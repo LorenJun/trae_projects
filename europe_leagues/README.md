@@ -8,7 +8,9 @@ europe_leagues/
 │   ├── teams_2025-26.md    # 球队信息
 │   └── analysis/           # 分析数据
 │       ├── predictions/    # 预测数据
-│       │   └── predictions_template.md  # 预测模板
+│       │   ├── predictions_template.md  # 预测模板
+│       │   ├── upset_warning_template.md # 冷门预警模板
+│       │   └── upset_warning.py         # 冷门预警分析脚本
 │       └── results/        # 实际结果
 │           └── results_template.md      # 结果模板
 ├── la_liga/                 # 西甲联赛
@@ -72,6 +74,65 @@ python analyze_prediction_accuracy.py
 # 查看生成的报告
 cat prediction_accuracy_report.md
 ```
+
+### 4. 冷门预警分析
+
+使用 `upset_warning.py` 脚本进行冷门预警分析：
+
+```python
+from upset_warning import 冷门预警Analyzer, generate_filename
+
+# 创建分析器
+analyzer = 冷门预警Analyzer('拜仁慕尼黑', '多特蒙德', '德甲')
+
+# 生成分析报告
+report = analyzer.generate_report(
+    initial_odds={'home': 1.85, 'draw': 3.50, 'away': 4.20},
+    final_odds={'home': 1.90, 'draw': 3.40, 'away': 4.00},
+    kelly_data={'home': [0.89, 0.88, 0.90], 'draw': [0.95, 0.96, 0.94], 'away': [1.02, 1.03, 1.01]},
+    离散率_data={'home': 1.5, 'draw': 2.3, 'away': 3.2},
+    home_basic={'rank': 1, 'points': 71, 'record': '22胜5平3负'},
+    away_basic={'rank': 3, 'points': 62, 'record': '18胜8平4负'},
+    league_round='第30轮'
+)
+
+# 生成文件名并保存
+filename = generate_filename('拜仁慕尼黑', '多特蒙德', '2026-04-18', 'bundesliga')
+with open(filename, 'w', encoding='utf-8') as f:
+    f.write(report)
+```
+
+#### 冷门预警分析维度
+
+| 分析维度 | 说明 | 权重 |
+|---------|------|------|
+| 赔率异常度 | 分析赔率变化是否异常 | 20% |
+| 凯利指数异常 | 分析凯利指数是否显示冷门信号 | 20% |
+| 离散率异常 | 分析多家公司赔率的离散程度 | 15% |
+| 临场变化异常 | 分析临场赔率变化趋势 | 15% |
+| 基本面异常 | 分析球队基本面是否支持冷门 | 15% |
+| 盘口异常 | 分析盘口变化是否合理 | 15% |
+
+#### 凯利口诀
+
+```
+低一致，稳；高分散，冷；
+临场降，强；临场升，坑
+```
+
+#### 冷门风险等级
+
+| 风险等级 | 冷门概率 | 说明 |
+|---------|---------|------|
+| 🔴 高风险 | >50% | 冷门可能性极大，需重点防范 |
+| 🟡 中风险 | 30%-50% | 存在冷门可能性，需谨慎 |
+| 🟢 低风险 | <30% | 冷门可能性较小，可信任正路 |
+
+#### 预测文件命名规则
+
+预测文件按照 `主队名称_客队名称_预测_YYYYMMDD.md` 格式命名，存放在各联赛的 `analysis/predictions/` 目录下。
+
+示例：`拜仁慕尼黑_vs_多特蒙德_预测_20260418.md`
 
 ## 统计指标
 
