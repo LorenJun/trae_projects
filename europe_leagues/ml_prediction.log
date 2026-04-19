@@ -1,0 +1,200 @@
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug: * Detected change in '/Users/lin/trae_projects/europe_leagues/web_interface.py', reloading
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug: * Detected change in '/Users/lin/trae_projects/europe_leagues/web_interface.py', reloading
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5002
+ * Running on http://192.168.31.235:5002
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug: * Restarting with stat
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 15:48:58] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 15:48:58] "GET /predictions HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 15:48:58] "GET /schedules HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 15:48:58] "GET /teams?league=premier_league HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 15:48:58] "GET /accuracy HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 15:48:58] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:07:58] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:07:58] "GET /predictions HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:07:58] "GET /schedules HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:07:58] "GET /teams?league=premier_league HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:07:58] "GET /accuracy HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:09:52] "POST /predict_match HTTP/1.1" 200 -
+INFO:werkzeug: * Detected change in '/Users/lin/trae_projects/europe_leagues/web_interface.py', reloading
+INFO:werkzeug: * Restarting with stat
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug: * Detected change in '/Users/lin/trae_projects/europe_leagues/web_interface.py', reloading
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: mock_realtime
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug: * Detected change in '/Users/lin/trae_projects/europe_leagues/web_interface.py', reloading
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: mock_realtime
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug: * Detected change in '/Users/lin/trae_projects/europe_leagues/web_interface.py', reloading
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: mock_realtime
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug: * Detected change in '/Users/lin/trae_projects/europe_leagues/web_interface.py', reloading
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: mock_realtime
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:root:添加数据源: mock_realtime
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5002
+ * Running on http://192.168.31.235:5002
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: mock_realtime
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:13:31] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:13:32] "GET /schedules HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:13:32] "GET /predictions HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:13:32] "GET /teams?league=premier_league HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:13:32] "GET /accuracy HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:13:32] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:13:32] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:13:32] "GET /teams?league=premier_league HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:13:32] "GET /accuracy HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:13:32] "GET /schedules HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:13:32] "GET /predictions HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:13:32] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+INFO:werkzeug: * Detected change in '/Users/lin/trae_projects/europe_leagues/web_interface.py', reloading
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: mock_realtime
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:root:添加数据源: mock_realtime
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5003
+ * Running on http://192.168.31.235:5003
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: mock_realtime
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:14:21] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:14:22] "GET /teams?league=premier_league HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:14:22] "GET /accuracy HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:14:22] "GET /predictions HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:14:22] "GET /schedules HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:14:22] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:14:24] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:14:24] "GET /predictions HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:14:24] "GET /schedules HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:14:24] "GET /teams?league=premier_league HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:14:24] "GET /accuracy HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:14:24] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+INFO:root:mock_realtime: 获取 诺丁汉森林 球员状态成功
+INFO:root:mock_realtime: 获取 伯恩利 球员状态成功
+INFO:root:mock_realtime: 获取 premier_league_2026-04-19_诺丁汉森林_vs_伯恩利 赔率数据成功
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:14:40] "POST /predict_match HTTP/1.1" 200 -
+INFO:werkzeug: * Detected change in '/Users/lin/trae_projects/europe_leagues/realtime_data集成.py', reloading
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: mock_realtime
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug: * Detected change in '/Users/lin/trae_projects/europe_leagues/web_interface.py', reloading
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: sporttery_realtime
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5003
+ * Running on http://192.168.31.235:5003
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: sporttery_realtime
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:34] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:35] "GET /predictions HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:35] "GET /schedules HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:35] "GET /teams?league=premier_league HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:35] "GET /accuracy HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:35] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:35] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:35] "GET /predictions HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:35] "GET /teams?league=premier_league HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:35] "GET /schedules HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:35] "GET /accuracy HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:35] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:37] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:37] "GET /predictions HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:37] "GET /schedules HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:37] "GET /accuracy HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:37] "GET /teams?league=premier_league HTTP/1.1" 200 -
+ERROR:root:sporttery_realtime: 获取球员状态失败: No module named 'browser_use'
+ERROR:root:sporttery_realtime: 获取球员状态失败: No module named 'browser_use'
+ERROR:root:sporttery_realtime: 获取赔率数据失败: No module named 'browser_use'
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:17:54] "POST /predict_match HTTP/1.1" 200 -
+INFO:werkzeug: * Detected change in '/Users/lin/trae_projects/europe_leagues/web_interface.py', reloading
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: sporttery_realtime
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:root:添加数据源: sporttery_realtime
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5004
+ * Running on http://192.168.31.235:5004
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: sporttery_realtime
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:18:14] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:18:14] "GET /teams?league=premier_league HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:18:14] "GET /predictions HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:18:14] "GET /schedules HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:18:14] "GET /accuracy HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:18:14] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+INFO:werkzeug: * Detected change in '/Users/lin/trae_projects/europe_leagues/web_interface.py', reloading
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: sporttery_realtime
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug: * Detected change in '/Users/lin/trae_projects/europe_leagues/web_interface.py', reloading
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: sporttery_realtime
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:root:添加数据源: sporttery_realtime
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5004
+ * Running on http://192.168.31.235:5004
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug: * Restarting with stat
+INFO:root:添加数据源: sporttery_realtime
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 109-897-850
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:28:00] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:28:00] "GET /teams?league=premier_league HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:28:00] "GET /accuracy HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:28:00] "GET /schedules HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:28:00] "GET /predictions HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:28:00] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:29:41] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:29:41] "GET /predictions HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:29:41] "GET /schedules HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:29:41] "GET /teams?league=premier_league HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:29:41] "GET /accuracy HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:29:41] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+ERROR:root:sporttery_realtime: 获取赔率数据失败: No module named 'browser_use'
+INFO:werkzeug:127.0.0.1 - - [19/Apr/2026 17:30:08] "POST /predict_match HTTP/1.1" 200 -
+INFO:werkzeug: * Detected change in '/Users/lin/trae_projects/europe_leagues/dongqiudi_scraper.py', reloading
+INFO:werkzeug: * Restarting with stat

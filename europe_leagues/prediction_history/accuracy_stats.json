@@ -1,0 +1,148 @@
+{
+  "overall": {
+    "total_predictions": 40,
+    "correct_predictions": 12,
+    "correct_scores": 2,
+    "half_correct": 10,
+    "win_accuracy": 30.0,
+    "score_accuracy": 5.0,
+    "half_accuracy": 25.0,
+    "league": null,
+    "days": 30,
+    "calculated_at": "2026-04-19T15:12:44.395158"
+  },
+  "by_league": {
+    "premier_league": {
+      "total_predictions": 5,
+      "correct_predictions": 1,
+      "correct_scores": 1,
+      "half_correct": 0,
+      "win_accuracy": 20.0,
+      "score_accuracy": 20.0,
+      "half_accuracy": 0.0,
+      "league": "premier_league",
+      "days": 30,
+      "calculated_at": "2026-04-19T15:12:44.395738"
+    },
+    "serie_a": {
+      "total_predictions": 11,
+      "correct_predictions": 2,
+      "correct_scores": 0,
+      "half_correct": 2,
+      "win_accuracy": 18.181818181818183,
+      "score_accuracy": 0.0,
+      "half_accuracy": 18.181818181818183,
+      "league": "serie_a",
+      "days": 30,
+      "calculated_at": "2026-04-19T15:12:44.396303"
+    },
+    "bundesliga": {
+      "total_predictions": 7,
+      "correct_predictions": 1,
+      "correct_scores": 1,
+      "half_correct": 0,
+      "win_accuracy": 14.285714285714285,
+      "score_accuracy": 14.285714285714285,
+      "half_accuracy": 0.0,
+      "league": "bundesliga",
+      "days": 30,
+      "calculated_at": "2026-04-19T15:12:44.396851"
+    },
+    "ligue_1": {
+      "total_predictions": 9,
+      "correct_predictions": 2,
+      "correct_scores": 0,
+      "half_correct": 2,
+      "win_accuracy": 22.22222222222222,
+      "score_accuracy": 0.0,
+      "half_accuracy": 22.22222222222222,
+      "league": "ligue_1",
+      "days": 30,
+      "calculated_at": "2026-04-19T15:12:44.397399"
+    },
+    "la_liga": {
+      "total_predictions": 8,
+      "correct_predictions": 6,
+      "correct_scores": 0,
+      "half_correct": 6,
+      "win_accuracy": 75.0,
+      "score_accuracy": 0.0,
+      "half_accuracy": 75.0,
+      "league": "la_liga",
+      "days": 30,
+      "calculated_at": "2026-04-19T15:12:44.398002"
+    }
+  },
+  "by_model": {
+    "poisson": {
+      "total": 0,
+      "correct": 0,
+      "accuracy": 0
+    },
+    "dixon_coles": {
+      "total": 0,
+      "correct": 0,
+      "accuracy": 0
+    },
+    "elo": {
+      "total": 0,
+      "correct": 0,
+      "accuracy": 0
+    },
+    "glicko": {
+      "total": 0,
+      "correct": 0,
+      "accuracy": 0
+    },
+    "logistic_regression": {
+      "total": 0,
+      "correct": 0,
+      "accuracy": 0
+    },
+    "random_forest": {
+      "total": 0,
+      "correct": 0,
+      "accuracy": 0
+    },
+    "xg": {
+      "total": 0,
+      "correct": 0,
+      "accuracy": 0
+    },
+    "bayesian": {
+      "total": 0,
+      "correct": 0,
+      "accuracy": 0
+    }
+  },
+  "trend": [
+    {
+      "date": "2026-04-13",
+      "accuracy": 30.0
+    },
+    {
+      "date": "2026-04-14",
+      "accuracy": 30.0
+    },
+    {
+      "date": "2026-04-15",
+      "accuracy": 30.0
+    },
+    {
+      "date": "2026-04-16",
+      "accuracy": 30.0
+    },
+    {
+      "date": "2026-04-17",
+      "accuracy": 30.0
+    },
+    {
+      "date": "2026-04-18",
+      "accuracy": 30.0
+    },
+    {
+      "date": "2026-04-19",
+      "accuracy": 30.0
+    }
+  ]
+}
