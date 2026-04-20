@@ -1,6 +1,6 @@
 ---
 name: "football-match-analysis"
-description: "Football match analysis skill. Invoke when user needs to analyze upcoming matches, predict scores, or provide betting insights based on team data, tactics, and referee style."
+description: "足球比赛预测分析skill，集成欧指/亚盘/凯利指数分析、泊松分布预测。Invoke when user needs match prediction, betting analysis, or match odds evaluation."
 ---
 
 # Football Match Analysis
@@ -222,7 +222,59 @@ europe_leagues/
 3. 验证盘口与球队实力是否匹配
 4. 检查大小球指数是否合理
 
-## 分析维度
+## 自动预测分析模块
+
+### 快速预测流程
+
+使用 `match_predictor.py` 模块进行自动化的赔率数据获取和预测分析：
+
+```python
+from okooo_match_finder import OkoooMatchFinder
+from match_predictor import OddsData, MatchPredictor, print_analysis_report
+
+# Step 1: 获取比赛ID
+finder = OkoooMatchFinder()
+match_id = finder.find_match_id("水晶宫", "西汉孤", "英超")
+
+# Step 2: 获取赔率数据
+# 使用 test_prediction.py 脚本获取完整赔率数据
+
+# Step 3: 进行预测分析
+odds_data = OddsData(
+    match_id=match_id,
+    home_team="水晶宫",
+    away_team="西汉孤",
+    league="英超",
+    euro_home=2.20,
+    euro_draw=3.32,
+    euro_away=3.13,
+    euro_home_current=2.50,
+    euro_draw_current=3.25,
+    euro_away_current=2.82,
+    asian_handicap="平手/半球",
+    asian_home_odds=1.78,
+    asian_away_odds=1.97,
+    asian_home_current=1.73,
+    asian_handicap_current="平手",
+    asian_away_current=1.88,
+    kelly_home=0.92,
+    kelly_away=0.89
+)
+
+# Step 4: 输出分析报告
+print_analysis_report(match_id, "水晶宫", "西汉孤", odds_data)
+```
+
+### 模块核心功能
+
+| 类/函数 | 功能 |
+|--------|------|
+| `OddsData` | 赔率数据结构，包含欧指、亚盘、凯利数据 |
+| `MatchPredictor` | 比赛预测器，综合分析各项数据 |
+| `analyze_match()` | 执行完整分析并返回预测结果 |
+| `print_analysis_report()` | 格式化输出分析报告 |
+
+### 分析维度
 
 ### 1. 球队基本信息
 
@@ -736,6 +788,68 @@ Step 7: 生成分析报告
 1. 欧冠资格队 vs 无欲无求队：正路概率高
 2. 欧战资格关键战：平局概率下降
 3. 轮换阵容时关注小将发挥
+```
+
+## 完整预测流程（自动化）
+
+### 一键预测命令
+
+```bash
+cd /Users/lin/trae_projects/europe_leagues
+python3 -c "
+from okooo_match_finder import OkoooMatchFinder
+from match_predictor import OddsData, print_analysis_report
+
+# 只需提供球队名称和联赛
+finder = OkoooMatchFinder()
+match_id = finder.find_match_id('水晶宫', '西汉孤', '英超')
+print(f'Match ID: {match_id}')
+"
+```
+
+### 预测分析完整流程
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    预测分析完整流程                           │
+├─────────────────────────────────────────────────────────────┤
+│  Step 1: 获取match_id                                      │
+│          okooo_match_finder.py 自动搜索验证                   │
+├─────────────────────────────────────────────────────────────┤
+│  Step 2: 获取赔率数据                                       │
+│          - 欧指: 99家平均赔率                                │
+│          - 亚盘: 威廉/立博等主流公司盘口                      │
+│          - 凯利: 指数高低判断冷热                            │
+├─────────────────────────────────────────────────────────────┤
+│  Step 3: 综合预测分析                                       │
+│          MatchPredictor.comprehensive_prediction()          │
+│          - 隐含概率计算                                      │
+│          - 赔率变化分析                                      │
+│          - 亚盘方向判断                                      │
+│          - 凯利指数解读                                      │
+│          - 泊松分布预测                                      │
+├─────────────────────────────────────────────────────────────┤
+│  Step 4: 输出分析报告                                       │
+│          print_analysis_report()                            │
+│          - 概率分布 / 赔率变化 / 投注建议                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 核心分析指标
+
+| 指标 | 说明 | 投注参考 |
+|------|------|---------|
+| 隐含概率 | 欧指倒数/总和 | >45%为热门 |
+| 赔率变化 | 升降反映冷热 | 降水=看好 |
+| 亚盘方向 | 盘口强化方向 | 强化方为庄家防范 |
+| 凯利指数 | <0.90=热门 | 集体低=稳 |
+| 泊松预测 | 比分概率矩阵 | 大小球参考 |
+
+### 实战口诀
+
+```
+低一致，稳；高分散，冷；
+临场降，强；临场升，坑
 ```
 
 ## 分析框架

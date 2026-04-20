@@ -21,23 +21,23 @@ from okooo_match_finder import OkoooMatchFinder, find_and_fetch_odds
 LEAGUE_CONFIG = {
     "premier_league": {
         "name": "英超",
-        "okooo_league_id": "35",
+        "okooo_league_id": "17",
     },
     "la_liga": {
         "name": "西甲",
-        "okooo_league_id": "36",
+        "okooo_league_id": "8",
     },
     "serie_a": {
         "name": "意甲",
-        "okooo_league_id": "37",
+        "okooo_league_id": "23",
     },
     "bundesliga": {
         "name": "德甲",
-        "okooo_league_id": "39",
+        "okooo_league_id": "35",
     },
     "ligue_1": {
         "name": "法甲",
-        "okooo_league_id": "38",
+        "okooo_league_id": "34",
     },
     "afc_champions_league": {
         "name": "亚冠",
