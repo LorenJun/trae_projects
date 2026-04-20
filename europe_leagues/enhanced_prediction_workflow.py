@@ -1,0 +1,1252 @@
+#!/usr/bin/env python3
+"""
+增强版预测比赛流程
+整合多模型融合、智能缓存、动态权重调整的完整预测系统
+"""
+
+import os
+import sys
+import json
+import hashlib
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any
+import logging
+from glob import glob
+
+# 添加项目路径
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
+
+# 导入机器学习模型
+from ml_prediction_models import MultiModelFusion, PoissonModel
+from result_manager import ResultManager
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('enhanced_prediction.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# 定义联赛配置
+LEAGUE_CONFIG = {
+    'premier_league': {
+        'name': '英超',
+        'code': 'premier_league',
+        'teams': ['切尔西', '曼联', '利物浦', '阿森纳', '曼城', '阿斯顿维拉', '诺丁汉森林', '布莱顿', '布伦特福德', '富勒姆', '伯恩茅斯', '水晶宫', '埃弗顿', '狼队', '西汉姆联', '热刺', '利兹联', '伯恩利', '桑德兰'],
+        'avg_goals': 2.7
+    },
+    'serie_a': {
+        'name': '意甲',
+        'code': 'serie_a',
+        'teams': ['国际米兰', 'AC米兰', '尤文图斯', '那不勒斯', '罗马', '亚特兰大', '拉齐奥', '佛罗伦萨', '博洛尼亚', '乌迪内斯'],
+        'avg_goals': 2.5
+    },
+    'bundesliga': {
+        'name': '德甲',
+        'code': 'bundesliga',
+        'teams': ['拜仁慕尼黑', '多特蒙德', '勒沃库森', '斯图加特', '柏林联合', '霍芬海姆', '法兰克福', '门兴格拉德巴赫', '沃尔夫斯堡', '美因茨'],
+        'avg_goals': 2.9
+    },
+    'ligue_1': {
+        'name': '法甲',
+        'code': 'ligue_1',
+        'teams': ['巴黎圣日耳曼', '马赛', '摩纳哥', '里尔', '里昂', '朗斯', '雷恩', '尼斯', '洛里昂', '斯特拉斯堡'],
+        'avg_goals': 2.4
+    },
+    'la_liga': {
+        'name': '西甲',
+        'code': 'la_liga',
+        'teams': ['巴塞罗那', '皇家马德里', '马德里竞技', '塞维利亚', '皇家社会', '比利亚雷亚尔', '贝蒂斯', '瓦伦西亚', '毕尔巴鄂竞技', '奥萨苏纳'],
+        'avg_goals': 2.6
+    }
+}
+
+class PredictionCache:
+    """智能缓存系统 - 避免重复计算"""
+    
+    def __init__(self, cache_dir: str = '.prediction_cache'):
+        self.cache_dir = cache_dir
+        os.makedirs(cache_dir, exist_ok=True)
+    
+    def _get_cache_key(self, func_name: str, params: Dict) -> str:
+        """生成缓存键"""
+        params_str = json.dumps(params, sort_keys=True, default=str)
+        key_str = f"{func_name}_{params_str}"
+        return hashlib.md5(key_str.encode()).hexdigest()
+    
+    def get(self, func_name: str, params: Dict, ttl_hours: int = 24) -> Optional[Any]:
+        """获取缓存数据"""
+        cache_key = self._get_cache_key(func_name, params)
+        cache_file = os.path.join(self.cache_dir, f"{cache_key}.json")
+        
+        if not os.path.exists(cache_file):
+            return None
+        
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+            
+            # 检查是否过期
+            cache_time = datetime.fromisoformat(cache_data['timestamp'])
+            if datetime.now() - cache_time > timedelta(hours=ttl_hours):
+                os.remove(cache_file)
+                return None
+            
+            return cache_data['data']
+        except Exception as e:
+            logger.warning(f"读取缓存失败: {e}")
+            return None
+    
+    def set(self, func_name: str, params: Dict, data: Any):
+        """设置缓存数据"""
+        cache_key = self._get_cache_key(func_name, params)
+        cache_file = os.path.join(self.cache_dir, f"{cache_key}.json")
+        
+        try:
+            cache_data = {
+                'timestamp': datetime.now().isoformat(),
+                'data': data
+            }
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, ensure_ascii=False, default=str)
+        except Exception as e:
+            logger.warning(f"写入缓存失败: {e}")
+
+class DynamicWeightAdjuster:
+    """动态权重调整器 - 根据历史准确率调整模型权重"""
+    
+    def __init__(self, history_file: str = 'prediction_history/accuracy_stats.json'):
+        self.history_file = history_file
+        self.accuracy_history = self._load_history()
+        # 调权保护机制：样本不足时避免“乱调”
+        self.min_league_samples = 30          # 联赛样本量门槛
+        self.min_model_samples = 20           # 子模型 n 门槛（低于则不参与调权）
+        self.max_adjustment_ratio = 0.10      # 每次调权最大偏离默认权重比例（±10%）
+        self.shrink_base = 0.8                # 收缩到默认权重：new = base*shrink + adj*(1-shrink)
+    
+    def _load_history(self) -> Dict:
+        """加载历史准确率数据"""
+        if os.path.exists(self.history_file):
+            try:
+                with open(self.history_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"加载历史数据失败: {e}")
+        return {}
+    
+    @staticmethod
+    def _normalize_weights(weights: Dict[str, float]) -> Dict[str, float]:
+        total_weight = sum(weights.values())
+        if total_weight <= 0:
+            return MultiModelFusion.MODEL_WEIGHTS.copy()
+        return {k: v / total_weight for k, v in weights.items()}
+
+    def get_adjusted_weights(self, league_code: str) -> Dict[str, float]:
+        """获取调整后的权重（带样本量保护、收缩与n门槛）"""
+        base_weights = self._normalize_weights(MultiModelFusion.MODEL_WEIGHTS.copy())
+        
+        # 新版统计文件结构: {'overall':..., 'by_league': {...}}
+        by_league = self.accuracy_history.get('by_league', {})
+        if league_code not in by_league:
+            return base_weights
+
+        league_acc = by_league[league_code]
+        total_predictions = int(league_acc.get('total_predictions', 0) or 0)
+        model_accuracy: Dict[str, float] = league_acc.get('model_accuracy', {}) or {}
+
+        # 1) 联赛样本量门槛：不足则直接返回默认权重
+        if total_predictions < self.min_league_samples:
+            return base_weights
+
+        # 2) 子模型 n 门槛：低样本模型不参与调权
+        # 当前统计口径里每个模型的有效样本量不单独落盘，这里先用“联赛样本量”作为保守下界。
+        # 若未来补充 model_total_* 字段，可替换为真实 n。
+        eligible_models = {
+            model_name for model_name in model_accuracy.keys()
+            if model_name in base_weights and total_predictions >= self.min_model_samples
+        }
+
+        adjusted = base_weights.copy()
+        for model_name, acc in model_accuracy.items():
+            if model_name not in eligible_models:
+                continue
+            # 准确率高的模型获得更高权重，低的更低：0.5~2.0 倍
+            adjustment_factor = 0.5 + (float(acc) * 1.5)
+            adjusted[model_name] *= adjustment_factor
+
+        adjusted = self._normalize_weights(adjusted)
+
+        # 3) 限幅：限制相对默认权重的偏离幅度，避免短期波动拉飞
+        capped = {}
+        for model_name, base_w in base_weights.items():
+            target = adjusted.get(model_name, base_w)
+            lo = base_w * (1.0 - self.max_adjustment_ratio)
+            hi = base_w * (1.0 + self.max_adjustment_ratio)
+            capped[model_name] = min(max(target, lo), hi)
+        capped = self._normalize_weights(capped)
+
+        # 4) 收缩：向默认权重回归
+        shrink = float(self.shrink_base)
+        final = {
+            model_name: base_weights[model_name] * shrink + capped[model_name] * (1.0 - shrink)
+            for model_name in base_weights
+        }
+        return self._normalize_weights(final)
+
+    def get_adjustment_diagnostics(self, league_code: str) -> Dict[str, Any]:
+        """返回调权诊断信息，便于在预测输出中解释权重来源。"""
+        base_weights = self._normalize_weights(MultiModelFusion.MODEL_WEIGHTS.copy())
+        by_league = self.accuracy_history.get('by_league', {})
+        league_acc = by_league.get(league_code, {}) if isinstance(by_league, dict) else {}
+        total_predictions = int(league_acc.get('total_predictions', 0) or 0)
+        model_accuracy = league_acc.get('model_accuracy', {}) or {}
+
+        final = self.get_adjusted_weights(league_code)
+        has_enough_samples = total_predictions >= self.min_league_samples
+
+        return {
+            'league_code': league_code,
+            'league_total_predictions': total_predictions,
+            'min_league_samples': self.min_league_samples,
+            'min_model_samples': self.min_model_samples,
+            'max_adjustment_ratio': self.max_adjustment_ratio,
+            'shrink_base': self.shrink_base,
+            'has_enough_samples': has_enough_samples,
+            'model_accuracy_keys': sorted([k for k in model_accuracy.keys() if k in base_weights]),
+            'base_weights': base_weights,
+            'final_weights': final,
+        }
+
+class TeamDataManager:
+    """球队数据管理器"""
+    
+    def __init__(self, base_dir: str = None):
+        self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
+        self.cache = PredictionCache()
+    
+    def get_player_data_path(self, league_code: str, team_name: str) -> str:
+        """获取球员数据文件路径"""
+        return os.path.join(self.base_dir, league_code, 'players', f"{team_name}.json")
+    
+    def load_player_data(self, league_code: str, team_name: str) -> Optional[Dict]:
+        """加载球队球员数据"""
+        cached = self.cache.get('load_player_data', {'league': league_code, 'team': team_name})
+        if cached:
+            return cached
+        
+        file_path = self.get_player_data_path(league_code, team_name)
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.cache.set('load_player_data', {'league': league_code, 'team': team_name}, data)
+                    return data
+            except Exception as e:
+                logger.warning(f"加载球员数据失败 {team_name}: {e}")
+        return None
+    
+    def analyze_team_strength(self, league_code: str, team_name: str) -> Dict:
+        """分析球队实力（增强版）"""
+        cache_params = {'league': league_code, 'team': team_name}
+        cached = self.cache.get('analyze_team_strength', cache_params)
+        if cached:
+            return cached
+        
+        team_data = self.load_player_data(league_code, team_name)
+        
+        if not team_data:
+            result = {
+                'team': team_name,
+                'strength': 50.0,
+                'attack': 1.0,
+                'defense': 1.0,
+                'injured_count': 0,
+                'suspended_count': 0,
+                'key_players_available': True,
+                'available_value': 0,
+                'total_value': 0
+            }
+        else:
+            # 统计球员状态
+            players = team_data.get('players', [])
+            injured_players = [p for p in players if p.get('transfer_status') == 'injured']
+            suspended_players = [p for p in players if p.get('transfer_status') == 'suspended']
+            available_players = [p for p in players if p.get('transfer_status') == 'current']
+            
+            total_value = sum(p.get('market_value', 0) for p in players)
+            available_value = sum(p.get('market_value', 0) for p in available_players)
+            
+            # 计算攻防能力
+            attack_players = [p for p in available_players if p.get('position') in ['前锋', '中场']]
+            defense_players = [p for p in available_players if p.get('position') in ['后卫', '门将']]
+            
+            attack = 1.0
+            if attack_players:
+                attack = sum(p.get('market_value', 0) for p in attack_players) / len(attack_players) / 50 + 0.5
+                attack = max(0.5, min(1.5, attack))
+            
+            defense = 1.0
+            if defense_players:
+                defense = sum(p.get('market_value', 0) for p in defense_players) / len(defense_players) / 50 + 0.5
+                defense = max(0.5, min(1.5, defense))
+            
+            # 基础实力值
+            base_strength = 50.0
+            if total_value > 0:
+                value_ratio = available_value / total_value
+                strength_adjustment = (value_ratio - 0.5) * 50
+                base_strength += strength_adjustment
+            
+            # 根据市场价值调整
+            avg_value = total_value / len(players) if players else 0
+            value_strength = min(50, avg_value / 2)
+            base_strength += value_strength
+            
+            strength = max(10, min(95, base_strength))
+            
+            # 检查核心球员
+            key_positions = ['前锋', '中场', '后卫', '门将']
+            key_players_available = True
+            for pos in key_positions:
+                pos_players = [p for p in available_players if p.get('position') == pos]
+                if not pos_players:
+                    key_players_available = False
+                    break
+            
+            result = {
+                'team': team_name,
+                'strength': strength,
+                'attack': attack,
+                'defense': defense,
+                'injured_count': len(injured_players),
+                'suspended_count': len(suspended_players),
+                'key_players_available': key_players_available,
+                'available_value': available_value,
+                'total_value': total_value
+            }
+        
+        self.cache.set('analyze_team_strength', cache_params, result)
+        return result
+
+class HistoricalOddsReference:
+    """历史赔率参考库。
+
+    用于在拿到当前赔率快照时，回看历史上“开盘/终盘/凯利/离散率/亚值变化”相近的比赛，
+    给预测结果一个可解释的参考样本。
+    """
+
+    FEATURE_FIELDS = [
+        ('胜平负赔率', 'initial', 'home'),
+        ('胜平负赔率', 'initial', 'draw'),
+        ('胜平负赔率', 'initial', 'away'),
+        ('胜平负赔率', 'final', 'home'),
+        ('胜平负赔率', 'final', 'draw'),
+        ('胜平负赔率', 'final', 'away'),
+        ('欧赔', 'initial', 'home'),
+        ('欧赔', 'initial', 'draw'),
+        ('欧赔', 'initial', 'away'),
+        ('欧赔', 'final', 'home'),
+        ('欧赔', 'final', 'draw'),
+        ('欧赔', 'final', 'away'),
+        ('亚值', 'initial', 'home_water'),
+        ('亚值', 'initial', 'handicap_value'),
+        ('亚值', 'initial', 'away_water'),
+        ('亚值', 'final', 'home_water'),
+        ('亚值', 'final', 'handicap_value'),
+        ('亚值', 'final', 'away_water'),
+        ('凯利', 'initial', 'home'),
+        ('凯利', 'initial', 'draw'),
+        ('凯利', 'initial', 'away'),
+        ('凯利', 'final', 'home'),
+        ('凯利', 'final', 'draw'),
+        ('凯利', 'final', 'away'),
+        ('离散率', 'initial', 'home'),
+        ('离散率', 'initial', 'draw'),
+        ('离散率', 'initial', 'away'),
+        ('离散率', 'final', 'home'),
+        ('离散率', 'final', 'draw'),
+        ('离散率', 'final', 'away'),
+    ]
+
+    def __init__(self, base_dir: str = None):
+        self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
+        self.cache = PredictionCache()
+        self.records_by_league = self._load_odds_history()
+        self.feature_stats = self._build_feature_stats()
+
+    @staticmethod
+    def _safe_float(value: Any) -> Optional[float]:
+        try:
+            if value in (None, ''):
+                return None
+            return float(value)
+        except Exception:
+            return None
+
+    def _load_odds_history(self) -> Dict[str, List[Dict]]:
+        records_by_league: Dict[str, List[Dict]] = {}
+        for league_code in LEAGUE_CONFIG:
+            odds_dir = os.path.join(self.base_dir, league_code, 'analysis', 'odds')
+            records_by_league[league_code] = []
+            if not os.path.isdir(odds_dir):
+                continue
+
+            for file_path in sorted(glob(os.path.join(odds_dir, '*_odds.json'))):
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        payload = json.load(f)
+                    for match in payload.get('matches', []):
+                        records_by_league[league_code].append(match)
+                except Exception as e:
+                    logger.warning(f"加载历史赔率文件失败 {file_path}: {e}")
+        return records_by_league
+
+    def _build_feature_stats(self) -> Dict[str, Dict[str, Dict[str, float]]]:
+        """为每个联赛、每个特征建立均值/标准差，用于相似度标准化。"""
+        stats: Dict[str, Dict[str, Dict[str, float]]] = {}
+        for league_code, matches in self.records_by_league.items():
+            values_by_key: Dict[str, List[float]] = {}
+            for match in matches:
+                vec = self._extract_feature_vector(match)
+                for k, v in vec.items():
+                    values_by_key.setdefault(k, []).append(v)
+
+            league_stats: Dict[str, Dict[str, float]] = {}
+            for k, vals in values_by_key.items():
+                if not vals:
+                    continue
+                mean = sum(vals) / len(vals)
+                var = sum((x - mean) ** 2 for x in vals) / max(1, len(vals) - 1)
+                std = var ** 0.5
+                if std == 0:
+                    std = 1.0
+                league_stats[k] = {'mean': mean, 'std': std}
+            stats[league_code] = league_stats
+        return stats
+
+    def get_league_record_count(self, league_code: str) -> int:
+        return len(self.records_by_league.get(league_code, []))
+
+    def _extract_feature_vector(self, odds_snapshot: Dict) -> Dict[str, float]:
+        vector: Dict[str, float] = {}
+        for group, phase, key in self.FEATURE_FIELDS:
+            value = (
+                odds_snapshot.get(group, {})
+                .get(phase, {})
+                .get(key)
+            )
+            numeric = self._safe_float(value)
+            if numeric is not None:
+                vector[f'{group}.{phase}.{key}'] = numeric
+        return vector
+
+    def _build_result_summary(self, matches: List[Dict]) -> Dict[str, Any]:
+        summary = {'主胜': 0, '平局': 0, '客胜': 0}
+        for match in matches:
+            actual = match.get('actual_result')
+            if actual in summary:
+                summary[actual] += 1
+
+        total = len(matches)
+        cold_count = 0
+        for match in matches:
+            win_odds = (
+                match.get('胜平负赔率', {})
+                .get('final', {})
+            )
+            actual = match.get('actual_result')
+            if actual == '主胜':
+                actual_odds = self._safe_float(win_odds.get('home'))
+            elif actual == '平局':
+                actual_odds = self._safe_float(win_odds.get('draw'))
+            elif actual == '客胜':
+                actual_odds = self._safe_float(win_odds.get('away'))
+            else:
+                actual_odds = None
+
+            if actual_odds is not None and actual_odds >= 3.5:
+                cold_count += 1
+
+        return {
+            'sample_size': total,
+            'result_counts': summary,
+            'result_rates': {
+                key: (value / total if total else 0.0)
+                for key, value in summary.items()
+            },
+            'cold_result_count': cold_count,
+            'cold_result_rate': (cold_count / total if total else 0.0),
+        }
+
+    def find_similar_matches(
+        self,
+        league_code: str,
+        current_odds: Dict,
+        top_k: int = 5,
+        exclude_match_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        cache_params = {
+            'algo_v': 2,
+            'league': league_code,
+            'odds': current_odds,
+            'top_k': top_k,
+            'exclude': exclude_match_id
+        }
+        cached = self.cache.get('find_similar_odds_matches', cache_params)
+        if cached:
+            return cached
+
+        current_vector = self._extract_feature_vector(current_odds)
+        history = self.records_by_league.get(league_code, [])
+        if not current_vector or not history:
+            result = {
+                'available': False,
+                'league_history_count': len(history),
+                'matched_feature_count': 0,
+                'similar_matches': [],
+                'summary': self._build_result_summary([]),
+                'insights': []
+            }
+            self.cache.set('find_similar_odds_matches', cache_params, result)
+            return result
+
+        # 分组权重，避免高量纲字段（如离散率）主导距离
+        group_weights = {
+            '胜平负赔率': 1.0,
+            '欧赔': 1.0,
+            '亚值': 1.0,
+            '凯利': 0.8,
+            '离散率': 0.6
+        }
+
+        feature_stats = self.feature_stats.get(league_code, {})
+        scored_matches = []
+        for match in history:
+            if exclude_match_id and match.get('match_id') == exclude_match_id:
+                continue
+            historical_vector = self._extract_feature_vector(match)
+            common_keys = set(current_vector) & set(historical_vector)
+            if len(common_keys) < 6:
+                continue
+
+            distance = 0.0
+            weight_sum = 0.0
+            for key in common_keys:
+                stats = feature_stats.get(key)
+                if stats:
+                    cur = (current_vector[key] - stats['mean']) / stats['std']
+                    hist = (historical_vector[key] - stats['mean']) / stats['std']
+                    diff = abs(cur - hist)
+                else:
+                    # 兜底：没有统计时退化为绝对差
+                    diff = abs(current_vector[key] - historical_vector[key])
+
+                group = key.split('.', 1)[0]
+                w = group_weights.get(group, 1.0)
+                distance += diff * w
+                weight_sum += w
+
+            avg_distance = distance / max(1.0, weight_sum)
+            similarity = max(0.0, 1.0 / (1.0 + avg_distance))
+            scored_matches.append({
+                'match_id': match.get('match_id'),
+                'match_date': match.get('match_date'),
+                'home_team': match.get('home_team'),
+                'away_team': match.get('away_team'),
+                'actual_score': match.get('actual_score'),
+                'actual_result': match.get('actual_result'),
+                'page_id': match.get('page_id'),
+                'similarity': similarity,
+                'distance': avg_distance,
+                'matched_feature_count': len(common_keys),
+                '胜平负赔率': match.get('胜平负赔率', {}),
+                '欧赔': match.get('欧赔', {}),
+                '亚值': match.get('亚值', {}),
+                '凯利': match.get('凯利', {}),
+                '离散率': match.get('离散率', {}),
+            })
+
+        scored_matches.sort(key=lambda item: (-item['similarity'], item['distance']))
+        top_matches = scored_matches[:top_k]
+        summary = self._build_result_summary(top_matches)
+
+        insights = []
+        if summary['sample_size'] >= 3:
+            cold_rate = summary['cold_result_rate']
+            if cold_rate >= 0.4:
+                insights.append('相似赔率样本中高赔赛果占比较高，需防范热门方向失真')
+            dominant_result, dominant_rate = max(
+                summary['result_rates'].items(),
+                key=lambda item: item[1]
+            )
+            if dominant_rate >= 0.6:
+                insights.append(f"相似赔率样本主要落在{dominant_result}({dominant_rate:.0%})")
+
+        result = {
+            'available': bool(top_matches),
+            'league_history_count': len(history),
+            'matched_feature_count': max(
+                (item['matched_feature_count'] for item in top_matches),
+                default=0
+            ),
+            'similar_matches': top_matches,
+            'summary': summary,
+            'insights': insights,
+        }
+        self.cache.set('find_similar_odds_matches', cache_params, result)
+        return result
+
+class UpsetAnalyzer:
+    """爆冷分析器"""
+    
+    def __init__(self, base_dir: str = None):
+        self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
+        self.upset_cases = self._load_upset_cases()
+        self.cache = PredictionCache()
+
+    @staticmethod
+    def _to_float(value: Any, default: float = 0.0) -> float:
+        try:
+            if value is None:
+                return default
+            return float(value)
+        except Exception:
+            return default
+
+    @staticmethod
+    def _case_get(case: Dict, *keys: str) -> Any:
+        for k in keys:
+            if k in case:
+                return case.get(k)
+        return None
+    
+    def _league_cases(self, league_name: str) -> List[Dict]:
+        return [
+            case for case in self.upset_cases
+            if self._case_get(case, 'league', '联赛') == league_name
+        ]
+    
+    def _load_upset_cases(self) -> List[Dict]:
+        """加载爆冷案例库"""
+        file_path = os.path.join(self.base_dir, '爆冷案例库.json')
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"加载爆冷案例库失败: {e}")
+        return []
+    
+    def assess_upset_potential(
+        self,
+        home_team: str,
+        away_team: str,
+        league_code: str,
+        strength_diff: float,
+        home_strength: Dict,
+        away_strength: Dict,
+        predicted_outcome: Optional[str] = None,
+        confidence: Optional[float] = None,
+        historical_odds_reference: Optional[Dict] = None
+    ) -> Dict:
+        """评估爆冷可能性（增强版）"""
+        cache_params = {
+            'home': home_team, 'away': away_team, 'league': league_code,
+            'diff': strength_diff,
+            'pred': predicted_outcome,
+            'conf': None if confidence is None else round(float(confidence), 3),
+            'odds_ref': historical_odds_reference
+        }
+        cached = self.cache.get('assess_upset_potential', cache_params)
+        if cached:
+            return cached
+        
+        upset_index = 0.0
+        factors = []
+        
+        # 1. 实力差距因素
+        if abs(strength_diff) > 20:
+            upset_index += 30
+            factors.append(f"实力差距大({strength_diff:+.1f})")
+        elif abs(strength_diff) > 10:
+            upset_index += 15
+        
+        # 2. 历史爆冷案例（精确匹配 + 模式学习）
+        league_name = LEAGUE_CONFIG[league_code]['name']
+        league_cases = self._league_cases(league_name)
+        similar_cases = []
+        for case in league_cases:
+            c_home = self._case_get(case, 'home_team', '主队')
+            c_away = self._case_get(case, 'away_team', '客队')
+            if not c_home or not c_away:
+                continue
+            if (
+                (c_home == home_team and c_away == away_team) or
+                (c_home == away_team and c_away == home_team)
+            ):
+                similar_cases.append(case)
+        
+        if similar_cases:
+            upset_index += len(similar_cases) * 15
+            factors.append(f"历史爆冷案例({len(similar_cases)}个)")
+
+        # 基于案例库做“模式学习”：同一联赛中，历史上与当前预测方向相同但被反打的比例越高，爆冷指数越高。
+        if predicted_outcome:
+            opposite_cases = []
+            for case in league_cases:
+                pred = self._case_get(case, 'predicted_outcome', '预测结果')
+                actual = self._case_get(case, 'actual_outcome', '实际结果')
+                if pred == predicted_outcome and actual and actual != predicted_outcome:
+                    opposite_cases.append(case)
+
+            if opposite_cases:
+                boost = min(20.0, len(opposite_cases) * 3.0)
+                upset_index += boost
+                factors.append(f"历史同向反打({len(opposite_cases)}次)")
+
+                super_cold = 0
+                for case in opposite_cases:
+                    odds = self._to_float(self._case_get(case, 'upset_odds', '实际爆冷赔率'), 0.0)
+                    if odds >= 5.0:
+                        super_cold += 1
+                if super_cold:
+                    upset_index += min(10.0, super_cold * 5.0)
+                    factors.append(f"历史超级冷门({super_cold}次)")
+
+            # 经验规律：强热门且高信心时，若信息面不足（战意/轮换/临场）很容易“过热被穿”
+            if confidence is not None and confidence >= 0.70 and abs(strength_diff) >= 15:
+                upset_index += 5.0
+                factors.append("强热门需防过热")
+        
+        # 3. 伤病因素
+        if home_strength.get('injured_count', 0) >= 3:
+            upset_index += 20
+            factors.append(f"{home_team}伤病严重({home_strength['injured_count']}人)")
+        elif home_strength.get('injured_count', 0) >= 2:
+            upset_index += 10
+        
+        if away_strength.get('injured_count', 0) >= 3:
+            upset_index += 20
+            factors.append(f"{away_team}伤病严重({away_strength['injured_count']}人)")
+        elif away_strength.get('injured_count', 0) >= 2:
+            upset_index += 10
+        
+        # 4. 核心球员缺席
+        if not home_strength.get('key_players_available', True):
+            upset_index += 25
+            factors.append(f"{home_team}核心球员缺席")
+        
+        if not away_strength.get('key_players_available', True):
+            upset_index += 25
+            factors.append(f"{away_team}核心球员缺席")
+
+        # 5. 历史相似赔率参考
+        if historical_odds_reference and historical_odds_reference.get('available'):
+            summary = historical_odds_reference.get('summary', {})
+            sample_size = summary.get('sample_size', 0)
+            cold_rate = summary.get('cold_result_rate', 0.0)
+            result_rates = summary.get('result_rates', {})
+
+            if sample_size >= 3:
+                upset_index += min(15.0, cold_rate * 25.0)
+                if cold_rate >= 0.4:
+                    factors.append(f"相似赔率冷门占比高({cold_rate:.0%})")
+
+                if predicted_outcome:
+                    reverse_rate = 1.0 - result_rates.get(predicted_outcome, 0.0)
+                    if reverse_rate >= 0.6:
+                        upset_index += min(10.0, reverse_rate * 10.0)
+                        factors.append(f"相似赔率反向结果偏多({reverse_rate:.0%})")
+        
+        # 确定爆冷等级
+        upset_index = min(100, upset_index)
+        
+        if upset_index >= 70:
+            upset_level = '高'
+            warning_level = '🔴'
+        elif upset_index >= 40:
+            upset_level = '中'
+            warning_level = '🟡'
+        else:
+            upset_level = '低'
+            warning_level = '🟢'
+        
+        result = {
+            'index': upset_index,
+            'level': upset_level,
+            'warning_level': warning_level,
+            'similar_cases_count': len(similar_cases),
+            'factors': factors,
+            'historical_odds_reference': historical_odds_reference
+        }
+        
+        self.cache.set('assess_upset_potential', cache_params, result)
+        return result
+
+class EnhancedPredictor:
+    """增强版预测器 - 整合所有功能"""
+    
+    def __init__(self, base_dir: str = None):
+        self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
+        self.team_manager = TeamDataManager(base_dir)
+        self.odds_reference = HistoricalOddsReference(base_dir)
+        self.upset_analyzer = UpsetAnalyzer(base_dir)
+        self.weight_adjuster = DynamicWeightAdjuster()
+        self.cache = PredictionCache()
+        self.result_manager = ResultManager()
+        
+        # 初始化多模型融合
+        self.model_fusion = MultiModelFusion()
+        self.poisson_model = PoissonModel()
+
+    def _apply_dynamic_weights(self, league_code: str) -> Dict[str, Any]:
+        """把动态权重应用到融合器（若可用），并返回诊断信息。"""
+        try:
+            diag = self.weight_adjuster.get_adjustment_diagnostics(league_code)
+            weights = diag.get('final_weights')
+            if weights and hasattr(self.model_fusion, 'set_model_weights'):
+                self.model_fusion.set_model_weights(weights)
+            return diag
+        except Exception as e:
+            logger.warning(f"动态调权应用失败: {e}")
+        return {'league_code': league_code, 'error': str(e)}
+
+    def compare_with_historical_odds(self, league_code: str, current_odds: Dict, top_k: int = 5) -> Dict:
+        """对比当前赔率与历史相似盘路。"""
+        return self.odds_reference.find_similar_matches(
+            league_code=league_code,
+            current_odds=current_odds,
+            top_k=top_k
+        )
+
+    @staticmethod
+    def _extract_current_odds_snapshot(match_record: Dict) -> Dict:
+        """从赔率落盘记录中提取预测所需的赔率快照字段。"""
+        return {
+            'match_id': match_record.get('match_id'),
+            '胜平负赔率': match_record.get('胜平负赔率', {}),
+            '欧赔': match_record.get('欧赔', {}),
+            '亚值': match_record.get('亚值', {}),
+            '凯利': match_record.get('凯利', {}),
+            '离散率': match_record.get('离散率', {}),
+        }
+
+    def _get_matches_from_odds_history(self, league_code: str, match_date: str) -> List[Dict]:
+        """从联赛目录的赔率落盘文件中获取某日真实赛程+赔率快照。"""
+        matches = []
+        for record in self.odds_reference.records_by_league.get(league_code, []):
+            if record.get('match_date') != match_date:
+                continue
+            matches.append({
+                'home_team': record.get('home_team'),
+                'away_team': record.get('away_team'),
+                'current_odds': self._extract_current_odds_snapshot(record),
+            })
+        return [m for m in matches if m.get('home_team') and m.get('away_team')]
+
+    def _get_matches_from_odds_snapshots(self, league_code: str, match_date: str) -> List[Dict]:
+        """从联赛目录 analysis/odds_snapshots/*_odds_snapshot.json 获取某日真实赛程+赔率快照。"""
+        snapshot_dir = os.path.join(self.base_dir, league_code, 'analysis', 'odds_snapshots')
+        if not os.path.isdir(snapshot_dir):
+            return []
+
+        matches = []
+        for file_path in sorted(glob(os.path.join(snapshot_dir, '*_odds_snapshot.json'))):
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    payload = json.load(f)
+            except Exception:
+                continue
+            for record in payload.get('matches', []):
+                if record.get('match_date') != match_date:
+                    continue
+                matches.append({
+                    'home_team': record.get('home_team'),
+                    'away_team': record.get('away_team'),
+                    'current_odds': self._extract_current_odds_snapshot(record),
+                })
+        return [m for m in matches if m.get('home_team') and m.get('away_team')]
+    
+    def predict_match(self, home_team: str, away_team: str, league_code: str, 
+                     match_date: str = None, current_odds: Optional[Dict] = None) -> Dict:
+        """预测单场比赛（增强版）"""
+        cache_params = {
+            'schema_v': 3,
+            'home': home_team, 'away': away_team,
+            'league': league_code, 'date': match_date,
+            'current_odds': current_odds
+        }
+        cached = self.cache.get('predict_match', cache_params)
+        if cached:
+            logger.info(f"使用缓存预测: {home_team} vs {away_team}")
+            return cached
+        
+        logger.info(f"开始预测: {home_team} vs {away_team} ({league_code})")
+
+        # 动态调权（基于最近准确率统计）；失败则使用默认权重
+        applied_weights = self._apply_dynamic_weights(league_code)
+        
+        # 1. 获取球队实力分析
+        home_strength = self.team_manager.analyze_team_strength(league_code, home_team)
+        away_strength = self.team_manager.analyze_team_strength(league_code, away_team)
+        
+        # 2. 计算实力差距
+        strength_diff = home_strength['strength'] - away_strength['strength']
+        
+        # 3. 使用多模型融合预测
+        league_avg_goals = LEAGUE_CONFIG[league_code]['avg_goals']
+        
+        # 准备模型输入参数
+        home_form = 3  # 假设最近5场胜场
+        away_form = 3
+        home_motivation = 75
+        away_motivation = 75
+        
+        # 计算预期进球
+        home_lambda = home_strength['attack'] * away_strength['defense'] * league_avg_goals * 1.12
+        away_lambda = away_strength['attack'] * home_strength['defense'] * league_avg_goals
+        
+        # 简化的xG计算
+        home_xg = home_lambda * 0.8
+        away_xg = away_lambda * 0.8
+        
+        # 多模型预测
+        fusion_result = self.model_fusion.predict(
+            home_team=home_team,
+            away_team=away_team,
+            home_strength=home_strength['strength'],
+            away_strength=away_strength['strength'],
+            home_form=home_form,
+            away_form=away_form,
+            home_injuries=home_strength['injured_count'],
+            away_injuries=away_strength['injured_count'],
+            h2h_home_wins=0,
+            h2h_away_wins=0,
+            h2h_draws=0,
+            home_motivation=home_motivation,
+            away_motivation=away_motivation,
+            home_xg=home_xg,
+            away_xg=away_xg,
+            home_attack=home_strength['attack'],
+            home_defense=home_strength['defense'],
+            away_attack=away_strength['attack'],
+            away_defense=away_strength['defense']
+        )
+        
+        # 5. 确定最终预测结果
+        final_prob = fusion_result['final']
+        probs = [
+            ('主胜', final_prob['home_win']),
+            ('平局', final_prob['draw']),
+            ('客胜', final_prob['away_win'])
+        ]
+        probs.sort(key=lambda x: x[1], reverse=True)
+        
+        main_prediction = probs[0][0]
+        confidence = probs[0][1]
+
+        historical_odds_reference = None
+        if current_odds:
+            exclude_match_id = current_odds.get('match_id') if isinstance(current_odds, dict) else None
+            historical_odds_reference = self.odds_reference.find_similar_matches(
+                league_code=league_code,
+                current_odds=current_odds,
+                top_k=5,
+                exclude_match_id=exclude_match_id
+            )
+        else:
+            historical_odds_reference = {
+                'available': False,
+                'league_history_count': self.odds_reference.get_league_record_count(league_code),
+                'matched_feature_count': 0,
+                'similar_matches': [],
+                'summary': {
+                    'sample_size': 0,
+                    'result_counts': {'主胜': 0, '平局': 0, '客胜': 0},
+                    'result_rates': {'主胜': 0.0, '平局': 0.0, '客胜': 0.0},
+                    'cold_result_count': 0,
+                    'cold_result_rate': 0.0,
+                },
+                'insights': ['当前未传入赔率快照，历史赔率参考已就绪但未参与匹配']
+            }
+
+        # 6. 爆冷分析（把模型输出也作为输入，便于案例库做“同向反打”学习）
+        upset_potential = self.upset_analyzer.assess_upset_potential(
+            home_team=home_team,
+            away_team=away_team,
+            league_code=league_code,
+            strength_diff=strength_diff,
+            home_strength=home_strength,
+            away_strength=away_strength,
+            predicted_outcome=main_prediction,
+            confidence=confidence,
+            historical_odds_reference=historical_odds_reference
+        )
+        
+        # 7. 预测比分
+        score_result = self.poisson_model.predict_score_probability(home_lambda, away_lambda)
+        top_scores = sorted(score_result['score_probs'].items(), key=lambda x: x[1], reverse=True)[:3]
+        
+        # 8. 大小球预测
+        over_under = self.poisson_model.predict_over_under(home_lambda, away_lambda)
+        
+        # 构建完整结果
+        result = {
+            'home_team': home_team,
+            'away_team': away_team,
+            'league_code': league_code,
+            'league_name': LEAGUE_CONFIG[league_code]['name'],
+            'match_date': match_date,
+            'prediction': main_prediction,
+            'confidence': confidence,
+            'all_probabilities': dict(probs),
+            'top_scores': top_scores,
+            'expected_goals': {
+                'home': home_lambda,
+                'away': away_lambda,
+                'total': home_lambda + away_lambda
+            },
+            'over_under': over_under,
+            'strength_diff': strength_diff,
+            'home_strength': home_strength,
+            'away_strength': away_strength,
+            'upset_potential': upset_potential,
+            'historical_odds_reference': historical_odds_reference,
+            'model_predictions': fusion_result['all_models'],
+            'final_probabilities': final_prob,
+            'applied_model_weights': applied_weights,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        self.cache.set('predict_match', cache_params, result)
+        logger.info(f"预测完成: {home_team} vs {away_team} -> {main_prediction} ({confidence:.1%})")
+        
+        return result
+    
+    def generate_prediction_report(self, league_code: str, match_date: str, 
+                                  matches: List[Dict] = None) -> Optional[str]:
+        """生成预测报告"""
+        if not matches:
+            # 优先从联赛目录中的“即时赔率快照”读取未来赛程（确保有 current_odds 才能做相似盘路）
+            matches = self._get_matches_from_odds_snapshots(league_code, match_date)
+            if not matches:
+                # 其次从历史赔率落盘文件读取（主要覆盖已回填的历史日期）
+                matches = self._get_matches_from_odds_history(league_code, match_date)
+            if not matches:
+                # 如果没有提供比赛，使用模拟数据
+                matches = self._get_sample_matches(league_code)
+        else:
+            # 如果传入 matches 但未带 current_odds，则尝试从快照目录补齐
+            need_fill = any(not m.get('current_odds') for m in matches if isinstance(m, dict))
+            if need_fill:
+                snapshot_index = {}
+                for m in self._get_matches_from_odds_snapshots(league_code, match_date):
+                    snapshot_index[(m.get('home_team'), m.get('away_team'))] = m.get('current_odds')
+                for m in matches:
+                    if not isinstance(m, dict):
+                        continue
+                    if m.get('current_odds'):
+                        continue
+                    key = (m.get('home_team') or m.get('主队'), m.get('away_team') or m.get('客队'))
+                    if key in snapshot_index:
+                        m['current_odds'] = snapshot_index[key]
+        
+        if not matches:
+            logger.warning(f"没有比赛数据: {league_code} {match_date}")
+            return None
+        
+        # 预测所有比赛
+        predictions = []
+        for match in matches:
+            current_odds = match.get('current_odds')
+            pred = self.predict_match(
+                match.get('home_team', match.get('主队')),
+                match.get('away_team', match.get('客队')),
+                league_code,
+                match_date,
+                current_odds=current_odds
+            )
+            predictions.append(pred)
+        
+        # 生成报告
+        report_content = self._format_report(league_code, match_date, predictions)
+        
+        # 保存报告
+        report_dir = os.path.join(self.base_dir, league_code, 'analysis', 'predictions')
+        os.makedirs(report_dir, exist_ok=True)
+        report_file = os.path.join(report_dir, f"{match_date}_predictions_enhanced.md")
+        
+        with open(report_file, 'w', encoding='utf-8') as f:
+            f.write(report_content)
+        
+        logger.info(f"生成预测报告: {report_file}")
+        
+        # 保存预测到历史数据库
+        for pred in predictions:
+            self.result_manager.save_prediction_from_enhanced(pred, league_code)
+        
+        logger.info(f"预测已保存到历史数据库")
+        
+        # 更新准确率统计
+        self.result_manager.update_accuracy_stats()
+        
+        return report_file
+    
+    def _get_sample_matches(self, league_code: str) -> List[Dict]:
+        """获取模拟比赛数据"""
+        teams = LEAGUE_CONFIG[league_code]['teams']
+        matches = []
+        for i in range(0, min(len(teams), 10), 2):
+            if i + 1 < len(teams):
+                matches.append({
+                    'home_team': teams[i],
+                    'away_team': teams[i + 1]
+                })
+        return matches
+    
+    def _format_report(self, league_code: str, match_date: str, predictions: List[Dict]) -> str:
+        """格式化预测报告"""
+        league_name = LEAGUE_CONFIG[league_code]['name']
+        
+        report = f"# 🔮 {league_name} 联赛预测分析报告\n"
+        report += f"\n**预测日期**: {match_date}\n"
+        report += f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        report += f"**预测场次**: {len(predictions)} 场\n"
+        
+        # 比赛预测列表
+        report += "\n" + "="*80 + "\n"
+        report += "## 📊 比赛预测详情\n"
+        
+        for pred in predictions:
+            home = pred['home_team']
+            away = pred['away_team']
+            
+            report += f"\n### {home} vs {away}\n"
+            report += f"\n**预测结果**: {pred['prediction']} (信心: {pred['confidence']:.1%})\n"
+            
+            # 概率分布
+            report += "\n**概率分布**:\n"
+            # 固定输出顺序，避免字典遍历导致的“主/平/客”顺序漂移
+            for outcome in ('主胜', '平局', '客胜'):
+                prob = pred['all_probabilities'].get(outcome, 0.0)
+                bar = "█" * int(prob * 50)
+                report += f"  {outcome}: {prob:6.1%} {bar}\n"
+            
+            # 比分预测
+            report += "\n**最可能比分**:\n"
+            for score, prob in pred['top_scores']:
+                report += f"  {score}: {prob:.1%}\n"
+            
+            # 大小球
+            ou = pred['over_under']
+            report += f"\n**大小球分析** (2.5球):\n"
+            report += f"  大球: {ou['over']:.1%} | 小球: {ou['under']:.1%}\n"
+            report += f"  预期总进球: {ou['total_lambda']:.2f}\n"
+            
+            # 实力分析
+            hs = pred['home_strength']
+            aws = pred['away_strength']
+            report += f"\n**实力对比**:\n"
+            report += f"  {home}: 实力={hs['strength']:.1f} 进攻={hs['attack']:.2f} 防守={hs['defense']:.2f} "
+            if hs['injured_count'] > 0:
+                report += f"伤病={hs['injured_count']}人"
+            report += "\n"
+            report += f"  {away}: 实力={aws['strength']:.1f} 进攻={aws['attack']:.2f} 防守={aws['defense']:.2f} "
+            if aws['injured_count'] > 0:
+                report += f"伤病={aws['injured_count']}人"
+            report += "\n"
+            
+            # 爆冷分析
+            upset = pred['upset_potential']
+            report += f"\n**爆冷分析**: {upset['warning_level']} {upset['level']} (指数: {upset['index']:.0f})\n"
+            if upset['factors']:
+                report += f"  风险因素: {', '.join(upset['factors'])}\n"
+
+            odds_ref = pred.get('historical_odds_reference', {})
+            if odds_ref.get('available'):
+                summary = odds_ref.get('summary', {})
+                report += "\n**历史赔率参考**:\n"
+                report += (
+                    f"  相似样本: {summary.get('sample_size', 0)} 场 | "
+                    f"主胜: {summary.get('result_rates', {}).get('主胜', 0.0):.1%} | "
+                    f"平局: {summary.get('result_rates', {}).get('平局', 0.0):.1%} | "
+                    f"客胜: {summary.get('result_rates', {}).get('客胜', 0.0):.1%}\n"
+                )
+                report += f"  高赔赛果占比: {summary.get('cold_result_rate', 0.0):.1%}\n"
+                if odds_ref.get('insights'):
+                    report += f"  参考结论: {'；'.join(odds_ref['insights'])}\n"
+                for similar in odds_ref.get('similar_matches', [])[:3]:
+                    report += (
+                        f"  - {similar['match_date']} {similar['home_team']} vs {similar['away_team']} "
+                        f"=> {similar['actual_result']} ({similar['actual_score']}) "
+                        f"[相似度 {similar['similarity']:.2f}]\n"
+                    )
+            
+            report += "\n" + "-"*60 + "\n"
+        
+        # 统计摘要
+        report += "\n" + "="*80 + "\n"
+        report += "## 📈 预测统计摘要\n"
+        
+        high_conf = [p for p in predictions if p['confidence'] >= 0.7]
+        med_conf = [p for p in predictions if 0.5 <= p['confidence'] < 0.7]
+        low_conf = [p for p in predictions if p['confidence'] < 0.5]
+        
+        report += f"\n- **高信心预测** (≥70%): {len(high_conf)} 场\n"
+        report += f"- **中等信心预测** (50%-70%): {len(med_conf)} 场\n"
+        report += f"- **低信心预测** (<50%): {len(low_conf)} 场\n"
+        
+        # 爆冷警告
+        upset_warnings = [p for p in predictions if p['upset_potential']['level'] == '高']
+        if upset_warnings:
+            report += f"\n## ⚠️ 爆冷警告\n"
+            for p in upset_warnings:
+                report += f"\n- {p['home_team']} vs {p['away_team']}\n"
+                report += f"  风险因素: {', '.join(p['upset_potential']['factors'])}\n"
+        
+        report += "\n" + "="*80 + "\n"
+        report += "## 💡 使用说明\n\n"
+        report += "1. 本报告基于多模型融合预测，仅供参考\n"
+        report += "2. 高信心预测（≥70%）可靠性较高\n"
+        report += "3. 爆冷警告需特别关注\n"
+        report += "4. 预测结果会根据实际比赛结果持续优化\n"
+        
+        return report
+
+def main():
+    """主函数 - 演示增强版预测流程"""
+    print("="*80)
+    print("🔮 增强版足球预测系统")
+    print("="*80)
+    
+    # 初始化预测器
+    predictor = EnhancedPredictor()
+    
+    # 预测今天和未来几天的比赛
+    base_date = datetime.now()
+    
+    for league_code in LEAGUE_CONFIG.keys():
+        print(f"\n📊 处理 {LEAGUE_CONFIG[league_code]['name']}...")
+        
+        for day_offset in range(3):
+            match_date = (base_date + timedelta(days=day_offset)).strftime('%Y-%m-%d')
+            
+            print(f"  📅 生成 {match_date} 的预测...")
+            report_file = predictor.generate_prediction_report(league_code, match_date)
+            
+            if report_file:
+                print(f"  ✅ 预测报告已生成: {os.path.basename(report_file)}")
+            else:
+                print(f"  ⚠️  未能生成预测报告")
+    
+    print("\n" + "="*80)
+    print("🎉 预测流程执行完成！")
+    print("="*80)
+
+if __name__ == "__main__":
+    main()

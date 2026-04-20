@@ -8,6 +8,13 @@ import os
 import json
 from datetime import datetime, timedelta
 import logging
+from glob import glob
+
+# 优先复用增强版预测器（包含：动态调权 + 历史相似盘路 + 更完整的爆冷分析）
+try:
+    from enhanced_prediction_workflow import EnhancedPredictor
+except Exception:
+    EnhancedPredictor = None
 
 # 配置日志
 logging.basicConfig(
@@ -55,12 +62,81 @@ def load_player_data(league_code, team_name):
 
 def load_match_data(league_code, date):
     """加载比赛数据"""
-    # 这里可以集成 data_collector.py 的功能
-    # 暂时返回模拟数据
+    # 优先从联赛目录的赔率落盘文件读取，避免抓取依赖导致的不可用
+    odds_matches = load_match_data_from_odds(league_code, date)
+    if odds_matches:
+        return odds_matches
+
+    # 兜底：集成 data_collector.py 的功能（若可用）
     from data_collector import DataCollector
     collector = DataCollector()
     import asyncio
     matches = asyncio.run(collector.collect_league_data(league_code, date))
+    return matches
+
+def load_match_data_from_odds(league_code, date):
+    """从联赛目录 analysis/odds/*_odds.json 读取真实赛程与赔率快照。"""
+    # 未来赛程优先读取 odds_snapshots（即时赔率快照）
+    snapshot_dir = os.path.join(league_code, 'analysis', 'odds_snapshots')
+    if os.path.isdir(snapshot_dir):
+        for file_path in sorted(glob(os.path.join(snapshot_dir, '*_odds_snapshot.json'))):
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    payload = json.load(f)
+            except Exception:
+                continue
+            matches = []
+            for record in payload.get('matches', []):
+                if record.get('match_date') != date:
+                    continue
+                home = record.get('home_team')
+                away = record.get('away_team')
+                if not home or not away:
+                    continue
+                current_odds = {
+                    'match_id': record.get('match_id'),
+                    '胜平负赔率': record.get('胜平负赔率', {}),
+                    '欧赔': record.get('欧赔', {}),
+                    '亚值': record.get('亚值', {}),
+                    '凯利': record.get('凯利', {}),
+                    '离散率': record.get('离散率', {}),
+                }
+                matches.append({'home_team': home, 'away_team': away, 'current_odds': current_odds, 'source': file_path})
+            if matches:
+                return matches
+
+    odds_dir = os.path.join(league_code, 'analysis', 'odds')
+    if not os.path.isdir(odds_dir):
+        return []
+
+    matches = []
+    for file_path in sorted(glob(os.path.join(odds_dir, '*_odds.json'))):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+        except Exception:
+            continue
+        for record in payload.get('matches', []):
+            if record.get('match_date') != date:
+                continue
+            home = record.get('home_team')
+            away = record.get('away_team')
+            if not home or not away:
+                continue
+            current_odds = {
+                'match_id': record.get('match_id'),
+                '胜平负赔率': record.get('胜平负赔率', {}),
+                '欧赔': record.get('欧赔', {}),
+                '亚值': record.get('亚值', {}),
+                '凯利': record.get('凯利', {}),
+                '离散率': record.get('离散率', {}),
+            }
+            matches.append({
+                'home_team': home,
+                'away_team': away,
+                'current_odds': current_odds,
+                'source': file_path
+            })
     return matches
 
 def load_upset_cases():
@@ -124,8 +200,37 @@ def analyze_team_strength(team_name, league_code):
         'available_players': total_players - len(injured_players) - len(suspended_players)
     }
 
-def predict_match(home_team, away_team, league_code, match_date):
+def predict_match(home_team, away_team, league_code, match_date, current_odds=None):
     """预测比赛结果"""
+    # 主流程：走增强版预测器（如果可用）
+    if EnhancedPredictor is not None:
+        try:
+            predictor = EnhancedPredictor()
+            enhanced = predictor.predict_match(
+                home_team=home_team,
+                away_team=away_team,
+                league_code=league_code,
+                match_date=match_date,
+                current_odds=current_odds
+            )
+            # 兼容旧字段结构（供本文件报告使用）
+            return {
+                'home_team': home_team,
+                'away_team': away_team,
+                'prediction': enhanced.get('prediction'),
+                'confidence': float(enhanced.get('confidence', 0.0) or 0.0),
+                'strength_diff': enhanced.get('strength_diff'),
+                'home_strength': enhanced.get('home_strength', {}),
+                'away_strength': enhanced.get('away_strength', {}),
+                'upset_potential': enhanced.get('upset_potential', {}),
+                'match_date': match_date,
+                # 额外字段：方便你核对“动态调权是否进入主流程”
+                'applied_model_weights': enhanced.get('applied_model_weights'),
+                'historical_odds_reference': enhanced.get('historical_odds_reference'),
+            }
+        except Exception as e:
+            logging.warning(f"增强版预测失败，回退旧逻辑: {e}")
+
     # 分析双方实力
     home_strength = analyze_team_strength(home_team, league_code)
     away_strength = analyze_team_strength(away_team, league_code)
@@ -235,11 +340,26 @@ def generate_prediction_report(league_code, date):
     # 生成预测
     predictions = []
     for match in matches:
+        # 兼容两类结构：
+        # - odds落盘读取：dict {'home_team','away_team','current_odds'}
+        # - data_collector：MatchData对象（可能带 odds_data）
+        if isinstance(match, dict):
+            home_team = match.get('home_team')
+            away_team = match.get('away_team')
+            current_odds = match.get('current_odds')
+        else:
+            home_team = getattr(match, 'home_team', None)
+            away_team = getattr(match, 'away_team', None)
+            current_odds = getattr(match, 'odds_data', None)
+
+        if not home_team or not away_team:
+            continue
         prediction = predict_match(
-            match.home_team,
-            match.away_team,
+            home_team,
+            away_team,
             league_code,
-            date
+            date,
+            current_odds=current_odds
         )
         predictions.append(prediction)
     
@@ -255,12 +375,24 @@ def generate_prediction_report(league_code, date):
         
         # 添加备注
         notes = []
+        # 动态调权诊断（增强版才有）
+        diag = pred.get('applied_model_weights')
+        if isinstance(diag, dict) and 'has_enough_samples' in diag:
+            if diag.get('has_enough_samples'):
+                notes.append("动态调权:已生效")
+            else:
+                notes.append("动态调权:样本不足")
         if pred['home_strength']['injured_count'] > 0:
             notes.append(f"{pred['home_team']}伤病{pred['home_strength']['injured_count']}人")
         if pred['away_strength']['injured_count'] > 0:
             notes.append(f"{pred['away_team']}伤病{pred['away_strength']['injured_count']}人")
         if pred['upset_potential']['level'] == '高':
             notes.append("爆冷警告")
+        # 历史相似盘路参考（增强版才有）
+        odds_ref = pred.get('historical_odds_reference')
+        if isinstance(odds_ref, dict) and odds_ref.get('available'):
+            summary = odds_ref.get('summary', {})
+            notes.append(f"相似盘{summary.get('sample_size', 0)}场")
         
         note_str = '; '.join(notes) if notes else '无'
         report_content += f"{note_str} |\n"
@@ -300,12 +432,13 @@ def main():
     print("优化的预测比赛流程")
     print("=" * 60)
     
-    # 切换到项目根目录
-    os.chdir('/Users/lin/trae_projects/europe_leagues')
+    # 切换到项目根目录（使用相对路径）
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(script_dir)
     
-    # 预测未来7天的比赛
+    # 预测未来3天的比赛（减少到3天提高效率）
     today = datetime.now()
-    for i in range(7):
+    for i in range(3):
         target_date = (today + timedelta(days=i)).strftime('%Y-%m-%d')
         
         for league_code in LEAGUES:

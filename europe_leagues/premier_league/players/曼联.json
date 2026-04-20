@@ -1,7 +1,5071 @@
 {
   "name": "曼联",
   "league": "英超",
-  "players": [],
-  "last_updated": "2026-04-19T22:35:00.000000",
+  "players": [
+    {
+      "name": "巴因德尔",
+      "position": "门将",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 6,
+        "minutes": 540,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 13,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Bayindir, Altay",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "451302.jpg",
+      "fpl_price_m": 4.7,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 1.8,
+        "ict_index": 12.8,
+        "influence": 118.4,
+        "creativity": 10.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.3
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.05,
+        "expected_goal_involvements": 0.05,
+        "expected_goals_conceded": 9.24,
+        "influence": 118.4,
+        "creativity": 10.0,
+        "threat": 0.0,
+        "ict_index": 12.8
+      },
+      "understat_player_id": "12054",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 0,
+        "goals": 0,
+        "xg": 0.0,
+        "npxg": 0.0,
+        "xg_chain": 1.0489089861512184,
+        "xg_buildup": 0.7549917474389076
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 1,
+        "xa": 0.2939172387123108,
+        "creativity_index": 10.0
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 0,
+        "saves": 13,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "expected_goals_conceded": 9.24
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 6,
+        "minutes": 540,
+        "position_code": "GK",
+        "xg": 0.0,
+        "xa": 0.2939172387123108,
+        "npxg": 0.0,
+        "shots": 0,
+        "key_passes": 1,
+        "xg_chain": 1.0489089861512184,
+        "xg_buildup": 0.7549917474389076
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 0,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": false,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "布鲁诺·费尔南德斯",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 30,
+        "minutes": 2615,
+        "goals": 8,
+        "assists": 19,
+        "yellow_cards": 4,
+        "red_cards": 0,
+        "clean_sheets": 5,
+        "saves": 0,
+        "bonus": 36
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Borges Fernandes, Bruno Miguel",
+      "chance_of_playing_this_round": 100,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "141746.jpg",
+      "fpl_price_m": 10.3,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 5.0,
+        "points_per_game": 6.6,
+        "ict_index": 320.5,
+        "influence": 1095.4,
+        "creativity": 1587.9,
+        "threat": 519.0,
+        "selected_by_percent": 45.5
+      },
+      "technical_stats": {
+        "expected_goals": 10.38,
+        "expected_assists": 9.6,
+        "expected_goal_involvements": 19.98,
+        "expected_goals_conceded": 38.18,
+        "influence": 1095.4,
+        "creativity": 1587.9,
+        "threat": 519.0,
+        "ict_index": 320.5
+      },
+      "understat_player_id": "1228",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 75,
+        "goals": 8,
+        "xg": 11.236784948967397,
+        "npxg": 6.669771890155971,
+        "xg_chain": 20.34626032691449,
+        "xg_buildup": 8.925826661288738
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 110,
+        "xa": 13.77549147605896,
+        "creativity_index": 1587.9
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 5,
+        "saves": 0,
+        "yellow_cards": 4,
+        "red_cards": 0,
+        "expected_goals_conceded": 38.18
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 30,
+        "minutes": 2632,
+        "position_code": "M",
+        "xg": 11.236784948967397,
+        "xa": 13.77549147605896,
+        "npxg": 6.669771890155971,
+        "shots": 75,
+        "key_passes": 110,
+        "xg_chain": 20.34626032691449,
+        "xg_buildup": 8.925826661288738
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 768,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            1,
+            116,
+            65
+          ],
+          [
+            1,
+            0,
+            0,
+            3,
+            219,
+            175
+          ],
+          [
+            0,
+            0,
+            1,
+            0,
+            118,
+            57
+          ],
+          [
+            0,
+            0,
+            1,
+            0,
+            4,
+            6
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "卡塞米罗",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 30,
+        "minutes": 2315,
+        "goals": 8,
+        "assists": 4,
+        "yellow_cards": 8,
+        "red_cards": 1,
+        "clean_sheets": 9,
+        "saves": 0,
+        "bonus": 17
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Casimiro, Carlos Henrique",
+      "chance_of_playing_this_round": 100,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "61256.jpg",
+      "fpl_price_m": 5.7,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 7.0,
+        "points_per_game": 4.8,
+        "ict_index": 178.8,
+        "influence": 783.0,
+        "creativity": 484.4,
+        "threat": 518.0,
+        "selected_by_percent": 3.4
+      },
+      "technical_stats": {
+        "expected_goals": 4.9,
+        "expected_assists": 3.05,
+        "expected_goal_involvements": 7.95,
+        "expected_goals_conceded": 27.83,
+        "influence": 783.0,
+        "creativity": 484.4,
+        "threat": 518.0,
+        "ict_index": 178.8
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "达洛特",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 26,
+        "minutes": 2339,
+        "goals": 1,
+        "assists": 6,
+        "yellow_cards": 5,
+        "red_cards": 0,
+        "clean_sheets": 7,
+        "saves": 0,
+        "bonus": 9
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Dalot Teixeira, Jose Diogo",
+      "chance_of_playing_this_round": 100,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "216051.jpg",
+      "fpl_price_m": 4.6,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 3.5,
+        "points_per_game": 3.4,
+        "ict_index": 110.0,
+        "influence": 485.4,
+        "creativity": 422.5,
+        "threat": 192.0,
+        "selected_by_percent": 4.4
+      },
+      "technical_stats": {
+        "expected_goals": 1.57,
+        "expected_assists": 2.39,
+        "expected_goal_involvements": 3.96,
+        "expected_goals_conceded": 32.37,
+        "influence": 485.4,
+        "creativity": 422.5,
+        "threat": 192.0,
+        "ict_index": 110.0
+      },
+      "understat_player_id": "7281",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 22,
+        "goals": 1,
+        "xg": 1.9999770913273096,
+        "npxg": 1.9999770913273096,
+        "xg_chain": 11.481667000800371,
+        "xg_buildup": 8.380131950601935
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 28,
+        "xa": 3.3998383646830916,
+        "creativity_index": 422.5
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 7,
+        "saves": 0,
+        "yellow_cards": 5,
+        "red_cards": 0,
+        "expected_goals_conceded": 32.37
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 31,
+        "minutes": 2344,
+        "position_code": "D S",
+        "xg": 1.9999770913273096,
+        "xa": 3.3998383646830916,
+        "npxg": 1.9999770913273096,
+        "shots": 22,
+        "key_passes": 28,
+        "xg_chain": 11.481667000800371,
+        "xg_buildup": 8.380131950601935
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 137,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            29,
+            27
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            23,
+            23
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            22,
+            13
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "德利赫特",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "injured",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 13,
+        "minutes": 1170,
+        "goals": 1,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 1,
+        "saves": 0,
+        "bonus": 5
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "De Ligt, Matthijs",
+      "injury_reason": "Back injury - Unknown return date",
+      "chance_of_playing_this_round": 0,
+      "chance_of_playing_next_round": 0,
+      "squad_number": null,
+      "photo": "209365.jpg",
+      "fpl_price_m": 4.9,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 3.3,
+        "ict_index": 45.7,
+        "influence": 276.6,
+        "creativity": 60.2,
+        "threat": 122.0,
+        "selected_by_percent": 1.8
+      },
+      "technical_stats": {
+        "expected_goals": 1.38,
+        "expected_assists": 0.83,
+        "expected_goal_involvements": 2.21,
+        "expected_goals_conceded": 18.73,
+        "influence": 276.6,
+        "creativity": 60.2,
+        "threat": 122.0,
+        "ict_index": 45.7
+      },
+      "understat_player_id": "7902",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 11,
+        "goals": 1,
+        "xg": 1.3233719654381275,
+        "npxg": 1.3233719654381275,
+        "xg_chain": 2.8319015204906464,
+        "xg_buildup": 2.3887862116098404
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 3,
+        "xa": 0.4281761646270752,
+        "creativity_index": 60.2
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 1,
+        "saves": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "expected_goals_conceded": 18.73
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 13,
+        "minutes": 1170,
+        "position_code": "D",
+        "xg": 1.3233719654381275,
+        "xa": 0.4281761646270752,
+        "npxg": 1.3233719654381275,
+        "shots": 11,
+        "key_passes": 3,
+        "xg_chain": 2.8319015204906464,
+        "xg_buildup": 2.3887862116098404
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 124,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            2,
+            9
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            6,
+            92
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            6,
+            9
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "阿马德",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 23,
+        "minutes": 1995,
+        "goals": 2,
+        "assists": 4,
+        "yellow_cards": 2,
+        "red_cards": 0,
+        "clean_sheets": 4,
+        "saves": 0,
+        "bonus": 6
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Diallo, Amad",
+      "chance_of_playing_this_round": 100,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "493250.jpg",
+      "fpl_price_m": 6.2,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 1.5,
+        "points_per_game": 2.9,
+        "ict_index": 143.7,
+        "influence": 391.2,
+        "creativity": 542.1,
+        "threat": 502.0,
+        "selected_by_percent": 1.4
+      },
+      "technical_stats": {
+        "expected_goals": 4.62,
+        "expected_assists": 3.52,
+        "expected_goal_involvements": 8.14,
+        "expected_goals_conceded": 26.37,
+        "influence": 391.2,
+        "creativity": 542.1,
+        "threat": 502.0,
+        "ict_index": 143.7
+      },
+      "understat_player_id": "8127",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 46,
+        "goals": 2,
+        "xg": 4.9004956018179655,
+        "npxg": 4.9004956018179655,
+        "xg_chain": 14.852390205487609,
+        "xg_buildup": 7.639680963009596
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 37,
+        "xa": 4.089084632694721,
+        "creativity_index": 542.1
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 4,
+        "saves": 0,
+        "yellow_cards": 2,
+        "red_cards": 0,
+        "expected_goals_conceded": 26.37
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 27,
+        "minutes": 1997,
+        "position_code": "D M S",
+        "xg": 4.9004956018179655,
+        "xa": 4.089084632694721,
+        "npxg": 4.9004956018179655,
+        "shots": 46,
+        "key_passes": 37,
+        "xg_chain": 14.852390205487609,
+        "xg_buildup": 7.639680963009596
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 106,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            22,
+            40
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            10,
+            26
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            3,
+            5
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "希顿",
+      "position": "门将",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Heaton, Thomas David",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "21205.jpg",
+      "fpl_price_m": 3.8,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 0.0,
+        "ict_index": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.4
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.0
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "Lammens, Senne",
+      "position": "门将",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 27,
+        "minutes": 2430,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 6,
+        "saves": 63,
+        "bonus": 9
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "465247.jpg",
+      "fpl_price_m": 5.1,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 6.0,
+        "points_per_game": 3.3,
+        "ict_index": 51.3,
+        "influence": 511.0,
+        "creativity": 0.0,
+        "threat": 2.0,
+        "selected_by_percent": 3.0
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 33.01,
+        "influence": 511.0,
+        "creativity": 0.0,
+        "threat": 2.0,
+        "ict_index": 51.3
+      },
+      "understat_player_id": "14056",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 0,
+        "goals": 0,
+        "xg": 0.0,
+        "npxg": 0.0,
+        "xg_chain": 2.97742398455739,
+        "xg_buildup": 2.97742398455739
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 0,
+        "xa": 0.0,
+        "creativity_index": 0.0
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 6,
+        "saves": 63,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "expected_goals_conceded": 33.01
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 27,
+        "minutes": 2430,
+        "position_code": "GK",
+        "xg": 0.0,
+        "xa": 0.0,
+        "npxg": 0.0,
+        "shots": 0,
+        "key_passes": 0,
+        "xg_chain": 2.97742398455739,
+        "xg_buildup": 2.97742398455739
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 0,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": false,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "马奎尔",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 14,
+        "minutes": 1199,
+        "goals": 1,
+        "assists": 1,
+        "yellow_cards": 3,
+        "red_cards": 1,
+        "clean_sheets": 5,
+        "saves": 0,
+        "bonus": 3
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Maguire, Harry Jacob",
+      "chance_of_playing_this_round": 0,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "95658.jpg",
+      "fpl_price_m": 4.4,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 3.5,
+        "ict_index": 40.3,
+        "influence": 246.0,
+        "creativity": 38.2,
+        "threat": 116.0,
+        "selected_by_percent": 1.3
+      },
+      "technical_stats": {
+        "expected_goals": 0.81,
+        "expected_assists": 0.19,
+        "expected_goal_involvements": 1.0,
+        "expected_goals_conceded": 16.71,
+        "influence": 246.0,
+        "creativity": 38.2,
+        "threat": 116.0,
+        "ict_index": 40.3
+      },
+      "understat_player_id": "1687",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 10,
+        "goals": 1,
+        "xg": 0.9909983389079571,
+        "npxg": 0.9909983389079571,
+        "xg_chain": 3.7443377673625946,
+        "xg_buildup": 3.7443377673625946
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 2,
+        "xa": 0.2362615466117859,
+        "creativity_index": 38.2
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 5,
+        "saves": 0,
+        "yellow_cards": 3,
+        "red_cards": 1,
+        "expected_goals_conceded": 16.71
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 18,
+        "minutes": 1216,
+        "position_code": "D S",
+        "xg": 0.9909983389079571,
+        "xa": 0.2362615466117859,
+        "npxg": 0.9909983389079571,
+        "shots": 10,
+        "key_passes": 2,
+        "xg_chain": 3.7443377673625946,
+        "xg_buildup": 3.7443377673625946
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 233,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            9,
+            28
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            10,
+            154
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            12,
+            19
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "马拉西亚",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 7,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Malacia, Tyrell Johannes Chicco",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "222690.jpg",
+      "fpl_price_m": 3.7,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 1.0,
+        "ict_index": 0.4,
+        "influence": 3.6,
+        "creativity": 0.5,
+        "threat": 0.0,
+        "selected_by_percent": 0.4
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.35,
+        "influence": 3.6,
+        "creativity": 0.5,
+        "threat": 0.0,
+        "ict_index": 0.4
+      },
+      "understat_player_id": "10803",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 0,
+        "goals": 0,
+        "xg": 0.0,
+        "npxg": 0.0,
+        "xg_chain": 0.05225421115756035,
+        "xg_buildup": 0.05225421115756035
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 0,
+        "xa": 0.0,
+        "creativity_index": 0.5
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 0,
+        "saves": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "expected_goals_conceded": 0.35
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 2,
+        "minutes": 2,
+        "position_code": "S",
+        "xg": 0.0,
+        "xa": 0.0,
+        "npxg": 0.0,
+        "shots": 0,
+        "key_passes": 0,
+        "xg_chain": 0.05225421115756035,
+        "xg_buildup": 0.05225421115756035
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 5,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            2,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "利桑德罗·马丁内斯",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "suspended",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 10,
+        "minutes": 959,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 1,
+        "clean_sheets": 3,
+        "saves": 0,
+        "bonus": 3
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Martinez, Lisandro",
+      "injury_reason": "Suspended until 09 May",
+      "chance_of_playing_this_round": 0,
+      "chance_of_playing_next_round": 0,
+      "squad_number": null,
+      "photo": "221820.jpg",
+      "fpl_price_m": 4.8,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": -1.5,
+        "points_per_game": 2.4,
+        "ict_index": 32.5,
+        "influence": 232.4,
+        "creativity": 80.6,
+        "threat": 10.0,
+        "selected_by_percent": 0.4
+      },
+      "technical_stats": {
+        "expected_goals": 0.06,
+        "expected_assists": 0.56,
+        "expected_goal_involvements": 0.62,
+        "expected_goals_conceded": 11.3,
+        "influence": 232.4,
+        "creativity": 80.6,
+        "threat": 10.0,
+        "ict_index": 32.5
+      },
+      "understat_player_id": "10802",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 4,
+        "goals": 0,
+        "xg": 0.05390207935124636,
+        "npxg": 0.05390207935124636,
+        "xg_chain": 5.1578133180737495,
+        "xg_buildup": 5.064821973443031
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 4,
+        "xa": 0.4361163191497326,
+        "creativity_index": 80.6
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 3,
+        "saves": 0,
+        "yellow_cards": 0,
+        "red_cards": 1,
+        "expected_goals_conceded": 11.3
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 15,
+        "minutes": 947,
+        "position_code": "D S",
+        "xg": 0.05390207935124636,
+        "xa": 0.4361163191497326,
+        "npxg": 0.05390207935124636,
+        "shots": 4,
+        "key_passes": 4,
+        "xg_chain": 5.1578133180737495,
+        "xg_buildup": 5.064821973443031
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 33,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            2
+          ],
+          [
+            2,
+            0,
+            0,
+            0,
+            2,
+            13
+          ],
+          [
+            0,
+            0,
+            0,
+            1,
+            7,
+            6
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "马兹拉维",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 9,
+        "minutes": 769,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 3,
+        "red_cards": 0,
+        "clean_sheets": 3,
+        "saves": 0,
+        "bonus": 3
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Mazraoui, Noussair",
+      "chance_of_playing_this_round": 100,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "230001.jpg",
+      "fpl_price_m": 4.9,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 3.5,
+        "points_per_game": 2.1,
+        "ict_index": 25.6,
+        "influence": 151.2,
+        "creativity": 72.7,
+        "threat": 33.0,
+        "selected_by_percent": 0.2
+      },
+      "technical_stats": {
+        "expected_goals": 0.19,
+        "expected_assists": 0.3,
+        "expected_goal_involvements": 0.48,
+        "expected_goals_conceded": 10.54,
+        "influence": 151.2,
+        "creativity": 72.7,
+        "threat": 33.0,
+        "ict_index": 25.6
+      },
+      "understat_player_id": "10696",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 5,
+        "goals": 0,
+        "xg": 0.19680644385516644,
+        "npxg": 0.19680644385516644,
+        "xg_chain": 4.387613967061043,
+        "xg_buildup": 4.245001167058945
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 2,
+        "xa": 0.07619490846991539,
+        "creativity_index": 72.7
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 3,
+        "saves": 0,
+        "yellow_cards": 3,
+        "red_cards": 0,
+        "expected_goals_conceded": 10.54
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 17,
+        "minutes": 781,
+        "position_code": "D S",
+        "xg": 0.19680644385516644,
+        "xa": 0.07619490846991539,
+        "npxg": 0.19680644385516644,
+        "shots": 5,
+        "key_passes": 2,
+        "xg_chain": 4.387613967061043,
+        "xg_buildup": 4.245001167058945
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 38,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            10,
+            5
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            10,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "姆贝乌莫",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 27,
+        "minutes": 2297,
+        "goals": 9,
+        "assists": 3,
+        "yellow_cards": 4,
+        "red_cards": 0,
+        "clean_sheets": 6,
+        "saves": 0,
+        "bonus": 15
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Mbeumo, Bryan Tetsadong Marceau",
+      "chance_of_playing_this_round": 100,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "446008.jpg",
+      "fpl_price_m": 8.5,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 2.0,
+        "points_per_game": 4.5,
+        "ict_index": 202.1,
+        "influence": 547.8,
+        "creativity": 711.9,
+        "threat": 761.0,
+        "selected_by_percent": 18.9
+      },
+      "technical_stats": {
+        "expected_goals": 8.04,
+        "expected_assists": 4.49,
+        "expected_goal_involvements": 12.53,
+        "expected_goals_conceded": 31.58,
+        "influence": 547.8,
+        "creativity": 711.9,
+        "threat": 761.0,
+        "ict_index": 202.1
+      },
+      "understat_player_id": "6552",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 61,
+        "goals": 9,
+        "xg": 9.723879012279212,
+        "npxg": 9.723879012279212,
+        "xg_chain": 17.466424867510796,
+        "xg_buildup": 5.314889772795141
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 39,
+        "xa": 4.381134629249573,
+        "creativity_index": 711.9
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 6,
+        "saves": 0,
+        "yellow_cards": 4,
+        "red_cards": 0,
+        "expected_goals_conceded": 31.58
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 28,
+        "minutes": 2349,
+        "position_code": "F M S",
+        "xg": 9.723879012279212,
+        "xa": 4.381134629249573,
+        "npxg": 9.723879012279212,
+        "shots": 61,
+        "key_passes": 39,
+        "xg_chain": 17.466424867510796,
+        "xg_buildup": 5.314889772795141
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 351,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            4
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            40,
+            92
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            38,
+            132
+          ],
+          [
+            0,
+            0,
+            0,
+            1,
+            8,
+            34
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "Mee, Dermot William",
+      "position": "门将",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "461537.jpg",
+      "fpl_price_m": 3.9,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 0.0,
+        "ict_index": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.1
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.0
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "芒特",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 10,
+        "minutes": 822,
+        "goals": 3,
+        "assists": 0,
+        "yellow_cards": 1,
+        "red_cards": 0,
+        "clean_sheets": 3,
+        "saves": 0,
+        "bonus": 3
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Mount, Mason Tony",
+      "chance_of_playing_this_round": 100,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "184341.jpg",
+      "fpl_price_m": 5.9,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 2.5,
+        "ict_index": 52.5,
+        "influence": 165.0,
+        "creativity": 200.6,
+        "threat": 160.0,
+        "selected_by_percent": 0.3
+      },
+      "technical_stats": {
+        "expected_goals": 1.54,
+        "expected_assists": 1.41,
+        "expected_goal_involvements": 2.95,
+        "expected_goals_conceded": 10.38,
+        "influence": 165.0,
+        "creativity": 200.6,
+        "threat": 160.0,
+        "ict_index": 52.5
+      },
+      "understat_player_id": "7768",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 18,
+        "goals": 3,
+        "xg": 1.7134401425719261,
+        "npxg": 1.7134401425719261,
+        "xg_chain": 4.889510989189148,
+        "xg_buildup": 2.9160353913903236
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 14,
+        "xa": 1.3764615170657635,
+        "creativity_index": 200.6
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 3,
+        "saves": 0,
+        "yellow_cards": 1,
+        "red_cards": 0,
+        "expected_goals_conceded": 10.38
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 19,
+        "minutes": 832,
+        "position_code": "M S",
+        "xg": 1.7134401425719261,
+        "xa": 1.3764615170657635,
+        "npxg": 1.7134401425719261,
+        "shots": 18,
+        "key_passes": 14,
+        "xg_chain": 4.889510989189148,
+        "xg_buildup": 2.9160353913903236
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 312,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            17,
+            46
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            64,
+            82
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            54,
+            41
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            2,
+            6
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "库尼亚",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 26,
+        "minutes": 2238,
+        "goals": 8,
+        "assists": 4,
+        "yellow_cards": 3,
+        "red_cards": 0,
+        "clean_sheets": 7,
+        "saves": 0,
+        "bonus": 12
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Santos Carneiro da Cunha, Matheus",
+      "chance_of_playing_this_round": 100,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "430871.jpg",
+      "fpl_price_m": 8.0,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 4.0,
+        "points_per_game": 4.2,
+        "ict_index": 174.0,
+        "influence": 577.2,
+        "creativity": 464.0,
+        "threat": 696.0,
+        "selected_by_percent": 8.6
+      },
+      "technical_stats": {
+        "expected_goals": 6.16,
+        "expected_assists": 2.73,
+        "expected_goal_involvements": 8.89,
+        "expected_goals_conceded": 31.99,
+        "influence": 577.2,
+        "creativity": 464.0,
+        "threat": 696.0,
+        "ict_index": 174.0
+      },
+      "understat_player_id": "7080",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 78,
+        "goals": 8,
+        "xg": 5.92956162057817,
+        "npxg": 5.92956162057817,
+        "xg_chain": 14.243052572011948,
+        "xg_buildup": 7.827565113082528
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 28,
+        "xa": 2.6576727889478207,
+        "creativity_index": 464.0
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 7,
+        "saves": 0,
+        "yellow_cards": 3,
+        "red_cards": 0,
+        "expected_goals_conceded": 31.99
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 30,
+        "minutes": 2245,
+        "position_code": "F M S",
+        "xg": 5.92956162057817,
+        "xa": 2.6576727889478207,
+        "npxg": 5.92956162057817,
+        "shots": 78,
+        "key_passes": 28,
+        "xg_chain": 14.243052572011948,
+        "xg_buildup": 7.827565113082528
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 493,
+        "shot_density": [
+          [
+            0,
+            1,
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            0,
+            49,
+            60
+          ],
+          [
+            0,
+            0,
+            0,
+            1,
+            99,
+            148
+          ],
+          [
+            0,
+            0,
+            2,
+            3,
+            54,
+            69
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            4
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "塞斯科",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 15,
+        "minutes": 1498,
+        "goals": 9,
+        "assists": 2,
+        "yellow_cards": 2,
+        "red_cards": 0,
+        "clean_sheets": 2,
+        "saves": 0,
+        "bonus": 17
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Sesko, Benjamin",
+      "chance_of_playing_this_round": 100,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "485711.jpg",
+      "fpl_price_m": 7.3,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 2.0,
+        "points_per_game": 3.5,
+        "ict_index": 127.2,
+        "influence": 414.0,
+        "creativity": 142.2,
+        "threat": 725.0,
+        "selected_by_percent": 6.0
+      },
+      "technical_stats": {
+        "expected_goals": 7.53,
+        "expected_assists": 0.24,
+        "expected_goal_involvements": 7.77,
+        "expected_goals_conceded": 25.53,
+        "influence": 414.0,
+        "creativity": 142.2,
+        "threat": 725.0,
+        "ict_index": 127.2
+      },
+      "understat_player_id": "11974",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 57,
+        "goals": 9,
+        "xg": 10.378642336465418,
+        "npxg": 10.378642336465418,
+        "xg_chain": 11.926156617701054,
+        "xg_buildup": 1.5266024935990572
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 8,
+        "xa": 0.5251399390399456,
+        "creativity_index": 142.2
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 2,
+        "saves": 0,
+        "yellow_cards": 2,
+        "red_cards": 0,
+        "expected_goals_conceded": 25.53
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 28,
+        "minutes": 1496,
+        "position_code": "F S",
+        "xg": 10.378642336465418,
+        "xa": 0.5251399390399456,
+        "npxg": 10.378642336465418,
+        "shots": 57,
+        "key_passes": 8,
+        "xg_chain": 11.926156617701054,
+        "xg_buildup": 1.5266024935990572
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 172,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            6,
+            17
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            20,
+            99
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            8,
+            22
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "卢克·肖",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 33,
+        "minutes": 2797,
+        "goals": 0,
+        "assists": 1,
+        "yellow_cards": 6,
+        "red_cards": 0,
+        "clean_sheets": 7,
+        "saves": 0,
+        "bonus": 3
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Shaw, Luke Paul Hoare",
+      "chance_of_playing_this_round": 100,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "106760.jpg",
+      "fpl_price_m": 4.5,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 5.5,
+        "points_per_game": 2.7,
+        "ict_index": 82.6,
+        "influence": 465.0,
+        "creativity": 289.9,
+        "threat": 70.0,
+        "selected_by_percent": 0.8
+      },
+      "technical_stats": {
+        "expected_goals": 0.54,
+        "expected_assists": 1.55,
+        "expected_goal_involvements": 2.08,
+        "expected_goals_conceded": 38.98,
+        "influence": 465.0,
+        "creativity": 289.9,
+        "threat": 70.0,
+        "ict_index": 82.6
+      },
+      "understat_player_id": "1006",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 6,
+        "goals": 0,
+        "xg": 0.40805117040872574,
+        "npxg": 0.40805117040872574,
+        "xg_chain": 9.848064153455198,
+        "xg_buildup": 9.169839984737337
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 15,
+        "xa": 1.4936611289158463,
+        "creativity_index": 289.9
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 7,
+        "saves": 0,
+        "yellow_cards": 6,
+        "red_cards": 0,
+        "expected_goals_conceded": 38.98
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 33,
+        "minutes": 2839,
+        "position_code": "D",
+        "xg": 0.40805117040872574,
+        "xa": 1.4936611289158463,
+        "npxg": 0.40805117040872574,
+        "shots": 6,
+        "key_passes": 15,
+        "xg_chain": 9.848064153455198,
+        "xg_buildup": 9.169839984737337
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 95,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            10,
+            13
+          ],
+          [
+            2,
+            0,
+            0,
+            0,
+            37,
+            31
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "乌加特",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 8,
+        "minutes": 876,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 1,
+        "red_cards": 0,
+        "clean_sheets": 1,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Ugarte Ribeiro, Manuel",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "232112.jpg",
+      "fpl_price_m": 4.7,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 2.0,
+        "points_per_game": 1.7,
+        "ict_index": 29.8,
+        "influence": 167.2,
+        "creativity": 83.6,
+        "threat": 48.0,
+        "selected_by_percent": 0.1
+      },
+      "technical_stats": {
+        "expected_goals": 0.72,
+        "expected_assists": 0.16,
+        "expected_goal_involvements": 0.88,
+        "expected_goals_conceded": 18.22,
+        "influence": 167.2,
+        "creativity": 83.6,
+        "threat": 48.0,
+        "ict_index": 29.8
+      },
+      "understat_player_id": "11766",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 13,
+        "goals": 0,
+        "xg": 0.8379190387204289,
+        "npxg": 0.8379190387204289,
+        "xg_chain": 3.852708961814642,
+        "xg_buildup": 3.154600067064166
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 3,
+        "xa": 0.12879487127065659,
+        "creativity_index": 83.6
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 1,
+        "saves": 0,
+        "yellow_cards": 1,
+        "red_cards": 0,
+        "expected_goals_conceded": 18.22
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 22,
+        "minutes": 850,
+        "position_code": "M S",
+        "xg": 0.8379190387204289,
+        "xa": 0.12879487127065659,
+        "npxg": 0.8379190387204289,
+        "shots": 13,
+        "key_passes": 3,
+        "xg_chain": 3.852708961814642,
+        "xg_buildup": 3.154600067064166
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 43,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            6,
+            3
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            16,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            1,
+            4,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "齐尔克泽",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 4,
+        "minutes": 512,
+        "goals": 2,
+        "assists": 1,
+        "yellow_cards": 1,
+        "red_cards": 0,
+        "clean_sheets": 1,
+        "saves": 0,
+        "bonus": 6
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "english_name": "Zirkzee, Joshua Orobosa",
+      "chance_of_playing_this_round": 100,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "458249.jpg",
+      "fpl_price_m": 5.8,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.5,
+        "points_per_game": 2.0,
+        "ict_index": 50.7,
+        "influence": 154.0,
+        "creativity": 162.0,
+        "threat": 195.0,
+        "selected_by_percent": 0.4
+      },
+      "technical_stats": {
+        "expected_goals": 2.18,
+        "expected_assists": 0.32,
+        "expected_goal_involvements": 2.5,
+        "expected_goals_conceded": 7.63,
+        "influence": 154.0,
+        "creativity": 162.0,
+        "threat": 195.0,
+        "ict_index": 50.7
+      },
+      "understat_player_id": "8044",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 21,
+        "goals": 2,
+        "xg": 3.4082061797380447,
+        "npxg": 3.4082061797380447,
+        "xg_chain": 5.993388883769512,
+        "xg_buildup": 2.3713151291012764
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 10,
+        "xa": 1.168784772977233,
+        "creativity_index": 162.0
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 1,
+        "saves": 0,
+        "yellow_cards": 1,
+        "red_cards": 0,
+        "expected_goals_conceded": 7.63
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 19,
+        "minutes": 483,
+        "position_code": "F M S",
+        "xg": 3.4082061797380447,
+        "xa": 1.168784772977233,
+        "npxg": 3.4082061797380447,
+        "shots": 21,
+        "key_passes": 10,
+        "xg_chain": 5.993388883769512,
+        "xg_buildup": 2.3713151291012764
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 180,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            7,
+            25
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            25,
+            82
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            11,
+            30
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "Aigbomian Musa, Victor Osezele",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Ajayi, Noah",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Aljofree, Sonny",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Amass, Harry John",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "injured",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "injury_reason": "has joined Norwich City on loan for the rest of the season.",
+      "chance_of_playing_this_round": 0,
+      "chance_of_playing_next_round": 0,
+      "squad_number": null,
+      "photo": "577974.jpg",
+      "fpl_price_m": 4.0,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 0.0,
+        "ict_index": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.1
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.0
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "Armer, Daniel James",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Bailey, James Alexander Mo",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Benoliel Monteiro Barbosa, Neithan Dylan",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Biancheri, Gabriele Cataldo",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Brown, Nathaniel-Junior Calvin",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Byrne-Hughes, Cameron Samuel",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Collyer, Tobias Christopher",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "injured",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "injury_reason": "has joined Hull City on loan for the rest of the season.",
+      "chance_of_playing_this_round": 0,
+      "chance_of_playing_next_round": 0,
+      "squad_number": null,
+      "photo": "490881.jpg",
+      "fpl_price_m": 4.5,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 0.0,
+        "ict_index": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.0
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.0
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "Devaney, Jacob Patrick John",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Dorgu, Patrick Chinazaekpere",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "injured",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 14,
+        "minutes": 1329,
+        "goals": 3,
+        "assists": 3,
+        "yellow_cards": 5,
+        "red_cards": 0,
+        "clean_sheets": 3,
+        "saves": 0,
+        "bonus": 8
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "injury_reason": "Hamstring injury - Unknown return date",
+      "chance_of_playing_this_round": 0,
+      "chance_of_playing_next_round": 0,
+      "squad_number": null,
+      "photo": "596777.jpg",
+      "fpl_price_m": 4.1,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 3.4,
+        "ict_index": 101.9,
+        "influence": 402.4,
+        "creativity": 354.1,
+        "threat": 262.0,
+        "selected_by_percent": 2.5
+      },
+      "technical_stats": {
+        "expected_goals": 1.86,
+        "expected_assists": 1.42,
+        "expected_goal_involvements": 3.28,
+        "expected_goals_conceded": 18.78,
+        "influence": 402.4,
+        "creativity": 354.1,
+        "threat": 262.0,
+        "ict_index": 101.9
+      },
+      "understat_player_id": "11944",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 20,
+        "goals": 3,
+        "xg": 2.0813217908143997,
+        "npxg": 2.0813217908143997,
+        "xg_chain": 5.760951640084386,
+        "xg_buildup": 1.712141117081046
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 24,
+        "xa": 2.645839985460043,
+        "creativity_index": 354.1
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 3,
+        "saves": 0,
+        "yellow_cards": 5,
+        "red_cards": 0,
+        "expected_goals_conceded": 18.78
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 22,
+        "minutes": 1327,
+        "position_code": "D M S",
+        "xg": 2.0813217908143997,
+        "xa": 2.645839985460043,
+        "npxg": 2.0813217908143997,
+        "shots": 20,
+        "key_passes": 24,
+        "xg_chain": 5.760951640084386,
+        "xg_buildup": 1.712141117081046
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 86,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            8,
+            6
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            12,
+            25
+          ],
+          [
+            0,
+            1,
+            0,
+            0,
+            11,
+            22
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "Ennis, Ethan Finley",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Fitzgerald, Jayce John",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "556639.jpg",
+      "fpl_price_m": 4.3,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 0.0,
+        "ict_index": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.0
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.0
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "Fletcher, Jack Davidson",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 107,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "547037.jpg",
+      "fpl_price_m": 4.3,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 1.0,
+        "ict_index": 4.8,
+        "influence": 18.6,
+        "creativity": 24.4,
+        "threat": 5.0,
+        "selected_by_percent": 0.1
+      },
+      "technical_stats": {
+        "expected_goals": 0.03,
+        "expected_assists": 0.02,
+        "expected_goal_involvements": 0.05,
+        "expected_goals_conceded": 1.86,
+        "influence": 18.6,
+        "creativity": 24.4,
+        "threat": 5.0,
+        "ict_index": 4.8
+      },
+      "understat_player_id": "13150",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 1,
+        "goals": 0,
+        "xg": 0.037386249750852585,
+        "npxg": 0.037386249750852585,
+        "xg_chain": 0.26276974007487297,
+        "xg_buildup": 0.14789408445358276
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 2,
+        "xa": 0.11487564817070961,
+        "creativity_index": 24.4
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 0,
+        "saves": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "expected_goals_conceded": 1.86
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 3,
+        "minutes": 97,
+        "position_code": "S",
+        "xg": 0.037386249750852585,
+        "xa": 0.11487564817070961,
+        "npxg": 0.037386249750852585,
+        "shots": 1,
+        "key_passes": 2,
+        "xg_chain": 0.26276974007487297,
+        "xg_buildup": 0.14789408445358276
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 1,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "Fletcher, Tyler Robert",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 1,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "519913.jpg",
+      "fpl_price_m": 4.4,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 1.0,
+        "ict_index": 0.1,
+        "influence": 0.4,
+        "creativity": 1.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.0
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.01,
+        "expected_goal_involvements": 0.01,
+        "expected_goals_conceded": 0.02,
+        "influence": 0.4,
+        "creativity": 1.0,
+        "threat": 0.0,
+        "ict_index": 0.1
+      },
+      "understat_player_id": "14272",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 0,
+        "goals": 0,
+        "xg": 0.0,
+        "npxg": 0.0,
+        "xg_chain": 0.0,
+        "xg_buildup": 0.0
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 0,
+        "xa": 0.0,
+        "creativity_index": 1.0
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 0,
+        "saves": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "expected_goals_conceded": 0.02
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 1,
+        "minutes": 1,
+        "position_code": "S",
+        "xg": 0.0,
+        "xa": 0.0,
+        "npxg": 0.0,
+        "shots": 0,
+        "key_passes": 0,
+        "xg_chain": 0.0,
+        "xg_buildup": 0.0
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 0,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": false,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "Fredricson, Tyler Edwin",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 2,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "547676.jpg",
+      "fpl_price_m": 3.7,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 1.0,
+        "ict_index": 0.4,
+        "influence": 4.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.2
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.3,
+        "influence": 4.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.4
+      },
+      "understat_player_id": "13467",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 0,
+        "goals": 0,
+        "xg": 0.0,
+        "npxg": 0.0,
+        "xg_chain": 0.0,
+        "xg_buildup": 0.0
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 0,
+        "xa": 0.0,
+        "creativity_index": 0.0
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 0,
+        "saves": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "expected_goals_conceded": 0.3
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 1,
+        "minutes": 1,
+        "position_code": "S",
+        "xg": 0.0,
+        "xa": 0.0,
+        "npxg": 0.0,
+        "shots": 0,
+        "key_passes": 0,
+        "xg_chain": 0.0,
+        "xg_buildup": 0.0
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 0,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": false,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "Gore, Daniel Lewis",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Hardy, Charlie James",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Harrison, Elyh Samuel",
+      "position": "门将",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "injured",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "injury_reason": "On loan to Shrewsbury Town",
+      "chance_of_playing_this_round": 0,
+      "chance_of_playing_next_round": 0,
+      "squad_number": null,
+      "photo": "588555.jpg",
+      "fpl_price_m": 4.0,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 0.0,
+        "ict_index": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.0
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.0
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "Heath, Frederick Henry",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Heaven, Ayden Edford",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 9,
+        "minutes": 740,
+        "goals": 0,
+        "assists": 1,
+        "yellow_cards": 2,
+        "red_cards": 0,
+        "clean_sheets": 2,
+        "saves": 0,
+        "bonus": 3
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "chance_of_playing_this_round": 100,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "606745.jpg",
+      "fpl_price_m": 3.7,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 5.5,
+        "points_per_game": 2.6,
+        "ict_index": 26.2,
+        "influence": 209.2,
+        "creativity": 27.4,
+        "threat": 26.0,
+        "selected_by_percent": 2.2
+      },
+      "technical_stats": {
+        "expected_goals": 0.34,
+        "expected_assists": 0.17,
+        "expected_goal_involvements": 0.51,
+        "expected_goals_conceded": 9.63,
+        "influence": 209.2,
+        "creativity": 27.4,
+        "threat": 26.0,
+        "ict_index": 26.2
+      },
+      "understat_player_id": "13080",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 3,
+        "goals": 0,
+        "xg": 0.21505310852080584,
+        "npxg": 0.21505310852080584,
+        "xg_chain": 3.6749197635799646,
+        "xg_buildup": 3.2206651363521814
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 2,
+        "xa": 0.365470789372921,
+        "creativity_index": 27.4
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 2,
+        "saves": 0,
+        "yellow_cards": 2,
+        "red_cards": 0,
+        "expected_goals_conceded": 9.63
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 15,
+        "minutes": 743,
+        "position_code": "D S",
+        "xg": 0.21505310852080584,
+        "xa": 0.365470789372921,
+        "npxg": 0.21505310852080584,
+        "shots": 3,
+        "key_passes": 2,
+        "xg_chain": 3.6749197635799646,
+        "xg_buildup": 3.2206651363521814
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 6,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            3
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "Helafu, Yuel Ghebreyesus",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Honor, Solomon Lindsay Birch",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Ibragimov, Amir",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Jackson, Louis Paul",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Kamason, Jaydan Dejon",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Kana Biyik, Enzo Roselin Teffe",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Kone, Sekou",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "injured",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "injury_reason": "has joined Lausanne-Sport on loan for the rest of the season.",
+      "chance_of_playing_this_round": 0,
+      "chance_of_playing_next_round": 0,
+      "squad_number": null,
+      "photo": "618873.jpg",
+      "fpl_price_m": 4.3,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 0.0,
+        "ict_index": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.1
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.0
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "Kukonki, Godwill",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "576637.jpg",
+      "fpl_price_m": 4.0,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 0.0,
+        "ict_index": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.0
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.0
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "Kynaston-Bradbury, Louie Jacob",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Lacey, Shea",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 12,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "chance_of_playing_this_round": 100,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "576628.jpg",
+      "fpl_price_m": 4.5,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 1.0,
+        "ict_index": 1.5,
+        "influence": 4.0,
+        "creativity": 1.5,
+        "threat": 11.0,
+        "selected_by_percent": 0.0
+      },
+      "technical_stats": {
+        "expected_goals": 0.07,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.07,
+        "expected_goals_conceded": 0.11,
+        "influence": 4.0,
+        "creativity": 1.5,
+        "threat": 11.0,
+        "ict_index": 1.5
+      },
+      "understat_player_id": "14198",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 3,
+        "goals": 0,
+        "xg": 0.05930102616548538,
+        "npxg": 0.05930102616548538,
+        "xg_chain": 0.1093531921505928,
+        "xg_buildup": 0.05005216225981712
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 0,
+        "xa": 0.0,
+        "creativity_index": 1.5
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 0,
+        "saves": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "expected_goals_conceded": 0.11
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 2,
+        "minutes": 6,
+        "position_code": "S",
+        "xg": 0.05930102616548538,
+        "xa": 0.0,
+        "npxg": 0.05930102616548538,
+        "shots": 3,
+        "key_passes": 0,
+        "xg_chain": 0.1093531921505928,
+        "xg_buildup": 0.05005216225981712
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 3,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            2,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "Leon Blanco, Diego Basilio",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "661712.jpg",
+      "fpl_price_m": 4.1,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 0.0,
+        "ict_index": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.1
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.0
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "Lusale, Samuel Malama",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Mainoo, Kobbie Boateng",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 11,
+        "minutes": 1203,
+        "goals": 0,
+        "assists": 2,
+        "yellow_cards": 1,
+        "red_cards": 0,
+        "clean_sheets": 4,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "chance_of_playing_this_round": 75,
+      "chance_of_playing_next_round": 100,
+      "squad_number": null,
+      "photo": "516895.jpg",
+      "fpl_price_m": 4.7,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 2.0,
+        "points_per_game": 2.1,
+        "ict_index": 59.3,
+        "influence": 246.6,
+        "creativity": 290.0,
+        "threat": 55.0,
+        "selected_by_percent": 1.0
+      },
+      "technical_stats": {
+        "expected_goals": 0.24,
+        "expected_assists": 0.85,
+        "expected_goal_involvements": 1.09,
+        "expected_goals_conceded": 16.64,
+        "influence": 246.6,
+        "creativity": 290.0,
+        "threat": 55.0,
+        "ict_index": 59.3
+      },
+      "understat_player_id": "11174",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 8,
+        "goals": 0,
+        "xg": 0.17940098699182272,
+        "npxg": 0.17940098699182272,
+        "xg_chain": 5.605078909546137,
+        "xg_buildup": 5.1746072340756655
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 17,
+        "xa": 0.598043785430491,
+        "creativity_index": 290.0
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 4,
+        "saves": 0,
+        "yellow_cards": 1,
+        "red_cards": 0,
+        "expected_goals_conceded": 16.64
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 23,
+        "minutes": 1173,
+        "position_code": "M S",
+        "xg": 0.17940098699182272,
+        "xa": 0.598043785430491,
+        "npxg": 0.17940098699182272,
+        "shots": 8,
+        "key_passes": 17,
+        "xg_chain": 5.605078909546137,
+        "xg_buildup": 5.1746072340756655
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 34,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            2,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            14,
+            7
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            6,
+            4
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "Mantato, Bendito Boanova",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 15,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "576620.jpg",
+      "fpl_price_m": 4.5,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 1.0,
+        "ict_index": 1.4,
+        "influence": 2.2,
+        "creativity": 11.7,
+        "threat": 0.0,
+        "selected_by_percent": 0.0
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.01,
+        "expected_goal_involvements": 0.01,
+        "expected_goals_conceded": 0.05,
+        "influence": 2.2,
+        "creativity": 11.7,
+        "threat": 0.0,
+        "ict_index": 1.4
+      },
+      "understat_player_id": "14266",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 0,
+        "goals": 0,
+        "xg": 0.0,
+        "npxg": 0.0,
+        "xg_chain": 0.12379638105630875,
+        "xg_buildup": 0.12379638105630875
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 1,
+        "xa": 0.03647809848189354,
+        "creativity_index": 11.7
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 0,
+        "saves": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "expected_goals_conceded": 0.05
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 1,
+        "minutes": 14,
+        "position_code": "S",
+        "xg": 0.0,
+        "xa": 0.03647809848189354,
+        "npxg": 0.0,
+        "shots": 0,
+        "key_passes": 1,
+        "xg_chain": 0.12379638105630875,
+        "xg_buildup": 0.12379638105630875
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 0,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": false,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    },
+    {
+      "name": "McAllister, Finley Joseph",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "McCormack, Rafe",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "McEvoy, Jay Paul",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Mills, Albert Frederick",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Missin, Ashton Brett",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Moorhouse, Jack Lee",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "injured",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "injury_reason": "has joined Leyton Orient on loan for the rest of the season.",
+      "chance_of_playing_this_round": 0,
+      "chance_of_playing_next_round": 0,
+      "squad_number": null,
+      "photo": "559684.jpg",
+      "fpl_price_m": 4.5,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 0.0,
+        "ict_index": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.0
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.0
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "Munro, Reece Stafford",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Murdock, William Alexander",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Ngwashi Chinjie, Jayden Armstrong",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Obi, Chidozie Martin",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "596047.jpg",
+      "fpl_price_m": 4.2,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 0.0,
+        "ict_index": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 1.4
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.0
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "Ogunneye, Habeeb Omotolani Oluwatoyin",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Overy, James Harrison",
+      "position": "门将",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "injured",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "injury_reason": "On loan to Shrewsbury Town",
+      "chance_of_playing_this_round": 0,
+      "chance_of_playing_next_round": 0,
+      "squad_number": null,
+      "photo": "588555.jpg",
+      "fpl_price_m": 4.0,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 0.0,
+        "ict_index": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.0
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.0
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "Plunkett, Dante Jeevan Jamal",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Scanlon, James Robert",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Shah, Jariyah Zain",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Sharpe, Malachi Israel",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Thwaites, Jim Alec Joseph",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": null,
+      "squad_number": null,
+      "photo": "576634.jpg",
+      "fpl_price_m": 4.5,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 0.0,
+        "ict_index": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.0
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.0
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "Watson, Jacob James Fraser",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Watson, Zachary Alexander",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Wheatley, Ethan Joseph",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "injured",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0,
+        "clean_sheets": 0,
+        "saves": 0,
+        "bonus": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "injury_reason": "has joined Bradford City on loan for the rest of the season.",
+      "chance_of_playing_this_round": 0,
+      "chance_of_playing_next_round": 0,
+      "squad_number": null,
+      "photo": "575034.jpg",
+      "fpl_price_m": 4.5,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 0.0,
+        "points_per_game": 0.0,
+        "ict_index": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "selected_by_percent": 0.1
+      },
+      "technical_stats": {
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "expected_goal_involvements": 0.0,
+        "expected_goals_conceded": 0.0,
+        "influence": 0.0,
+        "creativity": 0.0,
+        "threat": 0.0,
+        "ict_index": 0.0
+      },
+      "data_sources": [
+        "fantasy.premierleague.com"
+      ]
+    },
+    {
+      "name": "Williams, Ethan Demai",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "data_sources": []
+    },
+    {
+      "name": "Yoro, Leny Jean-Luc",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "doubtful",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 18,
+        "minutes": 1696,
+        "goals": 0,
+        "assists": 1,
+        "yellow_cards": 1,
+        "red_cards": 0,
+        "clean_sheets": 2,
+        "saves": 0,
+        "bonus": 1
+      },
+      "last_updated": "2026-04-20T18:39:08",
+      "injury_reason": "Knock - 75% chance of playing",
+      "chance_of_playing_this_round": null,
+      "chance_of_playing_next_round": 75,
+      "squad_number": null,
+      "photo": "550864.jpg",
+      "fpl_price_m": 4.1,
+      "rating_metrics": {
+        "source": "fpl",
+        "form": 1.5,
+        "points_per_game": 1.8,
+        "ict_index": 52.3,
+        "influence": 317.6,
+        "creativity": 82.8,
+        "threat": 124.0,
+        "selected_by_percent": 1.3
+      },
+      "technical_stats": {
+        "expected_goals": 1.34,
+        "expected_assists": 0.59,
+        "expected_goal_involvements": 1.93,
+        "expected_goals_conceded": 26.43,
+        "influence": 317.6,
+        "creativity": 82.8,
+        "threat": 124.0,
+        "ict_index": 52.3
+      },
+      "understat_player_id": "10564",
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 9,
+        "goals": 0,
+        "xg": 1.2473983131349087,
+        "npxg": 1.2473983131349087,
+        "xg_chain": 4.670362060889602,
+        "xg_buildup": 4.4985275361686945
+      },
+      "passing_stats": {
+        "source": "understat+fpl",
+        "key_passes": 4,
+        "xa": 0.2197452150285244,
+        "creativity_index": 82.8
+      },
+      "defensive_stats": {
+        "source": "fpl",
+        "clean_sheets": 2,
+        "saves": 0,
+        "yellow_cards": 1,
+        "red_cards": 0,
+        "expected_goals_conceded": 26.43
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 29,
+        "minutes": 1707,
+        "position_code": "D S",
+        "xg": 1.2473983131349087,
+        "xa": 0.2197452150285244,
+        "npxg": 1.2473983131349087,
+        "shots": 9,
+        "key_passes": 4,
+        "xg_chain": 4.670362060889602,
+        "xg_buildup": 4.4985275361686945
+      },
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 31,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            0,
+            29
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "data_sources": [
+        "fantasy.premierleague.com",
+        "understat.com"
+      ]
+    }
+  ],
+  "last_updated": "Mon, 20 Apr 2026 10:56:23 GMT",
   "season": "2026"
 }

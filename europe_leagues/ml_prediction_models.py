@@ -525,7 +525,7 @@ class MultiModelFusion:
         'ensemble': 0.05
     }
 
-    def __init__(self):
+    def __init__(self, model_weights: Optional[Dict[str, float]] = None):
         self.models = {
             'poisson': PoissonModel(),
             'dixon_coles': DixonColesModel(),
@@ -536,6 +536,21 @@ class MultiModelFusion:
             'xg': XGModel(),
             'bayesian': BayesianModel()
         }
+        self.model_weights = self._normalize_weights(model_weights or self.MODEL_WEIGHTS.copy())
+
+    @staticmethod
+    def _normalize_weights(weights: Dict[str, float]) -> Dict[str, float]:
+        total_weight = sum(weights.values())
+        if total_weight <= 0:
+            return MultiModelFusion.MODEL_WEIGHTS.copy()
+        return {
+            model_name: weight / total_weight
+            for model_name, weight in weights.items()
+        }
+
+    def set_model_weights(self, model_weights: Dict[str, float]):
+        """更新模型融合权重。"""
+        self.model_weights = self._normalize_weights(model_weights)
 
     def predict(
         self,
@@ -708,7 +723,7 @@ class MultiModelFusion:
         fused_away = 0
 
         for model_name, prediction in all_predictions.items():
-            weight = self.MODEL_WEIGHTS.get(model_name, 0.05)
+            weight = self.model_weights.get(model_name, 0.05)
             fused_home += prediction['home_win'] * weight
             fused_draw += prediction['draw'] * weight
             fused_away += prediction['away_win'] * weight

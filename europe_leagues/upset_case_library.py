@@ -7,7 +7,7 @@
 import json
 import os
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
 from enum import Enum
 
@@ -103,7 +103,10 @@ class 爆冷案例库:
 
     def __init__(self, 数据库路径: str = None):
         if 数据库路径 is None:
-            数据库路径 = "/Users/lin/trae_projects/europe_leagues/爆冷案例库.json"
+            数据库路径 = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "爆冷案例库.json"
+            )
 
         self.数据库路径 = 数据库路径
         self.案例列表: List[爆冷案例] = []
@@ -301,7 +304,10 @@ class 爆冷案例库:
     def 导出Markdown(self, 输出路径: str = None) -> None:
         """导出为Markdown格式"""
         if 输出路径 is None:
-            输出路径 = "/Users/lin/trae_projects/europe_leagues/爆冷案例库.md"
+            输出路径 = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "爆冷案例库.md"
+            )
 
         报告 = self.生成案例报告()
 
@@ -552,7 +558,6 @@ def 判断爆冷类型(
         return 爆冷类型.红牌逆转.value
     else:
         try:
-            预测进球 = int(预测比分.split("-")[0]) + int(预测比分.split("-")[1])
             实际进球 = int(实际比分.split("-")[0]) + int(实际比分.split("-")[1])
             if 实际进球 >= 4:
                 return 爆冷类型.大球爆冷.value

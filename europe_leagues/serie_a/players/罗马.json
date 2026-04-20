@@ -1,7 +1,3223 @@
 {
   "name": "罗马",
-  "league": "意甲",
-  "players": [],
-  "last_updated": "2026-04-19T22:35:00.000000",
+  "league": "serie_a",
+  "players": [
+    {
+      "name": "唐耶爾·馬倫",
+      "english_name": "Donyell Malen",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 13,
+        "minutes": 1074,
+        "goals": 10,
+        "assists": 0,
+        "yellow_cards": 1,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 53,
+        "goals": 10,
+        "xg": 10.050287067890167,
+        "npxg": 8.527689352631569,
+        "xg_chain": 8.515697754919529,
+        "xg_buildup": 0.9540079273283482
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 4,
+        "xa": 0.22185557708144188
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 13,
+        "minutes": 1074,
+        "position_code": "F",
+        "xg": 10.050287067890167,
+        "xa": 0.22185557708144188,
+        "npxg": 8.527689352631569,
+        "shots": 53,
+        "key_passes": 4,
+        "xg_chain": 8.515697754919529,
+        "xg_buildup": 0.9540079273283482
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "9749",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 294,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            15,
+            65
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            43,
+            108
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            13,
+            48
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q24084301",
+      "name_cn_source": "wikidata",
+      "shirt_numbers": [
+        "17"
+      ],
+      "shirt_number": 17,
+      "shirt_number_source": "wikidata",
+      "sofascore_player_id": 803039
+    },
+    {
+      "name": "馬蒂亞斯·蘇萊",
+      "english_name": "Matìas Soulè Malvano",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 28,
+        "minutes": 1936,
+        "goals": 6,
+        "assists": 5,
+        "yellow_cards": 1,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 46,
+        "goals": 6,
+        "xg": 3.859064320102334,
+        "npxg": 3.859064320102334,
+        "xg_chain": 13.019191801548004,
+        "xg_buildup": 7.682350642979145
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 40,
+        "xa": 4.037423160858452
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 28,
+        "minutes": 1936,
+        "position_code": "F M S",
+        "xg": 3.859064320102334,
+        "xa": 4.037423160858452,
+        "npxg": 3.859064320102334,
+        "shots": 46,
+        "key_passes": 40,
+        "xg_chain": 13.019191801548004,
+        "xg_buildup": 7.682350642979145
+      },
+      "data_sources": [
+        "understat.com"
+      ],
+      "understat_player_id": "9965",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 185,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            1,
+            49,
+            41
+          ],
+          [
+            0,
+            1,
+            0,
+            1,
+            41,
+            33
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            10,
+            6
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q107075915",
+      "name_cn_source": "wikidata"
+    },
+    {
+      "name": "洛倫佐·佩萊格里尼",
+      "english_name": "Lorenzo Pellegrini",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 24,
+        "minutes": 1508,
+        "goals": 4,
+        "assists": 2,
+        "yellow_cards": 2,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 32,
+        "goals": 4,
+        "xg": 4.77526899240911,
+        "npxg": 3.2526713106781244,
+        "xg_chain": 7.576448664069176,
+        "xg_buildup": 4.90537278726697
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 29,
+        "xa": 2.9984955824911594
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 24,
+        "minutes": 1508,
+        "position_code": "F M S",
+        "xg": 4.77526899240911,
+        "xa": 2.9984955824911594,
+        "npxg": 3.2526713106781244,
+        "shots": 32,
+        "key_passes": 29,
+        "xg_chain": 7.576448664069176,
+        "xg_buildup": 4.90537278726697
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "1471",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 558,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            68,
+            54
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            155,
+            168
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            64,
+            44
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            4
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q19773058",
+      "name_cn_source": "wikidata",
+      "shirt_numbers": [
+        "7"
+      ],
+      "shirt_number": 7,
+      "shirt_number_source": "wikidata",
+      "sofascore_player_id": 555540
+    },
+    {
+      "name": "Wesley",
+      "english_name": "Wesley",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 26,
+        "minutes": 2130,
+        "goals": 4,
+        "assists": 0,
+        "yellow_cards": 5,
+        "red_cards": 1
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 22,
+        "goals": 4,
+        "xg": 2.3235203810036182,
+        "npxg": 2.3235203810036182,
+        "xg_chain": 12.162292331457138,
+        "xg_buildup": 6.631311375647783
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 27,
+        "xa": 4.544415947049856
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 26,
+        "minutes": 2130,
+        "position_code": "D M S",
+        "xg": 2.3235203810036182,
+        "xa": 4.544415947049856,
+        "npxg": 2.3235203810036182,
+        "shots": 22,
+        "key_passes": 27,
+        "xg_chain": 12.162292331457138,
+        "xg_buildup": 6.631311375647783
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "13891",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 22,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            3,
+            4
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            3,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "sofascore_player_id": 1134200,
+      "shirt_number": 43,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "埃万·恩迪卡",
+      "english_name": "Evan Ndicka",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 27,
+        "minutes": 2380,
+        "goals": 3,
+        "assists": 0,
+        "yellow_cards": 5,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 21,
+        "goals": 3,
+        "xg": 2.2497257869690657,
+        "npxg": 2.2497257869690657,
+        "xg_chain": 6.716141993179917,
+        "xg_buildup": 6.365955786779523
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 6,
+        "xa": 0.5625489521771669
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 27,
+        "minutes": 2380,
+        "position_code": "D",
+        "xg": 2.2497257869690657,
+        "xa": 0.5625489521771669,
+        "npxg": 2.2497257869690657,
+        "shots": 21,
+        "key_passes": 6,
+        "xg_chain": 6.716141993179917,
+        "xg_buildup": 6.365955786779523
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "7049",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 135,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            2,
+            0,
+            0,
+            0,
+            5,
+            113
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            2,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q28971436",
+      "name_cn_source": "wikidata",
+      "sofascore_player_id": 848287,
+      "shirt_number": 5,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "埃文·弗格森",
+      "english_name": "Evan Ferguson",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 16,
+        "minutes": 777,
+        "goals": 3,
+        "assists": 2,
+        "yellow_cards": 1,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 26,
+        "goals": 3,
+        "xg": 3.4807619526982307,
+        "npxg": 3.4807619526982307,
+        "xg_chain": 5.4050158597528934,
+        "xg_buildup": 1.0331951715052128
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 15,
+        "xa": 1.6862706486135721
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 16,
+        "minutes": 777,
+        "position_code": "F S",
+        "xg": 3.4807619526982307,
+        "xa": 1.6862706486135721,
+        "npxg": 3.4807619526982307,
+        "shots": 26,
+        "key_passes": 15,
+        "xg_chain": 5.4050158597528934,
+        "xg_buildup": 1.0331951715052128
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "10177",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 107,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            6,
+            14
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            17,
+            52
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            7,
+            11
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q68650133",
+      "name_cn_source": "wikidata",
+      "sofascore_player_id": 999231,
+      "shirt_number": 11,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "阿尔乔姆·多夫比克",
+      "english_name": "Artem Dovbyk",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 13,
+        "minutes": 363,
+        "goals": 3,
+        "assists": 1,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 10,
+        "goals": 3,
+        "xg": 2.87838901206851,
+        "npxg": 2.87838901206851,
+        "xg_chain": 3.597304180264473,
+        "xg_buildup": 0.7824058942496777
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 11,
+        "xa": 1.2935574017465115
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 13,
+        "minutes": 363,
+        "position_code": "F S",
+        "xg": 2.87838901206851,
+        "xa": 1.2935574017465115,
+        "npxg": 2.87838901206851,
+        "shots": 10,
+        "key_passes": 11,
+        "xg_chain": 3.597304180264473,
+        "xg_buildup": 0.7824058942496777
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "11736",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 158,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            3,
+            11
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            8,
+            110
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            21
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q20066885",
+      "name_cn_source": "wikidata",
+      "shirt_numbers": [
+        "9"
+      ],
+      "shirt_number": 9,
+      "shirt_number_source": "wikidata",
+      "sofascore_player_id": 798820
+    },
+    {
+      "name": "布莱恩·克里斯坦特",
+      "english_name": "Bryan Cristante",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 32,
+        "minutes": 2696,
+        "goals": 2,
+        "assists": 1,
+        "yellow_cards": 6,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 39,
+        "goals": 2,
+        "xg": 2.149340652860701,
+        "npxg": 2.149340652860701,
+        "xg_chain": 10.379071962088346,
+        "xg_buildup": 8.532970605418086
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 25,
+        "xa": 1.8135408088564873
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 32,
+        "minutes": 2696,
+        "position_code": "M S",
+        "xg": 2.149340652860701,
+        "xa": 1.8135408088564873,
+        "npxg": 2.149340652860701,
+        "shots": 39,
+        "key_passes": 25,
+        "xg_chain": 10.379071962088346,
+        "xg_buildup": 8.532970605418086
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "1168",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 401,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            1,
+            47,
+            43
+          ],
+          [
+            2,
+            0,
+            0,
+            1,
+            88,
+            176
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            18,
+            25
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q4241246",
+      "name_cn_source": "wikidata",
+      "shirt_numbers": [
+        "24"
+      ],
+      "shirt_number": 24,
+      "shirt_number_source": "wikidata",
+      "sofascore_player_id": 186855
+    },
+    {
+      "name": "保罗·迪巴拉",
+      "english_name": "Paulo Dybala",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 17,
+        "minutes": 1062,
+        "goals": 2,
+        "assists": 2,
+        "yellow_cards": 1,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 36,
+        "goals": 2,
+        "xg": 5.446348372846842,
+        "npxg": 4.685049567371607,
+        "xg_chain": 8.439313229173422,
+        "xg_buildup": 2.234402993693948
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 40,
+        "xa": 3.5558443013578653
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 17,
+        "minutes": 1062,
+        "position_code": "F M S",
+        "xg": 5.446348372846842,
+        "xa": 3.5558443013578653,
+        "npxg": 4.685049567371607,
+        "shots": 36,
+        "key_passes": 40,
+        "xg_chain": 8.439313229173422,
+        "xg_buildup": 2.234402993693948
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "1294",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 952,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            3
+          ],
+          [
+            0,
+            0,
+            0,
+            1,
+            161,
+            122
+          ],
+          [
+            0,
+            0,
+            1,
+            3,
+            254,
+            242
+          ],
+          [
+            0,
+            0,
+            1,
+            3,
+            45,
+            114
+          ],
+          [
+            0,
+            0,
+            0,
+            1,
+            0,
+            1
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q166317",
+      "name_cn_source": "wikidata",
+      "shirt_numbers": [
+        "21"
+      ],
+      "shirt_number": 21,
+      "shirt_number_source": "wikidata",
+      "sofascore_player_id": 256219
+    },
+    {
+      "name": "马里奥·埃尔莫索",
+      "english_name": "Mario Hermoso",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 22,
+        "minutes": 1725,
+        "goals": 2,
+        "assists": 1,
+        "yellow_cards": 6,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 14,
+        "goals": 2,
+        "xg": 1.0574793834239244,
+        "npxg": 1.0574793834239244,
+        "xg_chain": 4.650283323600888,
+        "xg_buildup": 4.286653058603406
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 9,
+        "xa": 0.753788054920733
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 22,
+        "minutes": 1725,
+        "position_code": "D S",
+        "xg": 1.0574793834239244,
+        "xa": 0.753788054920733,
+        "npxg": 1.0574793834239244,
+        "shots": 14,
+        "key_passes": 9,
+        "xg_chain": 4.650283323600888,
+        "xg_buildup": 4.286653058603406
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "6136",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 129,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            1,
+            6,
+            7
+          ],
+          [
+            2,
+            0,
+            5,
+            0,
+            7,
+            67
+          ],
+          [
+            1,
+            0,
+            4,
+            3,
+            12,
+            13
+          ],
+          [
+            0,
+            0,
+            1,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q20719582",
+      "name_cn_source": "wikidata",
+      "sofascore_player_id": 353130,
+      "shirt_number": 22,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "庫瓦迪奧·科內",
+      "english_name": "Kouadio Kone",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 26,
+        "minutes": 2310,
+        "goals": 2,
+        "assists": 2,
+        "yellow_cards": 2,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 21,
+        "goals": 2,
+        "xg": 1.9376755431294441,
+        "npxg": 1.9376755431294441,
+        "xg_chain": 12.040730837732553,
+        "xg_buildup": 9.315206076949835
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 24,
+        "xa": 2.574226876720786
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 26,
+        "minutes": 2310,
+        "position_code": "M",
+        "xg": 1.9376755431294441,
+        "xa": 2.574226876720786,
+        "npxg": 1.9376755431294441,
+        "shots": 21,
+        "key_passes": 24,
+        "xg_chain": 12.040730837732553,
+        "xg_buildup": 9.315206076949835
+      },
+      "data_sources": [
+        "understat.com"
+      ],
+      "understat_player_id": "7482",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 142,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            14,
+            17
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            51,
+            23
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            21,
+            16
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q64029237",
+      "name_cn_source": "wikidata"
+    },
+    {
+      "name": "詹卢卡·曼奇尼",
+      "english_name": "Gianluca Mancini",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 31,
+        "minutes": 2657,
+        "goals": 1,
+        "assists": 2,
+        "yellow_cards": 9,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 16,
+        "goals": 1,
+        "xg": 1.4684944823384285,
+        "npxg": 1.4684944823384285,
+        "xg_chain": 10.517611859366298,
+        "xg_buildup": 9.267847446724772
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 21,
+        "xa": 2.720187921077013
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 31,
+        "minutes": 2657,
+        "position_code": "D",
+        "xg": 1.4684944823384285,
+        "xa": 2.720187921077013,
+        "npxg": 1.4684944823384285,
+        "shots": 16,
+        "key_passes": 21,
+        "xg_chain": 10.517611859366298,
+        "xg_buildup": 9.267847446724772
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "6159",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 196,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            12,
+            14
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            7,
+            154
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            3,
+            6
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q28973528",
+      "name_cn_source": "wikidata",
+      "shirt_numbers": [
+        "23"
+      ],
+      "shirt_number": 23,
+      "shirt_number_source": "wikidata",
+      "sofascore_player_id": 611210
+    },
+    {
+      "name": "泽基·切利克",
+      "english_name": "Mehmet Zeki Çelik",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 29,
+        "minutes": 2353,
+        "goals": 1,
+        "assists": 2,
+        "yellow_cards": 2,
+        "red_cards": 1
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 20,
+        "goals": 1,
+        "xg": 1.616654321551323,
+        "npxg": 1.616654321551323,
+        "xg_chain": 10.770119972527027,
+        "xg_buildup": 8.682425662875175
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 23,
+        "xa": 2.2389574982225895
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 29,
+        "minutes": 2353,
+        "position_code": "D M S",
+        "xg": 1.616654321551323,
+        "xa": 2.2389574982225895,
+        "npxg": 1.616654321551323,
+        "shots": 20,
+        "key_passes": 23,
+        "xg_chain": 10.770119972527027,
+        "xg_buildup": 8.682425662875175
+      },
+      "data_sources": [
+        "understat.com"
+      ],
+      "understat_player_id": "6872",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 99,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            22,
+            42
+          ],
+          [
+            1,
+            1,
+            0,
+            1,
+            11,
+            20
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q50628268",
+      "name_cn_source": "wikidata"
+    },
+    {
+      "name": "托馬索·巴爾丹齊",
+      "english_name": "Tommaso Baldanzi",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 17,
+        "minutes": 723,
+        "goals": 1,
+        "assists": 2,
+        "yellow_cards": 2,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 19,
+        "goals": 1,
+        "xg": 1.839009903371334,
+        "npxg": 1.839009903371334,
+        "xg_chain": 4.351064808666706,
+        "xg_buildup": 2.1957237236201763
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 14,
+        "xa": 0.9014128483831882
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 17,
+        "minutes": 723,
+        "position_code": "F M S",
+        "xg": 1.839009903371334,
+        "xa": 0.9014128483831882,
+        "npxg": 1.839009903371334,
+        "shots": 19,
+        "key_passes": 14,
+        "xg_chain": 4.351064808666706,
+        "xg_buildup": 2.1957237236201763
+      },
+      "data_sources": [
+        "understat.com"
+      ],
+      "understat_player_id": "9951",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 101,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            9,
+            21
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            32,
+            22
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            6,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q108188237",
+      "name_cn_source": "wikidata"
+    },
+    {
+      "name": "Niccolò Pisilli",
+      "english_name": "Niccolò Pisilli",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 20,
+        "minutes": 955,
+        "goals": 1,
+        "assists": 2,
+        "yellow_cards": 3,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 13,
+        "goals": 1,
+        "xg": 1.4379491470754147,
+        "npxg": 1.4379491470754147,
+        "xg_chain": 5.204948062077165,
+        "xg_buildup": 3.5501225013285875
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 8,
+        "xa": 1.2169616408646107
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 20,
+        "minutes": 955,
+        "position_code": "M S",
+        "xg": 1.4379491470754147,
+        "xa": 1.2169616408646107,
+        "npxg": 1.4379491470754147,
+        "shots": 13,
+        "key_passes": 8,
+        "xg_chain": 5.204948062077165,
+        "xg_buildup": 3.5501225013285875
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "11470",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 40,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            2,
+            7
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            9,
+            15
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            3,
+            4
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q118188838",
+      "name_cn_source": "wikidata",
+      "sofascore_player_id": 1175821,
+      "shirt_number": 61,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "Robinio Vaz",
+      "english_name": "Robinio Vaz",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 9,
+        "minutes": 146,
+        "goals": 1,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 5,
+        "goals": 1,
+        "xg": 0.6552822887897491,
+        "npxg": 0.6552822887897491,
+        "xg_chain": 0.7226787954568863,
+        "xg_buildup": 0.15723617002367973
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 0,
+        "xa": 0.0
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 9,
+        "minutes": 146,
+        "position_code": "S",
+        "xg": 0.6552822887897491,
+        "xa": 0.0,
+        "npxg": 0.6552822887897491,
+        "shots": 5,
+        "key_passes": 0,
+        "xg_chain": 0.7226787954568863,
+        "xg_buildup": 0.15723617002367973
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "13330",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 15,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            12
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q131826846",
+      "name_cn_source": "wikidata",
+      "sofascore_player_id": 1514800,
+      "shirt_number": 78,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "安赫利尼奥",
+      "english_name": "Angelino",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 7,
+        "minutes": 427,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 2,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 5,
+        "goals": 0,
+        "xg": 0.23263075575232506,
+        "npxg": 0.23263075575232506,
+        "xg_chain": 0.7898757718503475,
+        "xg_buildup": 0.6207265220582485
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 5,
+        "xa": 0.28048957511782646
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 7,
+        "minutes": 427,
+        "position_code": "D M S",
+        "xg": 0.23263075575232506,
+        "xa": 0.28048957511782646,
+        "npxg": 0.23263075575232506,
+        "shots": 5,
+        "key_passes": 5,
+        "xg_chain": 0.7898757718503475,
+        "xg_buildup": 0.6207265220582485
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "1040",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 116,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            6,
+            3
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            17,
+            15
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            13,
+            61
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q20688718",
+      "name_cn_source": "wikidata",
+      "shirt_numbers": [
+        "3"
+      ],
+      "shirt_number": 3,
+      "shirt_number_source": "wikidata",
+      "sofascore_player_id": 848355
+    },
+    {
+      "name": "斯蒂凡·艾尔·沙拉维",
+      "english_name": "Stephan El Shaarawy",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 17,
+        "minutes": 541,
+        "goals": 0,
+        "assists": 2,
+        "yellow_cards": 2,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 14,
+        "goals": 0,
+        "xg": 1.3734581843018532,
+        "npxg": 1.3734581843018532,
+        "xg_chain": 4.350600812584162,
+        "xg_buildup": 2.375115068629384
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 10,
+        "xa": 1.6725224703550339
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 17,
+        "minutes": 541,
+        "position_code": "F M S",
+        "xg": 1.3734581843018532,
+        "xa": 1.6725224703550339,
+        "npxg": 1.3734581843018532,
+        "shots": 14,
+        "key_passes": 10,
+        "xg_chain": 4.350600812584162,
+        "xg_buildup": 2.375115068629384
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "1252",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 485,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            15,
+            28
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            92,
+            132
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            90,
+            125
+          ],
+          [
+            0,
+            0,
+            1,
+            0,
+            1,
+            1
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q12984",
+      "name_cn_source": "wikidata",
+      "shirt_numbers": [
+        "92"
+      ],
+      "shirt_number": 92,
+      "shirt_number_source": "wikidata",
+      "sofascore_player_id": 45925
+    },
+    {
+      "name": "利昂·貝利",
+      "english_name": "Leon Bailey",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 7,
+        "minutes": 184,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 3,
+        "goals": 0,
+        "xg": 0.1348361037671566,
+        "npxg": 0.1348361037671566,
+        "xg_chain": 0.5365037806332111,
+        "xg_buildup": 0.46385668963193893
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 2,
+        "xa": 0.0624751690775156
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 7,
+        "minutes": 184,
+        "position_code": "F S",
+        "xg": 0.1348361037671566,
+        "xa": 0.0624751690775156,
+        "npxg": 0.1348361037671566,
+        "shots": 3,
+        "key_passes": 2,
+        "xg_chain": 0.5365037806332111,
+        "xg_buildup": 0.46385668963193893
+      },
+      "data_sources": [
+        "understat.com"
+      ],
+      "understat_player_id": "5221",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 387,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            2,
+            7
+          ],
+          [
+            0,
+            0,
+            1,
+            0,
+            70,
+            95
+          ],
+          [
+            0,
+            0,
+            0,
+            2,
+            46,
+            86
+          ],
+          [
+            0,
+            0,
+            0,
+            1,
+            28,
+            48
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q20890178",
+      "name_cn_source": "wikidata",
+      "shirt_numbers": [
+        "31"
+      ],
+      "shirt_number": 31,
+      "shirt_number_source": "wikidata"
+    },
+    {
+      "name": "哥斯達斯·斯米卡斯",
+      "english_name": "Konstantinos Tsimikas",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 18,
+        "minutes": 617,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 1,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 7,
+        "goals": 0,
+        "xg": 0.5683948341757059,
+        "npxg": 0.5683948341757059,
+        "xg_chain": 1.6814278615638614,
+        "xg_buildup": 1.141974575817585
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 3,
+        "xa": 0.07915243785828352
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 18,
+        "minutes": 617,
+        "position_code": "D M S",
+        "xg": 0.5683948341757059,
+        "xa": 0.07915243785828352,
+        "npxg": 0.5683948341757059,
+        "shots": 7,
+        "key_passes": 3,
+        "xg_chain": 1.6814278615638614,
+        "xg_buildup": 1.141974575817585
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "8852",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 29,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            5,
+            4
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            6,
+            14
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q22005877",
+      "name_cn_source": "wikidata",
+      "shirt_numbers": [
+        "21",
+        "3"
+      ],
+      "shirt_number_source": "wikidata",
+      "sofascore_player_id": 786259
+    },
+    {
+      "name": "布萊恩·薩拉戈薩",
+      "english_name": "Bryan Zaragoza",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 4,
+        "minutes": 140,
+        "goals": 0,
+        "assists": 1,
+        "yellow_cards": 1,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 1,
+        "goals": 0,
+        "xg": 0.1814824938774109,
+        "npxg": 0.1814824938774109,
+        "xg_chain": 1.0063471645116806,
+        "xg_buildup": 0.05709405243396759
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 4,
+        "xa": 0.8119799569249153
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 4,
+        "minutes": 140,
+        "position_code": "M S",
+        "xg": 0.1814824938774109,
+        "xa": 0.8119799569249153,
+        "npxg": 0.1814824938774109,
+        "shots": 1,
+        "key_passes": 4,
+        "xg_chain": 1.0063471645116806,
+        "xg_buildup": 0.05709405243396759
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "10143",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 109,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            2,
+            19
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            3,
+            12
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            26,
+            46
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q109853508",
+      "name_cn_source": "wikidata",
+      "shirt_numbers": [
+        "19"
+      ],
+      "shirt_number": 19,
+      "shirt_number_source": "wikidata",
+      "sofascore_player_id": 1084730
+    },
+    {
+      "name": "米莱·斯维拉尔",
+      "english_name": "Mile Svilar",
+      "position": "门将",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 33,
+        "minutes": 2970,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 0,
+        "goals": 0,
+        "xg": 0.0,
+        "npxg": 0.0,
+        "xg_chain": 3.8814839478582144,
+        "xg_buildup": 3.8814839478582144
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 0,
+        "xa": 0.0
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 33,
+        "minutes": 2970,
+        "position_code": "GK",
+        "xg": 0.0,
+        "xa": 0.0,
+        "npxg": 0.0,
+        "shots": 0,
+        "key_passes": 0,
+        "xg_chain": 3.8814839478582144,
+        "xg_buildup": 3.8814839478582144
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "10967",
+      "wikidata_id": "Q38245742",
+      "name_cn_source": "wikidata",
+      "sofascore_player_id": 793986,
+      "shirt_number": 99,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "尼尔·埃尔·艾诺伊",
+      "english_name": "Neil El Aynaoui",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 21,
+        "minutes": 705,
+        "goals": 0,
+        "assists": 1,
+        "yellow_cards": 4,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 4,
+        "goals": 0,
+        "xg": 0.16730844788253307,
+        "npxg": 0.16730844788253307,
+        "xg_chain": 3.1859983541071415,
+        "xg_buildup": 2.149244775995612
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 7,
+        "xa": 1.0134880170226097
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 21,
+        "minutes": 705,
+        "position_code": "M S",
+        "xg": 0.16730844788253307,
+        "xa": 1.0134880170226097,
+        "npxg": 0.16730844788253307,
+        "shots": 4,
+        "key_passes": 7,
+        "xg_chain": 3.1859983541071415,
+        "xg_buildup": 2.149244775995612
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "12104",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 45,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            14,
+            25
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            2,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q107745867",
+      "name_cn_source": "wikidata",
+      "sofascore_player_id": 1128530,
+      "shirt_number": 8,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "Daniele Ghilardi",
+      "english_name": "Daniele Ghilardi",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 19,
+        "minutes": 943,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 1,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 1,
+        "goals": 0,
+        "xg": 0.3682742714881897,
+        "npxg": 0.3682742714881897,
+        "xg_chain": 2.440393913537264,
+        "xg_buildup": 2.207573536783457
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 3,
+        "xa": 0.32266006246209145
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 19,
+        "minutes": 943,
+        "position_code": "D S",
+        "xg": 0.3682742714881897,
+        "xa": 0.32266006246209145,
+        "npxg": 0.3682742714881897,
+        "shots": 1,
+        "key_passes": 3,
+        "xg_chain": 2.440393913537264,
+        "xg_buildup": 2.207573536783457
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "12858",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 13,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q119292800",
+      "name_cn_source": "wikidata",
+      "sofascore_player_id": 1384847,
+      "shirt_number": 87,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "Alessandro Romano",
+      "english_name": "Alessandro Romano",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 2,
+        "minutes": 5,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 0,
+        "goals": 0,
+        "xg": 0.0,
+        "npxg": 0.0,
+        "xg_chain": 0.5332328081130981,
+        "xg_buildup": 0.5332328081130981
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 0,
+        "xa": 0.0
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 2,
+        "minutes": 5,
+        "position_code": "S",
+        "xg": 0.0,
+        "xa": 0.0,
+        "npxg": 0.0,
+        "shots": 0,
+        "key_passes": 0,
+        "xg_chain": 0.5332328081130981,
+        "xg_buildup": 0.5332328081130981
+      },
+      "data_sources": [
+        "understat.com"
+      ],
+      "understat_player_id": "13342",
+      "wikidata_id": "Q3610259",
+      "name_cn_source": "wikidata"
+    },
+    {
+      "name": "Lorenzo Venturino",
+      "english_name": "Lorenzo Venturino",
+      "position": "中场",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 11,
+        "minutes": 210,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 5,
+        "goals": 0,
+        "xg": 0.30348428059369326,
+        "npxg": 0.30348428059369326,
+        "xg_chain": 1.4495499581098557,
+        "xg_buildup": 0.4311673007905483
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 7,
+        "xa": 0.8655294105410576
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 11,
+        "minutes": 210,
+        "position_code": "M S",
+        "xg": 0.30348428059369326,
+        "xa": 0.8655294105410576,
+        "npxg": 0.30348428059369326,
+        "shots": 5,
+        "key_passes": 7,
+        "xg_chain": 1.4495499581098557,
+        "xg_buildup": 0.4311673007905483
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "13349",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 9,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            3,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            3
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q131796025",
+      "name_cn_source": "wikidata",
+      "sofascore_player_id": 1618563,
+      "shirt_number": 20,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "德文内·伦施",
+      "english_name": "Devyne Rensch",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 20,
+        "minutes": 980,
+        "goals": 0,
+        "assists": 4,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 4,
+        "goals": 0,
+        "xg": 0.5006411662325263,
+        "npxg": 0.5006411662325263,
+        "xg_chain": 4.010979915037751,
+        "xg_buildup": 2.7835104446858168
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 9,
+        "xa": 2.1966981906443834
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 20,
+        "minutes": 980,
+        "position_code": "D M S",
+        "xg": 0.5006411662325263,
+        "xa": 2.1966981906443834,
+        "npxg": 0.5006411662325263,
+        "shots": 4,
+        "key_passes": 9,
+        "xg_chain": 4.010979915037751,
+        "xg_buildup": 2.7835104446858168
+      },
+      "data_sources": [
+        "sofascore.com",
+        "understat.com"
+      ],
+      "understat_player_id": "13389",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 7,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            3
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q63966349",
+      "name_cn_source": "wikidata",
+      "sofascore_player_id": 982778,
+      "shirt_number": 2,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "Antonio Arena",
+      "english_name": "Antonio Arena",
+      "position": "",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 2,
+        "minutes": 19,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 2,
+        "goals": 0,
+        "xg": 0.17717944085597992,
+        "npxg": 0.17717944085597992,
+        "xg_chain": 0.17717944085597992,
+        "xg_buildup": 0.0
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 0,
+        "xa": 0.0
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 2,
+        "minutes": 19,
+        "position_code": "S",
+        "xg": 0.17717944085597992,
+        "xa": 0.0,
+        "npxg": 0.17717944085597992,
+        "shots": 2,
+        "key_passes": 0,
+        "xg_chain": 0.17717944085597992,
+        "xg_buildup": 0.0
+      },
+      "data_sources": [
+        "understat.com"
+      ],
+      "understat_player_id": "13989",
+      "heatmap": {
+        "source": "understat_shots",
+        "grid_rows": 5,
+        "grid_cols": 6,
+        "shot_count": 2,
+        "shot_density": [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "shot_map_available": true,
+      "wikidata_id": "Q133189496",
+      "name_cn_source": "wikidata"
+    },
+    {
+      "name": "Jan Ziółkowski",
+      "english_name": "Jan Ziólkowski",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "",
+      "transfer_status": "current",
+      "join_date": "",
+      "contract_until": "",
+      "market_value": 0,
+      "stats": {
+        "appearances": 14,
+        "minutes": 464,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 2,
+        "red_cards": 0
+      },
+      "shooting_stats": {
+        "source": "understat",
+        "shots": 0,
+        "goals": 0,
+        "xg": 0.0,
+        "npxg": 0.0,
+        "xg_chain": 0.7794324867427349,
+        "xg_buildup": 0.7794324867427349
+      },
+      "passing_stats": {
+        "source": "understat",
+        "key_passes": 1,
+        "xa": 0.04126720130443573
+      },
+      "advanced_stats": {
+        "source": "understat",
+        "games": 14,
+        "minutes": 464,
+        "position_code": "D S",
+        "xg": 0.0,
+        "xa": 0.04126720130443573,
+        "npxg": 0.0,
+        "shots": 0,
+        "key_passes": 1,
+        "xg_chain": 0.7794324867427349,
+        "xg_buildup": 0.7794324867427349
+      },
+      "data_sources": [
+        "understat.com"
+      ],
+      "understat_player_id": "14039",
+      "wikidata_id": "Q122114003",
+      "name_cn_source": "wikidata"
+    },
+    {
+      "name": "馬蒂亞斯·蘇萊",
+      "english_name": "Matías Soulé",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "Argentina",
+      "transfer_status": "current",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "data_sources": [
+        "sofascore.com"
+      ],
+      "sofascore_player_id": 1082406,
+      "shirt_number": 18,
+      "shirt_number_source": "sofascore",
+      "wikidata_id": "Q107075915",
+      "name_cn_source": "wikidata"
+    },
+    {
+      "name": "Edoardo Morucci",
+      "english_name": "Edoardo Morucci",
+      "position": "前锋",
+      "age": 0,
+      "nationality": "Italy",
+      "transfer_status": "current",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "data_sources": [
+        "sofascore.com"
+      ],
+      "sofascore_player_id": 2020988,
+      "shirt_number": 79,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "庫瓦迪奧·科內",
+      "english_name": "Manu Koné",
+      "position": "中场",
+      "age": 0,
+      "nationality": "France",
+      "transfer_status": "current",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "data_sources": [
+        "sofascore.com"
+      ],
+      "sofascore_player_id": 974087,
+      "shirt_number": 17,
+      "shirt_number_source": "sofascore",
+      "wikidata_id": "Q64029237",
+      "name_cn_source": "wikidata"
+    },
+    {
+      "name": "Muhammed Bah",
+      "english_name": "Muhammed Bah",
+      "position": "中场",
+      "age": 0,
+      "nationality": "Gambia",
+      "transfer_status": "current",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "data_sources": [
+        "sofascore.com"
+      ],
+      "sofascore_player_id": 1524408,
+      "shirt_number": 69,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "Mattia Della Rocca",
+      "english_name": "Mattia Della Rocca",
+      "position": "中场",
+      "age": 0,
+      "nationality": "Italy",
+      "transfer_status": "current",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "data_sources": [
+        "sofascore.com"
+      ],
+      "sofascore_player_id": 1626584,
+      "shirt_number": 75,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "Jan Ziółkowski",
+      "english_name": "Jan Ziółkowski",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "Poland",
+      "transfer_status": "current",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "data_sources": [
+        "sofascore.com"
+      ],
+      "sofascore_player_id": 1499991,
+      "shirt_number": 24,
+      "shirt_number_source": "sofascore",
+      "wikidata_id": "Q122114003",
+      "name_cn_source": "wikidata"
+    },
+    {
+      "name": "泽基·切利克",
+      "english_name": "Zeki Çelik",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "Türkiye",
+      "transfer_status": "current",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "data_sources": [
+        "sofascore.com"
+      ],
+      "sofascore_player_id": 893008,
+      "shirt_number": 19,
+      "shirt_number_source": "sofascore",
+      "wikidata_id": "Q50628268",
+      "name_cn_source": "wikidata"
+    },
+    {
+      "name": "Mohamed Seck",
+      "english_name": "Mohamed Seck",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "Italy",
+      "transfer_status": "current",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "data_sources": [
+        "sofascore.com"
+      ],
+      "sofascore_player_id": 1515897,
+      "shirt_number": 74,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "Emanuele Lulli",
+      "english_name": "Emanuele Lulli",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "Italy",
+      "transfer_status": "current",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "data_sources": [
+        "sofascore.com"
+      ],
+      "sofascore_player_id": 1955992,
+      "shirt_number": 77,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "Jacopo Mirra",
+      "english_name": "Jacopo Mirra",
+      "position": "后卫",
+      "age": 0,
+      "nationality": "Italy",
+      "transfer_status": "current",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "data_sources": [
+        "sofascore.com"
+      ],
+      "sofascore_player_id": 1614130,
+      "shirt_number": 76,
+      "shirt_number_source": "sofascore"
+    },
+    {
+      "name": "皮爾路易吉·戈利尼",
+      "english_name": "Pierluigi Gollini",
+      "position": "门将",
+      "age": 0,
+      "nationality": "Italy",
+      "transfer_status": "current",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "data_sources": [
+        "sofascore.com"
+      ],
+      "sofascore_player_id": 329175,
+      "shirt_number": 95,
+      "shirt_number_source": "wikidata",
+      "wikidata_id": "Q18156147",
+      "name_cn_source": "wikidata",
+      "shirt_numbers": [
+        "95"
+      ]
+    },
+    {
+      "name": "Radoslaw Zelezny",
+      "english_name": "Radosław Żelezny",
+      "position": "门将",
+      "age": 0,
+      "nationality": "Poland",
+      "transfer_status": "current",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "data_sources": [
+        "sofascore.com"
+      ],
+      "sofascore_player_id": 1461428,
+      "shirt_number": 91,
+      "shirt_number_source": "sofascore",
+      "wikidata_id": "Q135615870",
+      "name_cn_source": "wikidata"
+    },
+    {
+      "name": "Giorgio De Marzi",
+      "english_name": "Giorgio De Marzi",
+      "position": "门将",
+      "age": 0,
+      "nationality": "USA",
+      "transfer_status": "current",
+      "market_value": 0,
+      "stats": {
+        "appearances": 0,
+        "minutes": 0,
+        "goals": 0,
+        "assists": 0,
+        "yellow_cards": 0,
+        "red_cards": 0
+      },
+      "data_sources": [
+        "sofascore.com"
+      ],
+      "sofascore_player_id": 1652568,
+      "shirt_number": 70,
+      "shirt_number_source": "sofascore",
+      "wikidata_id": "Q131905664",
+      "name_cn_source": "wikidata"
+    }
+  ],
+  "last_updated": "Mon, 20 Apr 2026 11:14:45 GMT",
   "season": "2026"
 }
