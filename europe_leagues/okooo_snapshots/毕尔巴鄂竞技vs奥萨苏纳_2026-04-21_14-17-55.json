@@ -1,0 +1,110 @@
+{
+  "captured_at": "2026-04-21T14:17:55",
+  "driver": "local-chrome",
+  "chrome": {
+    "port": 9222,
+    "started_by_script": false
+  },
+  "league": "西甲",
+  "event": "毕尔巴鄂竞技vs奥萨苏纳",
+  "match_id": "1302871",
+  "schedule": {
+    "mid": "1302871",
+    "href": "https://m.okooo.com/match/history.php?MatchID=1302871&from=%2Fsaishi%2F8%2F",
+    "text": "第33轮 毕尔巴鄂 01:00 奥萨苏纳",
+    "score": 20.17
+  },
+  "欧赔": {
+    "found": true,
+    "initial": {
+      "home": 1.83,
+      "draw": 3.43,
+      "away": 4.28
+    },
+    "final": {
+      "home": 1.84,
+      "draw": 3.46,
+      "away": 4.52
+    },
+    "delta": {
+      "home": 0.01,
+      "draw": 0.03,
+      "away": 0.24
+    },
+    "url": "https://m.okooo.com/match/odds.php?MatchID=1302871",
+    "_attempts": [
+      {
+        "attempt": 1,
+        "client": "LocalChromeSession",
+        "success": true,
+        "blocked": false,
+        "found": true,
+        "parsed": null
+      }
+    ]
+  },
+  "亚值": {
+    "found": true,
+    "parsed": true,
+    "initial": {
+      "home_water": 1.91,
+      "handicap_text": "半球",
+      "away_water": 1.93
+    },
+    "final": {
+      "home_water": 2.15,
+      "handicap_text": "半/一",
+      "away_water": 1.88
+    },
+    "delta": {
+      "home_water": 0.24,
+      "away_water": -0.05
+    },
+    "url": "https://m.okooo.com/match/handicap.php?MatchID=1302871",
+    "_attempts": [
+      {
+        "attempt": 1,
+        "client": "LocalChromeSession",
+        "success": true,
+        "blocked": false,
+        "found": true,
+        "parsed": true
+      }
+    ]
+  },
+  "凯利": {
+    "found": true,
+    "initial": {
+      "home": 0.93,
+      "draw": 0.93,
+      "away": 0.93
+    },
+    "final": {
+      "home": 0.95,
+      "draw": 0.95,
+      "away": 0.95
+    },
+    "delta": {
+      "home": 0.02,
+      "draw": 0.02,
+      "away": 0.02
+    },
+    "payout_rate": 0.95,
+    "url": "https://m.okooo.com/match/odds.php?MatchID=1302871",
+    "_click": {
+      "clicked": true,
+      "label": "凯利",
+      "tag": "DIV"
+    },
+    "_attempts": [
+      {
+        "attempt": 1,
+        "client": "LocalChromeSession",
+        "success": true,
+        "blocked": false,
+        "found": true,
+        "parsed": null
+      }
+    ]
+  }
+}

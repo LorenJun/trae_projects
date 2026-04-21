@@ -26,8 +26,52 @@ class OkoooMatchFinder:
         print(f"正在搜索: {team1} vs {team2}")
         return self._search_online(team1, team2, league_hint)
 
+    def _normalize_team(self, name: str) -> str:
+        """Normalize team name for fuzzy matching (no external deps)."""
+        if not name:
+            return ""
+        text = name.strip().replace(" ", "")
+        # Common suffixes/keywords
+        for suffix in ["足球俱乐部", "俱乐部", "队", "FC", "fc"]:
+            if text.endswith(suffix):
+                text = text[: -len(suffix)]
+        return text
+
+    def _text_has_teams(self, text: str, team1: str, team2: str) -> bool:
+        """Best-effort check whether page text mentions the matchup."""
+        if not text:
+            return False
+        t = text.replace(" ", "")
+        a = self._normalize_team(team1)
+        b = self._normalize_team(team2)
+        if not a or not b:
+            return False
+        # When abbreviations exist, allow partial containment.
+        return (a in t and b in t) or (b in t and a in t)
+
+    def _extract_match_ids(self, html: str):
+        """Extract possible match ids from HTML/url patterns on mobile/desktop."""
+        if not html:
+            return []
+        ids = set()
+        # Mobile odds pages
+        for mid in re.findall(r"[?&]MatchID=(\d+)", html, flags=re.IGNORECASE):
+            ids.add(mid)
+        # Desktop match pages
+        for mid in re.findall(r"/soccer/match/(\d+)/", html):
+            ids.add(mid)
+        # Some pages may omit trailing slash
+        for mid in re.findall(r"/soccer/match/(\d+)(?:/|\\b)", html):
+            ids.add(mid)
+        return list(ids)
+
+    def _is_blocked(self, text: str) -> bool:
+        if not text:
+            return False
+        return ("访问被阻断" in text) or ("安全威胁" in text) or ("<title>405</title>" in text) or ("Sorry, your request has been blocked" in text)
+
     def _search_online(self, team1, team2, league_hint=None):
-        """在线搜索比赛ID"""
+        """在线搜索比赛ID（从移动端热门赛事入口查找 MatchID）"""
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -39,110 +83,118 @@ class OkoooMatchFinder:
             page = context.new_page()
 
             try:
-                print("  尝试从首页获取...")
-                page.goto('https://www.okooo.com/soccer/',
-                         wait_until='domcontentloaded', timeout=30000)
-                page.wait_for_timeout(3000)
+                # Mobile "hot competitions" entry. This is the only fixed entry point;
+                # we then follow its links to locate specific match pages that contain MatchID.
+                start_url = "https://m.okooo.com/saishi/remen/"
+                print(f"  从热门赛事页查找: {start_url}")
+                page.goto(start_url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(2500)
 
-                js_code = f'''
-                    () => {{
-                        const results = [];
-                        const links = document.querySelectorAll('a[href*="/soccer/match/"]');
+                html = page.content()
+                if self._is_blocked(html):
+                    print("  ✗ 热门赛事页被阻断(405/安全威胁)")
+                    browser.close()
+                    return None
 
-                        for (const link of links) {{
-                            const text = link.textContent || '';
-                            const href = link.href || '';
+                # Collect candidate urls from anchors; some are relative.
+                js_collect = """
+                    () => {
+                        const out = [];
+                        const as = Array.from(document.querySelectorAll('a[href]'));
+                        for (const a of as) {
+                            const href = a.getAttribute('href') || '';
+                            const text = (a.textContent || '').trim();
+                            if (!href) continue;
+                            out.push({ href, text });
+                        }
+                        return out;
+                    }
+                """
+                raw_links = page.evaluate(js_collect) or []
 
-                            const hasTeam1 = text.includes("{team1}") || text.includes("{team2}");
-                            const hasTeam2 = text.includes("{team2}") || text.includes("{team1}");
+                def abs_url(href: str) -> str:
+                    if not href:
+                        return ""
+                    if href.startswith("http://") or href.startswith("https://"):
+                        return href
+                    if href.startswith("//"):
+                        return "https:" + href
+                    if href.startswith("/"):
+                        return "https://m.okooo.com" + href
+                    return "https://m.okooo.com/" + href
 
-                            if (hasTeam1) {{
-                                const match = href.match(/soccer\\/match\\/(\\d+)/);
-                                if (match) {{
-                                    results.push({{
-                                        match_id: match[1],
-                                        text: text.trim(),
-                                        href: href
-                                    }});
-                                }}
-                            }}
-                        }}
+                # Prefer links likely to lead to match lists/details.
+                candidates = []
+                for item in raw_links:
+                    href = abs_url(item.get("href", ""))
+                    text = item.get("text", "")
+                    if not href:
+                        continue
+                    if "saishi" in href or "match" in href or "odds.php" in href or "MatchID=" in href:
+                        candidates.append((href, text))
 
-                        return results;
-                    }}
-                '''
+                # Also include any match-id patterns found directly in the HTML (rare).
+                for mid in self._extract_match_ids(html):
+                    candidates.append((f"https://m.okooo.com/match/odds.php?MatchID={mid}", ""))
 
-                match_links = page.evaluate(js_code)
+                # Dedupe while keeping order.
+                seen = set()
+                ordered = []
+                for href, text in candidates:
+                    key = href
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    ordered.append((href, text))
 
-                if match_links:
-                    print(f"  ✓ 找到 {len(match_links)} 个可能结果")
-                    for result in match_links[:3]:
-                        match_id = result['match_id']
-                        print(f"    候选: ID={match_id}, 内容={result['text'][:50]}")
-
-                        if self._quick_verify(page, match_id, team1, team2):
-                            print(f"  ✓ 验证通过: {match_id}")
-                            browser.close()
-                            return match_id
-
+                # If league hint is provided, prioritize links whose text includes it.
                 if league_hint:
-                    league_urls = self._get_league_url(league_hint)
-                    for league_url in league_urls:
-                        print(f"  尝试联赛页面: {league_url}")
+                    ordered.sort(key=lambda x: 0 if league_hint in (x[1] or "") else 1)
+
+                print(f"  候选入口链接数: {len(ordered)}")
+
+                # Traverse a limited number of pages to avoid hammering the site.
+                max_pages = 25 if league_hint else 15
+                for href, text in ordered[:max_pages]:
+                    try:
+                        page.goto(href, wait_until="domcontentloaded", timeout=30000)
+                        page.wait_for_timeout(2500)
+                        sub_html = page.content()
+                        if self._is_blocked(sub_html):
+                            continue
+
+                        # If this URL already includes MatchID, validate quickly.
+                        m = re.search(r"[?&]MatchID=(\d+)", href, flags=re.IGNORECASE)
+                        if m:
+                            match_id = m.group(1)
+                            if self._quick_verify(page, match_id, team1, team2):
+                                print(f"  ✓ 命中 MatchID: {match_id} (from url)")
+                                browser.close()
+                                return match_id
+
+                        # Otherwise, attempt to extract MatchID from the page.
+                        for match_id in self._extract_match_ids(sub_html):
+                            if self._quick_verify(page, match_id, team1, team2):
+                                print(f"  ✓ 命中 MatchID: {match_id}")
+                                browser.close()
+                                return match_id
+
+                        # As fallback, check if the page text mentions both teams,
+                        # then extract ids (helps when ids appear in JS snippets).
                         try:
-                            page.goto(league_url, wait_until='domcontentloaded', timeout=30000)
-                            page.wait_for_timeout(5000)
-
-                            js_code2 = f'''
-                                () => {{
-                                    const results = [];
-                                    const links = document.querySelectorAll('a[href*="/soccer/match/"]');
-
-                                    for (const link of links) {{
-                                        const text = link.textContent || '';
-                                        const href = link.href || '';
-
-                                        if (text.includes("{team1}") || text.includes("{team2}")) {{
-                                            const match = href.match(/soccer\\/match\\/(\\d+)/);
-                                            if (match) {{
-                                                results.push({{
-                                                    match_id: match[1],
-                                                    text: text.trim()
-                                                }});
-                                            }}
-                                        }}
-                                    }}
-
-                                    return results;
-                                }}
-                            '''
-
-                            match_links = page.evaluate(js_code2)
-
-                            if match_links:
-                                print(f"    找到 {len(match_links)} 个结果")
-                                for result in match_links[:2]:
-                                    match_id = result['match_id']
-                                    if self._quick_verify(page, match_id, team1, team2):
-                                        print(f"    ✓ 验证通过: {match_id}")
-                                        browser.close()
-                                        return match_id
-
-                            print("    尝试从HTML源码提取...")
-                            html = page.content()
-                            all_match_ids = re.findall(r'/soccer/match/(\d+)/', html)
-                            unique_ids = list(set(all_match_ids))
-                            print(f"    页面中找到 {len(unique_ids)} 个 match_id")
-
-                            for match_id in unique_ids:
+                            inner_text = page.evaluate("() => document.body ? document.body.innerText : ''") or ""
+                        except Exception:
+                            inner_text = ""
+                        if self._text_has_teams(inner_text, team1, team2):
+                            for match_id in self._extract_match_ids(inner_text):
                                 if self._quick_verify(page, match_id, team1, team2):
-                                    print(f"    ✓ 验证通过: {match_id}")
+                                    print(f"  ✓ 命中 MatchID: {match_id}")
                                     browser.close()
                                     return match_id
 
-                        except Exception as e:
-                            print(f"    访问失败: {e}")
-                            continue
+                    except Exception:
+                        # Keep best-effort behavior; continue to next candidate.
+                        continue
 
                 browser.close()
                 return None
@@ -155,21 +207,29 @@ class OkoooMatchFinder:
     def _quick_verify(self, page, match_id, team1, team2):
         """快速验证比赛ID"""
         try:
-            url = f'https://www.okooo.com/soccer/match/{match_id}/'
-            page.goto(url, wait_until='domcontentloaded', timeout=15000)
+            # Prefer mobile odds page because desktop match pages are more likely blocked.
+            url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
+            page.goto(url, wait_until="domcontentloaded", timeout=20000)
             page.wait_for_timeout(2000)
-
-            title = page.title()
-
-            if '405' in title:
+            html = page.content()
+            if self._is_blocked(html):
                 return False
 
-            has_team1 = team1 in title
-            has_team2 = team2 in title
+            try:
+                inner_text = page.evaluate("() => document.body ? document.body.innerText : ''") or ""
+            except Exception:
+                inner_text = ""
+            # Require both teams to reduce false positives.
+            if self._text_has_teams(inner_text, team1, team2):
+                return True
 
-            return has_team1 or has_team2
+            # Fallback to title check (best-effort).
+            title = page.title() or ""
+            if "405" in title:
+                return False
+            return (team1 in title and team2 in title) or (team1 in title or team2 in title)
 
-        except:
+        except Exception:
             return False
 
     def verify_match_id(self, match_id, expected_teams):

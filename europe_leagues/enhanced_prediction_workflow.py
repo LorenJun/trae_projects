@@ -17,20 +17,118 @@ from glob import glob
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+# Realtime okooo snapshots (refreshed before each prediction)
+from okooo_live_snapshot import refresh_snapshot as refresh_okooo_snapshot
+from okooo_live_snapshot import extract_current_odds as extract_okooo_current_odds
+
 # 导入机器学习模型
 from ml_prediction_models import MultiModelFusion, PoissonModel
 from result_manager import ResultManager
 
 # 配置日志
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+RUNTIME_DIR = os.path.join(SCRIPT_DIR, '.okooo-scraper', 'runtime')
+os.makedirs(RUNTIME_DIR, exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('enhanced_prediction.log', encoding='utf-8'),
+        logging.FileHandler(os.path.join(RUNTIME_DIR, 'enhanced_prediction.log'), encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
+
+
+def _external_snapshot_root(base_dir: str) -> str:
+    """Project-relative snapshot root (to avoid hardcoding user home paths).
+
+    NOTE: base_dir here is `europe_leagues/` by default for EnhancedPredictor.
+    """
+    return os.path.join(base_dir, '.okooo-scraper', 'snapshots')
+
+
+def _update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str, predictions: List[Dict]) -> int:
+    """Update teams_2025-26.md schedule rows in-place by appending prediction notes to the last column."""
+    try:
+        lines = open(teams_path, 'r', encoding='utf-8').read().splitlines(True)
+    except Exception:
+        return 0
+
+    def norm(s: str) -> str:
+        return (s or '').strip().replace(' ', '')
+
+    pred_index = {}
+    for p in predictions:
+        h = norm(p.get('home_team'))
+        a = norm(p.get('away_team'))
+        if h and a:
+            pred_index[(match_date, h, a)] = p
+
+    changed = 0
+    out_lines = []
+    for line in lines:
+        if not line.lstrip().startswith('|'):
+            out_lines.append(line)
+            continue
+        raw = line.strip('\n')
+        if raw.count('|') < 6:
+            out_lines.append(line)
+            continue
+        cells = [c.strip() for c in raw.strip().strip('|').split('|')]
+        if len(cells) != 6:
+            out_lines.append(line)
+            continue
+        date, _time, home, _score, away, note = cells
+        pred = pred_index.get((date, norm(home), norm(away)))
+        if not pred:
+            out_lines.append(line)
+            continue
+
+        level = ''
+        upset = pred.get('upset_potential')
+        if isinstance(upset, dict):
+            level = upset.get('level') or ''
+        elif isinstance(upset, str):
+            level = upset
+        conf = float(pred.get('confidence') or 0.0)
+        diag = pred.get('applied_model_weights')
+        dyn = ''
+        if isinstance(diag, dict) and 'has_enough_samples' in diag:
+            dyn = '动态调权:已生效' if diag.get('has_enough_samples') else '动态调权:样本不足'
+
+        base_note = note
+        if '预测:' in base_note:
+            base_note = base_note.split('预测:')[0].rstrip('；; ').strip()
+        merged = base_note.rstrip('；; ').strip()
+        pred_note = f"预测:{pred.get('prediction')} 信心:{conf:.2f} 爆冷:{level or '-'}{(' ' + dyn) if dyn else ''}".strip()
+        cells[5] = f"{merged}；{pred_note}" if merged else pred_note
+        out_lines.append("| " + " | ".join(cells) + " |\n")
+        changed += 1
+
+    if changed:
+        try:
+            with open(teams_path, 'w', encoding='utf-8') as f:
+                f.writelines(out_lines)
+        except Exception:
+            return 0
+    return changed
+
+
+def _external_snapshot_dirs(base_dir: str, league_code: str) -> List[str]:
+    dirs = [
+        os.path.join(_external_snapshot_root(base_dir), league_code),
+        os.path.join(base_dir, 'okooo_snapshots'),
+        os.path.join(base_dir, 'okooo_snapshots', league_code),
+    ]
+    seen = set()
+    result = []
+    for d in dirs:
+        if d and d not in seen:
+            seen.add(d)
+            result.append(d)
+    return result
 
 # 定义联赛配置
 LEAGUE_CONFIG = {
@@ -836,6 +934,33 @@ class EnhancedPredictor:
             '离散率': match_record.get('离散率', {}),
         }
 
+    @staticmethod
+    def _extract_current_odds_live_snapshot(snapshot: Dict) -> Dict:
+        """从 okooo_save_snapshot.py 生成的实时 JSON 提取预测所需字段。"""
+        europe = snapshot.get('欧赔', {}) or {}
+        asian = snapshot.get('亚值', {}) or {}
+        kelly = snapshot.get('凯利', {}) or {}
+        return {
+            'match_id': snapshot.get('match_id'),
+            '胜平负赔率': {
+                'initial': europe.get('initial', {}),
+                'final': europe.get('final', {}),
+            },
+            '欧赔': {
+                'initial': europe.get('initial', {}),
+                'final': europe.get('final', {}),
+            },
+            '亚值': {
+                'initial': asian.get('initial', {}),
+                'final': asian.get('final', {}),
+            },
+            '凯利': {
+                'initial': kelly.get('initial', {}),
+                'final': kelly.get('final', {}),
+            },
+            '离散率': snapshot.get('离散率', {}) or {},
+        }
+
     def _get_matches_from_odds_history(self, league_code: str, match_date: str) -> List[Dict]:
         """从联赛目录的赔率落盘文件中获取某日真实赛程+赔率快照。"""
         matches = []
@@ -870,7 +995,36 @@ class EnhancedPredictor:
                     'away_team': record.get('away_team'),
                     'current_odds': self._extract_current_odds_snapshot(record),
                 })
-        return [m for m in matches if m.get('home_team') and m.get('away_team')]
+        matches = [m for m in matches if m.get('home_team') and m.get('away_team')]
+        if matches:
+            return matches
+
+        # Fallback: external live snapshots generated by okooo_save_snapshot.py
+        live_matches = []
+        for external_dir in _external_snapshot_dirs(self.base_dir, league_code):
+            if not os.path.isdir(external_dir):
+                continue
+            for file_path in sorted(glob(os.path.join(external_dir, '*.json'))):
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        payload = json.load(f)
+                except Exception:
+                    continue
+                if payload.get('match_date') != match_date:
+                    continue
+                home = payload.get('home_team')
+                away = payload.get('away_team')
+                if not home or not away:
+                    continue
+                live_matches.append({
+                    'home_team': home,
+                    'away_team': away,
+                    'current_odds': self._extract_current_odds_live_snapshot(payload),
+                })
+        if live_matches:
+            logger.info(f"使用外部实时快照进行预测: {league_code} {match_date}, matches={len(live_matches)}")
+            return live_matches
+        return []
     
     def predict_match(self, home_team: str, away_team: str, league_code: str, 
                      match_date: str = None, current_odds: Optional[Dict] = None) -> Dict:
@@ -1030,7 +1184,7 @@ class EnhancedPredictor:
     
     def generate_prediction_report(self, league_code: str, match_date: str, 
                                   matches: List[Dict] = None) -> Optional[str]:
-        """生成预测报告"""
+        """生成预测并写回 teams_2025-26.md（不再生成独立 predictions.md 文件）"""
         if not matches:
             # 优先从联赛目录中的“即时赔率快照”读取未来赛程（确保有 current_odds 才能做相似盘路）
             matches = self._get_matches_from_odds_snapshots(league_code, match_date)
@@ -1063,28 +1217,48 @@ class EnhancedPredictor:
         # 预测所有比赛
         predictions = []
         for match in matches:
+            home = match.get('home_team', match.get('主队'))
+            away = match.get('away_team', match.get('客队'))
             current_odds = match.get('current_odds')
+
+            # Always refresh latest odds before prediction unless disabled.
+            # Set OKOOO_REFRESH_LIVE=0 to skip refreshing.
+            if os.environ.get("OKOOO_REFRESH_LIVE", "1") != "0" and home and away:
+                try:
+                    mid = None
+                    if isinstance(current_odds, dict):
+                        mid = current_odds.get("match_id")
+                    refreshed = refresh_okooo_snapshot(
+                        self.base_dir,
+                        league_code,
+                        home,
+                        away,
+                        match_date,
+                        driver="local-chrome",
+                        match_id=str(mid) if mid else "",
+                    )
+                    if refreshed:
+                        _path, payload = refreshed
+                        current_odds = extract_okooo_current_odds(payload)
+                except Exception as e:
+                    logger.warning(f"刷新实时快照失败: {home} vs {away} {match_date}: {e}")
+
             pred = self.predict_match(
-                match.get('home_team', match.get('主队')),
-                match.get('away_team', match.get('客队')),
+                home,
+                away,
                 league_code,
                 match_date,
                 current_odds=current_odds
             )
             predictions.append(pred)
         
-        # 生成报告
-        report_content = self._format_report(league_code, match_date, predictions)
-        
-        # 保存报告
-        report_dir = os.path.join(self.base_dir, league_code, 'analysis', 'predictions')
-        os.makedirs(report_dir, exist_ok=True)
-        report_file = os.path.join(report_dir, f"{match_date}_predictions_enhanced.md")
-        
-        with open(report_file, 'w', encoding='utf-8') as f:
-            f.write(report_content)
-        
-        logger.info(f"生成预测报告: {report_file}")
+        # Write back to league teams_2025-26.md schedule table notes.
+        teams_path = os.path.join(self.base_dir, league_code, 'teams_2025-26.md')
+        if os.path.exists(teams_path):
+            _update_teams_md_with_enhanced_predictions(teams_path, match_date, predictions)
+            logger.info(f"已更新 teams 文件: {teams_path}")
+        else:
+            logger.warning(f"未找到 teams 文件: {teams_path}")
         
         # 保存预测到历史数据库
         for pred in predictions:
@@ -1095,7 +1269,7 @@ class EnhancedPredictor:
         # 更新准确率统计
         self.result_manager.update_accuracy_stats()
         
-        return report_file
+        return teams_path if os.path.exists(teams_path) else None
     
     def _get_sample_matches(self, league_code: str) -> List[Dict]:
         """获取模拟比赛数据"""

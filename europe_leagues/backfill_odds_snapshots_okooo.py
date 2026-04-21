@@ -92,6 +92,134 @@ class OddsSnapshotBackfill:
         self._match_id_cache: Dict[Tuple[str, str, str], str] = {}
         self._odds_cache: Dict[str, Dict] = {}
 
+    def _browser_use_open_and_state(self, url: str, timeout: int = 45) -> str:
+        """Open a page via browser-use and return the textual state output.
+
+        We keep this isolated so all odds pages share consistent error handling.
+        """
+        try:
+            subprocess.run(
+                ["browser-use", "open", url],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            result = subprocess.run(
+                ["browser-use", "state"],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            print(f"  [WARN] browser-use 调用失败: {exc}")
+            return ""
+
+        if result.returncode != 0:
+            # Keep stderr small to avoid noisy logs; caller will treat as empty.
+            err = (result.stderr or "").strip()
+            if err:
+                err = err.splitlines()[-1]
+            print(f"  [WARN] browser-use state 失败: {err or 'unknown'}")
+            return ""
+
+        return result.stdout or ""
+
+    def _parse_total_line(self, line_text: str) -> Optional[float]:
+        """Parse O/U line text like '2.5', '2/2.5', '2.5/3' into a float value."""
+        if not line_text:
+            return None
+        text = line_text.strip()
+        # Normalize some common separators
+        text = text.replace(" ", "")
+        parts = text.split("/")
+        try:
+            if len(parts) == 1:
+                return float(parts[0])
+            nums = [float(p) for p in parts if p]
+            if not nums:
+                return None
+            # Asian-style split line: use the mean as a numeric proxy.
+            return sum(nums) / len(nums)
+        except Exception:
+            return None
+
+    def _extract_kelly_from_text(self, page_content: str) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]:
+        """Extract kelly (home/draw/away) for (final, initial) from page text."""
+        if not page_content:
+            return (None, None, None, None, None, None)
+
+        # Prefer matches near "凯利/Kelly" + "平均"
+        patt = re.compile(r'(?:凯利|Kelly)[\s\S]{0,120}?平均\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)', re.IGNORECASE)
+        lines = patt.findall(page_content)
+        if not lines:
+            # Fallback: any "平均 x.xx x.xx x.xx" with plausible kelly ranges.
+            cand = re.findall(r'平均\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)', page_content)
+            for trip in cand:
+                h, d, a = (float(trip[0]), float(trip[1]), float(trip[2]))
+                if all(0.3 <= v <= 2.5 for v in (h, d, a)):
+                    lines.append((trip[0], trip[1], trip[2]))
+            # keep at most 2 rows (final, initial)
+            lines = lines[:2]
+
+        if lines:
+            fh, fd, fa = (float(lines[0][0]), float(lines[0][1]), float(lines[0][2]))
+        else:
+            fh = fd = fa = None
+        if len(lines) >= 2:
+            ih, id_, ia = (float(lines[1][0]), float(lines[1][1]), float(lines[1][2]))
+        else:
+            ih = id_ = ia = None
+
+        return (ih, id_, ia, fh, fd, fa)
+
+    def _extract_over_under_from_text(
+        self, page_content: str
+    ) -> Tuple[Optional[str], Optional[float], Optional[float], Optional[float], Optional[str], Optional[float], Optional[float], Optional[float]]:
+        """Extract O/U (line + over/under water) for (final, initial) from page text.
+
+        Returns:
+            (initial_line_text, initial_line_value, initial_over_water, initial_under_water,
+             final_line_text, final_line_value, final_over_water, final_under_water)
+        """
+        if not page_content:
+            return (None, None, None, None, None, None, None, None)
+
+        # Prefer "平均 <over_water> <line> <under_water>"
+        patt = re.compile(r'平均\s+(\d+\.\d{2})\s+(\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?)\s+(\d+\.\d{2})')
+        rows = patt.findall(page_content)
+
+        # Fallback: any triplet water/line/water with plausible ranges
+        if not rows:
+            generic = re.findall(r'(\d+\.\d{2})\s+(\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?)\s+(\d+\.\d{2})', page_content)
+            for ow, line, uw in generic:
+                try:
+                    ow_f = float(ow)
+                    uw_f = float(uw)
+                    lv = self._parse_total_line(line)
+                except Exception:
+                    continue
+                if lv is None:
+                    continue
+                if 0.5 <= ow_f <= 2.5 and 0.5 <= uw_f <= 2.5 and 0.5 <= lv <= 10:
+                    rows.append((ow, line, uw))
+            rows = rows[:2]
+
+        # Convention in this repo: first row is "即时/final", second is "初始/initial".
+        final_line_text = final_line_value = final_over = final_under = None
+        init_line_text = init_line_value = init_over = init_under = None
+        if len(rows) >= 1:
+            final_over, final_line_text, final_under = rows[0][0], rows[0][1], rows[0][2]
+            final_line_value = self._parse_total_line(final_line_text)
+            final_over = float(final_over)
+            final_under = float(final_under)
+        if len(rows) >= 2:
+            init_over, init_line_text, init_under = rows[1][0], rows[1][1], rows[1][2]
+            init_line_value = self._parse_total_line(init_line_text)
+            init_over = float(init_over)
+            init_under = float(init_under)
+
+        return (init_line_text, init_line_value, init_over, init_under, final_line_text, final_line_value, final_over, final_under)
+
     def fetch_text(self, url: str, encoding: Optional[str] = None, retries: int = 4, timeout: int = 60) -> str:
         last_error = None
         for attempt in range(retries):
@@ -244,31 +372,24 @@ class OddsSnapshotBackfill:
             "kelly_home_final": None,
             "kelly_draw_final": None,
             "kelly_away_final": None,
+            "over_under_line_text_initial": None,
+            "over_under_line_value_initial": None,
+            "over_under_over_water_initial": None,
+            "over_under_under_water_initial": None,
+            "over_under_line_text_final": None,
+            "over_under_line_value_final": None,
+            "over_under_over_water_final": None,
+            "over_under_under_water_final": None,
+            "kelly_source_url": "",
+            "over_under_source_url": "",
         }
         
         # 欧赔页面 - 使用移动端
         ouzhi_url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
         
         try:
-            # 使用 browser-use 访问页面
-            # 先打开页面
-            subprocess.run(
-                ["browser-use", "open", ouzhi_url],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            # 获取页面内容
-            result = subprocess.run(
-                ["browser-use", "state"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode == 0:
-                page_content = result.stdout
+            page_content = self._browser_use_open_and_state(ouzhi_url, timeout=45)
+            if page_content:
                 
                 # 检查是否被阻断
                 if "访问被阻断" in page_content or "安全威胁" in page_content:
@@ -313,24 +434,8 @@ class OddsSnapshotBackfill:
         yazhi_url = f"https://m.okooo.com/match/handicap.php?MatchID={match_id}"
         
         try:
-            # 打开亚盘页面
-            subprocess.run(
-                ["browser-use", "open", yazhi_url],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            # 获取页面内容
-            result = subprocess.run(
-                ["browser-use", "state"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode == 0:
-                page_content = result.stdout
+            page_content = self._browser_use_open_and_state(yazhi_url, timeout=45)
+            if page_content:
                 
                 # 检查是否被阻断
                 if "访问被阻断" in page_content or "安全威胁" in page_content:
@@ -354,6 +459,71 @@ class OddsSnapshotBackfill:
                         odds_data["asian_away_water_initial"] = float(matches[1][2])
         except Exception as e:
             print(f"  [WARN] 获取亚盘失败: {e}")
+
+        # 凯利指数页面（优先抓取平均凯利：主/平/客）
+        kelly_urls = [
+            f"https://m.okooo.com/match/kelly.php?MatchID={match_id}",
+            f"https://m.okooo.com/match/kellyindex.php?MatchID={match_id}",
+            f"https://m.okooo.com/match/kelly_index.php?MatchID={match_id}",
+        ]
+        for kelly_url in kelly_urls:
+            try:
+                page_content = self._browser_use_open_and_state(kelly_url, timeout=45)
+                if not page_content:
+                    continue
+                if "访问被阻断" in page_content or "安全威胁" in page_content:
+                    continue
+                ih, id_, ia, fh, fd, fa = self._extract_kelly_from_text(page_content)
+                if any(v is not None for v in (ih, id_, ia, fh, fd, fa)):
+                    odds_data["kelly_home_initial"] = ih
+                    odds_data["kelly_draw_initial"] = id_
+                    odds_data["kelly_away_initial"] = ia
+                    odds_data["kelly_home_final"] = fh
+                    odds_data["kelly_draw_final"] = fd
+                    odds_data["kelly_away_final"] = fa
+                    odds_data["kelly_source_url"] = kelly_url
+                    break
+            except Exception as e:
+                print(f"  [WARN] 获取凯利失败: {e}")
+
+        # 大小球页面（总进球 O/U）
+        ou_urls = [
+            f"https://m.okooo.com/match/goal.php?MatchID={match_id}",
+            f"https://m.okooo.com/match/goals.php?MatchID={match_id}",
+            f"https://m.okooo.com/match/total.php?MatchID={match_id}",
+            f"https://m.okooo.com/match/daxiaoqiu.php?MatchID={match_id}",
+            f"https://m.okooo.com/match/ou.php?MatchID={match_id}",
+        ]
+        for ou_url in ou_urls:
+            try:
+                page_content = self._browser_use_open_and_state(ou_url, timeout=45)
+                if not page_content:
+                    continue
+                if "访问被阻断" in page_content or "安全威胁" in page_content:
+                    continue
+                (
+                    init_line_text,
+                    init_line_value,
+                    init_over,
+                    init_under,
+                    final_line_text,
+                    final_line_value,
+                    final_over,
+                    final_under,
+                ) = self._extract_over_under_from_text(page_content)
+                if any(v is not None for v in (init_line_value, final_line_value, init_over, final_over, init_under, final_under)):
+                    odds_data["over_under_line_text_initial"] = init_line_text
+                    odds_data["over_under_line_value_initial"] = init_line_value
+                    odds_data["over_under_over_water_initial"] = init_over
+                    odds_data["over_under_under_water_initial"] = init_under
+                    odds_data["over_under_line_text_final"] = final_line_text
+                    odds_data["over_under_line_value_final"] = final_line_value
+                    odds_data["over_under_over_water_final"] = final_over
+                    odds_data["over_under_under_water_final"] = final_under
+                    odds_data["over_under_source_url"] = ou_url
+                    break
+            except Exception as e:
+                print(f"  [WARN] 获取大小球失败: {e}")
         
         return odds_data
 
@@ -433,6 +603,8 @@ class OddsSnapshotBackfill:
                 "fixture": f"https://tzuqiu.cc/competitions/{fixture.competition_id}/fixture.do",
                 "europe_odds": f"https://m.okooo.com/match/odds.php?MatchID={fixture.okooo_match_id}" if fixture.okooo_match_id else "",
                 "asian_odds": f"https://m.okooo.com/match/handicap.php?MatchID={fixture.okooo_match_id}" if fixture.okooo_match_id else "",
+                "kelly": odds.get("kelly_source_url") or (f"https://m.okooo.com/match/kelly.php?MatchID={fixture.okooo_match_id}" if fixture.okooo_match_id else ""),
+                "over_under": odds.get("over_under_source_url") or "",
             },
             "胜平负赔率": {
                 "initial": {"home": odds["home_win_initial"], "draw": odds["draw_initial"], "away": odds["away_win_initial"]},
@@ -460,6 +632,20 @@ class OddsSnapshotBackfill:
                 "initial": {"home": odds["kelly_home_initial"], "draw": odds["kelly_draw_initial"], "away": odds["kelly_away_initial"]},
                 "final": {"home": odds["kelly_home_final"], "draw": odds["kelly_draw_final"], "away": odds["kelly_away_final"]},
             },
+            "大小球": {
+                "initial": {
+                    "line_text": odds.get("over_under_line_text_initial") or "",
+                    "line_value": odds.get("over_under_line_value_initial"),
+                    "over_water": odds.get("over_under_over_water_initial"),
+                    "under_water": odds.get("over_under_under_water_initial"),
+                },
+                "final": {
+                    "line_text": odds.get("over_under_line_text_final") or "",
+                    "line_value": odds.get("over_under_line_value_final"),
+                    "over_water": odds.get("over_under_over_water_final"),
+                    "under_water": odds.get("over_under_under_water_final"),
+                },
+            },
             "离散率": {
                 "initial": {"home": None, "draw": None, "away": None},
                 "final": {"home": None, "draw": None, "away": None},
@@ -472,6 +658,9 @@ class OddsSnapshotBackfill:
 
         def pick_asian(phase: str, key: str):
             return record.get("亚值", {}).get(phase, {}).get(key)
+
+        def pick_ou(phase: str, key: str):
+            return record.get("大小球", {}).get(phase, {}).get(key)
 
         return {
             "match_id": record["match_id"],
@@ -505,6 +694,12 @@ class OddsSnapshotBackfill:
             "凯利_即时_主": pick("凯利", "final", "home"),
             "凯利_即时_平": pick("凯利", "final", "draw"),
             "凯利_即时_客": pick("凯利", "final", "away"),
+            "大小球_初始_盘口值": pick_ou("initial", "line_value"),
+            "大小球_初始_大水": pick_ou("initial", "over_water"),
+            "大小球_初始_小水": pick_ou("initial", "under_water"),
+            "大小球_即时_盘口值": pick_ou("final", "line_value"),
+            "大小球_即时_大水": pick_ou("final", "over_water"),
+            "大小球_即时_小水": pick_ou("final", "under_water"),
             "离散率_初始_主": pick("离散率", "initial", "home"),
             "离散率_初始_平": pick("离散率", "initial", "draw"),
             "离散率_初始_客": pick("离散率", "initial", "away"),

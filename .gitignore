@@ -42,3 +42,11 @@ yarn-error.log*
 *.tmp
 *.temp
 .cache/
+
+# Okooo scraping artifacts (avoid polluting git status)
+europe_leagues/okooo_snapshots/
+europe_leagues/.chrome_remote_profile/
+europe_leagues/.okooo-scraper/
+
+# Prediction runtime cache
+.prediction_cache/

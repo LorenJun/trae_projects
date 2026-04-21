@@ -378,10 +378,10 @@ def generate_filename(home_team: str, away_team: str, match_date: str, league: s
     away = parse_team_name(away_team)
     date_str = match_date.replace('-', '')
 
-    league_path = f'/Users/lin/trae_projects/europe_leagues/{league}/analysis/predictions/'
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    league_path = os.path.join(base_dir, league, 'analysis', 'predictions')
     filename = f'{home}_vs_{away}_预测_{date_str}.md'
-
-    return league_path + filename
+    return os.path.join(league_path, filename)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,109 @@
+{
+  "captured_at": "2026-04-21T14:06:54",
+  "driver": "local-chrome",
+  "chrome": {
+    "port": 9222,
+    "started_by_script": false
+  },
+  "league": "法甲",
+  "event": "巴黎圣曼vs南特",
+  "match_id": "1301465",
+  "schedule": {
+    "mid": "1301465",
+    "href": "https://m.okooo.com/match/history.php?MatchID=1301465&from=%2Fsaishi%2F34%2F",
+    "text": "第26轮 巴黎圣曼 01:00 南特"
+  },
+  "欧赔": {
+    "found": true,
+    "initial": {
+      "home": 1.21,
+      "draw": 6.35,
+      "away": 11.39
+    },
+    "final": {
+      "home": 1.18,
+      "draw": 7.46,
+      "away": 12.78
+    },
+    "delta": {
+      "home": -0.03,
+      "draw": 1.11,
+      "away": 1.39
+    },
+    "url": "https://m.okooo.com/match/odds.php?MatchID=1301465",
+    "_attempts": [
+      {
+        "attempt": 1,
+        "client": "LocalChromeSession",
+        "success": true,
+        "blocked": false,
+        "found": true,
+        "parsed": null
+      }
+    ]
+  },
+  "亚值": {
+    "found": true,
+    "parsed": true,
+    "initial": {
+      "home_water": 1.87,
+      "handicap_text": "两球",
+      "away_water": 1.99
+    },
+    "final": {
+      "home_water": 1.94,
+      "handicap_text": "两球",
+      "away_water": 2.2
+    },
+    "delta": {
+      "home_water": 0.07,
+      "away_water": 0.21
+    },
+    "url": "https://m.okooo.com/match/handicap.php?MatchID=1301465",
+    "_attempts": [
+      {
+        "attempt": 1,
+        "client": "LocalChromeSession",
+        "success": true,
+        "blocked": false,
+        "found": true,
+        "parsed": true
+      }
+    ]
+  },
+  "凯利": {
+    "found": true,
+    "initial": {
+      "home": 0.93,
+      "draw": 0.93,
+      "away": 0.93
+    },
+    "final": {
+      "home": 0.94,
+      "draw": 0.94,
+      "away": 0.94
+    },
+    "delta": {
+      "home": 0.01,
+      "draw": 0.01,
+      "away": 0.01
+    },
+    "payout_rate": 0.94,
+    "url": "https://m.okooo.com/match/odds.php?MatchID=1301465",
+    "_click": {
+      "clicked": true,
+      "label": "凯利",
+      "tag": "DIV"
+    },
+    "_attempts": [
+      {
+        "attempt": 1,
+        "client": "LocalChromeSession",
+        "success": true,
+        "blocked": false,
+        "found": true,
+        "parsed": null
+      }
+    ]
+  }
+}
