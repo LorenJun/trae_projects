@@ -6,6 +6,7 @@
 import os
 import sys
 import json
+import re
 from datetime import datetime
 from typing import Dict, List, Optional
 import logging
@@ -52,6 +53,87 @@ class ResultManager:
                         json.dump({}, f)
                     else:
                         json.dump([], f)
+
+    def _teams_md_path(self, league_code: str) -> str:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(base_dir, league_code, 'teams_2025-26.md')
+
+    def _match_id_for_teams_row(self, league_code: str, match_date: str, home_team: str, away_team: str) -> str:
+        return f"{league_code}_{match_date.replace('-', '')}_{home_team}_{away_team}"
+
+    def _parse_score_to_winner(self, score_text: str) -> Optional[str]:
+        if not isinstance(score_text, str) or '-' not in score_text:
+            return None
+        parts = score_text.split('-')
+        if len(parts) != 2:
+            return None
+        try:
+            hs = int(parts[0].strip())
+            as_ = int(parts[1].strip())
+        except Exception:
+            return None
+        if hs > as_:
+            return 'home'
+        if hs < as_:
+            return 'away'
+        return 'draw'
+
+    def sync_results_from_teams_md(self) -> int:
+        """Sync completed match results from each league's teams_2025-26.md into results.json."""
+        results = self.load_results()
+        by_id = {r.get('match_id'): r for r in results if r.get('match_id')}
+        changed = 0
+
+        for league_code in LEAGUE_NAMES.keys():
+            path = self._teams_md_path(league_code)
+            if not os.path.exists(path):
+                continue
+            try:
+                lines = open(path, 'r', encoding='utf-8').read().splitlines()
+            except Exception:
+                continue
+
+            for line in lines:
+                if not line.strip().startswith('|'):
+                    continue
+                cols = [c.strip() for c in line.strip().strip('|').split('|')]
+                # schedule table format: 日期 | 时间 | 主队 | 比分 | 客队 | 备注
+                if len(cols) != 6:
+                    continue
+                match_date, match_time, home_team, score_text, away_team, note = cols
+                if not re.match(r'^\d{4}-\d{2}-\d{2}$', match_date):
+                    continue
+                if not re.match(r'^\d+\s*-\s*\d+$', score_text):
+                    continue
+                actual_winner = self._parse_score_to_winner(score_text)
+                if actual_winner is None:
+                    continue
+                hs, as_ = [int(x.strip()) for x in score_text.split('-')]
+                match_id = self._match_id_for_teams_row(league_code, match_date, home_team, away_team)
+                result_data = {
+                    'match_id': match_id,
+                    'league': league_code,
+                    'home_team': home_team,
+                    'away_team': away_team,
+                    'match_date': match_date,
+                    'match_time': match_time,
+                    'actual_winner': actual_winner,
+                    'actual_score': f"{hs}-{as_}",
+                    'home_score': hs,
+                    'away_score': as_,
+                    'result_status': 'completed',
+                    'saved_at': datetime.now().isoformat(),
+                }
+                prev = by_id.get(match_id)
+                if prev != result_data:
+                    by_id[match_id] = result_data
+                    changed += 1
+
+        if changed:
+            with open(self.results_file, 'w', encoding='utf-8') as f:
+                json.dump(list(by_id.values()), f, ensure_ascii=False, indent=2)
+            logger.info(f"已从 teams_2025-26.md 同步 {changed} 条真实赛果")
+        return changed
     
     def load_predictions(self) -> List[Dict]:
         """加载所有预测"""
@@ -259,6 +341,7 @@ class ResultManager:
     
     def update_accuracy_stats(self):
         """更新准确率统计"""
+        self.sync_results_from_teams_md()
         stats = {
             'overall': self.calculate_accuracy(),
             'by_league': {},

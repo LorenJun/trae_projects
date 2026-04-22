@@ -224,46 +224,38 @@ europe_leagues/
 
 ## 自动预测分析模块
 
-### 快速预测流程
+### 当前推荐流程
 
-使用 `match_predictor.py` 模块进行自动化的赔率数据获取和预测分析：
+当前项目已切到“实时赔率快照 + 预测写回联赛赛程文档”的架构，推荐直接使用下面这条链路：
 
-```python
-from okooo_match_finder import OkoooMatchFinder
-from match_predictor import OddsData, MatchPredictor, print_analysis_report
+1. 用 [okooo_save_snapshot.py](file:///Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py) 抓实时欧赔/亚值/凯利  
+2. 用 [optimized_prediction_workflow.py](file:///Users/bytedance/trae_projects/europe_leagues/optimized_prediction_workflow.py) 或 [enhanced_prediction_workflow.py](file:///Users/bytedance/trae_projects/europe_leagues/enhanced_prediction_workflow.py) 做预测  
+3. 将预测结果直接写回 `europe_leagues/<league>/teams_2025-26.md` 的赛程表“备注”列  
+4. 后续从 `teams_2025-26.md` 的“比分 + 备注中的预测”反向学习，更新历史准确率
 
-# Step 1: 获取比赛ID
-finder = OkoooMatchFinder()
-match_id = finder.find_match_id("水晶宫", "西汉孤", "英超")
+### 快速示例
 
-# Step 2: 获取赔率数据
-# 使用 test_prediction.py 脚本获取完整赔率数据
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
 
-# Step 3: 进行预测分析
-odds_data = OddsData(
-    match_id=match_id,
-    home_team="水晶宫",
-    away_team="西汉孤",
-    league="英超",
-    euro_home=2.20,
-    euro_draw=3.32,
-    euro_away=3.13,
-    euro_home_current=2.50,
-    euro_draw_current=3.25,
-    euro_away_current=2.82,
-    asian_handicap="平手/半球",
-    asian_home_odds=1.78,
-    asian_away_odds=1.97,
-    asian_home_current=1.73,
-    asian_handicap_current="平手",
-    asian_away_current=1.88,
-    kelly_home=0.92,
-    kelly_away=0.89
-)
+# 1) 抓实时赔率快照
+python3 okooo_save_snapshot.py \
+  --driver local-chrome \
+  --league 西甲 \
+  --team1 '毕尔巴鄂竞技' \
+  --team2 '奥萨苏纳' \
+  --date 2026-04-22
 
-# Step 4: 输出分析报告
-print_analysis_report(match_id, "水晶宫", "西汉孤", odds_data)
+# 2) 跑预测（默认会先刷新最新赔率）
+python3 -c "
+from optimized_prediction_workflow import generate_prediction_report
+print(generate_prediction_report('la_liga', '2026-04-22'))
+"
 ```
+
+说明：
+- 这里的返回值不再是独立预测报告 markdown，而是被更新后的 `teams_2025-26.md` 路径
+- 预测结果会写入赛程表备注列，例如：`进行中；预测:主胜 信心:0.48 爆冷:低`
 
 ### 模块核心功能
 
@@ -795,15 +787,10 @@ Step 7: 生成分析报告
 ### 一键预测命令
 
 ```bash
-cd /Users/lin/trae_projects/europe_leagues
+cd /Users/bytedance/trae_projects/europe_leagues
 python3 -c "
-from okooo_match_finder import OkoooMatchFinder
-from match_predictor import OddsData, print_analysis_report
-
-# 只需提供球队名称和联赛
-finder = OkoooMatchFinder()
-match_id = finder.find_match_id('水晶宫', '西汉孤', '英超')
-print(f'Match ID: {match_id}')
+from optimized_prediction_workflow import generate_prediction_report
+print(generate_prediction_report('la_liga', '2026-04-22'))
 "
 ```
 
@@ -813,25 +800,26 @@ print(f'Match ID: {match_id}')
 ┌─────────────────────────────────────────────────────────────┐
 │                    预测分析完整流程                           │
 ├─────────────────────────────────────────────────────────────┤
-│  Step 1: 获取match_id                                      │
-│          okooo_match_finder.py 自动搜索验证                   │
+│  Step 1: 获取 match_id / 实时快照                            │
+│          okooo_save_snapshot.py / okooo_match_finder.py      │
 ├─────────────────────────────────────────────────────────────┤
-│  Step 2: 获取赔率数据                                       │
-│          - 欧指: 99家平均赔率                                │
-│          - 亚盘: 威廉/立博等主流公司盘口                      │
-│          - 凯利: 指数高低判断冷热                            │
+│  Step 2: 刷新最新赔率                                       │
+│          - 欧赔: 99家平均 初始/最新                          │
+│          - 亚值: 平均指数 初盘/即时                          │
+│          - 凯利: 99家平均 初始/最新                          │
 ├─────────────────────────────────────────────────────────────┤
 │  Step 3: 综合预测分析                                       │
-│          MatchPredictor.comprehensive_prediction()          │
-│          - 隐含概率计算                                      │
-│          - 赔率变化分析                                      │
-│          - 亚盘方向判断                                      │
-│          - 凯利指数解读                                      │
-│          - 泊松分布预测                                      │
+│          optimized/enhanced_prediction_workflow             │
+│          - 球队基本面 / 伤停 / 近期状态                       │
+│          - 赔率变化 / 亚盘方向 / 凯利指数                     │
+│          - 历史相似盘路 / 爆冷分析 / 泊松分布                 │
 ├─────────────────────────────────────────────────────────────┤
-│  Step 4: 输出分析报告                                       │
-│          print_analysis_report()                            │
-│          - 概率分布 / 赔率变化 / 投注建议                    │
+│  Step 4: 写回联赛赛程文档                                    │
+│          teams_2025-26.md 备注列                            │
+│          - 预测结果 / 信心 / 爆冷等级                        │
+├─────────────────────────────────────────────────────────────┤
+│  Step 5: 历史学习与准确率统计                                │
+│          teams_2025-26.md -> result_manager/import_data     │
 └─────────────────────────────────────────────────────────────┘
 ```
 

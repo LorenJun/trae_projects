@@ -153,6 +153,38 @@ python3 europe_leagues/okooo_fetch_daily_schedule.py --league 西甲 --date 2026
 
 预测流程不会主动“发现当天所有比赛”，它只会对已进入预测列表的比赛逐场刷新赔率并写回 `teams_2025-26.md`。
 
+## 最新架构补充
+### `teams_2025-26.md` 的双重职责
+现在各联赛的 [teams_2025-26.md](file:///Users/bytedance/trae_projects/europe_leagues/la_liga/teams_2025-26.md) 不只是赛程文档，还承担两类数据职责：
+- **预测写回**：预测流程把结果写入赛程表“备注”列
+- **历史学习来源**：后续导入/准确率统计会从赛程表中解析“预测 + 真实赛果”
+
+当前约定：
+- 比分列：真实赛果，例如 `1-0`
+- 备注列：预测信息，例如 `已结束/预测主胜✅比分完全正确` 或 `进行中；预测:主胜 信心:0.48 爆冷:低`
+
+### 历史预测学习来源
+历史学习/准确率统计现在优先依赖：
+- `europe_leagues/<league>/teams_2025-26.md`
+
+已接入的代码：
+- [result_manager.py](file:///Users/bytedance/trae_projects/europe_leagues/result_manager.py)
+  - `update_accuracy_stats()` 会先从 `teams_2025-26.md` 同步真实赛果
+- [import_data.py](file:///Users/bytedance/trae_projects/europe_leagues/import_data.py)
+  - `parse_teams_schedule_file()` 直接从 `teams_2025-26.md` 解析历史预测与赛果
+
+### 已废弃/已删除的旧路径
+以下旧路径不再作为主流程数据源：
+- `europe_leagues/<league>/analysis/predictions/*_predictions*.md`
+- `europe_leagues/<league>/analysis/results/results_template.md`
+
+### 本地缓存与忽略目录
+运行过程中可能出现的本地缓存/运行目录：
+- `europe_leagues/.okooo-scraper/`：实时快照、赛程抓取结果、日志
+- `.prediction_cache/`：增强预测系统的中间结果缓存（如球队分析、相似盘路、单场预测）
+
+这些目录均应视为运行时产物，不参与版本提交。
+
 ## 最新流程（推荐）
 此流程适合“需要从热门赛事页出发，找到赛程，并对比欧赔/亚值/凯利初始与最新变化”的需求。
 

@@ -11,6 +11,115 @@ from datetime import datetime
 from prediction_history_db import PredictionHistoryDB
 
 
+def parse_teams_schedule_file(file_path: str) -> tuple:
+    """从 teams_2025-26.md 的赛程表解析预测与赛果。
+
+    约定：
+    - 表头格式：| 日期 | 时间 | 主队 | 比分 | 客队 | 备注 |
+    - 预测写在备注列，形如：`进行中；预测:主胜 信心:0.48 爆冷:低`
+    - 已结束比赛的比分列为 `x-y`
+    """
+    predictions = []
+    results = []
+
+    with open(file_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    league = os.path.basename(os.path.dirname(file_path))
+    league_name_map = {
+        'premier_league': '英超联赛',
+        'serie_a': '意甲联赛',
+        'bundesliga': '德甲联赛',
+        'ligue_1': '法甲联赛',
+        'la_liga': '西甲联赛',
+    }
+    league_name = league_name_map.get(league, league)
+
+    for line in lines:
+        line = line.strip()
+        if not line.startswith('|'):
+            continue
+        cols = [col.strip() for col in line.split('|') if col.strip()]
+        if len(cols) != 6:
+            continue
+
+        date, match_time, home_team, score_text, away_team, note = cols
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
+            continue
+        if not home_team or not away_team:
+            continue
+
+        match_id = f"{league}_{date.replace('-', '')}_{home_team}_{away_team}"
+        match_id = re.sub(r'\s+', '_', match_id)
+
+        # Parse prediction from note
+        # Supported note examples:
+        # - 进行中；预测:主胜 信心:0.48 爆冷:低
+        # - 已结束/预测主胜✅比分完全正确
+        predicted = None
+        prob = ''
+        m_pred = re.search(r'预测:\s*(主胜|平局|客胜)', note)
+        if not m_pred:
+            m_pred = re.search(r'预测\s*(主胜|平局|客胜)', note)
+        if m_pred:
+            predicted = m_pred.group(1)
+            m_prob = re.search(r'信心:\s*([0-9.]+)', note)
+            if m_prob:
+                prob = m_prob.group(1)
+
+        predicted_winner = None
+        if predicted == '主胜':
+            predicted_winner = 'home'
+        elif predicted == '客胜':
+            predicted_winner = 'away'
+        elif predicted == '平局':
+            predicted_winner = 'draw'
+
+        if predicted_winner:
+            predictions.append({
+                'match_id': match_id,
+                'league': league,
+                'league_name': league_name,
+                'home_team': home_team,
+                'away_team': away_team,
+                'match_date': date,
+                'match_time': match_time,
+                'predicted_winner': predicted_winner,
+                'predicted_score': '',
+                'predicted_probability': prob,
+                'over_under': '',
+                'handicap': '',
+                'correct': False,
+                'model_predictions': {},
+                'saved_at': datetime.now().isoformat()
+            })
+
+        # Parse actual result from score
+        if re.match(r'^\d+\s*-\s*\d+$', score_text):
+            hs, as_ = [int(x.strip()) for x in score_text.split('-')]
+            if hs > as_:
+                actual_winner = 'home'
+            elif hs < as_:
+                actual_winner = 'away'
+            else:
+                actual_winner = 'draw'
+            results.append({
+                'match_id': match_id,
+                'league': league,
+                'home_team': home_team,
+                'away_team': away_team,
+                'match_date': date,
+                'match_time': match_time,
+                'actual_winner': actual_winner,
+                'actual_score': f'{hs}-{as_}',
+                'home_score': hs,
+                'away_score': as_,
+                'result_status': 'completed'
+            })
+
+    return predictions, results
+
+
 def parse_prediction_file(file_path: str) -> tuple:
     """解析预测文件，返回预测和结果"""
     predictions = []
@@ -286,44 +395,34 @@ def parse_prediction_file(file_path: str) -> tuple:
 
 
 def import_prediction_files():
-    """导入所有预测文件"""
+    """导入各联赛 teams_2025-26.md 中的历史预测与赛果。"""
     db = PredictionHistoryDB()
     
     leagues = ['premier_league', 'serie_a', 'bundesliga', 'ligue_1', 'la_liga']
     
     for league in leagues:
-        prediction_dir = f"{league}/analysis/predictions"
-        if not os.path.exists(prediction_dir):
+        teams_file = f"{league}/teams_2025-26.md"
+        if not os.path.exists(teams_file):
             continue
-        
-        files = os.listdir(prediction_dir)
-        prediction_files = [f for f in files if f.endswith('_predictions.md')]
-        
-        for file_name in prediction_files:
-            file_path = os.path.join(prediction_dir, file_name)
-            print(f"处理文件: {file_path}")
-            
-            predictions, results = parse_prediction_file(file_path)
-            
-            # 保存预测
-            for prediction in predictions:
-                # 检查是否已存在
-                existing = db.get_prediction(prediction['match_id'])
-                if not existing:
-                    db.save_prediction(prediction)
-                    print(f"  保存预测: {prediction['home_team']} vs {prediction['away_team']}")
-                else:
-                    print(f"  预测已存在: {prediction['match_id']}")
-            
-            # 保存结果
-            for result in results:
-                # 检查是否已存在
-                existing = db.get_result(result['match_id'])
-                if not existing:
-                    db.save_result(result['match_id'], result)
-                    print(f"  保存结果: {result['home_team']} vs {result['away_team']} - {result['actual_score']}")
-                else:
-                    print(f"  结果已存在: {result['match_id']}")
+
+        print(f"处理文件: {teams_file}")
+        predictions, results = parse_teams_schedule_file(teams_file)
+
+        for prediction in predictions:
+            existing = db.get_prediction(prediction['match_id'])
+            if not existing:
+                db.save_prediction(prediction)
+                print(f"  保存预测: {prediction['home_team']} vs {prediction['away_team']}")
+            else:
+                print(f"  预测已存在: {prediction['match_id']}")
+
+        for result in results:
+            existing = db.get_result(result['match_id'])
+            if not existing:
+                db.save_result(result['match_id'], result)
+                print(f"  保存结果: {result['home_team']} vs {result['away_team']} - {result['actual_score']}")
+            else:
+                print(f"  结果已存在: {result['match_id']}")
 
 
 def import_player_data():
