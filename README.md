@@ -47,6 +47,203 @@ created_date: "2026-04-18"
 
 ---
 
+## 环境安装
+
+### 1. 系统要求
+
+- Python 3.9+（推荐 3.9 或 3.10）
+- macOS / Linux
+- `pip` 和 `venv`
+- 可选：Node.js 18+（如需使用 `feishu-cli`）
+
+### 2. 创建 Python 虚拟环境
+
+```bash
+cd /Users/bytedance/trae_projects
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
+```
+
+### 3. 安装核心 Python 依赖
+
+以下依赖可覆盖当前主流程、CLI 命令和大多数数据脚本：
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+说明：
+- `requests`：用于抓取公开页面和接口
+- `playwright`：用于浏览器自动化抓取
+- `websocket-client`：用于部分实时抓取脚本
+
+### 4. 安装 Playwright 浏览器
+
+如果你需要运行澳客、比赛搜索、浏览器采集等脚本，还需要安装浏览器内核：
+
+```bash
+python3 -m playwright install chromium
+```
+
+### 5. 安装 browser-use（可选）
+
+以下场景需要 `browser-use`：
+- `data_collector.py` 的真实浏览器采集
+- `okooo_save_snapshot.py` 的 user-like 浏览
+- 某些 `analysis/predictions/data_scraper.py` 脚本
+
+安装命令：
+
+```bash
+python3 -m pip install -r requirements-openclaw.txt
+```
+
+如果未安装 `browser-use`，系统当前会自动降级为 `mock` 数据模式，适合流程联调，但不适合真实数据验证。
+同时运行时会明确提示：请让 `openclaw` 自行执行 `python3 -m pip install browser-use` 后再重试真实采集链路。
+
+### 缓存策略（默认实时）
+
+预测流程的 `.prediction_cache` 已默认关闭（不读不写），以优先保证实时最新数据。
+
+如需临时开启本地缓存（用于性能压测或离线调试），可显式设置：
+
+```bash
+export ENABLE_PREDICTION_CACHE=1
+```
+
+恢复实时模式：
+
+```bash
+unset ENABLE_PREDICTION_CACHE
+```
+
+### 6. OpenClaw 一键初始化（推荐）
+
+如果你的目标是让 `openclaw` 直接完整使用本系统，优先执行：
+
+```bash
+bash scripts/setup_openclaw_env.sh
+```
+
+这个脚本会自动完成：
+- 创建 `.venv`
+- 安装 `requirements-openclaw.txt`
+- 安装 `Playwright Chromium`
+- 检测到 `npm` 时自动执行 `npm install`
+
+### 7. 安装 feishu-cli（可选）
+
+仓库根目录的 `package.json` 当前包含：
+- `feishu-cli`
+
+如需使用飞书文档/消息相关能力，可执行：
+
+```bash
+cd /Users/bytedance/trae_projects
+npm install
+```
+
+---
+
+## 工具说明
+
+### 必需工具
+
+| 工具 | 用途 | 是否必需 |
+|------|------|---------|
+| Python 3.9+ | 运行主流程、CLI、统计脚本 | 是 |
+| venv / pip | 管理 Python 环境 | 是 |
+
+### 推荐工具
+
+| 工具 | 用途 | 是否推荐 |
+|------|------|---------|
+| Playwright + Chromium | 浏览器自动化抓取 | 推荐 |
+| browser-use | 更像人工操作的抓取链路 | 推荐 |
+| requests | HTTP 数据抓取 | 推荐 |
+| websocket-client | 实时快照脚本 | 推荐 |
+
+### 可选工具
+
+| 工具 | 用途 | 是否可选 |
+|------|------|---------|
+| Node.js / npm | 安装 `feishu-cli` | 可选 |
+| feishu-cli | 飞书文档 / 消息集成 | 可选 |
+
+---
+
+## 运行验证
+
+完成安装后，建议按顺序验证：
+
+### 1. 检查系统环境
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py setup-openclaw --json
+python3 prediction_system.py health-check --json
+```
+
+### 2. 查看可用联赛
+
+```bash
+python3 prediction_system.py list-leagues --json
+```
+
+### 3. 预测单场比赛
+
+```bash
+python3 prediction_system.py predict-match \
+  --league la_liga \
+  --home-team 巴塞罗那 \
+  --away-team 皇家马德里 \
+  --date 2026-05-11 \
+  --json
+```
+
+### 4. 采集比赛数据
+
+```bash
+python3 prediction_system.py collect-data \
+  --league la_liga \
+  --date 2026-05-11 \
+  --json
+```
+
+### 5. 查看准确率
+
+```bash
+python3 prediction_system.py accuracy --refresh --json
+```
+
+---
+
+## OpenClaw 推荐命令
+
+为了方便 `openclaw` 或其他自动化系统调用，建议优先使用 `prediction_system.py` 的非交互子命令：
+
+```bash
+python3 prediction_system.py list-leagues --json
+python3 prediction_system.py predict-match --league la_liga --home-team 巴塞罗那 --away-team 皇家马德里 --date 2026-05-11 --json
+python3 prediction_system.py predict-schedule --league la_liga --date 2026-05-11 --days 2 --json
+python3 prediction_system.py collect-data --league la_liga --date 2026-05-11 --json
+python3 prediction_system.py pending-results --days-back 14 --json
+python3 prediction_system.py save-result --match-id la_liga_20260511_巴塞罗那_皇家马德里 --home-score 2 --away-score 1 --json
+python3 prediction_system.py accuracy --refresh --json
+python3 prediction_system.py health-check --json
+python3 prediction_system.py setup-openclaw --json
+```
+
+说明：
+- `predict-schedule` 和 `save-result` 会修改 `teams_2025-26.md`
+- `collect-data` 在缺少 `browser-use` 时会自动降级到 `mock` 数据模式，并提示 `openclaw` 自行安装 `browser-use`
+- `--json` 输出适合自动化系统直接解析
+- `health-check` 会返回 `openclaw_dependency_report`
+- `setup-openclaw` 会返回完整初始化命令和依赖状态
+
+---
+
 ## 项目结构
 
 ```

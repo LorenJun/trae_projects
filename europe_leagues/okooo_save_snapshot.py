@@ -17,9 +17,11 @@ from __future__ import annotations
 import atexit
 import argparse
 import json
+import os
 import re
 import subprocess
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -104,6 +106,64 @@ def _date_tokens(date_yyyy_mm_dd: str) -> list[str]:
     return [f"{mm}-{dd}", f"{int(mm)}-{int(dd)}"]
 
 
+def _time_tokens(hh_mm: str) -> list[str]:
+    """Convert HH:MM to likely fragments shown in schedule rows, e.g. '03:00' / '3:00'."""
+    if not hh_mm:
+        return []
+    m = re.match(r"^(\d{1,2}):(\d{2})$", hh_mm.strip())
+    if not m:
+        return []
+    hh = int(m.group(1))
+    mm = m.group(2)
+    return [f"{hh:02d}:{mm}", f"{hh}:{mm}"]
+
+
+def _alias_table_path() -> str:
+    return str(Path(__file__).resolve().parent / "okooo_team_aliases.json")
+
+
+def _load_alias_table() -> Dict[str, Any]:
+    """Load team alias table for fuzzy matching schedule rows (best-effort)."""
+    path = _alias_table_path()
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _team_aliases(alias_table: Dict[str, Any], league: str, team_name: str) -> list[str]:
+    if not team_name:
+        return []
+    league_key = _league_slug(league)
+    league_map = alias_table.get(league_key, {}) if isinstance(alias_table, dict) else {}
+    aliases = league_map.get(team_name, []) if isinstance(league_map, dict) else []
+    out = [team_name]
+    for a in aliases or []:
+        if a and isinstance(a, str):
+            out.append(a)
+    # De-dup while preserving order.
+    seen = set()
+    uniq = []
+    for x in out:
+        x = x.strip()
+        if not x or x in seen:
+            continue
+        seen.add(x)
+        uniq.append(x)
+    return uniq
+
+
+def _norm_team_tokens_multi(names: list[str]) -> list[str]:
+    """Generate fuzzy-match tokens for multiple aliases."""
+    tokens: set[str] = set()
+    for name in names or []:
+        for tok in _norm_team_tokens(name):
+            tokens.add(tok)
+    # Prefer longer tokens first to reduce false positives.
+    return sorted([t for t in tokens if len(t) >= 2], key=len, reverse=True)
+
+
 def _eval_scroll_to_bottom(bu: Any) -> None:
     bu.eval_json("(() => { window.scrollTo(0, document.body.scrollHeight); return JSON.stringify({ok:true}); })()")
     time.sleep(1.2)
@@ -119,16 +179,24 @@ def _find_rows_fuzzy(
     team1: str,
     team2: str,
     date_hint: str = "",
+    time_hint: str = "",
+    league: str = "",
+    alias_table: Dict[str, Any] | None = None,
     limit: int = 5,
 ) -> Dict[str, Any]:
-    t1_tokens = _norm_team_tokens(team1)
-    t2_tokens = _norm_team_tokens(team2)
+    alias_table = alias_table or {}
+    t1_tokens = _norm_team_tokens_multi(_team_aliases(alias_table, league, team1))
+    t2_tokens = _norm_team_tokens_multi(_team_aliases(alias_table, league, team2))
     d_tokens = _date_tokens(date_hint)
+    tm_tokens = _time_tokens(time_hint)
     js = r"""
 (() => {
   const t1 = %s;
   const t2 = %s;
   const ds = %s;
+  const ts = %s;
+  const requireDate = %s;
+  const requireTime = %s;
   const rows = Array.from(document.querySelectorAll("a[href*='history.php?MatchID=']"))
     .map(a => {
       const m = a.href.match(/MatchID=(\d+)/);
@@ -138,14 +206,19 @@ def _find_rows_fuzzy(
       if (!mid) return null;
       const compact = text.replace(/\s+/g,'');
       const hasAny = (tokens) => tokens.some(tok => tok && compact.includes(tok));
+      const hasDate = (ds.length ? hasAny(ds) : true);
+      const hasTime = (ts.length ? hasAny(ts) : true);
+      if (requireDate && !hasDate) return null;
+      if (requireTime && !hasTime) return null;
       const score =
         (hasAny(t1) ? 10 : 0) +
         (hasAny(t2) ? 10 : 0) +
-        (ds.length ? (hasAny(ds) ? 5 : 0) : 0) +
+        (ds.length ? (hasDate ? 6 : 0) : 0) +
+        (ts.length ? (hasTime ? 8 : 0) : 0) +
         Math.min(compact.length, 100) / 100.0;
       return { mid, href: a.href, text, score };
     })
-    .filter(x => x && x.score >= 20)  // require both sides present
+    .filter(x => x && x.score >= 20)  // require both teams present; date/time handled above if required
     .sort((a,b) => b.score - a.score);
   return JSON.stringify({count: rows.length, rows: rows.slice(0, %d)});
 })()
@@ -153,6 +226,9 @@ def _find_rows_fuzzy(
         json.dumps(t1_tokens, ensure_ascii=False),
         json.dumps(t2_tokens, ensure_ascii=False),
         json.dumps(d_tokens, ensure_ascii=False),
+        json.dumps(tm_tokens, ensure_ascii=False),
+        "true" if bool(d_tokens) else "false",
+        "true" if bool(tm_tokens) else "false",
         limit,
     )
     return bu.eval_json(js)
@@ -182,18 +258,40 @@ class BrowserUse:
     session: str
     headed: bool = False
 
+    def _run_once(self, cmd: list[str], timeout: int) -> subprocess.CompletedProcess:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+    def _close_session_best_effort(self) -> None:
+        try:
+            cp = self._run_once(["browser-use", "--session", self.session, "close"], timeout=30)
+            _ = cp.returncode  # best-effort
+        except Exception:
+            pass
+
     def run(self, *args: str, timeout: int = 60, use_headed: bool = False) -> str:
         cmd = ["browser-use", "--session", self.session]
         if use_headed:
             cmd.append("--headed")
         cmd.extend(args)
-        cp = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        cp = self._run_once(cmd, timeout=timeout)
         out = (cp.stdout or "").strip()
         err = (cp.stderr or "").strip()
-        if cp.returncode != 0:
-            tail = "\n".join([x for x in (out + "\n" + err).splitlines() if x][-8:])
-            raise RuntimeError(f"browser-use failed: {' '.join(cmd)}\n{tail}")
-        return out
+        if cp.returncode == 0:
+            return out
+
+        combined = (out + "\n" + err).strip()
+        if "already running with different config" in combined:
+            # Auto-recover: close the stale session and retry once.
+            self._close_session_best_effort()
+            cp2 = self._run_once(cmd, timeout=timeout)
+            out2 = (cp2.stdout or "").strip()
+            err2 = (cp2.stderr or "").strip()
+            if cp2.returncode == 0:
+                return out2
+            combined = (out2 + "\n" + err2).strip()
+
+        tail = "\n".join([x for x in combined.splitlines() if x][-8:])
+        raise RuntimeError(f"browser-use failed: {' '.join(cmd)}\n{tail}")
 
     def open(self, url: str) -> None:
         self.run("open", url, timeout=90, use_headed=self.headed)
@@ -604,9 +702,26 @@ def _parse_desktop_avg_row(row_cells: list[str]) -> Dict[str, Any]:
     }
 
 
-def _find_match_id(bu: Any, league: str, team1: str, team2: str, date_hint: str = "") -> Dict[str, Any]:
+def _find_match_id(
+    bu: Any,
+    league: str,
+    team1: str,
+    team2: str,
+    date_hint: str = "",
+    time_hint: str = "",
+    alias_table: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     def find_rows() -> Dict[str, Any]:
-        return _find_rows_fuzzy(bu, team1, team2, date_hint=date_hint, limit=5)
+        return _find_rows_fuzzy(
+            bu,
+            team1,
+            team2,
+            date_hint=date_hint,
+            time_hint=time_hint,
+            league=league,
+            alias_table=alias_table or {},
+            limit=5,
+        )
 
     bu.open(REMEN_URL)
 
@@ -644,7 +759,7 @@ def _find_match_id(bu: Any, league: str, team1: str, team2: str, date_hint: str 
             _eval_scroll_to_top(bu)
             found = find_rows()
     if not isinstance(found, dict) or not found.get("rows"):
-        raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行")
+        raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
 
     first = found["rows"][0]
     return {"match_id": first["mid"], "schedule_row": first}
@@ -948,6 +1063,11 @@ def main() -> None:
         default="",
         help="可选：比赛日期 YYYY-MM-DD，用于在赛程中更准确定位（例如 2026-04-22）。",
     )
+    parser.add_argument(
+        "--time",
+        default="",
+        help="可选：比赛时间 HH:MM，用于在赛程中更精准定位（例如 03:00）。",
+    )
     args = parser.parse_args()
 
     event_name = f"{args.team1}vs{args.team2}"
@@ -956,7 +1076,10 @@ def main() -> None:
         out_dir = out_dir / _league_slug(args.league)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    ts = datetime.now().strftime("%H%M%S")
+    # NOTE: some browser-use implementations may truncate/normalize session names.
+    # Keep the random token at the beginning to reduce collision probability after truncation.
+    token = uuid.uuid4().hex[:8]
+    session_prefix = f"ok_{token}"
 
     chrome_meta: Dict[str, Any] = {}
     if args.driver == "local-chrome":
@@ -982,9 +1105,18 @@ def main() -> None:
             },
         }
     else:
-        schedule_bu = client_factory(f"okooo_schedule_{ts}")
+        alias_table = _load_alias_table()
+        schedule_bu = client_factory(f"{session_prefix}_sched")
         try:
-            found = _find_match_id(schedule_bu, args.league, args.team1, args.team2, date_hint=args.date)
+            found = _find_match_id(
+                schedule_bu,
+                args.league,
+                args.team1,
+                args.team2,
+                date_hint=args.date,
+                time_hint=args.time,
+                alias_table=alias_table,
+            )
         finally:
             schedule_bu.close()
         match_id = found["match_id"]
@@ -1016,9 +1148,9 @@ def main() -> None:
         "away_team": args.team2,
         "match_time": found["schedule_row"].get("text", ""),
         "schedule": found["schedule_row"],
-        "欧赔": _extract_europe_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"okooo_europe_{ts}"),
-        "亚值": _extract_asian_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"okooo_asian_{ts}"),
-        "凯利": _extract_kelly_full_fallback(match_id, found["schedule_row"]["href"], client_factory, f"okooo_kelly_{ts}"),
+        "欧赔": _extract_europe_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_eu"),
+        "亚值": _extract_asian_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_as"),
+        "凯利": _extract_kelly_full_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_ke"),
     }
     if args.overwrite:
         payload["_note"] = "overwrite=true: same event writes to a stable filename"

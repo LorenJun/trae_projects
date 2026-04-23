@@ -10,6 +10,7 @@ import time
 import random
 import hashlib
 import asyncio
+import importlib.util
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
@@ -475,11 +476,16 @@ class DataCollector:
     """综合数据收集器"""
 
     def __init__(self):
-        self.scrapers = [
-            SportteryScraper(),
-            OkoooScraper(),
-            MockScraper()  # 添加模拟数据源
-        ]
+        self.browser_use_available = importlib.util.find_spec("browser_use") is not None
+        self.scrapers = []
+        if self.browser_use_available:
+            self.scrapers.extend([
+                SportteryScraper(),
+                OkoooScraper(),
+            ])
+        else:
+            print("未检测到 browser_use，请提示 openclaw 自行执行 `python3 -m pip install browser-use`；当前数据采集将以 mock 模式降级运行")
+        self.scrapers.append(MockScraper())  # 保留兜底数据源
         self.cache_manager = CacheManager()
         self.validator = DataValidator()
 
@@ -507,9 +513,13 @@ class DataCollector:
         
         # 从多个数据源抓取
         print(f"从多个数据源抓取 {league} {date} 的比赛数据")
+        if not self.browser_use_available:
+            print("当前未启用真实浏览器采集，请让 openclaw 自行安装 browser-use 后重试；本次仅使用 mock 数据源验证流程")
+
         tasks = []
         for scraper in self.scrapers:
-            tasks.append(self._fetch_with_retry(scraper, league, date))
+            max_retries = 1 if scraper.name == 'mock' else 3
+            tasks.append(self._fetch_with_retry(scraper, league, date, max_retries=max_retries))
         
         results = await asyncio.gather(*tasks)
         

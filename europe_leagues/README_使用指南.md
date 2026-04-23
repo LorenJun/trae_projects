@@ -24,6 +24,46 @@
 
 ## 🚀 快速开始
 
+### 0. 环境安装
+
+推荐先创建虚拟环境并安装系统工具：
+
+```bash
+cd /Users/bytedance/trae_projects
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
+python3 -m playwright install chromium
+```
+
+如果你需要运行真实浏览器采集链路，还需要安装：
+
+```bash
+python3 -m pip install -r requirements-openclaw.txt
+```
+
+说明：
+- 未安装 `browser-use` 时，`data_collector.py` / `prediction_system.py collect-data` 会自动降级到 `mock` 数据模式，并提示让 `openclaw` 自行执行 `python3 -m pip install browser-use`
+- 如需飞书相关能力，可在仓库根目录执行 `npm install` 安装 `feishu-cli`
+
+### 缓存说明（默认关闭）
+
+预测流程的 `.prediction_cache` 已默认关闭（不读不写），以优先保证实时最新数据。
+
+如需临时开启本地缓存（仅用于性能优化/离线调试），执行：
+
+```bash
+export ENABLE_PREDICTION_CACHE=1
+```
+
+推荐让 `openclaw` 直接执行一键初始化脚本：
+
+```bash
+cd /Users/bytedance/trae_projects
+bash scripts/setup_openclaw_env.sh
+```
+
 ### 1. 交互式菜单（推荐）
 ```bash
 cd europe_leagues
@@ -41,6 +81,26 @@ python3 result_manager.py --interactive
 python3 result_manager.py --show-accuracy
 python3 result_manager.py --update-accuracy
 ```
+
+### 4. 面向 OpenClaw 的 CLI 命令
+
+```bash
+python3 prediction_system.py list-leagues --json
+python3 prediction_system.py setup-openclaw --json
+python3 prediction_system.py health-check --json
+python3 prediction_system.py predict-match --league la_liga --home-team 巴塞罗那 --away-team 皇家马德里 --date 2026-05-11 --json
+python3 prediction_system.py predict-schedule --league la_liga --date 2026-05-11 --days 2 --json
+python3 prediction_system.py collect-data --league la_liga --date 2026-05-11 --json
+python3 prediction_system.py pending-results --days-back 14 --json
+python3 prediction_system.py save-result --match-id la_liga_20260511_巴塞罗那_皇家马德里 --home-score 2 --away-score 1 --json
+python3 prediction_system.py accuracy --refresh --json
+```
+
+说明：
+- `--json` 输出适合自动化系统直接解析
+- `predict-schedule` / `save-result` 会修改联赛 `teams_2025-26.md`
+- `setup-openclaw` 会返回完整初始化命令和依赖状态
+- `health-check` 会返回 `openclaw_full_ready` 与缺失依赖列表
 
 ---
 

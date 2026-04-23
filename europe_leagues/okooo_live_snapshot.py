@@ -78,8 +78,10 @@ def refresh_snapshot(
     home_team: str,
     away_team: str,
     match_date: str,
-    driver: str = "local-chrome",
+    driver: str = "browser-use",
     match_id: str = "",
+    headed: bool = False,
+    match_time: str = "",
 ) -> Optional[Tuple[str, Dict[str, Any]]]:
     """Run okooo_save_snapshot.py to refresh odds and return (path, payload)."""
     league_cn = LEAGUE_CODE_TO_CN.get(league_code, league_code)
@@ -99,6 +101,10 @@ def refresh_snapshot(
         match_date,
         "--overwrite",
     ]
+    if match_time:
+        cmd.extend(["--time", match_time])
+    if headed and driver == "browser-use":
+        cmd.append("--headed")
     if match_id:
         cmd.extend(["--match-id", str(match_id)])
     try:

@@ -185,11 +185,20 @@ LEAGUE_CONFIG = {
 }
 
 class PredictionCache:
-    """智能缓存系统 - 避免重复计算"""
+    """智能缓存系统 - 避免重复计算。
+
+    默认关闭（不读不写、不创建目录），以保证预测链路尽量使用实时数据。
+    如需开启（用于本地性能优化），设置环境变量：
+      ENABLE_PREDICTION_CACHE=1
+    """
     
-    def __init__(self, cache_dir: str = '.prediction_cache'):
+    def __init__(self, cache_dir: str = '.prediction_cache', enabled: Optional[bool] = None):
+        if enabled is None:
+            enabled = os.getenv('ENABLE_PREDICTION_CACHE', '0') == '1'
+        self.enabled = bool(enabled) and bool(cache_dir)
         self.cache_dir = cache_dir
-        os.makedirs(cache_dir, exist_ok=True)
+        if self.enabled:
+            os.makedirs(cache_dir, exist_ok=True)
     
     def _get_cache_key(self, func_name: str, params: Dict) -> str:
         """生成缓存键"""
@@ -199,6 +208,8 @@ class PredictionCache:
     
     def get(self, func_name: str, params: Dict, ttl_hours: int = 24) -> Optional[Any]:
         """获取缓存数据"""
+        if not self.enabled:
+            return None
         cache_key = self._get_cache_key(func_name, params)
         cache_file = os.path.join(self.cache_dir, f"{cache_key}.json")
         
@@ -222,6 +233,8 @@ class PredictionCache:
     
     def set(self, func_name: str, params: Dict, data: Any):
         """设置缓存数据"""
+        if not self.enabled:
+            return
         cache_key = self._get_cache_key(func_name, params)
         cache_file = os.path.join(self.cache_dir, f"{cache_key}.json")
         
@@ -1049,19 +1062,100 @@ class EnhancedPredictor:
             return live_matches
         return []
     
-    def predict_match(self, home_team: str, away_team: str, league_code: str, 
-                     match_date: str = None, current_odds: Optional[Dict] = None) -> Dict:
-        """预测单场比赛（增强版）"""
+    def predict_match(
+        self,
+        home_team: str,
+        away_team: str,
+        league_code: str,
+        match_date: str = None,
+        current_odds: Optional[Dict] = None,
+        match_id: str = "",
+        force_refresh_odds: bool = True,
+        okooo_driver: str = "browser-use",
+        okooo_headed: bool = False,
+        match_time: str = "",
+        league_hint: Optional[str] = None,
+        analysis_context: Optional[Dict] = None,
+    ) -> Dict:
+        """预测单场比赛（增强版）。
+
+        默认尝试实时刷新澳客赔率快照并注入 current_odds，以便赔率相似盘路与爆冷评估使用最新数据。
+        其他多维度信息（战术/战意/首发/临场变化等）可由调用方通过 analysis_context 传入。
+        """
+        if not match_date:
+            match_date = datetime.now().strftime("%Y-%m-%d")
+
+        analysis_context = analysis_context or {}
+        realtime = {
+            "okooo": {
+                "attempted": False,
+                "refreshed": False,
+                "snapshot_path": "",
+                "match_id": str(match_id or ""),
+                "driver": okooo_driver,
+                "headed": bool(okooo_headed),
+                "errors": [],
+            },
+            "context_applied": {},
+        }
+
+        # 0. 优先刷新实时赔率快照（默认开启，可用 env OKOOO_REFRESH_LIVE=0 关闭）
+        if (
+            force_refresh_odds
+            and os.environ.get("OKOOO_REFRESH_LIVE", "1") != "0"
+            and home_team
+            and away_team
+        ):
+            realtime["okooo"]["attempted"] = True
+            # Stable path: rely on okooo_save_snapshot.py to find MatchID from schedule rows.
+            # We then fallback between drivers (local-chrome <-> browser-use) if needed.
+            mid = str(match_id or "")
+            drivers = [okooo_driver]
+            if okooo_driver == "local-chrome":
+                drivers.append("browser-use")
+            elif okooo_driver == "browser-use":
+                drivers.append("local-chrome")
+
+            for drv in drivers:
+                try:
+                    refreshed = refresh_okooo_snapshot(
+                        self.base_dir,
+                        league_code,
+                        home_team,
+                        away_team,
+                        match_date,
+                        driver=drv,
+                        match_id=mid,
+                        headed=bool(okooo_headed),
+                        match_time=match_time or "",
+                    )
+                    if refreshed:
+                        path, payload = refreshed
+                        realtime["okooo"]["snapshot_path"] = path or ""
+                        realtime["okooo"]["match_id"] = str(payload.get("match_id") or mid or "")
+                        realtime["okooo"]["refreshed"] = True
+                        realtime["okooo"]["driver"] = drv
+                        current_odds = extract_okooo_current_odds(payload)
+                        break
+                except Exception as e:
+                    realtime["okooo"]["errors"].append({"driver": drv, "error": str(e)})
+                    continue
         cache_params = {
             'schema_v': 3,
             'home': home_team, 'away': away_team,
             'league': league_code, 'date': match_date,
-            'current_odds': current_odds
+            'current_odds': current_odds,
+            'match_id': realtime["okooo"]["match_id"],
+            'force_refresh_odds': force_refresh_odds,
+            'okooo_driver': okooo_driver,
+            'okooo_headed': bool(okooo_headed),
+            'analysis_context': analysis_context,
         }
         cached = self.cache.get('predict_match', cache_params)
         if cached:
             logger.info(f"使用缓存预测: {home_team} vs {away_team}")
             return cached
+        
         
         logger.info(f"开始预测: {home_team} vs {away_team} ({league_code})")
 
@@ -1078,11 +1172,19 @@ class EnhancedPredictor:
         # 3. 使用多模型融合预测
         league_avg_goals = LEAGUE_CONFIG[league_code]['avg_goals']
         
-        # 准备模型输入参数
-        home_form = 3  # 假设最近5场胜场
-        away_form = 3
-        home_motivation = 75
-        away_motivation = 75
+        # 准备模型输入参数（支持调用方覆盖）
+        home_form = int(analysis_context.get("home_form", 3))
+        away_form = int(analysis_context.get("away_form", 3))
+        home_motivation = float(analysis_context.get("home_motivation", 75))
+        away_motivation = float(analysis_context.get("away_motivation", 75))
+        realtime["context_applied"].update(
+            {
+                "home_form": home_form,
+                "away_form": away_form,
+                "home_motivation": home_motivation,
+                "away_motivation": away_motivation,
+            }
+        )
         
         # 计算预期进球
         home_lambda = home_strength['attack'] * away_strength['defense'] * league_avg_goals * 1.12
@@ -1093,6 +1195,13 @@ class EnhancedPredictor:
         away_xg = away_lambda * 0.8
         
         # 多模型预测
+        h2h_home_wins = int(analysis_context.get("h2h_home_wins", 0))
+        h2h_away_wins = int(analysis_context.get("h2h_away_wins", 0))
+        h2h_draws = int(analysis_context.get("h2h_draws", 0))
+        realtime["context_applied"].update(
+            {"h2h_home_wins": h2h_home_wins, "h2h_away_wins": h2h_away_wins, "h2h_draws": h2h_draws}
+        )
+
         fusion_result = self.model_fusion.predict(
             home_team=home_team,
             away_team=away_team,
@@ -1102,9 +1211,9 @@ class EnhancedPredictor:
             away_form=away_form,
             home_injuries=home_strength['injured_count'],
             away_injuries=away_strength['injured_count'],
-            h2h_home_wins=0,
-            h2h_away_wins=0,
-            h2h_draws=0,
+            h2h_home_wins=h2h_home_wins,
+            h2h_away_wins=h2h_away_wins,
+            h2h_draws=h2h_draws,
             home_motivation=home_motivation,
             away_motivation=away_motivation,
             home_xg=home_xg,
@@ -1197,6 +1306,8 @@ class EnhancedPredictor:
             'model_predictions': fusion_result['all_models'],
             'final_probabilities': final_prob,
             'applied_model_weights': applied_weights,
+            'realtime': realtime,
+            'analysis_context': analysis_context,
             'timestamp': datetime.now().isoformat()
         }
         

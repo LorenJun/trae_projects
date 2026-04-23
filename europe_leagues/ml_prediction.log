@@ -1144,3 +1144,89 @@ INFO:__main__:预测完成: 诺丁汉森林 vs 布莱顿 -> 主胜 (47.5%)
 INFO:__main__:开始预测: 布伦特福德 vs 富勒姆 (premier_league)
 INFO:__main__:预测完成: 布伦特福德 vs 富勒姆 -> 主胜 (47.6%)
 INFO:__main__:已更新 teams 文件: /Users/bytedance/trae_projects/europe_leagues/premier_league/teams_2025-26.md
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (47.6%)
+WARNING:enhanced_prediction_workflow:刷新实时快照失败: 巴塞罗那 vs 皇家马德里 2026-01-01: refresh_snapshot failed: rc=1
+    self.recv_header()
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/websocket/_abnf.py", line 329, in recv_header
+    header = self.recv_strict(2)
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/websocket/_abnf.py", line 418, in recv_strict
+    bytes_ = self.recv(min(16384, shortage))
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/websocket/_core.py", line 581, in _recv
+    return recv(self.sock, bufsize)
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/websocket/_socket.py", line 132, in recv
+    raise WebSocketTimeoutException(message)
+websocket._exceptions.WebSocketTimeoutException: timed out
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (47.6%)
+WARNING:enhanced_prediction_workflow:刷新实时快照失败: 马德里竞技 vs 塞维利亚 2026-01-01: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1032, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 987, in main
+    found = _find_match_id(schedule_bu, args.league, args.team1, args.team2, date_hint=args.date)
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 647, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行")
+RuntimeError: 未在联赛赛程中找到包含 马德里竞技 和 塞维利亚 的比赛行
+INFO:enhanced_prediction_workflow:开始预测: 马德里竞技 vs 塞维利亚 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 马德里竞技 vs 塞维利亚 -> 主胜 (47.6%)
+WARNING:enhanced_prediction_workflow:刷新实时快照失败: 皇家社会 vs 比利亚雷亚尔 2026-01-01: refresh_snapshot failed: rc=1
+    self.recv_header()
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/websocket/_abnf.py", line 329, in recv_header
+    header = self.recv_strict(2)
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/websocket/_abnf.py", line 418, in recv_strict
+    bytes_ = self.recv(min(16384, shortage))
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/websocket/_core.py", line 581, in _recv
+    return recv(self.sock, bufsize)
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/websocket/_socket.py", line 132, in recv
+    raise WebSocketTimeoutException(message)
+websocket._exceptions.WebSocketTimeoutException: timed out
+INFO:enhanced_prediction_workflow:开始预测: 皇家社会 vs 比利亚雷亚尔 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 皇家社会 vs 比利亚雷亚尔 -> 主胜 (47.6%)
+WARNING:enhanced_prediction_workflow:刷新实时快照失败: 贝蒂斯 vs 瓦伦西亚 2026-01-01: refresh_snapshot failed: rc=1
+    self.recv_header()
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/websocket/_abnf.py", line 329, in recv_header
+    header = self.recv_strict(2)
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/websocket/_abnf.py", line 418, in recv_strict
+    bytes_ = self.recv(min(16384, shortage))
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/websocket/_core.py", line 581, in _recv
+    return recv(self.sock, bufsize)
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/websocket/_socket.py", line 132, in recv
+    raise WebSocketTimeoutException(message)
+websocket._exceptions.WebSocketTimeoutException: timed out
+INFO:enhanced_prediction_workflow:开始预测: 贝蒂斯 vs 瓦伦西亚 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 贝蒂斯 vs 瓦伦西亚 -> 主胜 (51.5%)
+INFO:enhanced_prediction_workflow:开始预测: 毕尔巴鄂竞技 vs 奥萨苏纳 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 毕尔巴鄂竞技 vs 奥萨苏纳 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:已更新 teams 文件: /Users/bytedance/trae_projects/europe_leagues/la_liga/teams_2025-26.md
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: la_liga_20260101_巴塞罗那_皇家马德里
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: la_liga_20260101_马德里竞技_塞维利亚
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: la_liga_20260101_皇家社会_比利亚雷亚尔
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: la_liga_20260101_贝蒂斯_瓦伦西亚
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: la_liga_20260101_毕尔巴鄂竞技_奥萨苏纳
+INFO:enhanced_prediction_workflow:预测已保存到历史数据库
+INFO:result_manager:准确率统计已更新
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (49.0%)
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (47.6%)
