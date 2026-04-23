@@ -18,7 +18,7 @@
 - **结果追踪**: 自动保存预测，对比实际结果
 - **准确率统计**: 按联赛、按模型统计准确率
 - **爆冷分析**: 基于历史案例分析爆冷可能性
-- **美观报告**: 生成Markdown格式的预测报告
+- **预测写回**: 直接写回各联赛 `teams_2025-26.md`（赛程表备注列）
 
 ---
 
@@ -54,7 +54,6 @@ python3 result_manager.py --update-accuracy
 | `enhanced_prediction_workflow.py` | 增强预测主程序 |
 | `result_manager.py` | 结果管理和准确率统计 |
 | `ml_prediction_models.py` | 10种预测模型 |
-| `prediction_history_db.py` | 历史数据库管理 |
 | `optimized_prediction_workflow.py` | 原始预测程序 |
 
 ### 数据目录
@@ -65,7 +64,7 @@ europe_leagues/
 ├── bundesliga/       # 德甲
 ├── ligue_1/          # 法甲
 ├── la_liga/          # 西甲
-└── prediction_history/  # 历史数据
+└── .okooo-scraper/      # 运行时产物（快照/日志/准确率输出）
 ```
 
 ---
@@ -74,18 +73,17 @@ europe_leagues/
 
 ### 1. 预测阶段
 1. 系统生成未来几天的比赛预测
-2. 保存预测到历史数据库
-3. 生成Markdown预测报告
+2. 将预测结果写回各联赛 `teams_2025-26.md` 的赛程表“备注”列
 
 ### 2. 比赛结束后
-1. 输入实际比赛结果
-2. 系统自动对比预测与结果
-3. 更新各预测的正确性标记
+1. 更新赛程表“比分”列为真实赛果（`x-y`）
+2. 可在备注列追加 `✅/❌`（或由脚本统一标注）
+3. 系统根据 `teams_2025-26.md` 直接统计准确率
 
 ### 3. 准确率统计
-1. 系统自动计算整体准确率
-2. 按联赛、按模型统计准确率
-3. 生成准确率报告
+1. 系统自动计算整体准确率（直接解析 `teams_2025-26.md`）
+2. 按联赛统计准确率
+3. 输出到 `europe_leagues/.okooo-scraper/runtime/accuracy_stats.json`
 
 ---
 
@@ -120,9 +118,8 @@ python3 -c "from result_manager import ResultManager, print_accuracy_report; man
 
 ## 📊 预测报告说明
 
-生成的预测报告包含：
+写回到 `teams_2025-26.md` 备注列的预测信息包含（取决于预测器版本与数据可用性）：
 
-- 比赛对阵
 - 预测结果（主胜/平局/客胜）
 - 信心指数
 - 概率分布可视化
@@ -130,7 +127,7 @@ python3 -c "from result_manager import ResultManager, print_accuracy_report; man
 - 大小球分析
 - 球队实力对比
 - 爆冷风险分析
-- 各模型预测详情
+- 动态调权诊断（如可用）
 
 ---
 

@@ -16,52 +16,38 @@ purpose: "负责追踪比赛结果、统计预测准确率、生成优化建议"
 
 ### 预测数据记录
 
-**文件位置**: `europe_leagues/[联赛]/analysis/predictions/`
-
-**文件命名**: `predictions_YYYY-MM.md` (按月归档)
+**文件位置**: `europe_leagues/<league>/teams_2025-26.md`
 
 **数据格式**:
 
+赛前预测写入赛程表“备注”列，建议统一为机器可解析格式：
+
 | 字段 | 类型 | 说明 | 必填 |
 |------|------|------|------|
-| 预测ID | String | 唯一标识 | ✅ |
-| 预测日期 | Date | YYYY-MM-DD | ✅ |
-| 比赛日期 | Date | YYYY-MM-DD | ✅ |
+| 比赛日期 | String | YYYY-MM-DD | ✅ |
 | 主队 | String | 主队名称 | ✅ |
 | 客队 | String | 客队名称 | ✅ |
-| 联赛 | String | 联赛名称 | ✅ |
 | 预测结果 | Enum | 主胜/平局/客胜 | ✅ |
-| 预测比分 | String | 如 "2-1" | ✅ |
-| 预测概率 | Float | 0.0-1.0 | ✅ |
-| 大小球预测 | Enum | 大球/小球 | ✅ |
-| 让球盘预测 | String | 如 "利物浦-0.5" | ✅ |
-| 投注建议 | String | 描述文字 | ✅ |
-| 分析报告链接 | String | 报告文件路径 | - |
+| 信心 | Float | 0.0-1.0 | - |
+| 爆冷等级 | Enum | 低/中/高 | - |
+| 赛后标记 | Enum | ✅/❌（可选） | - |
 
 ---
 
 ### 实际结果记录
 
-**文件位置**: `europe_leagues/[联赛]/analysis/results/`
-
-**文件命名**: `results_YYYY-MM.md` (按月归档)
+**文件位置**: `europe_leagues/<league>/teams_2025-26.md`
 
 **数据格式**:
 
+赛后结果写入赛程表“比分”列：
+
 | 字段 | 类型 | 说明 | 必填 |
 |------|------|------|------|
-| 预测ID | String | 关联预测记录 | ✅ |
-| 比赛日期 | Date | YYYY-MM-DD | ✅ |
+| 比赛日期 | String | YYYY-MM-DD | ✅ |
 | 主队 | String | 主队名称 | ✅ |
 | 客队 | String | 客队名称 | ✅ |
-| 联赛 | String | 联赛名称 | ✅ |
-| 实际结果 | Enum | 主胜/平局/客胜 | ✅ |
-| 实际比分 | String | 如 "2-0" | ✅ |
-| 主队进球 | Int | 主队进球数 | ✅ |
-| 客队进球 | Int | 客队进球数 | ✅ |
-| 总进球 | Int | 总进球数 | ✅ |
-| 比赛状态 | Enum | 已结束/未开始 | ✅ |
-| 记录日期 | Date | 记录日期 | ✅ |
+| 实际比分 | String | `x-y` | ✅ |
 
 ---
 
@@ -96,6 +82,15 @@ purpose: "负责追踪比赛结果、统计预测准确率、生成优化建议"
 | 总预测数 | COUNT(*) | 所有预测场次 |
 | 正确预测数 | COUNT(正确) | 预测正确的场次 |
 | 准确率 | 正确数 / 总数 | 0.0-1.0 |
+
+统计入口（直接解析 `teams_2025-26.md`）：
+```bash
+cd europe_leagues
+python3 result_manager.py --update-accuracy
+```
+
+输出文件：
+- `europe_leagues/.okooo-scraper/runtime/accuracy_stats.json`
 
 ---
 

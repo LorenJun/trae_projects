@@ -49,7 +49,7 @@ def run_enhanced_system(league_code=None, days=3):
             return
         
         base_date = datetime.now()
-        all_reports = []
+        updated_files = []
         
         for l_code in leagues:
             print(f"📊 处理 {LEAGUE_CONFIG[l_code]['name']}...")
@@ -58,14 +58,14 @@ def run_enhanced_system(league_code=None, days=3):
                 match_date = (base_date + timedelta(days=day_offset)).strftime('%Y-%m-%d')
                 print(f"  📅 生成 {match_date} 的预测...")
                 
-                report_file = predictor.generate_prediction_report(l_code, match_date)
-                if report_file:
-                    print(f"  ✅ {os.path.basename(report_file)}")
-                    all_reports.append(report_file)
+                teams_file = predictor.generate_prediction_report(l_code, match_date)
+                if teams_file:
+                    print(f"  ✅ 已更新 {os.path.basename(teams_file)}")
+                    updated_files.append(teams_file)
         
         print()
         print("="*80)
-        print(f"🎉 完成！共生成 {len(all_reports)} 份预测报告")
+        print(f"🎉 完成！共更新 {len(updated_files)} 个 teams_2025-26.md 文件")
         print("="*80)
         
     except Exception as e:

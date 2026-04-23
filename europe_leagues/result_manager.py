@@ -35,24 +35,58 @@ LEAGUE_NAMES = {
 class ResultManager:
     """结果管理器"""
     
-    def __init__(self, db_path: str = 'prediction_history'):
-        self.db_path = db_path
-        self.predictions_file = os.path.join(db_path, 'predictions.json')
-        self.results_file = os.path.join(db_path, 'results.json')
-        self.accuracy_file = os.path.join(db_path, 'accuracy_stats.json')
-        self._init_files()
-    
-    def _init_files(self):
-        """初始化数据文件"""
-        os.makedirs(self.db_path, exist_ok=True)
-        
-        for file_path in [self.predictions_file, self.results_file, self.accuracy_file]:
-            if not os.path.exists(file_path):
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    if 'accuracy' in file_path:
-                        json.dump({}, f)
-                    else:
-                        json.dump([], f)
+    def __init__(self):
+        # prediction_history/ is deprecated; teams_2025-26.md is the single source of truth.
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        runtime_dir = os.path.join(base_dir, '.okooo-scraper', 'runtime')
+        os.makedirs(runtime_dir, exist_ok=True)
+        self.accuracy_file = os.path.join(runtime_dir, 'accuracy_stats.json')
+
+    def load_predictions(self) -> List[Dict]:
+        """Derive predictions from teams_2025-26.md note columns (no prediction_history/)."""
+        preds: List[Dict] = []
+        for league_code, match_date, match_time, home_team, score_text, away_team, note in self._iter_teams_rows():
+            predicted_winner = self._parse_predicted_winner(note)
+            if predicted_winner not in ('home', 'draw', 'away'):
+                continue
+            preds.append({
+                'match_id': self._match_id_for_teams_row(league_code, match_date, home_team, away_team),
+                'league': league_code,
+                'league_name': LEAGUE_NAMES.get(league_code, league_code),
+                'home_team': home_team,
+                'away_team': away_team,
+                'match_date': match_date,
+                'match_time': match_time,
+                'predicted_winner': predicted_winner,
+                'saved_at': match_date,
+            })
+        return preds
+
+    def load_results(self) -> List[Dict]:
+        """Derive completed results from teams_2025-26.md score columns (no prediction_history/)."""
+        results: List[Dict] = []
+        for league_code, match_date, match_time, home_team, score_text, away_team, note in self._iter_teams_rows():
+            if not re.match(r'^\d+\s*-\s*\d+$', score_text or ''):
+                continue
+            actual_winner = self._parse_score_to_winner(score_text)
+            if actual_winner not in ('home', 'draw', 'away'):
+                continue
+            hs, as_ = [int(x.strip()) for x in score_text.split('-')]
+            results.append({
+                'match_id': self._match_id_for_teams_row(league_code, match_date, home_team, away_team),
+                'league': league_code,
+                'home_team': home_team,
+                'away_team': away_team,
+                'match_date': match_date,
+                'match_time': match_time,
+                'actual_winner': actual_winner,
+                'actual_score': f"{hs}-{as_}",
+                'home_score': hs,
+                'away_score': as_,
+                'result_status': 'completed',
+                'saved_at': match_date,
+            })
+        return results
 
     def _teams_md_path(self, league_code: str) -> str:
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -78,12 +112,18 @@ class ResultManager:
             return 'away'
         return 'draw'
 
-    def sync_results_from_teams_md(self) -> int:
-        """Sync completed match results from each league's teams_2025-26.md into results.json."""
-        results = self.load_results()
-        by_id = {r.get('match_id'): r for r in results if r.get('match_id')}
-        changed = 0
+    def _parse_predicted_winner(self, note: str) -> Optional[str]:
+        """Parse predicted winner from note column."""
+        if not isinstance(note, str):
+            return None
+        m = re.search(r'预测[:\s]*(主胜|平局|客胜)', note)
+        if not m:
+            return None
+        val = m.group(1)
+        return {'主胜': 'home', '平局': 'draw', '客胜': 'away'}.get(val)
 
+    def _iter_teams_rows(self):
+        """Yield (league, date, time, home, score, away, note)."""
         for league_code in LEAGUE_NAMES.keys():
             path = self._teams_md_path(league_code)
             if not os.path.exists(path):
@@ -92,48 +132,16 @@ class ResultManager:
                 lines = open(path, 'r', encoding='utf-8').read().splitlines()
             except Exception:
                 continue
-
             for line in lines:
                 if not line.strip().startswith('|'):
                     continue
                 cols = [c.strip() for c in line.strip().strip('|').split('|')]
-                # schedule table format: 日期 | 时间 | 主队 | 比分 | 客队 | 备注
                 if len(cols) != 6:
                     continue
                 match_date, match_time, home_team, score_text, away_team, note = cols
                 if not re.match(r'^\d{4}-\d{2}-\d{2}$', match_date):
                     continue
-                if not re.match(r'^\d+\s*-\s*\d+$', score_text):
-                    continue
-                actual_winner = self._parse_score_to_winner(score_text)
-                if actual_winner is None:
-                    continue
-                hs, as_ = [int(x.strip()) for x in score_text.split('-')]
-                match_id = self._match_id_for_teams_row(league_code, match_date, home_team, away_team)
-                result_data = {
-                    'match_id': match_id,
-                    'league': league_code,
-                    'home_team': home_team,
-                    'away_team': away_team,
-                    'match_date': match_date,
-                    'match_time': match_time,
-                    'actual_winner': actual_winner,
-                    'actual_score': f"{hs}-{as_}",
-                    'home_score': hs,
-                    'away_score': as_,
-                    'result_status': 'completed',
-                    'saved_at': datetime.now().isoformat(),
-                }
-                prev = by_id.get(match_id)
-                if prev != result_data:
-                    by_id[match_id] = result_data
-                    changed += 1
-
-        if changed:
-            with open(self.results_file, 'w', encoding='utf-8') as f:
-                json.dump(list(by_id.values()), f, ensure_ascii=False, indent=2)
-            logger.info(f"已从 teams_2025-26.md 同步 {changed} 条真实赛果")
-        return changed
+                yield league_code, match_date, match_time, home_team, score_text, away_team, note
     
     def load_predictions(self) -> List[Dict]:
         """加载所有预测"""
@@ -238,93 +246,38 @@ class ResultManager:
     
     def calculate_accuracy(self, league: Optional[str] = None, days: int = 30) -> Dict:
         """计算准确率"""
-        predictions = self.load_predictions()
-        results = self.load_results()
-        
-        result_dict = {r['match_id']: r for r in results}
-        
+        # Source of truth: teams_2025-26.md
         total = 0
         correct = 0
         total_score_pred = 0
         correct_score = 0
-        model_total: Dict[str, int] = {}
-        model_correct: Dict[str, int] = {}
         
         cutoff = datetime.now().timestamp() - (days * 86400)
 
         valid_winners = {'home', 'draw', 'away'}
-        
-        for pred in predictions:
-            match_id = pred.get('match_id', '')
-            # 过滤占位比赛
-            if not match_id or '------' in match_id:
-                continue
-            
-            if league and pred.get('league') != league:
-                continue
-            
-            # 检查时间范围
-            saved_at = pred.get('saved_at', '')
-            if saved_at:
-                try:
-                    saved_time = datetime.fromisoformat(saved_at).timestamp()
-                    if saved_time < cutoff:
-                        continue
-                except:
-                    pass
-            
-            if match_id not in result_dict:
-                continue
-            
-            result = result_dict[match_id]
-            actual_winner = result.get('actual_winner')
-            # 仅统计已确认真实赛果的场次，避免“待进行/已结束/空值”污染准确率
-            if actual_winner not in valid_winners:
+
+        for league_code, match_date, _match_time, home_team, score_text, away_team, note in self._iter_teams_rows():
+            if league and league_code != league:
                 continue
 
+            # Time window filter based on match_date
+            try:
+                saved_time = datetime.fromisoformat(match_date).timestamp()
+                if saved_time < cutoff:
+                    continue
+            except Exception:
+                pass
+
+            predicted_winner = self._parse_predicted_winner(note)
+            actual_winner = self._parse_score_to_winner(score_text) if re.match(r'^\d+\s*-\s*\d+$', score_text or '') else None
+            if predicted_winner not in valid_winners or actual_winner not in valid_winners:
+                continue
             total += 1
-            
-            predicted_winner = pred.get('predicted_winner')
-            
             if predicted_winner == actual_winner:
                 correct += 1
-
-            # 统计各子模型的胜平负方向准确率（用于动态调权）
-            full_pred = pred.get('full_prediction') or {}
-            per_model = full_pred.get('model_predictions') or pred.get('model_predictions') or {}
-            if isinstance(per_model, dict):
-                for model_name, mp in per_model.items():
-                    if not isinstance(mp, dict):
-                        continue
-                    if not all(k in mp for k in ('home_win', 'draw', 'away_win')):
-                        continue
-                    model_total[model_name] = model_total.get(model_name, 0) + 1
-                    winner = max(
-                        (('home', mp.get('home_win')), ('draw', mp.get('draw')), ('away', mp.get('away_win'))),
-                        key=lambda x: (x[1] if isinstance(x[1], (int, float)) else -1)
-                    )[0]
-                    if winner == actual_winner:
-                        model_correct[model_name] = model_correct.get(model_name, 0) + 1
-            
-            # 检查比分预测
-            predicted_score = pred.get('predicted_score', '')
-            actual_score = result.get('actual_score', '')
-            if (
-                predicted_score and actual_score and
-                isinstance(actual_score, str) and '-' in actual_score
-            ):
-                total_score_pred += 1
-                if actual_score in predicted_score:
-                    correct_score += 1
         
         accuracy = (correct / total * 100) if total > 0 else 0
         score_accuracy = (correct_score / total_score_pred * 100) if total_score_pred > 0 else 0
-
-        model_accuracy = {}
-        for model_name, mt in model_total.items():
-            if mt <= 0:
-                continue
-            model_accuracy[model_name] = round(model_correct.get(model_name, 0) / mt, 4)
         
         return {
             'league': league,
@@ -334,14 +287,13 @@ class ResultManager:
             'total_score_predictions': total_score_pred,
             'correct_score_predictions': correct_score,
             'score_accuracy': round(score_accuracy, 2),
-            'model_accuracy': model_accuracy,
+            'model_accuracy': {},
             'calculated_at': datetime.now().isoformat(),
             'days': days
         }
     
     def update_accuracy_stats(self):
         """更新准确率统计"""
-        self.sync_results_from_teams_md()
         stats = {
             'overall': self.calculate_accuracy(),
             'by_league': {},

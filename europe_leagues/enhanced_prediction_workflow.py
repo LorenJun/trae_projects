@@ -11,6 +11,7 @@ import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import logging
+import re
 from glob import glob
 
 # 添加项目路径
@@ -59,6 +60,23 @@ def _update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str,
     def norm(s: str) -> str:
         return (s or '').strip().replace(' ', '')
 
+    def strip_existing_prediction_fragments(note: str) -> str:
+        """Remove any existing prediction fragments from note to avoid duplicate write-backs.
+
+        Supports both formats:
+        - New: `...；预测:主胜 信心:0.48 爆冷:低`
+        - Legacy: `.../预测主胜✅` / `.../预测平局❌` / `预测 客胜`
+        """
+        if not note:
+            return ''
+        base = note
+        if '预测:' in base:
+            base = base.split('预测:')[0]
+        base = re.sub(r'预测\s*(主胜|平局|客胜)\s*[✅❌]?', '', base)
+        base = re.sub(r'\s+', ' ', base).strip()
+        base = base.rstrip('；; /／').strip()
+        return base
+
     pred_index = {}
     for p in predictions:
         h = norm(p.get('home_team'))
@@ -86,6 +104,11 @@ def _update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str,
             out_lines.append(line)
             continue
 
+        # Don't rewrite finished matches (their notes may contain manual correctness marks like ✅/❌).
+        if re.match(r'^\d+\s*-\s*\d+$', _score or ''):
+            out_lines.append(line)
+            continue
+
         level = ''
         upset = pred.get('upset_potential')
         if isinstance(upset, dict):
@@ -98,10 +121,7 @@ def _update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str,
         if isinstance(diag, dict) and 'has_enough_samples' in diag:
             dyn = '动态调权:已生效' if diag.get('has_enough_samples') else '动态调权:样本不足'
 
-        base_note = note
-        if '预测:' in base_note:
-            base_note = base_note.split('预测:')[0].rstrip('；; ').strip()
-        merged = base_note.rstrip('；; ').strip()
+        merged = strip_existing_prediction_fragments(note).rstrip('；; ').strip()
         pred_note = f"预测:{pred.get('prediction')} 信心:{conf:.2f} 爆冷:{level or '-'}{(' ' + dyn) if dyn else ''}".strip()
         cells[5] = f"{merged}；{pred_note}" if merged else pred_note
         out_lines.append("| " + " | ".join(cells) + " |\n")
@@ -218,7 +238,10 @@ class PredictionCache:
 class DynamicWeightAdjuster:
     """动态权重调整器 - 根据历史准确率调整模型权重"""
     
-    def __init__(self, history_file: str = 'prediction_history/accuracy_stats.json'):
+    def __init__(self, history_file: str = ''):
+        if not history_file:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            history_file = os.path.join(base_dir, '.okooo-scraper', 'runtime', 'accuracy_stats.json')
         self.history_file = history_file
         self.accuracy_history = self._load_history()
         # 调权保护机制：样本不足时避免“乱调”

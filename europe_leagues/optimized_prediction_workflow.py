@@ -8,6 +8,7 @@ import os
 import json
 from datetime import datetime, timedelta
 import logging
+import re
 from glob import glob
 
 # 优先复用增强版预测器（包含：动态调权 + 历史相似盘路 + 更完整的爆冷分析）
@@ -427,6 +428,30 @@ def _format_prediction_note(pred: dict) -> str:
     return f"预测:{pred.get('prediction')} 信心:{float(pred.get('confidence') or 0.0):.2f} 爆冷:{level or '-'}{(' ' + dyn) if dyn else ''}".strip()
 
 
+def _strip_existing_prediction_fragments(note: str) -> str:
+    """Remove any existing prediction fragments from note to avoid duplicate write-backs.
+
+    Supports both formats:
+    - New: `...；预测:主胜 信心:0.48 爆冷:低`
+    - Legacy: `.../预测主胜✅` / `.../预测平局❌` / `预测 客胜`
+    """
+    if not note:
+        return ''
+
+    base = note
+    # New machine-parseable format: drop everything after the first `预测:`
+    if '预测:' in base:
+        base = base.split('预测:')[0]
+
+    # Legacy format: remove only the winner token (keep other commentary if any).
+    base = re.sub(r'预测\s*(主胜|平局|客胜)\s*[✅❌]?', '', base)
+
+    # Cleanup: normalize whitespace and strip trailing separators.
+    base = re.sub(r'\s+', ' ', base).strip()
+    base = base.rstrip('；; /／').strip()
+    return base
+
+
 def update_teams_md_with_predictions(league_code: str, match_date: str, predictions: list[dict]):
     """Update europe_leagues/<league>/teams_2025-26.md by writing prediction into schedule table note column."""
     teams_path = os.path.join(SCRIPT_DIR, league_code, 'teams_2025-26.md')
@@ -464,9 +489,12 @@ def update_teams_md_with_predictions(league_code: str, match_date: str, predicti
             out_lines.append(line)
             continue
 
-        base_note = note
-        if '预测:' in base_note:
-            base_note = base_note.split('预测:')[0].rstrip('；; ').strip()
+        # Don't rewrite finished matches (their notes may contain manual correctness marks like ✅/❌).
+        if re.match(r'^\d+\s*-\s*\d+$', _score or ''):
+            out_lines.append(line)
+            continue
+
+        base_note = _strip_existing_prediction_fragments(note)
         new_note = _format_prediction_note(pred)
         merged = base_note.rstrip('；; ').strip()
         cells[5] = f"{merged}；{new_note}" if merged else new_note

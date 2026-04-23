@@ -1106,3 +1106,41 @@ INFO:enhanced_prediction_workflow:生成预测报告: /Users/bytedance/trae_proj
 INFO:result_manager:保存预测: premier_league_20260421_水晶宫_西汉姆联
 INFO:enhanced_prediction_workflow:预测已保存到历史数据库
 INFO:result_manager:准确率统计已更新
+INFO:__main__:开始预测: 切尔西 vs 曼联 (premier_league)
+INFO:__main__:预测完成: 切尔西 vs 曼联 -> 主胜 (47.6%)
+WARNING:__main__:刷新实时快照失败: 利物浦 vs 阿森纳 2026-04-23: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1032, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 987, in main
+    found = _find_match_id(schedule_bu, args.league, args.team1, args.team2, date_hint=args.date)
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 647, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行")
+RuntimeError: 未在联赛赛程中找到包含 利物浦 和 阿森纳 的比赛行
+INFO:__main__:开始预测: 利物浦 vs 阿森纳 (premier_league)
+INFO:__main__:预测完成: 利物浦 vs 阿森纳 -> 主胜 (47.3%)
+WARNING:__main__:刷新实时快照失败: 曼城 vs 阿斯顿维拉 2026-04-23: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1032, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 987, in main
+    found = _find_match_id(schedule_bu, args.league, args.team1, args.team2, date_hint=args.date)
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 647, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行")
+RuntimeError: 未在联赛赛程中找到包含 曼城 和 阿斯顿维拉 的比赛行
+INFO:__main__:开始预测: 曼城 vs 阿斯顿维拉 (premier_league)
+INFO:__main__:预测完成: 曼城 vs 阿斯顿维拉 -> 主胜 (47.6%)
+WARNING:__main__:刷新实时快照失败: 诺丁汉森林 vs 布莱顿 2026-04-23: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1032, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 987, in main
+    found = _find_match_id(schedule_bu, args.league, args.team1, args.team2, date_hint=args.date)
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 647, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行")
+RuntimeError: 未在联赛赛程中找到包含 诺丁汉森林 和 布莱顿 的比赛行
+INFO:__main__:开始预测: 诺丁汉森林 vs 布莱顿 (premier_league)
+INFO:__main__:预测完成: 诺丁汉森林 vs 布莱顿 -> 主胜 (47.5%)
+INFO:__main__:开始预测: 布伦特福德 vs 富勒姆 (premier_league)
+INFO:__main__:预测完成: 布伦特福德 vs 富勒姆 -> 主胜 (47.6%)
+INFO:__main__:已更新 teams 文件: /Users/bytedance/trae_projects/europe_leagues/premier_league/teams_2025-26.md

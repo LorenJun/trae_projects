@@ -169,9 +169,9 @@ python3 europe_leagues/okooo_fetch_daily_schedule.py --league 西甲 --date 2026
 
 已接入的代码：
 - [result_manager.py](file:///Users/bytedance/trae_projects/europe_leagues/result_manager.py)
-  - `update_accuracy_stats()` 会先从 `teams_2025-26.md` 同步真实赛果
+  - `update_accuracy_stats()` 直接从 `teams_2025-26.md` 解析预测与赛果并统计准确率
 - [import_data.py](file:///Users/bytedance/trae_projects/europe_leagues/import_data.py)
-  - `parse_teams_schedule_file()` 直接从 `teams_2025-26.md` 解析历史预测与赛果
+  - `parse_teams_schedule_file()` 可用于解析 `teams_2025-26.md` 中的历史预测与赛果
 
 ### 已废弃/已删除的旧路径
 以下旧路径不再作为主流程数据源：

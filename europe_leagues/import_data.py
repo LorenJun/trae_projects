@@ -8,7 +8,6 @@ import os
 import json
 import re
 from datetime import datetime
-from prediction_history_db import PredictionHistoryDB
 
 
 def parse_teams_schedule_file(file_path: str) -> tuple:
@@ -395,34 +394,28 @@ def parse_prediction_file(file_path: str) -> tuple:
 
 
 def import_prediction_files():
-    """导入各联赛 teams_2025-26.md 中的历史预测与赛果。"""
-    db = PredictionHistoryDB()
+    """已废弃：prediction_history/ 不再作为数据源或存储。
+
+    teams_2025-26.md 是唯一数据源；准确率由 result_manager.py 直接解析计算。
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
     
     leagues = ['premier_league', 'serie_a', 'bundesliga', 'ligue_1', 'la_liga']
     
+    total_preds = 0
+    total_results = 0
     for league in leagues:
-        teams_file = f"{league}/teams_2025-26.md"
+        teams_file = os.path.join(base_dir, league, "teams_2025-26.md")
         if not os.path.exists(teams_file):
             continue
 
         print(f"处理文件: {teams_file}")
         predictions, results = parse_teams_schedule_file(teams_file)
+        total_preds += len(predictions)
+        total_results += len(results)
+        print(f"  解析预测: {len(predictions)} 条，解析赛果: {len(results)} 条")
 
-        for prediction in predictions:
-            existing = db.get_prediction(prediction['match_id'])
-            if not existing:
-                db.save_prediction(prediction)
-                print(f"  保存预测: {prediction['home_team']} vs {prediction['away_team']}")
-            else:
-                print(f"  预测已存在: {prediction['match_id']}")
-
-        for result in results:
-            existing = db.get_result(result['match_id'])
-            if not existing:
-                db.save_result(result['match_id'], result)
-                print(f"  保存结果: {result['home_team']} vs {result['away_team']} - {result['actual_score']}")
-            else:
-                print(f"  结果已存在: {result['match_id']}")
+    print(f"\n汇总：预测 {total_preds} 条，赛果 {total_results} 条（未写入 prediction_history/）")
 
 
 def import_player_data():
@@ -480,16 +473,12 @@ def import_upset_cases():
 
 def update_web_data():
     """更新Web界面数据"""
-    # 收集所有数据
-    db = PredictionHistoryDB()
-    
-    # 生成准确率报告
-    report = db.generate_accuracy_report()
-    print("\n" + report)
-    
-    # 更新准确率统计
-    stats = db.update_accuracy_stats()
-    print("\n准确率统计已更新")
+    # prediction_history/ 已废弃；这里仅更新运行时准确率统计文件
+    from result_manager import ResultManager, print_accuracy_report
+    manager = ResultManager()
+    stats = manager.update_accuracy_stats()
+    print_accuracy_report(stats)
+    print("\n准确率统计已更新（来源：teams_2025-26.md）")
 
 
 def main():
@@ -508,8 +497,8 @@ def main():
     print("\n3. 导入爆冷案例库")
     import_upset_cases()
     
-    # 4. 更新Web数据
-    print("\n4. 更新Web界面数据")
+    # 4. 更新准确率统计（基于 teams_2025-26.md）
+    print("\n4. 更新准确率统计")
     update_web_data()
     
     print("\n数据导入完成！")

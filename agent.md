@@ -1,9 +1,10 @@
 ---
 project_name: "Football Prediction Agent"
-version: "1.0.0"
+version: "1.1.0"
 author: "LorenJun"
 email: "jl.07221@qq.com"
 created_date: "2026-04-18"
+last_updated_date: "2026-04-22"
 ---
 
 # 🏆 足球比赛预测分析Agent
@@ -50,6 +51,10 @@ trae_projects/
 │   ├── serie_a/                      # 意甲
 │   ├── bundesliga/                   # 德甲
 │   ├── ligue_1/                      # 法甲
+│   ├── .okooo-scraper/               # 运行时产物（快照/日志/赛程抓取结果）
+│   ├── okooo_save_snapshot.py        # 抓澳客实时赔率快照
+│   ├── optimized_prediction_workflow.py # 预测流程（写回 teams_2025-26.md）
+│   ├── enhanced_prediction_workflow.py  # 增强预测流程（写回 teams_2025-26.md）
 │   └── README.md                     # 联赛数据说明
 │
 ├── docs/                             # 文档目录
@@ -59,14 +64,26 @@ trae_projects/
 │   │   └── workflow.md               # 工作流程规范
 │   └── tutorials/                    # 教程文档
 │
-├── scripts/                          # 脚本目录
-│   ├── poisson_analysis.py           # 泊松分布分析
-│   └── analyze_prediction_accuracy.py # 准确率分析
-│
-└── logs/                             # 日志目录（按需创建）
-    ├── predictions/
-    └── analysis/
+├── poisson_analysis.py               # 泊松分布分析
+├── analyze_prediction_accuracy.py    # 历史准确率分析脚本（旧）
+├── predictions/                      # 历史输出（旧）
+└── docs/                             # 文档目录（标准/教程）
 ```
+
+---
+
+## 单一事实来源（重要）
+
+项目当前以 `europe_leagues/<league>/teams_2025-26.md` 作为单一事实来源（Single Source of Truth）：
+- 赛程表（6列）：`日期 | 时间 | 主队 | 比分 | 客队 | 备注`
+- 比分列：已完赛填写 `x-y`，未完赛统一为 `-`
+- 备注列：写入赛前预测信息（机器可解析），赛后可追加 `✅/❌`
+- 文件内 `## 预测记录` 段落用于复盘/沉淀经验（可人读，也可作为扩展学习输入）
+
+已废弃的数据目录/模板（仓库可能仍保留部分历史文件，但不再作为主流程输入）：
+- `prediction_history/`（已迁移并删除）
+- `analysis/results/results_template.md`（已删除）
+- `analysis/predictions/*_predictions*.md`（预测流程不再生成）
 
 ---
 
@@ -132,7 +149,7 @@ Step 3: 赔率分析
         ↓
 Step 4: 综合预测
         ↓
-   [生成预测报告]
+   [写回 teams_2025-26.md 备注列]
         ↓
 Step 5: 赛后追踪
         ↓
@@ -140,6 +157,37 @@ Step 5: 赛后追踪
         ↓
 Step 6: 准确率统计与优化
 ```
+
+---
+
+## 常用命令（可跑通）
+
+在项目根目录 `/Users/bytedance/trae_projects`：
+
+### 1) 抓实时赔率快照（澳客）
+```bash
+cd europe_leagues
+python3 okooo_save_snapshot.py --driver local-chrome --league 西甲 --team1 '毕尔巴鄂竞技' --team2 '奥萨苏纳' --date 2026-04-22
+```
+
+### 2) 生成预测并写回联赛文档
+```bash
+cd europe_leagues
+python3 -c "from optimized_prediction_workflow import generate_prediction_report; print(generate_prediction_report('la_liga','2026-04-22'))"
+```
+
+### 3) 统计准确率（直接解析 teams_2025-26.md）
+```bash
+cd europe_leagues
+python3 result_manager.py --update-accuracy
+```
+
+输出位置：
+- `europe_leagues/.okooo-scraper/runtime/accuracy_stats.json`
+
+运行时产物（不入库）：
+- `europe_leagues/.okooo-scraper/`
+- `.prediction_cache/`
 
 ---
 
@@ -204,7 +252,7 @@ Step 6: 准确率统计与优化
 
 - **维护者**: LorenJun
 - **邮箱**: jl.07221@qq.com
-- **项目路径**: /Users/lin/trae_projects
+- **项目路径**: /Users/bytedance/trae_projects
 
 ---
 
