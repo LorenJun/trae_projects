@@ -776,6 +776,172 @@ class UpsetAnalyzer:
                 logger.warning(f"加载爆冷案例库失败: {e}")
         return []
     
+    def analyze_handicap_vs_strength(
+        self,
+        home_team: str,
+        away_team: str,
+        strength_diff: float,
+        asian_handicap: Optional[Dict] = None,
+        european_odds: Optional[Dict] = None
+    ) -> Dict:
+        """分析强队实力指数与让步数据是否匹配 - 新增爆冷预警核心逻辑
+        
+        当强队实力明显占优但盘口/赔率让步不足时，触发爆冷预警
+        
+        Args:
+            home_team: 主队名称
+            away_team: 客队名称
+            strength_diff: 实力差距 (正值表示主队强，负值表示客队强)
+            asian_handicap: 亚盘数据 {'initial': {...}, 'final': {...}}
+            european_odds: 欧赔数据 {'initial': {...}, 'final': {...}}
+            
+        Returns:
+            {
+                'mismatch_detected': bool,  # 是否检测到不匹配
+                'mismatch_level': str,      # '高'/'中'/'低'
+                'strong_team': str,         # 强队名称
+                'weak_team': str,           # 弱队名称
+                'strength_advantage': float, # 实力优势值
+                'handicap_advantage': float, # 盘口优势值
+                'gap': float,               # 差距值
+                'warning_factors': List[str], # 预警因素
+                'suggested_outcome': str    # 建议投注方向
+            }
+        """
+        result = {
+            'mismatch_detected': False,
+            'mismatch_level': '低',
+            'strong_team': '',
+            'weak_team': '',
+            'strength_advantage': 0.0,
+            'handicap_advantage': 0.0,
+            'gap': 0.0,
+            'warning_factors': [],
+            'suggested_outcome': ''
+        }
+        
+        if not asian_handicap and not european_odds:
+            return result
+            
+        # 确定哪方是强队
+        if strength_diff > 0:
+            result['strong_team'] = home_team
+            result['weak_team'] = away_team
+            result['strength_advantage'] = strength_diff
+        else:
+            result['strong_team'] = away_team
+            result['weak_team'] = home_team
+            result['strength_advantage'] = abs(strength_diff)
+            
+        # 实力优势必须足够大才进行分析
+        if result['strength_advantage'] < 10:
+            return result
+            
+        warning_factors = []
+        gap = 0.0
+        
+        # 1. 亚盘分析 - 强队让球是否足够
+        if asian_handicap:
+            final_handicap = asian_handicap.get('final', {})
+            handicap_value = self._to_float(final_handicap.get('handicap_value'), 0.0)
+            home_water = self._to_float(final_handicap.get('home_water'), 0.0)
+            away_water = self._to_float(final_handicap.get('away_water'), 0.0)
+            
+            # 转换盘口为数值
+            handicap_num = 0.0
+            if handicap_value:
+                # 处理类似 "0.5", "1", "1/1.5" 等格式
+                if '/' in str(handicap_value):
+                    parts = str(handicap_value).split('/')
+                    handicap_num = (float(parts[0]) + float(parts[1])) / 2
+                else:
+                    handicap_num = float(handicap_value)
+                    
+            # 判断强队是主队还是客队
+            is_strong_home = result['strong_team'] == home_team
+            
+            # 强队让球不足的情况
+            if is_strong_home:
+                # 主队是强队，应该让球
+                if handicap_num < 0.5 and result['strength_advantage'] >= 20:
+                    gap = 20 - handicap_num * 10
+                    warning_factors.append(f"{home_team}实力强{result['strength_advantage']:.0f}分但仅让{handicap_value}球，盘口过浅")
+                elif handicap_num < 0.25 and result['strength_advantage'] >= 15:
+                    gap = 15 - handicap_num * 10
+                    warning_factors.append(f"{home_team}实力占优但盘口让球不足")
+            else:
+                # 客队是强队，应该受让或让球
+                if handicap_num > -0.5 and result['strength_advantage'] >= 20:
+                    gap = 20 + handicap_num * 10
+                    warning_factors.append(f"{away_team}实力强{result['strength_advantage']:.0f}分但盘口{handicap_value}球，未获足够支持")
+                    
+            # 水位异常 - 强队水位过高
+            if is_strong_home and home_water > 1.0:
+                gap += 5
+                warning_factors.append(f"{home_team}水位偏高({home_water})，庄家赔付压力大")
+            elif not is_strong_home and away_water > 1.0:
+                gap += 5
+                warning_factors.append(f"{away_team}水位偏高({away_water})，庄家赔付压力大")
+                
+        # 2. 欧赔分析 - 强队赔率是否过高
+        if european_odds:
+            final_odds = european_odds.get('final', {})
+            home_odds = self._to_float(final_odds.get('home'), 0.0)
+            draw_odds = self._to_float(final_odds.get('draw'), 0.0)
+            away_odds = self._to_float(final_odds.get('away'), 0.0)
+            
+            is_strong_home = result['strong_team'] == home_team
+            
+            # 根据实力差距计算理论赔率
+            if result['strength_advantage'] >= 25:
+                expected_strong_odds = 1.3
+            elif result['strength_advantage'] >= 20:
+                expected_strong_odds = 1.5
+            elif result['strength_advantage'] >= 15:
+                expected_strong_odds = 1.7
+            elif result['strength_advantage'] >= 10:
+                expected_strong_odds = 1.9
+            else:
+                expected_strong_odds = 2.1
+                
+            actual_strong_odds = home_odds if is_strong_home else away_odds
+            
+            if actual_strong_odds > 0 and actual_strong_odds > expected_strong_odds * 1.15:
+                odds_gap = (actual_strong_odds - expected_strong_odds) / expected_strong_odds * 100
+                gap += odds_gap
+                warning_factors.append(f"{result['strong_team']}赔率{actual_strong_odds}高于理论值{expected_strong_odds:.2f}，机构不看好")
+                
+            # 平局赔率偏低 - 防范冷门信号
+            if draw_odds > 0 and draw_odds < 3.2 and result['strength_advantage'] >= 15:
+                gap += 8
+                warning_factors.append(f"平局赔率{draw_odds}偏低，机构防范冷门")
+                
+        # 3. 综合判断
+        result['gap'] = gap
+        result['warning_factors'] = warning_factors
+        
+        if gap >= 30:
+            result['mismatch_level'] = '高'
+            result['mismatch_detected'] = True
+        elif gap >= 15:
+            result['mismatch_level'] = '中'
+            result['mismatch_detected'] = True
+        elif gap >= 5:
+            result['mismatch_level'] = '低'
+            
+        # 建议投注方向
+        if result['mismatch_detected']:
+            if result['mismatch_level'] == '高':
+                result['suggested_outcome'] = f"防范冷门 - {result['weak_team']}不败或平局"
+            elif result['mismatch_level'] == '中':
+                result['suggested_outcome'] = f"谨慎 - {result['weak_team']}+1球或小球"
+            else:
+                result['suggested_outcome'] = f"观望 - {result['strong_team']}小胜或平局"
+        else:
+            result['suggested_outcome'] = f"正常 - {result['strong_team']}胜"
+            
+        return result
+
     def assess_upset_potential(
         self,
         home_team: str,
@@ -786,7 +952,9 @@ class UpsetAnalyzer:
         away_strength: Dict,
         predicted_outcome: Optional[str] = None,
         confidence: Optional[float] = None,
-        historical_odds_reference: Optional[Dict] = None
+        historical_odds_reference: Optional[Dict] = None,
+        asian_handicap: Optional[Dict] = None,
+        european_odds: Optional[Dict] = None
     ) -> Dict:
         """评估爆冷可能性（增强版）"""
         cache_params = {
@@ -897,6 +1065,37 @@ class UpsetAnalyzer:
                         upset_index += min(10.0, reverse_rate * 10.0)
                         factors.append(f"相似赔率反向结果偏多({reverse_rate:.0%})")
         
+        # 6. 【新增】强队实力指数与让步数据不匹配分析
+        if asian_handicap or european_odds:
+            mismatch_analysis = self.analyze_handicap_vs_strength(
+                home_team=home_team,
+                away_team=away_team,
+                strength_diff=strength_diff,
+                asian_handicap=asian_handicap,
+                european_odds=european_odds
+            )
+            
+            if mismatch_analysis.get('mismatch_detected'):
+                gap = mismatch_analysis.get('gap', 0)
+                level = mismatch_analysis.get('mismatch_level', '低')
+                
+                # 根据不匹配程度增加爆冷指数
+                if level == '高':
+                    upset_index += min(35, gap)
+                elif level == '中':
+                    upset_index += min(20, gap)
+                else:
+                    upset_index += min(10, gap)
+                    
+                # 添加不匹配因素到列表
+                warning_factors = mismatch_analysis.get('warning_factors', [])
+                for factor in warning_factors:
+                    if factor not in factors:
+                        factors.append(f"[实力-盘口不匹配] {factor}")
+                        
+                # 保存不匹配分析结果供外部使用
+                self._last_mismatch_analysis = mismatch_analysis
+        
         # 确定爆冷等级
         upset_index = min(100, upset_index)
         
@@ -916,7 +1115,8 @@ class UpsetAnalyzer:
             'warning_level': warning_level,
             'similar_cases_count': len(similar_cases),
             'factors': factors,
-            'historical_odds_reference': historical_odds_reference
+            'historical_odds_reference': historical_odds_reference,
+            'handicap_strength_mismatch': getattr(self, '_last_mismatch_analysis', None)
         }
         
         self.cache.set('assess_upset_potential', cache_params, result)
