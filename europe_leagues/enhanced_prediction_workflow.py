@@ -60,6 +60,45 @@ def _update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str,
     def norm(s: str) -> str:
         return (s or '').strip().replace(' ', '')
 
+    def _format_upset_note(upset: Any) -> str:
+        """Format upset info into a compact single-line note segment for teams_2025-26.md."""
+        if isinstance(upset, str):
+            return f"爆冷:{upset or '-'}".strip()
+        if not isinstance(upset, dict):
+            return "爆冷:-"
+
+        level = (upset.get('level') or '').strip() or '-'
+        idx = upset.get('index')
+        idx_str = ''
+        if isinstance(idx, (int, float)):
+            idx_str = f"({int(round(float(idx)))})"
+
+        parts = [f"爆冷:{level}{idx_str}"]
+
+        mismatch = upset.get('handicap_strength_mismatch')
+        if isinstance(mismatch, dict) and mismatch.get('mismatch_detected'):
+            ml = (mismatch.get('mismatch_level') or '').strip() or '是'
+            parts.append(f"错配:{ml}")
+
+            suggestion = (mismatch.get('suggested_outcome') or '').strip()
+            if suggestion:
+                parts.append(f"建议:{suggestion}")
+
+            factors = mismatch.get('warning_factors') or []
+            if isinstance(factors, list) and factors:
+                # Keep it short to avoid blowing up the schedule table cell.
+                compact = ';'.join([str(x).strip() for x in factors[:2] if str(x).strip()])
+                if compact:
+                    parts.append(f"因子:{compact}")
+
+        knowledge = upset.get('case_knowledge')
+        if isinstance(knowledge, dict) and knowledge.get('available'):
+            hint = (knowledge.get('hint') or '').strip()
+            if hint:
+                parts.append(f"案例:{hint}")
+
+        return ' '.join(parts).strip()
+
     def strip_existing_prediction_fragments(note: str) -> str:
         """Remove any existing prediction fragments from note to avoid duplicate write-backs.
 
@@ -109,12 +148,8 @@ def _update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str,
             out_lines.append(line)
             continue
 
-        level = ''
         upset = pred.get('upset_potential')
-        if isinstance(upset, dict):
-            level = upset.get('level') or ''
-        elif isinstance(upset, str):
-            level = upset
+        upset_note = _format_upset_note(upset)
         conf = float(pred.get('confidence') or 0.0)
         diag = pred.get('applied_model_weights')
         dyn = ''
@@ -122,7 +157,7 @@ def _update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str,
             dyn = '动态调权:已生效' if diag.get('has_enough_samples') else '动态调权:样本不足'
 
         merged = strip_existing_prediction_fragments(note).rstrip('；; ').strip()
-        pred_note = f"预测:{pred.get('prediction')} 信心:{conf:.2f} 爆冷:{level or '-'}{(' ' + dyn) if dyn else ''}".strip()
+        pred_note = f"预测:{pred.get('prediction')} 信心:{conf:.2f} {upset_note}{(' ' + dyn) if dyn else ''}".strip()
         cells[5] = f"{merged}；{pred_note}" if merged else pred_note
         out_lines.append("| " + " | ".join(cells) + " |\n")
         changed += 1
@@ -758,6 +793,140 @@ class UpsetAnalyzer:
             if k in case:
                 return case.get(k)
         return None
+
+    @staticmethod
+    def _case_int(case: Dict, *keys: str, default: int = 0) -> int:
+        value = UpsetAnalyzer._case_get(case, *keys)
+        try:
+            if value in (None, ''):
+                return default
+            return int(float(value))
+        except Exception:
+            return default
+
+    @staticmethod
+    def _extract_case_tags(case: Dict) -> set:
+        """Extract coarse tags from a knowledge-base case for similarity matching."""
+        text_fields = []
+        for key in ('爆冷类型', '盘口异常', '赔率变化', '凯利指数', '伤病影响', '战术变化', '心理因素', '爆冷原因分析'):
+            val = UpsetAnalyzer._case_get(case, key)
+            if val:
+                text_fields.append(str(val))
+        text = ' '.join(text_fields)
+
+        tags = set()
+        if '降盘' in text or '降' in (UpsetAnalyzer._case_get(case, '盘口异常') or ''):
+            tags.add('handicap_down')
+        if '升盘' in text or '升' in (UpsetAnalyzer._case_get(case, '盘口异常') or ''):
+            tags.add('handicap_up')
+        if '平手' in text:
+            tags.add('handicap_level')
+        if '偏高' in text:
+            tags.add('kelly_or_water_high')
+        if '伤' in text or '缺阵' in text:
+            tags.add('injury_or_absence')
+        if '轮换' in text or '欧战' in text or '杯' in text:
+            tags.add('rotation_or_cup')
+        if '战意' in text or '保级' in text or '争冠' in text:
+            tags.add('motivation')
+        if '主场' in text:
+            tags.add('home_boost')
+        if '平局' in text:
+            tags.add('draw_risk')
+        if '赔率' in text and '上升' in text:
+            tags.add('odds_up')
+        if '赔率' in text and '下降' in text:
+            tags.add('odds_down')
+        return tags
+
+    @staticmethod
+    def _extract_current_tags(
+        strength_diff: float,
+        asian_handicap: Optional[Dict],
+        european_odds: Optional[Dict],
+        mismatch_analysis: Optional[Dict],
+    ) -> set:
+        """Extract coarse tags from current match context for similarity matching."""
+        tags = set()
+        if abs(float(strength_diff or 0.0)) >= 20:
+            tags.add('big_gap')
+        if mismatch_analysis and mismatch_analysis.get('mismatch_detected'):
+            tags.add('handicap_strength_mismatch')
+            tags.add(f"mismatch_{mismatch_analysis.get('mismatch_level')}")
+
+        # Draw-odds low heuristic
+        if isinstance(european_odds, dict):
+            final_odds = european_odds.get('final', {}) or {}
+            draw_odds = UpsetAnalyzer._to_float(final_odds.get('draw'), 0.0)
+            if draw_odds and draw_odds < 3.2:
+                tags.add('draw_risk')
+
+        # Handicap movement heuristic (if initial/final both present)
+        if isinstance(asian_handicap, dict):
+            fin = asian_handicap.get('final', {}) or {}
+            ini = asian_handicap.get('initial', {}) or {}
+            fin_v = str(fin.get('handicap_value') or '')
+            ini_v = str(ini.get('handicap_value') or '')
+            if fin_v and ini_v and fin_v != ini_v:
+                tags.add('handicap_move')
+        return tags
+
+    def _find_similar_cases(
+        self,
+        league_name: str,
+        strength_diff: float,
+        asian_handicap: Optional[Dict],
+        european_odds: Optional[Dict],
+        mismatch_analysis: Optional[Dict],
+        top_k: int = 3,
+    ) -> List[Dict[str, Any]]:
+        """Similarity retrieval over the upset case library (as a lightweight knowledge base)."""
+        cases = self._league_cases(league_name)
+        if not cases:
+            return []
+
+        cur_tags = self._extract_current_tags(strength_diff, asian_handicap, european_odds, mismatch_analysis)
+        cur_gap = abs(float(strength_diff or 0.0))
+
+        scored = []
+        for case in cases:
+            # Skip unverified cases to reduce noise.
+            level = str(self._case_get(case, '爆冷等级') or '')
+            actual = str(self._case_get(case, '实际结果') or '')
+            if level == '待验证' or actual == '待验证':
+                continue
+
+            # Approximate "gap" using ranking/points differences from the case as a proxy for strength gap.
+            rank_gap = abs(self._case_int(case, '排名差', default=0))
+            pts_gap = abs(self._case_int(case, '积分差', default=0))
+            case_gap = rank_gap * 2.0 + pts_gap * 0.8
+
+            # Gap similarity: 1/(1+delta) in a normalized space.
+            gap_delta = abs(cur_gap - case_gap)
+            gap_sim = 1.0 / (1.0 + (gap_delta / 10.0))
+
+            case_tags = self._extract_case_tags(case)
+            union = cur_tags | case_tags
+            tag_sim = (len(cur_tags & case_tags) / len(union)) if union else 0.0
+
+            score = 0.6 * tag_sim + 0.4 * gap_sim
+            scored.append((score, tag_sim, gap_sim, case))
+
+        scored.sort(key=lambda x: (-x[0], -x[1], -x[2]))
+        top = []
+        for score, tag_sim, gap_sim, case in scored[:top_k]:
+            top.append({
+                'case_id': self._case_get(case, '案例ID') or '',
+                'match_date': self._case_get(case, '比赛日期') or '',
+                'home_team': self._case_get(case, '主队') or '',
+                'away_team': self._case_get(case, '客队') or '',
+                'upset_level': self._case_get(case, '爆冷等级') or '',
+                'upset_type': self._case_get(case, '爆冷类型') or '',
+                'reason': self._case_get(case, '爆冷原因分析') or '',
+                'suggestion': self._case_get(case, '改进建议') or '',
+                'score': round(float(score), 3),
+            })
+        return top
     
     def _league_cases(self, league_name: str) -> List[Dict]:
         return [
@@ -962,7 +1131,9 @@ class UpsetAnalyzer:
             'diff': strength_diff,
             'pred': predicted_outcome,
             'conf': None if confidence is None else round(float(confidence), 3),
-            'odds_ref': historical_odds_reference
+            'odds_ref': historical_odds_reference,
+            'asian_handicap': asian_handicap,
+            'european_odds': european_odds,
         }
         cached = self.cache.get('assess_upset_potential', cache_params)
         if cached:
@@ -970,6 +1141,7 @@ class UpsetAnalyzer:
         
         upset_index = 0.0
         factors = []
+        mismatch_analysis = None
         
         # 1. 实力差距因素
         if abs(strength_diff) > 20:
@@ -1092,9 +1264,38 @@ class UpsetAnalyzer:
                 for factor in warning_factors:
                     if factor not in factors:
                         factors.append(f"[实力-盘口不匹配] {factor}")
-                        
-                # 保存不匹配分析结果供外部使用
-                self._last_mismatch_analysis = mismatch_analysis
+
+        # 7. 【新增】爆冷案例库知识检索（相似案例 Top-K），用于解释与复盘
+        knowledge = {'available': False, 'top_cases': [], 'hint': ''}
+        try:
+            league_name = LEAGUE_CONFIG[league_code]['name']
+            top_cases = self._find_similar_cases(
+                league_name=league_name,
+                strength_diff=strength_diff,
+                asian_handicap=asian_handicap,
+                european_odds=european_odds,
+                mismatch_analysis=mismatch_analysis,
+                top_k=3,
+            )
+            if top_cases:
+                knowledge['available'] = True
+                knowledge['top_cases'] = top_cases
+                best = top_cases[0]
+                # One-line hint for schedule write-back.
+                hint_bits = []
+                if best.get('upset_level'):
+                    hint_bits.append(str(best['upset_level']))
+                if best.get('upset_type') and best['upset_type'] != '无':
+                    hint_bits.append(str(best['upset_type']))
+                knowledge['hint'] = f"{best.get('home_team','')}vs{best.get('away_team','')}({','.join(hint_bits)})".strip('()')
+
+                # Conservative boost: only when similarity is reasonably high and the case is a real upset.
+                if float(best.get('score') or 0.0) >= 0.55 and best.get('upset_level') not in ('微弱爆冷', ''):
+                    upset_index += min(8.0, float(best.get('score') or 0.0) * 8.0)
+                    factors.append(f"[案例库] 相似案例:{knowledge['hint']} s={best.get('score')}")
+        except Exception:
+            # Keep prediction robust; knowledge is best-effort.
+            knowledge = {'available': False, 'top_cases': [], 'hint': ''}
         
         # 确定爆冷等级
         upset_index = min(100, upset_index)
@@ -1116,7 +1317,8 @@ class UpsetAnalyzer:
             'similar_cases_count': len(similar_cases),
             'factors': factors,
             'historical_odds_reference': historical_odds_reference,
-            'handicap_strength_mismatch': getattr(self, '_last_mismatch_analysis', None)
+            'handicap_strength_mismatch': mismatch_analysis,
+            'case_knowledge': knowledge,
         }
         
         self.cache.set('assess_upset_potential', cache_params, result)
@@ -1461,6 +1663,12 @@ class EnhancedPredictor:
                 'insights': ['当前未传入赔率快照，历史赔率参考已就绪但未参与匹配']
             }
 
+        asian_handicap = None
+        european_odds = None
+        if isinstance(current_odds, dict):
+            asian_handicap = current_odds.get('亚值')
+            european_odds = current_odds.get('欧赔')
+
         # 6. 爆冷分析（把模型输出也作为输入，便于案例库做“同向反打”学习）
         upset_potential = self.upset_analyzer.assess_upset_potential(
             home_team=home_team,
@@ -1471,7 +1679,9 @@ class EnhancedPredictor:
             away_strength=away_strength,
             predicted_outcome=main_prediction,
             confidence=confidence,
-            historical_odds_reference=historical_odds_reference
+            historical_odds_reference=historical_odds_reference,
+            asian_handicap=asian_handicap,
+            european_odds=european_odds,
         )
         
         # 7. 预测比分
