@@ -416,16 +416,50 @@ def _norm_name(s: str) -> str:
 
 def _format_prediction_note(pred: dict) -> str:
     upset = pred.get('upset_potential')
-    level = ''
-    if isinstance(upset, dict):
-        level = upset.get('level') or ''
-    elif isinstance(upset, str):
-        level = upset
+
+    def _format_upset_note(upset_val) -> str:
+        if isinstance(upset_val, str):
+            return f"爆冷:{upset_val or '-'}".strip()
+        if not isinstance(upset_val, dict):
+            return "爆冷:-"
+
+        level_local = (upset_val.get('level') or '').strip() or '-'
+        idx = upset_val.get('index')
+        idx_str = ''
+        if isinstance(idx, (int, float)):
+            idx_str = f"({int(round(float(idx)))})"
+
+        parts = [f"爆冷:{level_local}{idx_str}"]
+
+        mismatch = upset_val.get('handicap_strength_mismatch')
+        if isinstance(mismatch, dict) and mismatch.get('mismatch_detected'):
+            ml = (mismatch.get('mismatch_level') or '').strip() or '是'
+            parts.append(f"错配:{ml}")
+
+            suggestion = (mismatch.get('suggested_outcome') or '').strip()
+            if suggestion:
+                parts.append(f"建议:{suggestion}")
+
+            factors = mismatch.get('warning_factors') or []
+            if isinstance(factors, list) and factors:
+                compact = ';'.join([str(x).strip() for x in factors[:2] if str(x).strip()])
+                if compact:
+                    parts.append(f"因子:{compact}")
+
+        knowledge = upset_val.get('case_knowledge')
+        if isinstance(knowledge, dict) and knowledge.get('available'):
+            hint = (knowledge.get('hint') or '').strip()
+            if hint:
+                parts.append(f"案例:{hint}")
+
+        return ' '.join(parts).strip()
+
+    upset_note = _format_upset_note(upset)
     diag = pred.get('applied_model_weights')
     dyn = ''
     if isinstance(diag, dict) and 'has_enough_samples' in diag:
         dyn = '动态调权:已生效' if diag.get('has_enough_samples') else '动态调权:样本不足'
-    return f"预测:{pred.get('prediction')} 信心:{float(pred.get('confidence') or 0.0):.2f} 爆冷:{level or '-'}{(' ' + dyn) if dyn else ''}".strip()
+    return f"预测:{pred.get('prediction')} 信心:{float(pred.get('confidence') or 0.0):.2f} {upset_note}{(' ' + dyn) if dyn else ''}".strip()
 
 
 def _strip_existing_prediction_fragments(note: str) -> str:

@@ -1234,3 +1234,314 @@ INFO:enhanced_prediction_workflow:开始预测: 巴列卡诺 vs 西班牙人 (la
 INFO:enhanced_prediction_workflow:预测完成: 巴列卡诺 vs 西班牙人 -> 主胜 (47.6%)
 INFO:enhanced_prediction_workflow:开始预测: 莱万特 vs 塞维利亚 (la_liga)
 INFO:enhanced_prediction_workflow:预测完成: 莱万特 vs 塞维利亚 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 西班牙人 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 西班牙人 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 强队 vs 弱队 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 强队 vs 弱队 -> 主胜 (72.0%)
+WARNING:__main__:刷新实时快照失败: 切尔西 vs 曼联 2026-04-24: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 切尔西 和 曼联 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 切尔西 vs 曼联 (premier_league)
+INFO:__main__:预测完成: 切尔西 vs 曼联 -> 主胜 (47.6%)
+WARNING:__main__:刷新实时快照失败: 利物浦 vs 阿森纳 2026-04-24: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 利物浦 和 阿森纳 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 利物浦 vs 阿森纳 (premier_league)
+INFO:__main__:预测完成: 利物浦 vs 阿森纳 -> 主胜 (47.3%)
+WARNING:__main__:刷新实时快照失败: 曼城 vs 阿斯顿维拉 2026-04-24: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 曼城 和 阿斯顿维拉 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 曼城 vs 阿斯顿维拉 (premier_league)
+INFO:__main__:预测完成: 曼城 vs 阿斯顿维拉 -> 主胜 (47.6%)
+WARNING:__main__:刷新实时快照失败: 诺丁汉森林 vs 布莱顿 2026-04-24: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 诺丁汉森林 和 布莱顿 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 诺丁汉森林 vs 布莱顿 (premier_league)
+INFO:__main__:预测完成: 诺丁汉森林 vs 布莱顿 -> 主胜 (47.5%)
+WARNING:__main__:刷新实时快照失败: 布伦特福德 vs 富勒姆 2026-04-24: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 布伦特福德 和 富勒姆 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 布伦特福德 vs 富勒姆 (premier_league)
+INFO:__main__:预测完成: 布伦特福德 vs 富勒姆 -> 主胜 (47.6%)
+INFO:__main__:已更新 teams 文件: /Users/bytedance/trae_projects/europe_leagues/premier_league/teams_2025-26.md
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260424_切尔西_曼联
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260424_利物浦_阿森纳
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260424_曼城_阿斯顿维拉
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260424_诺丁汉森林_布莱顿
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260424_布伦特福德_富勒姆
+INFO:__main__:预测已保存到历史数据库
+INFO:result_manager:准确率统计已更新
+WARNING:__main__:刷新实时快照失败: 切尔西 vs 曼联 2026-04-25: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 切尔西 和 曼联 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 切尔西 vs 曼联 (premier_league)
+INFO:__main__:预测完成: 切尔西 vs 曼联 -> 主胜 (47.6%)
+WARNING:__main__:刷新实时快照失败: 利物浦 vs 阿森纳 2026-04-25: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 利物浦 和 阿森纳 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 利物浦 vs 阿森纳 (premier_league)
+INFO:__main__:预测完成: 利物浦 vs 阿森纳 -> 主胜 (47.3%)
+WARNING:__main__:刷新实时快照失败: 曼城 vs 阿斯顿维拉 2026-04-25: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 曼城 和 阿斯顿维拉 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 曼城 vs 阿斯顿维拉 (premier_league)
+INFO:__main__:预测完成: 曼城 vs 阿斯顿维拉 -> 主胜 (47.6%)
+WARNING:__main__:刷新实时快照失败: 诺丁汉森林 vs 布莱顿 2026-04-25: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 诺丁汉森林 和 布莱顿 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 诺丁汉森林 vs 布莱顿 (premier_league)
+INFO:__main__:预测完成: 诺丁汉森林 vs 布莱顿 -> 主胜 (47.5%)
+WARNING:__main__:刷新实时快照失败: 布伦特福德 vs 富勒姆 2026-04-25: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 布伦特福德 和 富勒姆 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 布伦特福德 vs 富勒姆 (premier_league)
+INFO:__main__:预测完成: 布伦特福德 vs 富勒姆 -> 主胜 (47.6%)
+INFO:__main__:已更新 teams 文件: /Users/bytedance/trae_projects/europe_leagues/premier_league/teams_2025-26.md
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260425_切尔西_曼联
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260425_利物浦_阿森纳
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260425_曼城_阿斯顿维拉
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260425_诺丁汉森林_布莱顿
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260425_布伦特福德_富勒姆
+INFO:__main__:预测已保存到历史数据库
+INFO:result_manager:准确率统计已更新
+WARNING:__main__:刷新实时快照失败: 切尔西 vs 曼联 2026-04-26: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 切尔西 和 曼联 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 切尔西 vs 曼联 (premier_league)
+INFO:__main__:预测完成: 切尔西 vs 曼联 -> 主胜 (47.6%)
+WARNING:__main__:刷新实时快照失败: 利物浦 vs 阿森纳 2026-04-26: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 利物浦 和 阿森纳 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 利物浦 vs 阿森纳 (premier_league)
+INFO:__main__:预测完成: 利物浦 vs 阿森纳 -> 主胜 (47.3%)
+WARNING:__main__:刷新实时快照失败: 曼城 vs 阿斯顿维拉 2026-04-26: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 曼城 和 阿斯顿维拉 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 曼城 vs 阿斯顿维拉 (premier_league)
+INFO:__main__:预测完成: 曼城 vs 阿斯顿维拉 -> 主胜 (47.6%)
+WARNING:__main__:刷新实时快照失败: 诺丁汉森林 vs 布莱顿 2026-04-26: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 诺丁汉森林 和 布莱顿 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 诺丁汉森林 vs 布莱顿 (premier_league)
+INFO:__main__:预测完成: 诺丁汉森林 vs 布莱顿 -> 主胜 (47.5%)
+WARNING:__main__:刷新实时快照失败: 布伦特福德 vs 富勒姆 2026-04-26: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 布伦特福德 和 富勒姆 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 布伦特福德 vs 富勒姆 (premier_league)
+INFO:__main__:预测完成: 布伦特福德 vs 富勒姆 -> 主胜 (47.6%)
+INFO:__main__:已更新 teams 文件: /Users/bytedance/trae_projects/europe_leagues/premier_league/teams_2025-26.md
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260426_切尔西_曼联
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260426_利物浦_阿森纳
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260426_曼城_阿斯顿维拉
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260426_诺丁汉森林_布莱顿
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: premier_league_20260426_布伦特福德_富勒姆
+INFO:__main__:预测已保存到历史数据库
+INFO:result_manager:准确率统计已更新
+WARNING:__main__:刷新实时快照失败: 国际米兰 vs AC米兰 2026-04-24: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 国际米兰 和 AC米兰 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 国际米兰 vs AC米兰 (serie_a)
+INFO:__main__:预测完成: 国际米兰 vs AC米兰 -> 主胜 (47.5%)
+WARNING:__main__:刷新实时快照失败: 尤文图斯 vs 那不勒斯 2026-04-24: refresh_snapshot failed: rc=1
+    return request('put', url, data=data, **kwargs)
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/requests/api.py", line 61, in request
+    return session.request(method=method, url=url, **kwargs)
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/requests/sessions.py", line 542, in request
+    resp = self.send(prep, **send_kwargs)
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/requests/sessions.py", line 655, in send
+    r = adapter.send(request, **kwargs)
+  File "/Users/bytedance/Library/Python/3.9/lib/python/site-packages/requests/adapters.py", line 529, in send
+    raise ReadTimeout(e, request=request)
+requests.exceptions.ReadTimeout: HTTPConnectionPool(host='127.0.0.1', port=9222): Read timed out. (read timeout=15)
+INFO:__main__:开始预测: 尤文图斯 vs 那不勒斯 (serie_a)
+INFO:__main__:预测完成: 尤文图斯 vs 那不勒斯 -> 主胜 (47.5%)
+WARNING:__main__:刷新实时快照失败: 罗马 vs 亚特兰大 2026-04-24: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 罗马 和 亚特兰大 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 罗马 vs 亚特兰大 (serie_a)
+INFO:__main__:预测完成: 罗马 vs 亚特兰大 -> 主胜 (47.5%)
+WARNING:__main__:刷新实时快照失败: 拉齐奥 vs 佛罗伦萨 2026-04-24: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 拉齐奥 和 佛罗伦萨 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 拉齐奥 vs 佛罗伦萨 (serie_a)
+INFO:__main__:预测完成: 拉齐奥 vs 佛罗伦萨 -> 主胜 (47.5%)
+WARNING:__main__:刷新实时快照失败: 博洛尼亚 vs 乌迪内斯 2026-04-24: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 博洛尼亚 和 乌迪内斯 的比赛行(可尝试补充别名/时间)
+INFO:__main__:开始预测: 博洛尼亚 vs 乌迪内斯 (serie_a)
+INFO:__main__:预测完成: 博洛尼亚 vs 乌迪内斯 -> 主胜 (47.5%)
+INFO:__main__:已更新 teams 文件: /Users/bytedance/trae_projects/europe_leagues/serie_a/teams_2025-26.md
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: serie_a_20260424_国际米兰_AC米兰
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: serie_a_20260424_尤文图斯_那不勒斯
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: serie_a_20260424_罗马_亚特兰大
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: serie_a_20260424_拉齐奥_佛罗伦萨
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: serie_a_20260424_博洛尼亚_乌迪内斯
+INFO:__main__:预测已保存到历史数据库
+INFO:result_manager:准确率统计已更新
+WARNING:__main__:刷新实时快照失败: 国际米兰 vs AC米兰 2026-04-25: refresh_snapshot failed: rc=1
+Traceback (most recent call last):
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1164, in <module>
+    main()
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 1111, in main
+    found = _find_match_id(
+  File "/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py", line 762, in _find_match_id
+    raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
+RuntimeError: 未在联赛赛程中找到包含 国际米兰 和 AC米兰 的比赛行(可尝试补充别名/时间)
+INFO:enhanced_prediction_workflow:开始预测: 巴塞罗那 vs 皇家马德里 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 巴塞罗那 vs 皇家马德里 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 马德里竞技 vs 塞维利亚 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 马德里竞技 vs 塞维利亚 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 皇家社会 vs 比利亚雷亚尔 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 皇家社会 vs 比利亚雷亚尔 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 贝蒂斯 vs 瓦伦西亚 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 贝蒂斯 vs 瓦伦西亚 -> 主胜 (51.5%)
+INFO:enhanced_prediction_workflow:开始预测: 毕尔巴鄂竞技 vs 奥萨苏纳 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 毕尔巴鄂竞技 vs 奥萨苏纳 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:已更新 teams 文件: ./la_liga/teams_2025-26.md
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: la_liga_20260418_巴塞罗那_皇家马德里
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: la_liga_20260418_马德里竞技_塞维利亚
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: la_liga_20260418_皇家社会_比利亚雷亚尔
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: la_liga_20260418_贝蒂斯_瓦伦西亚
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: la_liga_20260418_毕尔巴鄂竞技_奥萨苏纳
+INFO:enhanced_prediction_workflow:预测已保存到历史数据库
+INFO:result_manager:准确率统计已更新
+INFO:enhanced_prediction_workflow:开始预测: 奥萨苏纳 vs 巴塞罗那 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 奥萨苏纳 vs 巴塞罗那 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:已更新 teams 文件: ./la_liga/teams_2025-26.md
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: la_liga_20260503_奥萨苏纳_巴塞罗那
+INFO:enhanced_prediction_workflow:预测已保存到历史数据库
+INFO:result_manager:准确率统计已更新
+INFO:enhanced_prediction_workflow:开始预测: 奥萨苏纳 vs 巴塞罗那 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 奥萨苏纳 vs 巴塞罗那 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:开始预测: 奥萨苏纳 vs 巴塞罗那 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 奥萨苏纳 vs 巴塞罗那 -> 主胜 (47.6%)
+INFO:enhanced_prediction_workflow:已更新 teams 文件: ./la_liga/teams_2025-26.md
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: la_liga_20260503_奥萨苏纳_巴塞罗那
+INFO:enhanced_prediction_workflow:预测已保存到历史数据库
+INFO:result_manager:准确率统计已更新
+INFO:enhanced_prediction_workflow:开始预测: 奥萨苏纳 vs 巴塞罗那 (la_liga)
+INFO:enhanced_prediction_workflow:预测完成: 奥萨苏纳 vs 巴塞罗那 -> 客胜 (55.6%)
+INFO:enhanced_prediction_workflow:已更新 teams 文件: ./la_liga/teams_2025-26.md
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: la_liga_20260503_奥萨苏纳_巴塞罗那
+INFO:enhanced_prediction_workflow:预测已保存到历史数据库
+INFO:result_manager:准确率统计已更新
+INFO:enhanced_prediction_workflow:开始预测: 美因茨 vs 拜仁慕尼黑 (bundesliga)
+INFO:enhanced_prediction_workflow:预测完成: 美因茨 vs 拜仁慕尼黑 -> 客胜 (60.3%)
+INFO:enhanced_prediction_workflow:已更新 teams 文件: ./bundesliga/teams_2025-26.md
+INFO:result_manager:预测已写入 teams 文件，兼容返回预测对象: bundesliga_20260425_美因茨_拜仁慕尼黑
+INFO:enhanced_prediction_workflow:预测已保存到历史数据库
+INFO:result_manager:准确率统计已更新
