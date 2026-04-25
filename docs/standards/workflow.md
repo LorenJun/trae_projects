@@ -65,6 +65,47 @@ last_updated: "2026-04-18"
 
 ---
 
+## Agent 执行约束
+
+本节用于约束调度型 Agent、OpenClaw 或其它自动化调用方，确保执行时不偏离当前项目主流程。
+
+### 必守规则
+- 以 `europe_leagues/<league>/teams_2025-26.md` 作为唯一正式落盘位置。
+- 优先调用 `prediction_system.py` 的非交互子命令，并统一附带 `--json`。
+- 除非用户明确要求只读查询，否则涉及预测、回填、统计的任务都应按既定步骤执行，不得跳步。
+- 历史目录、示例模板、旧版 `predictions/` 只可参考，不可作为主流程输出目标。
+- 缺少实时依赖时可以降级，但必须在输出中标注“降级/模拟数据”，不可混淆为真实临场数据。
+
+### 偏航纠正提示词
+
+以下文字可直接作为工作流前置提示，供 Agent 调用时复用：
+
+```text
+如果当前任务与“标准预测流程”不完全一致，请先把任务映射到以下六类之一：环境检查、数据采集、赛前预测、赛果回填、准确率统计、只读查询。
+
+执行规则：
+1. 只读查询：允许仅读文档或读取联赛文件，不写入。
+2. 赛前预测：必须经过“确认比赛 -> 采集数据 -> 分析 -> 生成预测 -> 写回 teams_2025-26.md”。
+3. 赛果回填：必须经过“确认比赛 -> 校验比分 -> save-result -> 必要时刷新 accuracy”。
+4. 准确率统计：直接读取 teams_2025-26.md 相关数据，不再依赖旧模板文件。
+5. 若准备创建新的预测 markdown、结果 markdown 或临时主流程文件，视为偏航，立即停止并改回 teams_2025-26.md。
+6. 若数据不足，先说明缺口，再执行 collect-data 或降级方案，不允许跳过采集直接输出确定性结论。
+```
+
+### 任务类型与推荐入口
+
+| 任务类型 | 推荐入口 | 是否允许写文件 |
+|------|------|------|
+| 环境检查 | `python3 prediction_system.py health-check --json` | 否 |
+| 数据采集 | `python3 prediction_system.py collect-data ... --json` | 否 |
+| 单场预测 | `python3 prediction_system.py predict-match ... --json` | 是 |
+| 批量预测 | `python3 prediction_system.py predict-schedule ... --json` | 是 |
+| 赛果回填 | `python3 prediction_system.py save-result ... --json` | 是 |
+| 准确率统计 | `python3 prediction_system.py accuracy --refresh --json` | 是 |
+| 待回填赛果查询 | `python3 prediction_system.py pending-results --days-back 14 --json` | 否 |
+
+---
+
 ## Step 1: 赛前准备
 
 ### 时间节点

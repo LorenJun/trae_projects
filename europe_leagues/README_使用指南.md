@@ -104,6 +104,43 @@ python3 prediction_system.py accuracy --refresh --json
 
 ---
 
+## Agent 调用提示词
+
+以下提示词可直接提供给 `openclaw`、自动化编排器或调度型 Agent，确保执行时遵循当前项目真实流程。
+
+### 统一入口提示词
+
+```text
+你正在操作的是一个“以 europe_leagues/<league>/teams_2025-26.md 为单一事实来源”的足球预测项目。
+
+执行任务时必须遵守：
+1. 先判断任务类型：环境检查、数据采集、赛前预测、赛果回填、准确率统计、只读查询。
+2. 除只读查询外，优先调用 prediction_system.py 的非交互命令，并附带 --json。
+3. 所有正式落盘只允许写入对应联赛的 teams_2025-26.md，不要把新结果写入 predictions/、analysis/predictions/*.md 或其它旧目录。
+4. 赛前预测必须按“确认比赛 -> collect-data -> 分析 -> predict-match/predict-schedule -> 写回 teams_2025-26.md”执行。
+5. 赛后处理必须按“确认比赛 -> 核验比分 -> save-result -> 必要时 accuracy --refresh”执行。
+6. 缺少 browser-use、Playwright 或实时源异常时，可以降级，但必须明确标记为 mock/降级数据。
+7. 如果用户只要求查看、解释、调研，默认不写文件。
+8. 如果准备创建新的主流程 markdown 文件，视为偏航，应立即停止并改回 teams_2025-26.md。
+```
+
+### 偏航纠正提示词
+
+```text
+如果你发现自己准备跳过数据采集直接生成预测，或者准备把结果写入旧模板文件，请立即停止并回到标准流程：
+
+- 环境检查：health-check
+- 数据采集：collect-data
+- 单场预测：predict-match
+- 批量预测：predict-schedule
+- 赛果回填：save-result
+- 准确率统计：accuracy --refresh
+
+查架构时优先阅读 README_使用指南.md、README.md、agent.md、docs/standards/workflow.md、agents/*.md。
+```
+
+---
+
 ## 📦 模块说明
 
 ### 核心模块

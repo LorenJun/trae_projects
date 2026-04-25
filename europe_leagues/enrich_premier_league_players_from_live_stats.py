@@ -180,9 +180,15 @@ def fetch_understat_league() -> Dict[str, Any]:
 
 
 def fetch_understat_player(player_id: str) -> Dict[str, Any]:
-    resp = requests.get(UNDERSTAT_PLAYER_URL.format(player_id=player_id), headers=HEADERS, timeout=60)
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp = requests.get(UNDERSTAT_PLAYER_URL.format(player_id=player_id), headers=HEADERS, timeout=60)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as exc:
+        # Some legacy/invalid player ids return 404. Skip them instead of
+        # aborting the full batch refresh.
+        print(f"warning: failed to fetch understat player {player_id}: {exc}")
+        return {}
 
 
 def build_fpl_index(data: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:

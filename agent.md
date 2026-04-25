@@ -160,6 +160,55 @@ Step 6: 准确率统计与优化
 
 ---
 
+## Agent 调用提示词
+
+以下内容可直接作为调度型 Agent 的系统提示或任务前缀，目的是让 Agent 严格贴合本项目现有预测流程，避免跳过关键步骤、误写历史目录或输出到错误位置。
+
+### 统一调度提示词
+
+```text
+你正在操作的是一个“以 teams_2025-26.md 为单一事实来源”的足球预测项目。
+
+执行任何任务时，必须遵守以下规则：
+1. 先识别任务类型：环境检查、数据采集、赛前预测、赛果回填、准确率统计、文档查询。
+2. 除纯文档查询外，优先使用非交互 CLI：prediction_system.py ... --json。
+3. 所有正式落盘以 europe_leagues/<league>/teams_2025-26.md 为准，不要把新的主流程结果写到 predictions/、analysis/predictions/*.md 或其它历史目录。
+4. 赛前预测必须遵循固定顺序：确认联赛与比赛 -> 必要时 health-check -> collect-data -> 基本面/赔率分析 -> predict-match 或 predict-schedule -> 写回 teams_2025-26.md。
+5. 赛后任务必须遵循固定顺序：确认 match_id 或比赛信息 -> 核验实际比分 -> save-result -> accuracy --refresh（如任务涉及统计）。
+6. 如果缺少 browser-use、Playwright 或实时源异常，允许降级，但必须在结果中明确标记为 mock/降级数据，不得伪装成真实临场数据。
+7. 如果用户只要求“查看”或“解释”，默认不改文件；如果任务要求“更新/生成/保存”，再执行写回。
+8. 写文件前先确认目标联赛、目标日期、目标比赛是否已经存在于对应 teams_2025-26.md，避免重复写入。
+9. 任何结论都要优先引用当前项目已有脚本和现有文档，不要凭空创造新流程。
+10. 如果用户要求与标准流程冲突，先说明冲突点，再给出最接近项目规范的执行方案。
+```
+
+### 流程守卫提示词
+
+```text
+当你不确定下一步做什么时，不要自由发挥，请回到下面的守卫流程：
+
+- 预测前：health-check -> 定位 league/match -> collect-data -> predict-match/predict-schedule
+- 写回时：只写 teams_2025-26.md
+- 查结果时：优先 pending-results / save-result / accuracy
+- 查架构时：优先阅读 agent.md、docs/standards/workflow.md、agents/*.md
+
+若发现自己准备跳过“数据采集”直接下结论，或准备把结果写入历史模板文件，应立即停止并回到标准流程。
+```
+
+### 推荐命令顺序
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py health-check --json
+python3 prediction_system.py collect-data --league <league> --date <YYYY-MM-DD> --json
+python3 prediction_system.py predict-match --league <league> --home-team <主队> --away-team <客队> --date <YYYY-MM-DD> --json
+python3 prediction_system.py pending-results --days-back 14 --json
+python3 prediction_system.py save-result --match-id <match_id> --home-score <n> --away-score <n> --json
+python3 prediction_system.py accuracy --refresh --json
+```
+
+---
+
 ## 常用命令（可跑通）
 
 在项目根目录 `/Users/bytedance/trae_projects`：
