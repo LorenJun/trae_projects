@@ -39,11 +39,18 @@ def extract_current_odds(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     europe = snapshot.get("欧赔", {}) or {}
     asian = snapshot.get("亚值", {}) or {}
     kelly = snapshot.get("凯利", {}) or {}
+    totals = snapshot.get("大小球", {}) or {}
+    # okooo_save_snapshot.py stores totals as:
+    #   {"found": true/false, "initial": {...}, "final": {...}, ...}
+    # We normalize it to the nested schema used by prediction workflow.
+    totals_initial = totals.get("initial", {}) if isinstance(totals, dict) else {}
+    totals_final = totals.get("final", {}) if isinstance(totals, dict) else {}
     return {
         "match_id": snapshot.get("match_id"),
         "胜平负赔率": {"initial": europe.get("initial", {}), "final": europe.get("final", {})},
         "欧赔": {"initial": europe.get("initial", {}), "final": europe.get("final", {})},
         "亚值": {"initial": asian.get("initial", {}), "final": asian.get("final", {})},
+        "大小球": {"initial": totals_initial, "final": totals_final},
         "凯利": {"initial": kelly.get("initial", {}), "final": kelly.get("final", {})},
         "离散率": snapshot.get("离散率", {}) or {},
     }

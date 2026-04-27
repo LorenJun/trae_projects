@@ -585,6 +585,116 @@ def _parse_asian_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
     return bu.eval_json(js)
 
 
+def _parse_totals_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
+    """Parse Over/Under (大小球) average row on current page.
+
+    Expected mobile row pattern:
+      澳门  1.82  3.0  1.90   1.77  2.75  1.95
+    Where:
+      initial: over, line, under
+      final:   over, line, under
+    """
+    js = r"""
+(() => {
+  const blocked = (document.body?.innerText||'').includes('访问被阻断') || (document.title||'').includes('405');
+  if (blocked) return JSON.stringify({blocked:true});
+
+  const rows = [...document.querySelectorAll('tr')];
+  const avgRow = rows.find(tr => {
+    const txt = (tr.innerText || '').replace(/\s+/g, ' ').trim();
+    return txt.includes('平均指数') || txt.includes('澳门');
+  });
+  if (!avgRow) return JSON.stringify({found:false});
+
+  const tds = [...avgRow.querySelectorAll('td')].map(td => (td.innerText||'').replace(/\s+/g,' ').trim());
+  const nums = [];
+  for (const td of tds) {
+    const m = td.match(/\d+(?:\.\d+)?/g) || [];
+    for (const x of m) nums.push(parseFloat(x));
+  }
+  // Need at least 6 numbers: init(over,line,under), final(over,line,under)
+  if (nums.length < 6) {
+    return JSON.stringify({found:true, parsed:false, text:(avgRow.innerText||'').replace(/\s+/g,' ').trim(), tds});
+  }
+
+  const initial = { over: nums[0], line: nums[1], under: nums[2] };
+  const final = { over: nums[3], line: nums[4], under: nums[5] };
+  const delta = {
+    over: +(final.over - initial.over).toFixed(4),
+    line: +(final.line - initial.line).toFixed(4),
+    under: +(final.under - initial.under).toFixed(4),
+  };
+
+  return JSON.stringify({found:true, parsed:true, initial, final, delta});
+})()
+"""
+    data = bu.eval_json(js)
+    if isinstance(data, dict) and data.get("found") and data.get("parsed"):
+        return data
+
+    # Fallback for the actual mobile UX: O/U is nested under 亚值 page and is often
+    # rendered as free text instead of a regular table row.
+    fallback_js = r"""
+(() => {
+  const blocked = (document.body?.innerText||'').includes('访问被阻断') || (document.title||'').includes('405');
+  if (blocked) return JSON.stringify({blocked:true});
+
+  const body = document.body?.innerText || '';
+  const lines = body.split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const compact = body.replace(/\s+/g, ' ').trim();
+
+  const companyAliases = [
+    '澳门彩票', '澳门', 'Bet365', 'bet365', '皇冠', 'Pinnacle', '威廉.希尔', '立博'
+  ];
+  const numRe = /\d+(?:\.\d+)?/g;
+
+  const parseLine = (line, company) => {
+    const idx = line.indexOf(company);
+    if (idx < 0) return null;
+    const tail = line.slice(idx + company.length).trim();
+    const nums = (tail.match(numRe) || []).map(x => parseFloat(x));
+    if (nums.length < 6) return null;
+    return {
+      found: true,
+      parsed: true,
+      company,
+      initial: { over: nums[0], line: nums[1], under: nums[2] },
+      final: { over: nums[3], line: nums[4], under: nums[5] },
+      delta: {
+        over: +(nums[3] - nums[0]).toFixed(4),
+        line: +(nums[4] - nums[1]).toFixed(4),
+        under: +(nums[5] - nums[2]).toFixed(4),
+      },
+      _source: 'body_text_line',
+      _matched_line: line,
+    };
+  };
+
+  for (const company of companyAliases) {
+    for (const line of lines) {
+      const parsed = parseLine(line, company);
+      if (parsed) return JSON.stringify(parsed);
+    }
+  }
+
+  for (const company of companyAliases) {
+    const idx = compact.indexOf(company);
+    if (idx < 0) continue;
+    const windowText = compact.slice(idx, idx + 120);
+    const parsed = parseLine(windowText, company);
+    if (parsed) {
+      parsed._source = 'body_text_window';
+      parsed._matched_line = windowText;
+      return JSON.stringify(parsed);
+    }
+  }
+
+  return JSON.stringify({found:false, _source:'body_text_fallback'});
+})()
+"""
+    return bu.eval_json(fallback_js)
+
+
 def _parse_kelly_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
     js = r"""
 (() => {
@@ -785,6 +895,54 @@ def _extract_asian(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
     return data
 
 
+def _extract_totals_from_asian_page(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
+    """Extract totals from the mobile asian-handicap page's inner '大小球' tab.
+
+    User-provided evidence shows O/U is nested under the 亚值 page instead of
+    always being exposed as a dedicated mobile path.
+    """
+    url = f"https://m.okooo.com/match/handicap.php?MatchID={match_id}"
+    state_text = _open_ready(bu, url, settle_seconds=3.0)
+    if _is_blocked_text(state_text):
+        return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
+
+    # First click the nested tab on the asian page.
+    click_result = _click_visible_text(bu, ["大小球", "大/小", "总进球"], settle_seconds=CLICK_SETTLE_SECONDS)
+    data = _parse_totals_on_current_page(bu)
+    data["url"] = url
+    data["_flow"] = "asian_inner_tab"
+    data["_click"] = click_result
+    return data
+
+
+def _extract_totals(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
+    # Prefer the mobile asian page's inner "大小球" tab. This matches the actual
+    # UI observed in recent screenshots and is more reliable than guessing a
+    # standalone totals route.
+    data0 = _extract_totals_from_asian_page(bu, match_id)
+    if data0.get("found"):
+        return data0
+
+    # Fallback: dedicated totals page if available on mobile.
+    # Some setups route to /overunder.php, others to /daxiao.php; try first path.
+    primary = f"https://m.okooo.com/match/overunder.php?MatchID={match_id}"
+    state_text = _open_ready(bu, primary, settle_seconds=3.0)
+    if _is_blocked_text(state_text):
+        return {"blocked": True, "url": primary, "_state_excerpt": state_text[:500]}
+    data = _parse_totals_on_current_page(bu)
+    if data.get("found"):
+        data["url"] = primary
+        return data
+
+    alt = f"https://m.okooo.com/match/daxiao.php?MatchID={match_id}"
+    state_text2 = _open_ready(bu, alt, settle_seconds=3.0)
+    if _is_blocked_text(state_text2):
+        return {"blocked": True, "url": alt, "_state_excerpt": state_text2[:500]}
+    data2 = _parse_totals_on_current_page(bu)
+    data2["url"] = alt
+    return data2
+
+
 def _extract_kelly_from_odds_tab(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
     # Prefer tab navigation because direct kelly.php is sometimes blocked.
     url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
@@ -840,6 +998,18 @@ def _extract_asian_from_history_flow(bu: BrowserUse, history_url: str) -> Dict[s
     return data
 
 
+def _extract_totals_from_history_flow(bu: BrowserUse, history_url: str) -> Dict[str, Any]:
+    state_text = _open_ready(bu, history_url, settle_seconds=3.0)
+    if _is_blocked_text(state_text):
+        return {"blocked": True, "url": history_url, "_state_excerpt": state_text[:500]}
+    click_result = _click_visible_text(bu, ["大小球", "大小", "大/小", "总进球"])
+    data = _parse_totals_on_current_page(bu)
+    data["url"] = history_url
+    data["_flow"] = "history_tab"
+    data["_click"] = click_result
+    return data
+
+
 def _extract_kelly_from_history_flow(bu: BrowserUse, history_url: str) -> Dict[str, Any]:
     state_text = _open_ready(bu, history_url, settle_seconds=3.0)
     if _is_blocked_text(state_text):
@@ -883,6 +1053,17 @@ def _extract_asian_desktop(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
     data = _parse_asian_on_current_page(bu)
+    data["url"] = url
+    data["_flow"] = "desktop_direct"
+    return data
+
+
+def _extract_totals_desktop(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
+    url = f"https://www.okooo.com/soccer/match/{match_id}/ou/"
+    state_text = _open_ready(bu, url, settle_seconds=4.0)
+    if _is_blocked_text(state_text):
+        return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
+    data = _parse_totals_on_current_page(bu)
     data["url"] = url
     data["_flow"] = "desktop_direct"
     return data
@@ -980,6 +1161,21 @@ def _extract_asian_with_fallback(match_id: str, history_url: str, client_factory
         second["_fallback_from"] = "mobile_direct"
         return second
     third = _run_with_retries("asian_desktop", f"{session_prefix}_desktop", client_factory, _extract_asian_desktop, match_id)
+    if _is_success_payload(third):
+        third["_fallback_from"] = "history_tab"
+        return third
+    return third if third.get("_attempts") else (second if second.get("_attempts") else first)
+
+
+def _extract_totals_with_fallback(match_id: str, history_url: str, client_factory: Callable[[str], Any], session_prefix: str) -> Dict[str, Any]:
+    first = _run_with_retries("totals_mobile", f"{session_prefix}_mobile", client_factory, _extract_totals, match_id)
+    if _is_success_payload(first):
+        return first
+    second = _run_with_retries("totals_history", f"{session_prefix}_history", client_factory, _extract_totals_from_history_flow, history_url)
+    if _is_success_payload(second):
+        second["_fallback_from"] = "mobile_direct"
+        return second
+    third = _run_with_retries("totals_desktop", f"{session_prefix}_desktop", client_factory, _extract_totals_desktop, match_id)
     if _is_success_payload(third):
         third["_fallback_from"] = "history_tab"
         return third
@@ -1150,6 +1346,7 @@ def main() -> None:
         "schedule": found["schedule_row"],
         "欧赔": _extract_europe_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_eu"),
         "亚值": _extract_asian_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_as"),
+        "大小球": _extract_totals_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_ou"),
         "凯利": _extract_kelly_full_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_ke"),
     }
     if args.overwrite:

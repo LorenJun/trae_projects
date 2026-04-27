@@ -21,9 +21,10 @@ sys.path.insert(0, PROJECT_ROOT)
 # Realtime okooo snapshots (refreshed before each prediction)
 from okooo_live_snapshot import refresh_snapshot as refresh_okooo_snapshot
 from okooo_live_snapshot import extract_current_odds as extract_okooo_current_odds
+import subprocess
 
 # 导入机器学习模型
-from ml_prediction_models import MultiModelFusion, PoissonModel
+from ml_prediction_models import MultiModelFusion, PoissonModel, DixonColesModel
 from result_manager import ResultManager
 
 # 配置日志
@@ -40,6 +41,105 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+def _load_team_alias_map(base_dir: str) -> Dict[str, Any]:
+    """Load team alias mapping file used across collectors (league -> canonical -> aliases)."""
+    try:
+        path = os.path.join(base_dir, "okooo_team_aliases.json")
+        if not os.path.exists(path):
+            return {}
+        return json.loads(open(path, "r", encoding="utf-8").read())
+    except Exception:
+        return {}
+
+
+def _aliases_for_team(alias_map: Dict[str, Any], league_code: str, team_name: str) -> List[str]:
+    league = alias_map.get(league_code) if isinstance(alias_map, dict) else None
+    if not isinstance(league, dict):
+        return []
+    aliases = league.get(team_name)
+    return [str(x) for x in aliases] if isinstance(aliases, list) else []
+
+
+def _derive_form_from_recent(points: Any, matches: Any) -> int:
+    """Map recent points to a 1..5 form scale."""
+    try:
+        pts = int(points)
+        m = max(1, int(matches))
+    except Exception:
+        return 3
+    ppg = pts / m
+    if ppg >= 2.2:
+        return 5
+    if ppg >= 1.6:
+        return 4
+    if ppg >= 1.0:
+        return 3
+    if ppg >= 0.5:
+        return 2
+    return 1
+
+
+def _auto_enrich_team_context_if_enabled(
+    base_dir: str,
+    league_code: str,
+    home_team: str,
+    away_team: str,
+    analysis_context: Dict[str, Any],
+    realtime_context_applied: Dict[str, Any],
+) -> None:
+    """Best-effort: fetch team state (formation/possession/last lineup/player form) via Sofascore.
+
+    Enable via env:
+      ENABLE_TEAM_CONTEXT=1
+      TEAM_CONTEXT_LAST_N=5
+    """
+    # Default ON: we want team_context to be available for richer analysis.
+    # Can be disabled via ENABLE_TEAM_CONTEXT=0.
+    enabled = os.environ.get("ENABLE_TEAM_CONTEXT", "1").strip() in ("1", "true", "True")
+    if not enabled:
+        return
+    if not isinstance(analysis_context, dict):
+        return
+    if "team_context" in analysis_context:
+        # Caller already provided team context.
+        return
+
+    diag: Dict[str, Any] = {"attempted": True, "ok": False, "provider": "sofascore"}
+    try:
+        from sofascore_team_context import build_match_team_context
+
+        alias_map = _load_team_alias_map(base_dir)
+        home_aliases = _aliases_for_team(alias_map, league_code, home_team)
+        away_aliases = _aliases_for_team(alias_map, league_code, away_team)
+        last_n = int(os.environ.get("TEAM_CONTEXT_LAST_N", "5") or "5")
+
+        tc = build_match_team_context(
+            base_dir=base_dir,
+            league_code=league_code,
+            home_team=home_team,
+            away_team=away_team,
+            home_aliases=home_aliases,
+            away_aliases=away_aliases,
+            last_n=last_n,
+        )
+        analysis_context["team_context"] = tc
+        diag["ok"] = bool(tc.get("ok"))
+
+        # Derive form scale if not provided by caller.
+        if "home_form" not in analysis_context and isinstance(tc.get("home"), dict):
+            recent = tc["home"].get("recent") if isinstance(tc["home"].get("recent"), dict) else {}
+            analysis_context["home_form"] = _derive_form_from_recent(recent.get("points", 0), recent.get("matches", 5))
+        if "away_form" not in analysis_context and isinstance(tc.get("away"), dict):
+            recent = tc["away"].get("recent") if isinstance(tc["away"].get("recent"), dict) else {}
+            analysis_context["away_form"] = _derive_form_from_recent(recent.get("points", 0), recent.get("matches", 5))
+
+        diag["home_form"] = analysis_context.get("home_form")
+        diag["away_form"] = analysis_context.get("away_form")
+    except Exception as e:
+        diag["error"] = str(e)
+
+    realtime_context_applied["team_context"] = diag
 
 
 def _external_snapshot_root(base_dir: str) -> str:
@@ -99,6 +199,32 @@ def _update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str,
 
         return ' '.join(parts).strip()
 
+    def _format_score_ou_note(pred: Dict[str, Any]) -> str:
+        """Keep score/O-U summary short so schedule table cell won't explode."""
+        top_scores = pred.get('top_scores') or []
+        scores = []
+        if isinstance(top_scores, list):
+            for item in top_scores[:2]:
+                if isinstance(item, (list, tuple)) and item:
+                    scores.append(str(item[0]).strip())
+        score_note = ''
+        if scores:
+            score_note = f"比分:{'/'.join(scores)}"
+
+        ou = pred.get('over_under') or {}
+        ou_note = ''
+        if isinstance(ou, dict):
+            line = ou.get('line')
+            over_p = ou.get('over')
+            under_p = ou.get('under')
+            if isinstance(line, (int, float)) and isinstance(over_p, (int, float)) and isinstance(under_p, (int, float)):
+                side = '大' if over_p >= under_p else '小'
+                prob = max(over_p, under_p)
+                ou_note = f"大小:{side}{line:g}({prob:.2f})"
+
+        bits = [x for x in (score_note, ou_note) if x]
+        return ' '.join(bits).strip()
+
     def strip_existing_prediction_fragments(note: str) -> str:
         """Remove any existing prediction fragments from note to avoid duplicate write-backs.
 
@@ -150,6 +276,7 @@ def _update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str,
 
         upset = pred.get('upset_potential')
         upset_note = _format_upset_note(upset)
+        score_ou_note = _format_score_ou_note(pred)
         conf = float(pred.get('confidence') or 0.0)
         diag = pred.get('applied_model_weights')
         dyn = ''
@@ -157,7 +284,7 @@ def _update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str,
             dyn = '动态调权:已生效' if diag.get('has_enough_samples') else '动态调权:样本不足'
 
         merged = strip_existing_prediction_fragments(note).rstrip('；; ').strip()
-        pred_note = f"预测:{pred.get('prediction')} 信心:{conf:.2f} {upset_note}{(' ' + dyn) if dyn else ''}".strip()
+        pred_note = f"预测:{pred.get('prediction')} 信心:{conf:.2f} {score_ou_note} {upset_note}{(' ' + dyn) if dyn else ''}".strip()
         cells[5] = f"{merged}；{pred_note}" if merged else pred_note
         out_lines.append("| " + " | ".join(cells) + " |\n")
         changed += 1
@@ -1360,6 +1487,274 @@ class EnhancedPredictor:
             top_k=top_k
         )
 
+    def _calibrate_lambdas_from_market(
+        self,
+        league_code: str,
+        base_home_lambda: float,
+        base_away_lambda: float,
+        european_odds: Optional[Dict[str, Any]],
+    ) -> tuple[float, float, Dict[str, Any]]:
+        """Use 1X2 (欧赔终盘) implied probabilities to calibrate expected goals (lambdas).
+
+        Why:
+        - Our base lambdas come mostly from squad market-value proxies and are noisy.
+        - Score + O/U hit rate is very sensitive to lambdas.
+        - 1X2 market already encodes updated team news & latent strength; calibrating toward it
+          tends to improve stability.
+        """
+        diag: Dict[str, Any] = {"applied": False}
+        if not isinstance(european_odds, dict):
+            return base_home_lambda, base_away_lambda, diag
+        final = european_odds.get("final")
+        if not isinstance(final, dict):
+            return base_home_lambda, base_away_lambda, diag
+
+        oh = self._to_float(final.get("home"))
+        od = self._to_float(final.get("draw"))
+        oa = self._to_float(final.get("away"))
+        if not oh or not od or not oa or min(oh, od, oa) <= 1.01:
+            return base_home_lambda, base_away_lambda, diag
+
+        # implied probs (remove margin via normalization)
+        ph = 1.0 / oh
+        pd = 1.0 / od
+        pa = 1.0 / oa
+        s = ph + pd + pa
+        ph, pd, pa = ph / s, pd / s, pa / s
+
+        rho_map = {
+            "premier_league": -0.08,
+            "la_liga": -0.10,
+            "serie_a": -0.12,
+            "bundesliga": -0.06,
+            "ligue_1": -0.10,
+        }
+        dc = DixonColesModel(rho=rho_map.get(league_code, -0.10))
+
+        league_avg = float(LEAGUE_CONFIG.get(league_code, {}).get("avg_goals") or 2.6)
+        base_total = max(0.8, float(base_home_lambda) + float(base_away_lambda))
+
+        best = None
+        best_cost = 1e9
+
+        # Grid-search small region: keep cost low (runs per match)
+        total_min = max(1.2, league_avg - 0.8)
+        total_max = min(3.8, league_avg + 0.8)
+        # Favor totals near base_total/league_avg (soft constraint)
+        for ti in range(int(total_min * 20), int(total_max * 20) + 1):  # step 0.05
+            total = ti / 20.0
+            for si in range(20, 81, 2):  # share 0.20..0.80 step 0.02
+                share = si / 100.0
+                hl = max(0.15, total * share)
+                al = max(0.15, total * (1 - share))
+
+                probs = dc.predict_with_dixon_coles(hl, al)
+                cost_prob = (probs["home_win"] - ph) ** 2 + (probs["draw"] - pd) ** 2 + (probs["away_win"] - pa) ** 2
+
+                # soft penalty: don't drift too far from base lambdas
+                cost_base = 0.08 * ((hl - base_home_lambda) ** 2 + (al - base_away_lambda) ** 2)
+                # soft penalty: keep totals close to league/base total
+                cost_total = 0.04 * ((total - league_avg) ** 2 + (total - base_total) ** 2)
+                cost = cost_prob + cost_base + cost_total
+
+                if cost < best_cost:
+                    best_cost = cost
+                    best = (hl, al, probs)
+
+        if not best:
+            return base_home_lambda, base_away_lambda, diag
+
+        hl, al, probs = best
+        diag = {
+            "applied": True,
+            "source": "euro_final_1x2",
+            "odds_final": {"home": oh, "draw": od, "away": oa},
+            "implied_probs": {"home": round(ph, 4), "draw": round(pd, 4), "away": round(pa, 4)},
+            "model_probs": {"home": round(float(probs["home_win"]), 4), "draw": round(float(probs["draw"]), 4), "away": round(float(probs["away_win"]), 4)},
+            "lambda_base": {"home": round(float(base_home_lambda), 3), "away": round(float(base_away_lambda), 3), "total": round(float(base_total), 3)},
+            "lambda_calibrated": {"home": round(float(hl), 3), "away": round(float(al), 3), "total": round(float(hl + al), 3)},
+            "cost": round(float(best_cost), 6),
+        }
+        return float(hl), float(al), diag
+
+    def _apply_live_outcome_adjustment(
+        self,
+        league_code: str,
+        final_prob: Dict[str, float],
+        current_odds: Optional[Dict[str, Any]],
+        historical_odds_reference: Optional[Dict[str, Any]] = None,
+    ) -> tuple[Dict[str, float], Dict[str, Any]]:
+        """Apply live, rule-based corrections for draw traps / strong-handicap-not-cover patterns.
+
+        This is intentionally a *small* adjustment layer (post-fusion) to:
+        - raise draw probability when market+handicap signals suggest a cold draw
+        - reduce favorite win probability when deep handicap shows retreat / water drift
+        """
+        diag: Dict[str, Any] = {"applied": False, "signals": [], "delta": {}}
+        if not isinstance(final_prob, dict):
+            return final_prob, diag
+        if not isinstance(current_odds, dict):
+            return final_prob, diag
+
+        def _pick(d: Dict[str, Any], *keys: str) -> Any:
+            cur: Any = d
+            for k in keys:
+                if not isinstance(cur, dict):
+                    return None
+                cur = cur.get(k)
+            return cur
+
+        def _parse_euro_final(eu: Any) -> tuple[Optional[float], Optional[float], Optional[float]]:
+            if not isinstance(eu, dict):
+                return None, None, None
+            # normalized schema: {'final': {'home':..,'draw':..,'away':..}}
+            fin = eu.get("final")
+            if isinstance(fin, dict):
+                return self._to_float(fin.get("home")), self._to_float(fin.get("draw")), self._to_float(fin.get("away"))
+            # fallback: 500-like snapshots may contain Chinese keys
+            fin = eu.get("最新指数")
+            if isinstance(fin, dict):
+                return self._to_float(fin.get("主")), self._to_float(fin.get("平")), self._to_float(fin.get("客"))
+            return None, None, None
+
+        def _parse_asian(asian: Any) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]:
+            # return (hcp_init, hcp_final, hw_init, aw_init, hw_final, aw_final)
+            if not isinstance(asian, dict):
+                return None, None, None, None, None, None
+            ini = asian.get("initial")
+            fin = asian.get("final")
+            if isinstance(ini, dict) and isinstance(fin, dict):
+                hcp_i = self._to_float(ini.get("handicap") if "handicap" in ini else ini.get("盘口值"))
+                hcp_f = self._to_float(fin.get("handicap") if "handicap" in fin else fin.get("盘口值"))
+                hw_i = self._to_float(ini.get("home_water") if "home_water" in ini else ini.get("主水"))
+                aw_i = self._to_float(ini.get("away_water") if "away_water" in ini else ini.get("客水"))
+                hw_f = self._to_float(fin.get("home_water") if "home_water" in fin else fin.get("主水"))
+                aw_f = self._to_float(fin.get("away_water") if "away_water" in fin else fin.get("客水"))
+                return hcp_i, hcp_f, hw_i, aw_i, hw_f, aw_f
+            return None, None, None, None, None, None
+
+        p_h = float(final_prob.get("home_win") or 0.0)
+        p_d = float(final_prob.get("draw") or 0.0)
+        p_a = float(final_prob.get("away_win") or 0.0)
+        total = p_h + p_d + p_a
+        if total <= 0:
+            return final_prob, diag
+        p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
+
+        euro = current_odds.get("欧赔")
+        asian = current_odds.get("亚值")
+        kelly = current_odds.get("凯利")
+
+        oh, od, oa = _parse_euro_final(euro)
+        hcp_i, hcp_f, hw_i, aw_i, hw_f, aw_f = _parse_asian(asian)
+        kd = None
+        if isinstance(kelly, dict):
+            kd = self._to_float(_pick(kelly, "final", "draw"))
+
+        # Determine favorite (exclude draw)
+        fav_side = None
+        fav_odds = None
+        if isinstance(oh, float) and isinstance(oa, float):
+            if oh <= oa:
+                fav_side, fav_odds = "home", oh
+            else:
+                fav_side, fav_odds = "away", oa
+        _ = od  # keep for future extensions (draw odds based filters)
+
+        _ = league_code  # reserved for future league-specific thresholds
+        deep_handicap = isinstance(hcp_f, float) and abs(hcp_f) >= 0.75
+        very_deep_handicap = isinstance(hcp_f, float) and abs(hcp_f) >= 1.0
+
+        # Handicap giver side: negative -> home gives, positive -> away gives
+        giver = None
+        if isinstance(hcp_f, float):
+            if hcp_f < -0.06:
+                giver = "home"
+            elif hcp_f > 0.06:
+                giver = "away"
+
+        retreat = False
+        if isinstance(hcp_i, float) and isinstance(hcp_f, float) and abs(hcp_f) + 0.12 < abs(hcp_i):
+            retreat = True
+
+        water_drift = False
+        if fav_side == "home" and isinstance(hw_i, float) and isinstance(hw_f, float) and (hw_f - hw_i) >= 0.04:
+            water_drift = True
+        if fav_side == "away" and isinstance(aw_i, float) and isinstance(aw_f, float) and (aw_f - aw_i) >= 0.04:
+            water_drift = True
+
+        # Cold draw signal score
+        draw_boost = 0.0
+        if isinstance(fav_odds, float) and fav_odds <= 1.60:
+            draw_boost += 0.04
+            diag["signals"].append("低赔强侧(<=1.60)")
+        if deep_handicap and giver == fav_side:
+            draw_boost += 0.03
+            diag["signals"].append("深让>=0.75")
+        if very_deep_handicap and giver == fav_side:
+            draw_boost += 0.03
+            diag["signals"].append("强让>=1.0")
+        if retreat and giver == fav_side and very_deep_handicap:
+            draw_boost += 0.03
+            diag["signals"].append("强让退盘")
+        if water_drift and giver == fav_side and very_deep_handicap:
+            draw_boost += 0.02
+            diag["signals"].append("强侧水位走高")
+        if isinstance(kd, float) and kd <= 0.95:
+            draw_boost += 0.01
+            diag["signals"].append("平局凯利偏低")
+
+        # Historical similar odds: if draw-rate is high, nudge draw a bit.
+        try:
+            if isinstance(historical_odds_reference, dict):
+                summary = historical_odds_reference.get("summary") or {}
+                rates = summary.get("result_rates") or {}
+                dr = rates.get("平局")
+                if isinstance(dr, (int, float)) and dr >= 0.33:
+                    draw_boost += 0.02
+                    diag["signals"].append("相似盘路平局率偏高")
+        except Exception:
+            pass
+
+        draw_boost = min(0.10, max(0.0, draw_boost))
+        if draw_boost <= 0:
+            return {"home_win": p_h, "draw": p_d, "away_win": p_a}, diag
+
+        # Apply by taking from favorite win, prefer not to zero it out.
+        if fav_side == "home":
+            take = min(draw_boost, max(0.0, p_h - 0.05))
+            p_h -= take
+            p_d += take
+        elif fav_side == "away":
+            take = min(draw_boost, max(0.0, p_a - 0.05))
+            p_a -= take
+            p_d += take
+        else:
+            # no favorite info, take from max win side
+            if p_h >= p_a:
+                take = min(draw_boost, max(0.0, p_h - 0.05))
+                p_h -= take
+                p_d += take
+            else:
+                take = min(draw_boost, max(0.0, p_a - 0.05))
+                p_a -= take
+                p_d += take
+
+        # Normalize again
+        s2 = p_h + p_d + p_a
+        if s2 > 0:
+            p_h, p_d, p_a = p_h / s2, p_d / s2, p_a / s2
+
+        diag["applied"] = True
+        diag["delta"] = {
+            "home_win": round(p_h - float(final_prob.get("home_win") or 0.0), 6),
+            "draw": round(p_d - float(final_prob.get("draw") or 0.0), 6),
+            "away_win": round(p_a - float(final_prob.get("away_win") or 0.0), 6),
+        }
+        diag["fav"] = {"side": fav_side, "odds": fav_odds}
+        diag["asian"] = {"handicap_initial": hcp_i, "handicap_final": hcp_f, "giver": giver, "retreat": retreat, "water_drift": water_drift}
+        return {"home_win": p_h, "draw": p_d, "away_win": p_a}, diag
+
     @staticmethod
     def _extract_current_odds_snapshot(match_record: Dict) -> Dict:
         """从赔率落盘记录中提取预测所需的赔率快照字段。"""
@@ -1368,6 +1763,7 @@ class EnhancedPredictor:
             '胜平负赔率': match_record.get('胜平负赔率', {}),
             '欧赔': match_record.get('欧赔', {}),
             '亚值': match_record.get('亚值', {}),
+            '大小球': match_record.get('大小球', {}) or {},
             '凯利': match_record.get('凯利', {}),
             '离散率': match_record.get('离散率', {}),
         }
@@ -1378,6 +1774,7 @@ class EnhancedPredictor:
         europe = snapshot.get('欧赔', {}) or {}
         asian = snapshot.get('亚值', {}) or {}
         kelly = snapshot.get('凯利', {}) or {}
+        totals = snapshot.get('大小球', {}) or {}
         return {
             'match_id': snapshot.get('match_id'),
             '胜平负赔率': {
@@ -1392,12 +1789,173 @@ class EnhancedPredictor:
                 'initial': asian.get('initial', {}),
                 'final': asian.get('final', {}),
             },
+            '大小球': {
+                'initial': totals.get('initial', {}) if isinstance(totals, dict) else {},
+                'final': totals.get('final', {}) if isinstance(totals, dict) else {},
+            },
             '凯利': {
                 'initial': kelly.get('initial', {}),
                 'final': kelly.get('final', {}),
             },
             '离散率': snapshot.get('离散率', {}) or {},
         }
+
+    def _resolve_over_under_line(self, current_odds: Optional[Dict[str, Any]], analysis_context: Dict[str, Any]) -> tuple[float, str]:
+        """Pick a real O/U line if available; otherwise fallback to 2.5.
+
+        Priority:
+        1) analysis_context['ou_line'] (external source override)
+        2) current_odds['大小球']['final']['line'] / ['盘口'] (from snapshots if enriched)
+        3) default 2.5
+        """
+        line = None
+        src = "default_2.5"
+
+        # 1) explicit override
+        try:
+            if isinstance(analysis_context, dict) and 'ou_line' in analysis_context:
+                v = self._to_float(analysis_context.get('ou_line'))
+                if isinstance(v, float) and 0.5 <= v <= 6.5:
+                    return float(v), "analysis_context"
+        except Exception:
+            pass
+
+        # 2) snapshot-provided totals
+        try:
+            if isinstance(current_odds, dict):
+                ou = current_odds.get('大小球')
+                if isinstance(ou, dict):
+                    fin = ou.get('final')
+                    if isinstance(fin, dict):
+                        v = fin.get('line')
+                        if v is None:
+                            v = fin.get('盘口')
+                        vv = self._to_float(v)
+                        if isinstance(vv, float) and 0.5 <= vv <= 6.5:
+                            return float(vv), "snapshot_final"
+                    ini = ou.get('initial')
+                    if isinstance(ini, dict):
+                        v = ini.get('line')
+                        if v is None:
+                            v = ini.get('盘口')
+                        vv = self._to_float(v)
+                        if isinstance(vv, float) and 0.5 <= vv <= 6.5:
+                            return float(vv), "snapshot_initial"
+        except Exception:
+            pass
+
+        # 3) default
+        return 2.5, src
+
+    def _auto_fetch_okooo_totals_if_needed(
+        self,
+        league_code: str,
+        match_date: str,
+        home_team: str,
+        away_team: str,
+        current_odds: Optional[Dict[str, Any]],
+        analysis_context: Dict[str, Any],
+        okooo_driver: str = "browser-use",
+        okooo_headed: bool = False,
+        match_time: str = "",
+        match_id: str = "",
+    ) -> tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+        """Best-effort: fetch latest O/U line + water from okooo via remen flow.
+
+        This runs `okooo_save_snapshot.py` (browser-based) and reads the emitted JSON.
+        It is guarded by env var `OKOOO_AUTO_TOTALS` (default on).
+        """
+        diag: Dict[str, Any] = {"attempted": False, "ok": False}
+        enabled = os.environ.get("OKOOO_AUTO_TOTALS", "1").strip() not in ("0", "false", "False")
+        if not enabled:
+            diag["skipped"] = "OKOOO_AUTO_TOTALS=0"
+            return current_odds, diag
+
+        # If already has totals line, no need.
+        try:
+            line, src = self._resolve_over_under_line(current_odds=current_odds, analysis_context=analysis_context)
+            if src in ("snapshot_final", "snapshot_initial", "analysis_context"):
+                diag["skipped"] = f"ou_line already resolved from {src}"
+                return current_odds, diag
+        except Exception:
+            pass
+
+        league_name = (LEAGUE_CONFIG.get(league_code, {}) or {}).get("name") or ""
+        if not league_name:
+            diag["skipped"] = "unknown league"
+            return current_odds, diag
+
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "okooo_save_snapshot.py")
+        out_dir = _external_snapshot_root(self.base_dir)  # europe_leagues/.okooo-scraper/snapshots
+        # Prefer the caller-provided driver but fallback to the other one (best-effort).
+        drivers = [okooo_driver]
+        if okooo_driver == "local-chrome":
+            drivers.append("browser-use")
+        elif okooo_driver == "browser-use":
+            drivers.append("local-chrome")
+
+        diag["attempted"] = True
+        try:
+            last_err = None
+            for drv in drivers:
+                cmd = [
+                    sys.executable,
+                    script,
+                    "--driver",
+                    str(drv),
+                    "--league",
+                    str(league_name),
+                    "--team1",
+                    str(home_team),
+                    "--team2",
+                    str(away_team),
+                    "--date",
+                    str(match_date),
+                    "--out-dir",
+                    str(out_dir),
+                    "--overwrite",
+                ]
+                if match_time:
+                    cmd.extend(["--time", str(match_time)])
+                if match_id:
+                    cmd.extend(["--match-id", str(match_id)])
+                if bool(okooo_headed) and drv == "browser-use":
+                    cmd.append("--headed")
+
+                diag["driver_tried"] = drv
+                diag["cmd"] = " ".join([str(x) for x in cmd])
+                p = subprocess.run(cmd, cwd=os.path.dirname(script), capture_output=True, text=True, timeout=240)
+                diag["returncode"] = p.returncode
+                if p.stdout:
+                    diag["stdout_tail"] = p.stdout.strip().splitlines()[-1][-200:]
+                if p.stderr:
+                    diag["stderr_tail"] = p.stderr.strip().splitlines()[-1][-200:]
+                if p.returncode != 0:
+                    last_err = f"rc={p.returncode}"
+                    continue
+
+                out_path = (p.stdout or "").strip().splitlines()[-1].strip()
+                if not out_path or not os.path.exists(out_path):
+                    last_err = "snapshot path missing"
+                    continue
+
+                data = json.loads(open(out_path, "r", encoding="utf-8").read())
+                totals = data.get("大小球") if isinstance(data, dict) else None
+                if not isinstance(totals, dict) or not totals.get("found"):
+                    last_err = "totals not found in snapshot"
+                    continue
+
+                merged = dict(current_odds or {})
+                merged["大小球"] = {"initial": totals.get("initial") or {}, "final": totals.get("final") or {}}
+                diag["ok"] = True
+                diag["source_snapshot"] = out_path
+                return merged, diag
+
+            diag["error"] = last_err or "unknown"
+            return current_odds, diag
+        except Exception as e:
+            diag["error"] = str(e)
+            return current_odds, diag
 
     def _get_matches_from_odds_history(self, league_code: str, match_date: str) -> List[Dict]:
         """从联赛目录的赔率落盘文件中获取某日真实赛程+赔率快照。"""
@@ -1413,7 +1971,12 @@ class EnhancedPredictor:
         return [m for m in matches if m.get('home_team') and m.get('away_team')]
 
     def _get_matches_from_odds_snapshots(self, league_code: str, match_date: str) -> List[Dict]:
-        """从联赛目录 analysis/odds_snapshots/*_odds_snapshot.json 获取某日真实赛程+赔率快照。"""
+        """从联赛目录 analysis/odds_snapshots 获取某日真实赛程+赔率快照。
+
+        支持：
+        - `*_odds_snapshot.json`（结构化快照）
+        - `*_odds_snapshot.csv`（批量快照，项目内目前更常见）
+        """
         snapshot_dir = os.path.join(self.base_dir, league_code, 'analysis', 'odds_snapshots')
         if not os.path.isdir(snapshot_dir):
             return []
@@ -1436,6 +1999,32 @@ class EnhancedPredictor:
         matches = [m for m in matches if m.get('home_team') and m.get('away_team')]
         if matches:
             return matches
+
+        # CSV snapshots (preferred in this repo)
+        csv_matches = []
+        for file_path in sorted(glob(os.path.join(snapshot_dir, '*_odds_snapshot.csv'))):
+            try:
+                import csv as _csv
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    reader = _csv.DictReader(f)
+                    for row in reader:
+                        if row.get('match_date') != match_date:
+                            continue
+                        home = (row.get('home_team') or '').strip()
+                        away = (row.get('away_team') or '').strip()
+                        if not home or not away:
+                            continue
+                        csv_matches.append({
+                            'home_team': home,
+                            'away_team': away,
+                            'current_odds': self._extract_current_odds_from_csv_row(row),
+                        })
+            except Exception:
+                continue
+        csv_matches = [m for m in csv_matches if m.get('home_team') and m.get('away_team')]
+        if csv_matches:
+            logger.info(f"使用 CSV 赔率快照进行预测: {league_code} {match_date}, matches={len(csv_matches)}")
+            return csv_matches
 
         # Fallback: external live snapshots generated by okooo_save_snapshot.py
         live_matches = []
@@ -1463,6 +2052,102 @@ class EnhancedPredictor:
             logger.info(f"使用外部实时快照进行预测: {league_code} {match_date}, matches={len(live_matches)}")
             return live_matches
         return []
+
+    @staticmethod
+    def _to_float(value: Any) -> Optional[float]:
+        try:
+            if value is None:
+                return None
+            s = str(value).strip()
+            if not s:
+                return None
+            return float(s)
+        except Exception:
+            return None
+
+    def _extract_current_odds_from_csv_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """把 odds_snapshot.csv 的扁平字段转换成 current_odds 所需的嵌套结构。"""
+        f = self._to_float
+        europe_initial = {
+            'home': f(row.get('欧赔_初始_主')),
+            'draw': f(row.get('欧赔_初始_平')),
+            'away': f(row.get('欧赔_初始_客')),
+        }
+        europe_final = {
+            'home': f(row.get('欧赔_即时_主')),
+            'draw': f(row.get('欧赔_即时_平')),
+            'away': f(row.get('欧赔_即时_客')),
+        }
+        spf_initial = {
+            'home': f(row.get('胜平负_初始_主')),
+            'draw': f(row.get('胜平负_初始_平')),
+            'away': f(row.get('胜平负_初始_客')),
+        }
+        spf_final = {
+            'home': f(row.get('胜平负_即时_主')),
+            'draw': f(row.get('胜平负_即时_平')),
+            'away': f(row.get('胜平负_即时_客')),
+        }
+        asian_initial = {
+            'home_water': f(row.get('亚值_初始_主水')),
+            'handicap': f(row.get('亚值_初始_盘口值')),
+            'away_water': f(row.get('亚值_初始_客水')),
+        }
+        asian_final = {
+            'home_water': f(row.get('亚值_即时_主水')),
+            'handicap': f(row.get('亚值_即时_盘口值')),
+            'away_water': f(row.get('亚值_即时_客水')),
+        }
+        kelly_initial = {
+            'home': f(row.get('凯利_初始_主')),
+            'draw': f(row.get('凯利_初始_平')),
+            'away': f(row.get('凯利_初始_客')),
+        }
+        kelly_final = {
+            'home': f(row.get('凯利_即时_主')),
+            'draw': f(row.get('凯利_即时_平')),
+            'away': f(row.get('凯利_即时_客')),
+        }
+        disc_initial = {
+            'home': f(row.get('离散率_初始_主')),
+            'draw': f(row.get('离散率_初始_平')),
+            'away': f(row.get('离散率_初始_客')),
+        }
+        disc_final = {
+            'home': f(row.get('离散率_即时_主')),
+            'draw': f(row.get('离散率_即时_平')),
+            'away': f(row.get('离散率_即时_客')),
+        }
+
+        # Optional: over/under market (if the snapshot csv has been enriched)
+        # Expected column names (any subset is ok):
+        # - 大小球_初始_盘口 / 大小球_即时_盘口
+        # - 大小球_初始_大 / 大小球_初始_小 / 大小球_即时_大 / 大小球_即时_小
+        ou_initial = {
+            'line': f(row.get('大小球_初始_盘口')),
+            'over': f(row.get('大小球_初始_大')),
+            'under': f(row.get('大小球_初始_小')),
+        }
+        ou_final = {
+            'line': f(row.get('大小球_即时_盘口')),
+            'over': f(row.get('大小球_即时_大')),
+            'under': f(row.get('大小球_即时_小')),
+        }
+        if all(v is None for v in ou_initial.values()):
+            ou_initial = {}
+        if all(v is None for v in ou_final.values()):
+            ou_final = {}
+        ou_block = {'initial': ou_initial, 'final': ou_final} if (ou_initial or ou_final) else {}
+        return {
+            'match_id': row.get('match_id') or row.get('page_id'),
+            '胜平负赔率': {'initial': spf_initial, 'final': spf_final},
+            '欧赔': {'initial': europe_initial, 'final': europe_final},
+            '亚值': {'initial': asian_initial, 'final': asian_final},
+            '凯利': {'initial': kelly_initial, 'final': kelly_final},
+            '离散率': {'initial': disc_initial, 'final': disc_final},
+            '大小球': ou_block,
+            '_source': 'odds_snapshot.csv',
+        }
     
     def predict_match(
         self,
@@ -1542,6 +2227,35 @@ class EnhancedPredictor:
                 except Exception as e:
                     realtime["okooo"]["errors"].append({"driver": drv, "error": str(e)})
                     continue
+
+        # 0.5 若缺少大小球盘口线/水位，补抓一次（best-effort，可用 env OKOOO_AUTO_TOTALS=0 关闭）
+        try:
+            current_odds, ou_fetch_diag = self._auto_fetch_okooo_totals_if_needed(
+                league_code=league_code,
+                match_date=match_date,
+                home_team=home_team,
+                away_team=away_team,
+                current_odds=current_odds,
+                analysis_context=analysis_context,
+                okooo_driver=okooo_driver,
+                okooo_headed=bool(okooo_headed),
+                match_time=match_time or "",
+                match_id=realtime["okooo"]["match_id"],
+            )
+            realtime["context_applied"]["okooo_totals_fetch"] = ou_fetch_diag
+        except Exception as e:
+            realtime["context_applied"]["okooo_totals_fetch"] = {"attempted": True, "ok": False, "error": str(e)}
+
+        # 0.6 可选：自动补齐球队战术/控球/上一场首发/球员近期评分（best-effort，默认关闭）
+        _auto_enrich_team_context_if_enabled(
+            base_dir=self.base_dir,
+            league_code=league_code,
+            home_team=home_team,
+            away_team=away_team,
+            analysis_context=analysis_context,
+            realtime_context_applied=realtime["context_applied"],
+        )
+
         cache_params = {
             'schema_v': 3,
             'home': home_team, 'away': away_team,
@@ -1571,6 +2285,13 @@ class EnhancedPredictor:
         # 2. 计算实力差距
         strength_diff = home_strength['strength'] - away_strength['strength']
         
+        # Prepare market odds handles early (also used by lambda calibration).
+        asian_handicap = None
+        european_odds = None
+        if isinstance(current_odds, dict):
+            asian_handicap = current_odds.get('亚值')
+            european_odds = current_odds.get('欧赔')
+
         # 3. 使用多模型融合预测
         league_avg_goals = LEAGUE_CONFIG[league_code]['avg_goals']
         
@@ -1589,8 +2310,23 @@ class EnhancedPredictor:
         )
         
         # 计算预期进球
-        home_lambda = home_strength['attack'] * away_strength['defense'] * league_avg_goals * 1.12
-        away_lambda = away_strength['attack'] * home_strength['defense'] * league_avg_goals
+        base_home_lambda = home_strength['attack'] * away_strength['defense'] * league_avg_goals * 1.12
+        base_away_lambda = away_strength['attack'] * home_strength['defense'] * league_avg_goals
+
+        home_lambda = base_home_lambda
+        away_lambda = base_away_lambda
+
+        # 如果有欧赔终盘，尝试用市场隐含概率校准 λ（提升比分/大小球稳定性）
+        try:
+            home_lambda, away_lambda, cal_diag = self._calibrate_lambdas_from_market(
+                league_code=league_code,
+                base_home_lambda=base_home_lambda,
+                base_away_lambda=base_away_lambda,
+                european_odds=european_odds,
+            )
+            realtime["context_applied"]["lambda_calibration"] = cal_diag
+        except Exception as e:
+            realtime["context_applied"]["lambda_calibration"] = {"applied": False, "error": str(e)}
         
         # 简化的xG计算
         home_xg = home_lambda * 0.8
@@ -1626,7 +2362,7 @@ class EnhancedPredictor:
             away_defense=away_strength['defense']
         )
         
-        # 5. 确定最终预测结果
+        # 5. 确定最终预测结果（可叠加临场规则修正）
         final_prob = fusion_result['final']
         probs = [
             ('主胜', final_prob['home_win']),
@@ -1634,13 +2370,10 @@ class EnhancedPredictor:
             ('客胜', final_prob['away_win'])
         ]
         probs.sort(key=lambda x: x[1], reverse=True)
-        
-        main_prediction = probs[0][0]
-        confidence = probs[0][1]
 
         historical_odds_reference = None
-        if current_odds:
-            exclude_match_id = current_odds.get('match_id') if isinstance(current_odds, dict) else None
+        if isinstance(current_odds, dict) and current_odds:
+            exclude_match_id = current_odds.get('match_id')
             historical_odds_reference = self.odds_reference.find_similar_matches(
                 league_code=league_code,
                 current_odds=current_odds,
@@ -1663,11 +2396,25 @@ class EnhancedPredictor:
                 'insights': ['当前未传入赔率快照，历史赔率参考已就绪但未参与匹配']
             }
 
-        asian_handicap = None
-        european_odds = None
-        if isinstance(current_odds, dict):
-            asian_handicap = current_odds.get('亚值')
-            european_odds = current_odds.get('欧赔')
+        # Live correction for draw-traps / strong-handicap-not-cover patterns
+        adjusted_prob, live_adj_diag = self._apply_live_outcome_adjustment(
+            league_code=league_code,
+            final_prob=final_prob,
+            current_odds=current_odds,
+            historical_odds_reference=historical_odds_reference,
+        )
+        if isinstance(live_adj_diag, dict) and live_adj_diag.get("applied"):
+            final_prob = adjusted_prob
+            probs = [
+                ('主胜', final_prob['home_win']),
+                ('平局', final_prob['draw']),
+                ('客胜', final_prob['away_win'])
+            ]
+            probs.sort(key=lambda x: x[1], reverse=True)
+        realtime["context_applied"]["live_outcome_adjustment"] = live_adj_diag
+
+        main_prediction = probs[0][0]
+        confidence = probs[0][1]
 
         # 6. 爆冷分析（把模型输出也作为输入，便于案例库做“同向反打”学习）
         upset_potential = self.upset_analyzer.assess_upset_potential(
@@ -1684,12 +2431,57 @@ class EnhancedPredictor:
             european_odds=european_odds,
         )
         
-        # 7. 预测比分
-        score_result = self.poisson_model.predict_score_probability(home_lambda, away_lambda)
+        # 7. 预测比分（Dixon-Coles 修正：更贴近低比分/平局分布）
+        rho_map = {
+            'premier_league': -0.08,
+            'la_liga': -0.10,
+            'serie_a': -0.12,
+            'bundesliga': -0.06,
+            'ligue_1': -0.10,
+        }
+        dc_model = DixonColesModel(rho=rho_map.get(league_code, -0.10))
+        score_result = dc_model.predict_with_dixon_coles(home_lambda, away_lambda)
         top_scores = sorted(score_result['score_probs'].items(), key=lambda x: x[1], reverse=True)[:3]
         
         # 8. 大小球预测
-        over_under = self.poisson_model.predict_over_under(home_lambda, away_lambda)
+        # If current_odds still lacks totals, attempt a last-moment fetch (best-effort).
+        if os.environ.get("OKOOO_AUTO_TOTALS", "1") != "0":
+            try:
+                current_odds, ou_fetch_diag2 = self._auto_fetch_okooo_totals_if_needed(
+                    league_code=league_code,
+                    match_date=match_date,
+                    home_team=home_team,
+                    away_team=away_team,
+                    current_odds=current_odds,
+                    analysis_context=analysis_context,
+                    okooo_driver=okooo_driver,
+                    okooo_headed=bool(okooo_headed),
+                    match_time=match_time or "",
+                    match_id=realtime["okooo"]["match_id"],
+                )
+                # Only overwrite if we actually attempted here (avoid masking earlier diag).
+                realtime["context_applied"]["okooo_totals_fetch_last_moment"] = ou_fetch_diag2
+            except Exception as e:
+                realtime["context_applied"]["okooo_totals_fetch_last_moment"] = {"attempted": True, "ok": False, "error": str(e)}
+
+        ou_line, ou_line_source = self._resolve_over_under_line(current_odds=current_odds, analysis_context=analysis_context)
+        over_under = self.poisson_model.predict_over_under(home_lambda, away_lambda, line=ou_line)
+        if isinstance(over_under, dict):
+            over_under["line_source"] = ou_line_source
+            # Attach market O/U (line + water) if we have it, for traceability in final conclusion.
+            try:
+                market_ou = None
+                if isinstance(current_odds, dict):
+                    blk = current_odds.get("大小球")
+                    if isinstance(blk, dict):
+                        fin = blk.get("final") if isinstance(blk.get("final"), dict) else {}
+                        ini = blk.get("initial") if isinstance(blk.get("initial"), dict) else {}
+                        market_ou = {"final": fin or {}, "initial": ini or {}}
+                if market_ou:
+                    over_under["market"] = market_ou
+                    realtime["context_applied"]["ou_market"] = market_ou
+            except Exception:
+                pass
         
         # 构建完整结果
         result = {
@@ -1792,7 +2584,9 @@ class EnhancedPredictor:
                 away,
                 league_code,
                 match_date,
-                current_odds=current_odds
+                current_odds=current_odds,
+                # We already attempted a live refresh above in this loop; avoid double refreshing.
+                force_refresh_odds=False,
             )
             predictions.append(pred)
         
@@ -1862,7 +2656,9 @@ class EnhancedPredictor:
             
             # 大小球
             ou = pred['over_under']
-            report += f"\n**大小球分析** (2.5球):\n"
+            ou_line = ou.get('line')
+            line_label = f"{ou_line:g}" if isinstance(ou_line, (int, float)) else "?"
+            report += f"\n**大小球分析** ({line_label}球):\n"
             report += f"  大球: {ou['over']:.1%} | 小球: {ou['under']:.1%}\n"
             report += f"  预期总进球: {ou['total_lambda']:.2f}\n"
             

@@ -71,6 +71,7 @@ def build_json_result(command, data=None, captured_stdout="", captured_stderr=""
 
 def serialize_match_data(match):
     return {
+        "match_id": getattr(match, "match_id", "") or "",
         "home_team": match.home_team,
         "away_team": match.away_team,
         "league": match.league,
@@ -78,6 +79,7 @@ def serialize_match_data(match):
         "match_time": match.match_time,
         "status": match.status,
         "score": list(match.score) if match.score else None,
+        "odds_data": match.odds_data if getattr(match, "odds_data", None) else None,
         "sources": match.sources or [],
         "update_time": match.update_time,
     }

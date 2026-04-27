@@ -19,6 +19,7 @@ created_date: "2026-04-18"
 - 🔍 **比赛分析Agent** - 多维度比赛基本面分析
 - 💰 **赔率分析Agent** - 凯利指数、盘口深度分析
 - 📈 **结果追踪Agent** - 准确率统计与持续优化
+- 🧠 **可选：球队状态增强** - 使用 SofaScore 注入阵型/控球/上一场首发/球员评分趋势（`team_context`）
 
 ---
 
@@ -116,6 +117,20 @@ export ENABLE_PREDICTION_CACHE=1
 
 ```bash
 unset ENABLE_PREDICTION_CACHE
+```
+
+### 可选：球队状态增强（SofaScore）
+
+如需在预测时自动注入球队近况（阵型/控球/上一场首发/球员评分趋势），可启用：
+
+```bash
+export TEAM_CONTEXT_LAST_N=5
+```
+
+默认该增强已开启；如需关闭：
+
+```bash
+export ENABLE_TEAM_CONTEXT=0
 ```
 
 ### 6. OpenClaw 一键初始化（推荐）

@@ -222,14 +222,31 @@ class EloRatingSystem:
         self.set_rating(away_team, away_new)
 
     def predict_match(self, home_team: str, away_team: str) -> Dict[str, float]:
-        """预测比赛"""
+        """预测比赛（包含可用的平局概率近似）。
+
+        说明：
+        - 传统 Elo 二元 logistic 会导致 home_win + away_win = 1，从而 draw 恒为 0。
+        - 这会显著拉低平局预测、进而拖累比分/大小球推断。
+        - 这里用“实力接近则更易平”的经验项，为 draw 分配合理质量，
+          再把剩余概率按 Elo 强弱分配给主/客胜。
+        """
         home_rating = self.get_rating(home_team) + self.home_advantage
         away_rating = self.get_rating(away_team)
 
-        # 计算预期得分
-        home_win_prob = 1 / (1 + 10 ** ((away_rating - home_rating) / 400))
-        away_win_prob = 1 / (1 + 10 ** ((home_rating - away_rating) / 400))
-        draw_prob = 1 - home_win_prob - away_win_prob
+        # Elo 强弱（胜负二元）基准概率
+        p_home_raw = 1 / (1 + 10 ** ((away_rating - home_rating) / 400))
+        p_home_raw = max(0.001, min(0.999, p_home_raw))
+        p_away_raw = 1 - p_home_raw
+
+        # 平局概率：强弱越接近越大（经验近似）
+        diff = abs(home_rating - away_rating)
+        draw_base = 0.28
+        draw_prob = draw_base * math.exp(-diff / 250)
+        draw_prob = max(0.08, min(0.32, draw_prob))
+
+        remain = 1 - draw_prob
+        home_win_prob = remain * p_home_raw
+        away_win_prob = remain * p_away_raw
 
         return {
             'home_win': home_win_prob,
@@ -249,14 +266,23 @@ class GlickoRatingSystem(EloRatingSystem):
         self.vol_constant = vol_constant  # 波动性
 
     def predict_match(self, home_team: str, away_team: str) -> Dict[str, float]:
-        """预测比赛（考虑评级偏差）"""
+        """预测比赛（包含可用的平局概率近似）"""
         home_rating = self.get_rating(home_team) + self.home_advantage
         away_rating = self.get_rating(away_team)
 
         # 计算预期得分（简化版本）
-        home_win_prob = 1 / (1 + 10 ** ((away_rating - home_rating) / 400))
-        away_win_prob = 1 / (1 + 10 ** ((home_rating - away_rating) / 400))
-        draw_prob = 1 - home_win_prob - away_win_prob
+        p_home_raw = 1 / (1 + 10 ** ((away_rating - home_rating) / 400))
+        p_home_raw = max(0.001, min(0.999, p_home_raw))
+        p_away_raw = 1 - p_home_raw
+
+        diff = abs(home_rating - away_rating)
+        draw_base = 0.28
+        draw_prob = draw_base * math.exp(-diff / 250)
+        draw_prob = max(0.08, min(0.32, draw_prob))
+
+        remain = 1 - draw_prob
+        home_win_prob = remain * p_home_raw
+        away_win_prob = remain * p_away_raw
 
         return {
             'home_win': home_win_prob,
@@ -324,15 +350,18 @@ class LogisticRegressionModel:
         )
 
         # 转换为概率
-        home_win_prob = 1 / (1 + math.exp(-home_score * 5))
-        away_win_prob = 1 / (1 + math.exp(home_score * 5))
-        draw_prob = 1 - home_win_prob - away_win_prob
+        p_home_raw = 1 / (1 + math.exp(-home_score * 5))
+        p_home_raw = max(0.001, min(0.999, p_home_raw))
+        p_away_raw = 1 - p_home_raw
 
-        # 归一化
-        total = home_win_prob + away_win_prob + draw_prob
-        home_win_prob /= total
-        away_win_prob /= total
-        draw_prob /= total
+        # 平局概率经验项：越接近越容易平（避免 draw 恒为0）
+        draw_base = 0.30
+        draw_prob = draw_base * math.exp(-abs(home_score) * 1.5)
+        draw_prob = max(0.08, min(0.34, draw_prob))
+
+        remain = 1 - draw_prob
+        home_win_prob = remain * p_home_raw
+        away_win_prob = remain * p_away_raw
 
         return {
             'home_win': home_win_prob,

@@ -1,39 +1,57 @@
 ---
 document_title: "数据格式规范"
-version: "1.0.0"
-last_updated: "2026-04-18"
+version: "1.1.0"
+last_updated: "2026-04-27"
 ---
 
-# 📋 数据格式规范
+# 数据格式规范
 
-本规范定义项目中所有数据文件的格式标准，确保数据的一致性和可解析性。
+本规范定义当前项目正式使用的数据格式，确保以下几类数据在项目内保持一致：
 
----
+- 联赛主文件 `teams_2025-26.md`
+- 澳客实时快照 JSON
+- 预测输出结构
+- 赛果回填与准确率统计相关结构
+
+## 当前单一事实来源
+
+正式主流程只认：
+
+- `europe_leagues/<league>/teams_2025-26.md`
+
+运行时数据允许写入：
+
+- `europe_leagues/.okooo-scraper/snapshots/`
+- `europe_leagues/.okooo-scraper/schedules/`
+- `europe_leagues/.okooo-scraper/runtime/`
+
+以下旧目录不再作为正式主流程输出目标：
+
+- `predictions/`
+- `reports/`
+- `analysis/predictions/*.md`
+- `analysis/results/*.md`
 
 ## 目录结构
 
-```
+```text
 docs/
 └── standards/
-    ├── coding_standards.md      # 编码规范
-    ├── data_format.md           # 本文档 - 数据格式规范
-    └── workflow.md              # 工作流程规范
+    ├── coding_standards.md
+    ├── data_format.md
+    └── workflow.md
 ```
-
----
 
 ## Markdown 表格格式
 
 ### 通用表格规范
 
-**表头格式**: 使用第一行作为表头
+- 数字列右对齐
+- 文字列左对齐
+- 状态列可居中
 
-**对齐方式**:
-- 数字列: 右对齐
-- 文字列: 左对齐
-- 状态列: 居中对齐
+示例：
 
-**示例**:
 ```markdown
 | 文字列（左对齐） | 数字列（右对齐） | 状态列（居中） |
 |-----------------|----------------:|:--------------:|
@@ -41,198 +59,349 @@ docs/
 | 内容2           |              20 |      ❌        |
 ```
 
----
-
-## 预测数据格式
+## 联赛主文件格式
 
 ### 文件位置
-`europe_leagues/[联赛]/analysis/predictions/predictions_YYYY-MM.md`
 
-### 表格结构
+- `europe_leagues/<league>/teams_2025-26.md`
 
-| 字段 | 类型 | 格式 | 示例 | 说明 |
-|------|------|------|------|------|
-| 预测ID | String | `YYYYMMDD-HHMM-主队-客队` | `20260418-0230-圣保利-科隆` | 唯一标识 |
-| 预测日期 | Date | `YYYY-MM-DD` | `2026-04-17` | 预测记录日期 |
-| 比赛日期 | Date | `YYYY-MM-DD` | `2026-04-18` | 比赛日期 |
-| 主队 | String | | `圣保利` | 主队全名 |
-| 客队 | String | | `科隆` | 客队全名 |
-| 联赛 | String | | `德甲` | 联赛名称 |
-| 预测结果 | Enum | `主胜`\|`平局`\|`客胜` | `主胜` | 预测结果 |
-| 预测比分 | String | `X-Y` | `2-1` | 预测具体比分 |
-| 预测概率 | Float | `0.00-1.00` | `0.65` | 结果概率 |
-| 大小球 | Enum | `大球`\|`小球` | `大球` | 大小球预测 |
-| 让球盘 | String | `主队±X球` | `圣保利-0.5` | 让球盘预测 |
-| 投注建议 | String | | `谨慎推荐主胜` | 投注建议描述 |
-| 报告链接 | String | 文件路径 | `./reports/20260418-圣保利-科隆.md` | 分析报告路径 |
-| 实际结果 | Enum | `主胜`\|`平局`\|`客胜`\|`-` | `-` | 赛后填写 |
-| 实际比分 | String | `X-Y`\|`-` | `-` | 赛后填写 |
-| 预测正确 | Boolean | `是`\|`否`\|`-` | `-` | 赛后填写 |
+### 赛程表结构
 
-### 完整示例
+| 字段 | 类型 | 示例 | 说明 |
+|------|------|------|------|
+| 日期 | Date | `2026-04-28` | 比赛日期 |
+| 时间 | Time | `03:00` | 开球时间 |
+| 主队 | String | `曼联` | 主队名称 |
+| 比分 | String | `-` / `1-0` | 未赛为 `-`，已赛为 `x-y` |
+| 客队 | String | `布伦特福德` | 客队名称 |
+| 备注 | String | `主胜；比分:1-0/1-1；大小:小3.0(...)` | 预测摘要与赛后标记 |
+
+示例：
 
 ```markdown
-# 2026年04月预测记录
-
-| 预测ID | 预测日期 | 比赛日期 | 主队 | 客队 | 联赛 | 预测结果 | 预测比分 | 预测概率 | 大小球 | 让球盘 | 投注建议 | 报告链接 | 实际结果 | 实际比分 | 预测正确 |
-|--------|---------|---------|------|------|------|---------|---------|---------|--------|--------|---------|---------|---------|---------|---------|
-| 20260418-0230-圣保利-科隆 | 2026-04-17 | 2026-04-18 | 圣保利 | 科隆 | 德甲 | 主胜 | 2-1 | 0.55 | 大球 | 圣保利-0.5 | 谨慎推荐主胜 | ./reports/20260418-圣保利-科隆.md | - | - | - |
-```
-
----
-
-## 实际结果数据格式
-
-### 文件位置
-`europe_leagues/[联赛]/analysis/results/results_YYYY-MM.md`
-
-### 表格结构
-
-| 字段 | 类型 | 格式 | 示例 | 说明 |
-|------|------|------|------|------|
-| 预测ID | String | `YYYYMMDD-HHMM-主队-客队` | `20260418-0230-圣保利-科隆` | 关联预测记录 |
-| 比赛日期 | Date | `YYYY-MM-DD` | `2026-04-18` | 比赛日期 |
-| 主队 | String | | `圣保利` | 主队全名 |
-| 客队 | String | | `科隆` | 客队全名 |
-| 联赛 | String | | `德甲` | 联赛名称 |
-| 实际结果 | Enum | `主胜`\|`平局`\|`客胜` | `主胜` | 实际结果 |
-| 实际比分 | String | `X-Y` | `2-0` | 实际具体比分 |
-| 主队进球 | Int | | `2` | 主队进球数 |
-| 客队进球 | Int | | `0` | 客队进球数 |
-| 总进球 | Int | | `2` | 总进球数 |
-| 比赛状态 | Enum | `已结束`\|`进行中`\|`未开始` | `已结束` | 比赛状态 |
-| 记录日期 | Date | `YYYY-MM-DD` | `2026-04-18` | 结果记录日期 |
-| 数据源 | String | | `竞彩网` | 数据来源 |
-
-### 完整示例
-
-```markdown
-# 2026年04月比赛结果
-
-| 预测ID | 比赛日期 | 主队 | 客队 | 联赛 | 实际结果 | 实际比分 | 主队进球 | 客队进球 | 总进球 | 比赛状态 | 记录日期 | 数据源 |
-|--------|---------|------|------|------|---------|---------|---------|---------|--------|---------|---------|--------|
-| 20260418-0230-圣保利-科隆 | 2026-04-18 | 圣保利 | 科隆 | 德甲 | 主胜 | 2-0 | 2 | 0 | 2 | 已结束 | 2026-04-18 | 竞彩网 |
-```
-
----
-
-## 球队信息数据格式
-
-### 文件位置
-`europe_leagues/[联赛]/teams_YYYY-YY.md`
-
-### 表格结构 - 积分榜
-
-| 排名 | 球队 | 场次 | 胜 | 平 | 负 | 进球 | 失球 | 净胜球 | 积分 |
-|-----:|------|-----:|---:|---:|---:|-----:|-----:|-------:|-----:|
-| 1 | 拜仁慕尼黑 | 30 | 22 | 5 | 3 | 78 | 22 | 56 | 71 |
-| 2 | 勒沃库森 | 30 | 20 | 7 | 3 | 65 | 28 | 37 | 67 |
-
-### 表格结构 - 赛程
-
 | 日期 | 时间 | 主队 | 比分 | 客队 | 备注 |
 |------|------|------|------|------|------|
-| 2026-04-18 | 02:30 | 圣保利 | - | 科隆 | 待验证 |
+| 2026-04-28 | 03:00 | 曼联 | - | 布伦特福德 | 主胜；比分:1-0/1-1；大小:小3.0(大12.5%/小87.5%) |
+```
 
----
+## 澳客赛程 JSON 格式
 
-## 赔率数据格式
+### 文件位置
 
-### JSON格式（推荐）
+- `europe_leagues/.okooo-scraper/schedules/<league>/<date>.json`
+
+### 核心字段
 
 ```json
 {
-  "match_info": {
-    "date": "2026-04-18",
-    "time": "02:30",
-    "home_team": "圣保利",
-    "away_team": "科隆",
-    "league": "德甲",
-    "round": "第30轮"
+  "league": "premier_league",
+  "date": "2026-04-28",
+  "matches": [
+    {
+      "match_id": "1296070",
+      "time": "03:00",
+      "home_team": "曼联",
+      "away_team": "布伦特",
+      "status": "未开赛"
+    }
+  ]
+}
+```
+
+说明：
+
+- `away_team` 可能是简称，如 `布伦特`
+- 昵称、简称差异需通过 `europe_leagues/okooo_team_aliases.json` 处理
+
+## 澳客实时快照 JSON 格式
+
+### 文件位置
+
+- `europe_leagues/.okooo-scraper/snapshots/<league>/<主队>vs<客队>.json`
+
+### 当前推荐结构
+
+```json
+{
+  "match_id": "1296070",
+  "league": "premier_league",
+  "date": "2026-04-28",
+  "time": "03:00",
+  "home_team": "曼联",
+  "away_team": "布伦特福德",
+  "欧赔": {
+    "initial": {"home": 2.06, "draw": 3.45, "away": 3.10},
+    "final": {"home": 1.92, "draw": 3.78, "away": 3.74}
   },
-  "odds": {
-    "home_win": 2.65,
-    "draw": 3.20,
-    "away_win": 2.80,
-    "initial_home_win": 2.82,
-    "initial_draw": 3.00,
-    "initial_away_win": 2.27
+  "亚值": {
+    "initial": {"home_water": 1.85, "handicap_text": "半/一", "away_water": 1.99},
+    "final": {"home_water": 1.89, "handicap_text": "平/半", "away_water": 2.96}
   },
-  "kelly": {
-    "home_kelly": 1.05,
-    "draw_kelly": 1.02,
-    "away_kelly": 0.95,
-    "variance": 0.02
+  "大小球": {
+    "found": true,
+    "initial": {"over": 1.86, "line": 3.0, "under": 1.94},
+    "final": {"over": 1.86, "line": 3.0, "under": 1.94},
+    "delta": {"over": 0.0, "line": 0.0, "under": 0.0},
+    "_flow": "asian_inner_tab"
   },
-  "asian_handicap": {
-    "initial": "平手",
-    "current": "平手",
-    "home_odds": 0.95,
-    "away_odds": 0.95
-  },
-  "over_under": {
-    "line": 2.5,
-    "over": 1.90,
-    "under": 1.95
+  "凯利": {
+    "initial": {"home": 0.93, "draw": 0.93, "away": 0.93},
+    "final": {"home": 0.95, "draw": 0.95, "away": 0.95}
   }
 }
 ```
 
----
+### `大小球` 字段规范
+
+| 字段 | 类型 | 示例 | 说明 |
+|------|------|------|------|
+| `found` | Boolean | `true` | 是否成功抓到大小球 |
+| `initial.over` | Float | `1.86` | 初始大球水位 |
+| `initial.line` | Float | `3.0` | 初始盘口线 |
+| `initial.under` | Float | `1.94` | 初始小球水位 |
+| `final.over` | Float | `1.86` | 即时大球水位 |
+| `final.line` | Float | `3.0` | 即时盘口线 |
+| `final.under` | Float | `1.94` | 即时小球水位 |
+| `delta.over` | Float | `0.0` | 大球水位变化 |
+| `delta.line` | Float | `0.0` | 盘口线变化 |
+| `delta.under` | Float | `0.0` | 小球水位变化 |
+| `_flow` | String | `asian_inner_tab` | 抓取路径来源 |
+
+### `_flow` 推荐取值
+
+| 值 | 说明 |
+|------|------|
+| `asian_inner_tab` | 从 `handicap.php` 页面内 `大小球` tab 抓到 |
+| `overunder_php` | 从 `overunder.php` fallback 抓到 |
+| `daxiao_php` | 从 `daxiao.php` fallback 抓到 |
+| `desktop_ou` | 从桌面 `/ou/` fallback 抓到 |
+
+项目当前推荐优先级：
+
+1. `asian_inner_tab`
+2. `overunder.php` / `daxiao.php`
+3. `desktop /ou/`
+
+## 预测输入 `current_odds` 结构
+
+`EnhancedPredictor.predict_match()` 内部使用的 `current_odds` 推荐结构：
+
+```json
+{
+  "欧赔": {
+    "initial": {"home": 2.06, "draw": 3.45, "away": 3.10},
+    "final": {"home": 1.92, "draw": 3.78, "away": 3.74}
+  },
+  "亚值": {
+    "initial": {"home_water": 1.85, "handicap_text": "半/一", "away_water": 1.99},
+    "final": {"home_water": 1.89, "handicap_text": "平/半", "away_water": 2.96}
+  },
+  "大小球": {
+    "initial": {"over": 1.86, "line": 3.0, "under": 1.94},
+    "final": {"over": 1.86, "line": 3.0, "under": 1.94}
+  },
+  "凯利": {
+    "initial": {"home": 0.93, "draw": 0.93, "away": 0.93},
+    "final": {"home": 0.95, "draw": 0.95, "away": 0.95}
+  }
+}
+```
+
+## 预测输出格式
+
+### 核心输出字段
+
+```json
+{
+  "prediction": "主胜",
+  "confidence": 0.64,
+  "final_probabilities": {
+    "home_win": 0.42,
+    "draw": 0.30,
+    "away_win": 0.28
+  },
+  "top_scores": [
+    {"score": "1-0", "probability": 0.18},
+    {"score": "1-1", "probability": 0.15}
+  ],
+  "over_under": {
+    "over": 0.125,
+    "under": 0.875,
+    "total_lambda": 1.90,
+    "line": 3.0,
+    "line_source": "snapshot_final",
+    "market": {
+      "initial": {"over": 1.86, "line": 3.0, "under": 1.94},
+      "final": {"over": 1.86, "line": 3.0, "under": 1.94}
+    }
+  }
+}
+```
+
+### `over_under` 字段规范
+
+| 字段 | 类型 | 示例 | 说明 |
+|------|------|------|------|
+| `over` | Float | `0.125` | 大球概率 |
+| `under` | Float | `0.875` | 小球概率 |
+| `total_lambda` | Float | `1.90` | 预期总进球 |
+| `line` | Float | `3.0` | 实际用于计算的盘口线 |
+| `line_source` | String | `snapshot_final` | 盘口线来源 |
+| `market.initial.over` | Float | `1.86` | 初始大球水位 |
+| `market.initial.line` | Float | `3.0` | 初始盘口线 |
+| `market.initial.under` | Float | `1.94` | 初始小球水位 |
+| `market.final.over` | Float | `1.86` | 即时大球水位 |
+| `market.final.line` | Float | `3.0` | 即时盘口线 |
+| `market.final.under` | Float | `1.94` | 即时小球水位 |
+
+### `line_source` 推荐取值
+
+| 值 | 说明 |
+|------|------|
+| `analysis_context` | 显式由上下文覆盖 |
+| `snapshot_final` | 来自实时快照 `大小球.final.line` |
+| `snapshot_initial` | 来自实时快照 `大小球.initial.line` |
+| `default_2.5` | 未抓到真实盘口，回退默认值 |
+
+### 使用规则
+
+- 当 `line_source=snapshot_final` 时，说明真实大小球已成功注入预测
+- 当 `market.final` 非空时，最终结论中应同步展示大/小水位
+- 不允许把真实 `3.0`、`2.75` 的比赛继续按固定 `2.5` 解释
+
+## 可选：球队状态增强（team_context）
+
+预测流程默认会在运行时通过 Sofascore 抓取双方近 N 场的状态信息，并注入到 `analysis_context['team_context']`。如需关闭：`ENABLE_TEAM_CONTEXT=0`。
+
+- 环境变量：
+  - `ENABLE_TEAM_CONTEXT=0`（关闭）
+  - `TEAM_CONTEXT_LAST_N=5`
+- team_id 缓存文件：
+  - `europe_leagues/.okooo-scraper/runtime/sofascore_team_ids.json`
+
+### `analysis_context.team_context` 结构
+
+```json
+{
+  "ok": true,
+  "source": "sofascore",
+  "league": "premier_league",
+  "home": {
+    "ok": true,
+    "team_id": 42,
+    "name": "Manchester United",
+    "recent": {"matches": 5, "points": 10, "gf": 8, "ga": 4},
+    "avg_possession": 54.2,
+    "formations": [{"formation": "4-2-3-1", "count": 3}],
+    "last_lineup": {"formation": "4-2-3-1", "starters": [{"name": "Player A", "rating": 7.2}]},
+    "key_players": [{"name": "Player A", "avg_rating": 7.25, "matches": 3}]
+  },
+  "away": {
+    "ok": true,
+    "team_id": 99,
+    "name": "Brentford",
+    "recent": {"matches": 5, "points": 7, "gf": 6, "ga": 6},
+    "avg_possession": 48.7,
+    "formations": [{"formation": "3-5-2", "count": 2}],
+    "last_lineup": {"formation": "3-5-2", "starters": [{"name": "Player B", "rating": 7.0}]},
+    "key_players": [{"name": "Player B", "avg_rating": 7.10, "matches": 4}]
+  }
+}
+```
+
+### `realtime.context_applied.team_context`（诊断字段）
+
+```json
+{
+  "attempted": true,
+  "ok": true,
+  "provider": "sofascore",
+  "home_form": 4,
+  "away_form": 4
+}
+```
+
+说明：
+
+- `analysis_context['home_form'] / ['away_form']` 会在未显式提供时，基于 `recent.points / recent.matches` 推导为 1..5
+- 该增强为 best-effort；失败时 `ok=false`，并包含 `error`，但不会阻断预测
+
+## 赛果与准确率统计相关格式
+
+### 赛程比分列
+
+- 未赛：`-`
+- 已赛：`x-y`
+
+### 备注列可解析字段
+
+常见格式：
+
+- `主胜`
+- `比分:1-0/1-1`
+- `大小:小3.0(大12.5%/小87.5%)`
+- `✅` / `❌`
+
+### 准确率统计关注项
+
+- 胜平负命中率
+- 比分 Top 命中率
+- 大小球命中率
 
 ## 文件命名规范
 
-### 预测文件
-- 格式: `predictions_YYYY-MM.md`
-- 示例: `predictions_2026-04.md`
+### 联赛主文件
 
-### 结果文件
-- 格式: `results_YYYY-MM.md`
-- 示例: `results_2026-04.md`
+- 格式：`teams_YYYY-YY.md`
+- 示例：`teams_2025-26.md`
 
-### 分析报告
-- 格式: `YYYYMMDD-主队-客队.md`
-- 示例: `20260418-圣保利-科隆.md`
+### 赛程 JSON
 
-### 球队信息
-- 格式: `teams_YYYY-YY.md`
-- 示例: `teams_2025-26.md`
+- 格式：`YYYY-MM-DD.json`
+- 示例：`2026-04-28.json`
 
----
+### 快照 JSON
+
+- 格式：`<主队>vs<客队>.json`
+- 示例：`曼联vs布伦特福德.json`
 
 ## 日期和时间格式
 
-### 日期格式
-- 格式: `YYYY-MM-DD`
-- 示例: `2026-04-18`
+### 日期
 
-### 时间格式
-- 格式: `HH:MM` (24小时制)
-- 示例: `02:30`
+- 格式：`YYYY-MM-DD`
+- 示例：`2026-04-28`
+
+### 时间
+
+- 格式：`HH:MM`
+- 示例：`03:00`
 
 ### 日期时间组合
-- 格式: `YYYY-MM-DD HH:MM`
-- 示例: `2026-04-18 02:30`
 
----
+- 格式：`YYYY-MM-DD HH:MM`
+- 示例：`2026-04-28 03:00`
 
 ## 验证检查清单
 
-### 预测数据验证
-- [ ] 预测ID唯一性检查
-- [ ] 日期格式正确性
-- [ ] 概率值在0.0-1.0之间
-- [ ] 比分格式为X-Y
-- [ ] 枚举值在允许范围内
+### 快照验证
 
-### 结果数据验证
-- [ ] 预测ID与预测记录匹配
-- [ ] 主队进球 + 客队进球 = 总进球
-- [ ] 实际比分与实际结果一致
-- [ ] 记录日期 >= 比赛日期
+- `match_id` 存在
+- `欧赔` 存在
+- `亚值` 存在
+- `大小球.found=true`
+- `大小球.final.line` 非空
+- `_flow` 已记录
 
-### 表格格式验证
-- [ ] 表头与规范一致
-- [ ] 列数正确
-- [ ] 对齐方式正确
-- [ ] 无空行或空列
+### 预测输出验证
+
+- `final_probabilities` 存在
+- `top_scores` 存在
+- `over_under.line` 存在
+- `over_under.line_source` 存在
+- `over_under.market.final` 非空或明确说明回退原因
+
+### 主流程写回验证
+
+- 正式写回只发生在 `teams_2025-26.md`
+- 不把主流程结果写入旧 `predictions/`、`reports/` 目录

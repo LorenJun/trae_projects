@@ -6,6 +6,7 @@
 
 import re
 import json
+import os
 import time
 import random
 import hashlib
@@ -17,6 +18,46 @@ from datetime import datetime
 from pathlib import Path
 
 
+def _load_team_alias_map() -> Dict[str, Dict[str, str]]:
+    """Load team alias map as {league: {alias_or_name: canonical_name}}."""
+    path = Path(__file__).resolve().parent / "okooo_team_aliases.json"
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, Dict[str, str]] = {}
+    for league, mapping in raw.items():
+        if not isinstance(mapping, dict):
+            continue
+        league_map: Dict[str, str] = {}
+        for canonical, aliases in mapping.items():
+            if not canonical:
+                continue
+            league_map[str(canonical).strip()] = str(canonical).strip()
+            if isinstance(aliases, list):
+                for a in aliases:
+                    if not a:
+                        continue
+                    league_map[str(a).strip()] = str(canonical).strip()
+        out[str(league).strip()] = league_map
+    return out
+
+
+def _normalize_team_name(league: str, name: str, alias_map: Optional[Dict[str, Dict[str, str]]] = None) -> str:
+    n = (name or "").strip()
+    if not n:
+        return ""
+    amap = alias_map or {}
+    league_map = amap.get(league or "", {})
+    if isinstance(league_map, dict):
+        return league_map.get(n, n)
+    return n
+
+
 @dataclass
 class MatchData:
     """比赛数据结构"""
@@ -26,6 +67,7 @@ class MatchData:
     match_date: str
     match_time: str
     status: str  # 待进行、进行中、已结束
+    match_id: str = ""
     score: Optional[Tuple[int, int]] = None
     odds_data: Optional[Dict] = None
     update_time: str = None
@@ -363,6 +405,7 @@ class CacheManager:
                 'cache_time': datetime.now().isoformat(),
                 'matches': [
                     {
+                        'match_id': m.match_id,
                         'home_team': m.home_team,
                         'away_team': m.away_team,
                         'league': m.league,
@@ -370,6 +413,7 @@ class CacheManager:
                         'match_time': m.match_time,
                         'status': m.status,
                         'score': m.score,
+                        'odds_data': m.odds_data,
                         'sources': m.sources,
                         'update_time': m.update_time
                     }
@@ -439,10 +483,14 @@ class DataValidator:
     @staticmethod
     def _is_same_match(match1: MatchData, match2: MatchData) -> bool:
         """判断是否为同一场比赛"""
-        # 基于队名和日期判断
-        return (match1.home_team == match2.home_team and 
-                match1.away_team == match2.away_team and
-                match1.match_date == match2.match_date)
+        # 基于队名和日期判断（兼容简称/别名）
+        if match1.match_date != match2.match_date:
+            return False
+        league = match1.league or match2.league
+        return (
+            _normalize_team_name(league, match1.home_team) == _normalize_team_name(league, match2.home_team)
+            and _normalize_team_name(league, match1.away_team) == _normalize_team_name(league, match2.away_team)
+        )
 
     @staticmethod
     def _merge_matches(matches: List[MatchData]) -> MatchData:
@@ -489,6 +537,89 @@ class DataCollector:
         self.cache_manager = CacheManager()
         self.validator = DataValidator()
 
+        # Load okooo team alias mapping (used for schedule matching and cross-source merge).
+        self._team_alias_map = _load_team_alias_map()
+
+    def _norm_team(self, league: str, name: str) -> str:
+        return _normalize_team_name(league, name, alias_map=self._team_alias_map)
+
+    def _load_okooo_schedule(self, league: str, date: str) -> List[Dict]:
+        """Load (or fetch) okooo daily schedule JSON and return matches."""
+        try:
+            league_cn = {
+                'premier_league': '英超',
+                'la_liga': '西甲',
+                'serie_a': '意甲',
+                'bundesliga': '德甲',
+                'ligue_1': '法甲',
+            }.get(league, '')
+            if not league_cn:
+                return []
+
+            schedule_path = Path(__file__).resolve().parent / ".okooo-scraper" / "schedules" / league / f"{date}.json"
+            if not schedule_path.exists():
+                # Best-effort fetch; this does not require browser_use but requires local Chrome CDP.
+                import subprocess
+                cmd = [
+                    "python3",
+                    str(Path(__file__).resolve().parent / "okooo_fetch_daily_schedule.py"),
+                    "--league",
+                    league_cn,
+                    "--date",
+                    date,
+                ]
+                cp = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+                if cp.returncode != 0:
+                    return []
+                # Script prints output path on last line.
+                out_lines = (cp.stdout or "").strip().splitlines()
+                if out_lines:
+                    schedule_path = Path(out_lines[-1].strip())
+
+            payload = json.loads(schedule_path.read_text(encoding="utf-8"))
+            matches = payload.get("matches") if isinstance(payload, dict) else None
+            return matches if isinstance(matches, list) else []
+        except Exception:
+            return []
+
+    def _attach_okooo_odds_if_available(self, match: MatchData, refresh: bool = False, driver: str = "local-chrome") -> None:
+        """Attach odds_data using existing snapshot (or refresh it if enabled)."""
+        try:
+            base_dir = str(Path(__file__).resolve().parent)
+            # Local import to avoid hard dependency for non-collector use.
+            from okooo_live_snapshot import find_snapshot_by_match_id, refresh_snapshot, extract_current_odds
+
+            if not match.match_id:
+                return
+
+            found = find_snapshot_by_match_id(base_dir, match.league, match.match_id)
+            if found:
+                _path, payload = found
+                match.odds_data = extract_current_odds(payload)
+                match.sources = list(set(match.sources or []) | {"okooo_snapshot"})
+                return
+
+            if not refresh:
+                return
+
+            refreshed = refresh_snapshot(
+                base_dir=base_dir,
+                league_code=match.league,
+                home_team=match.home_team,
+                away_team=match.away_team,
+                match_date=match.match_date,
+                driver=driver,
+                match_id=match.match_id,
+                headed=False,
+                match_time=match.match_time or "",
+            )
+            if refreshed:
+                _path, payload = refreshed
+                match.odds_data = extract_current_odds(payload)
+                match.sources = list(set(match.sources or []) | {"okooo_snapshot"})
+        except Exception:
+            return
+
     async def collect_league_data(self, league: str, date: str, use_cache: bool = True) -> List[MatchData]:
         """收集联赛当日所有比赛数据"""
         # 尝试从缓存获取
@@ -496,21 +627,78 @@ class DataCollector:
             cached_data = self.cache_manager.get_cache(league, date)
             if cached_data:
                 print(f"从缓存获取 {league} {date} 的比赛数据")
-                return [
+                matches = [
                     MatchData(
-                        home_team=m['home_team'],
-                        away_team=m['away_team'],
+                        match_id=m.get('match_id', ''),
+                        home_team=self._norm_team(league, m.get('home_team', '')),
+                        away_team=self._norm_team(league, m.get('away_team', '')),
                         league=m['league'],
                         match_date=m['match_date'],
                         match_time=m['match_time'],
                         status=m['status'],
                         score=m['score'],
+                        odds_data=m.get('odds_data'),
                         sources=m['sources'],
                         update_time=m['update_time']
                     )
                     for m in cached_data
                 ]
+                # Best-effort: if odds_data wasn't cached, attach from existing local snapshots.
+                for m in matches:
+                    if not m.odds_data:
+                        self._attach_okooo_odds_if_available(m, refresh=False)
+                return matches
         
+        # Prefer okooo daily schedule to get stable MatchID (does not require browser_use).
+        # This aligns `collect-data` with the project's real-time prediction pipeline.
+        use_okooo_schedule = os.environ.get("OKOOO_COLLECT_SCHEDULE", "1").strip() not in ("0", "false", "False")
+        schedule_matches: List[MatchData] = []
+        if use_okooo_schedule:
+            rows = self._load_okooo_schedule(league, date)
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                mid = str(r.get("match_id") or "").strip()
+                home = self._norm_team(league, str(r.get("home_team") or "").strip())
+                away = self._norm_team(league, str(r.get("away_team") or "").strip())
+                kick = str(r.get("kickoff_time") or r.get("time") or "").strip()
+                if not (home and away and kick):
+                    continue
+                schedule_matches.append(
+                    MatchData(
+                        match_id=mid,
+                        home_team=home,
+                        away_team=away,
+                        league=league,
+                        match_date=date,
+                        match_time=kick,
+                        status="待进行",
+                        score=None,
+                        odds_data=None,
+                        sources=["okooo_schedule"],
+                    )
+                )
+
+            # Always attach odds_data from existing local snapshots (cheap, no browsing).
+            for m in schedule_matches:
+                if not m.odds_data:
+                    self._attach_okooo_odds_if_available(m, refresh=False)
+
+            # Optionally refresh snapshots (best-effort, capped).
+            refresh_snapshots = os.environ.get("OKOOO_COLLECT_REFRESH_SNAPSHOT", "0").strip() in ("1", "true", "True")
+            max_n = int(os.environ.get("OKOOO_COLLECT_SNAPSHOT_LIMIT", "0") or "0")
+            if refresh_snapshots or max_n != 0:
+                # Default: only refresh existing snapshots; allow refresh for first N if requested.
+                limit = max_n if max_n > 0 else 0
+                refreshed = 0
+                for m in schedule_matches:
+                    do_refresh = refresh_snapshots and (limit == 0 or refreshed < limit)
+                    before = bool(m.odds_data)
+                    self._attach_okooo_odds_if_available(m, refresh=do_refresh)
+                    after = bool(m.odds_data)
+                    if do_refresh and (not before) and after:
+                        refreshed += 1
+
         # 从多个数据源抓取
         print(f"从多个数据源抓取 {league} {date} 的比赛数据")
         if not self.browser_use_available:
@@ -525,6 +713,8 @@ class DataCollector:
         
         # 过滤空结果
         valid_results = [r for r in results if r]
+        if schedule_matches:
+            valid_results.insert(0, schedule_matches)
         
         if not valid_results:
             print(f"所有数据源都抓取失败")

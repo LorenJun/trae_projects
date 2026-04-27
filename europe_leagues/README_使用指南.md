@@ -1,280 +1,183 @@
-# 🏆 足球预测系统 - 使用指南
+# 足球预测系统 - 使用指南
 
-## 📋 目录
-1. [系统概览](#系统概览)
-2. [快速开始](#快速开始)
-3. [模块说明](#模块说明)
-4. [工作流程](#工作流程)
-5. [使用示例](#使用示例)
+## 系统概览
 
----
+这是当前项目的正式使用说明，围绕“实时快照 -> 综合预测 -> 写回/输出终版结论”组织。
 
-## 🎯 系统概览
+核心特性：
 
-这是一个完整的足球比赛预测和结果追踪系统，包含以下特点：
+- 多模型融合预测
+- 实时欧赔/亚值/凯利抓取
+- 亚值页内 `大小球` tab 抓取真实盘口线与水位
+- 预测输出内置 `over_under.market`
+- `teams_2025-26.md` 作为正式写回与历史学习来源
 
-- **多模型融合**: 使用10种不同的预测模型
-- **智能缓存**: 避免重复计算，提升效率
-- **结果追踪**: 自动保存预测，对比实际结果
-- **准确率统计**: 按联赛、按模型统计准确率
-- **爆冷分析**: 基于历史案例分析爆冷可能性
-- **预测写回**: 直接写回各联赛 `teams_2025-26.md`（赛程表备注列）
+## 推荐入口
 
----
+### 单场预测
 
-## 🚀 快速开始
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py predict-match --league premier_league --home-team 曼联 --away-team 布伦特福德 --date 2026-04-28 --json
+```
 
-### 0. 环境安装
+### 批量预测
 
-推荐先创建虚拟环境并安装系统工具：
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py predict-schedule --league premier_league --date 2026-04-28 --days 1 --json
+```
+
+### 赛程预抓
 
 ```bash
 cd /Users/bytedance/trae_projects
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install --upgrade pip
-python3 -m pip install -r requirements.txt
-python3 -m playwright install chromium
+python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026-04-28
 ```
 
-如果你需要运行真实浏览器采集链路，还需要安装：
+## 当前完整预测流程
 
-```bash
-python3 -m pip install -r requirements-openclaw.txt
+1. 确认比赛信息：联赛、主客队、日期、必要时比赛时间
+2. 若比赛简称可能不一致，先检查 `okooo_team_aliases.json`
+3. 优先抓当天赛程获取 `match_id`
+4. 调用 `okooo_save_snapshot.py` 刷新实时快照
+5. 调用 `EnhancedPredictor.predict_match()` 预测
+6. 输出终版结论时，优先使用：
+   - `final_probabilities`
+   - `top_scores`
+   - `over_under.line`
+   - `over_under.market.final`
+
+## 大小球的当前规则
+
+### 真实入口
+
+大小球真实数据优先来自：
+
+- `https://m.okooo.com/match/handicap.php?MatchID=<id>` 页面内的 `大小球` tab
+
+不是优先依赖：
+
+- `/ou/`
+- `/overunder.php`
+- `/daxiao.php`
+
+### 预测系统里的使用优先级
+
+1. `analysis_context['ou_line']`
+2. `current_odds['大小球']['final']['line']`
+3. 默认 `2.5`
+
+### 最终输出检查
+
+看到下面这种结构，才说明真实大小球已经真正注入预测：
+
+```json
+{
+  "line": 3.0,
+  "line_source": "snapshot_final",
+  "market": {
+    "final": {"over": 1.86, "line": 3.0, "under": 1.94}
+  }
+}
 ```
 
-说明：
-- 未安装 `browser-use` 时，`data_collector.py` / `prediction_system.py collect-data` 会自动降级到 `mock` 数据模式，并提示让 `openclaw` 自行执行 `python3 -m pip install browser-use`
-- 如需飞书相关能力，可在仓库根目录执行 `npm install` 安装 `feishu-cli`
+## 当前推荐命令
 
-### 缓存说明（默认关闭）
-
-预测流程的 `.prediction_cache` 已默认关闭（不读不写），以优先保证实时最新数据。
-
-如需临时开启本地缓存（仅用于性能优化/离线调试），执行：
-
-```bash
-export ENABLE_PREDICTION_CACHE=1
-```
-
-推荐让 `openclaw` 直接执行一键初始化脚本：
+### 直接抓快照
 
 ```bash
 cd /Users/bytedance/trae_projects
-bash scripts/setup_openclaw_env.sh
+python3 europe_leagues/okooo_save_snapshot.py \
+  --driver local-chrome \
+  --league 英超 \
+  --team1 曼联 \
+  --team2 布伦特福德 \
+  --date 2026-04-28 \
+  --time 03:00 \
+  --match-id 1296070 \
+  --overwrite
 ```
 
-### 1. 交互式菜单（推荐）
-```bash
-cd europe_leagues
-python3 prediction_system.py
-```
-
-### 2. 直接运行增强预测
-```bash
-python3 enhanced_prediction_workflow.py
-```
-
-### 3. 结果管理和准确率统计
-```bash
-python3 result_manager.py --interactive
-python3 result_manager.py --show-accuracy
-python3 result_manager.py --update-accuracy
-```
-
-### 4. 面向 OpenClaw 的 CLI 命令
+### 直接跑 Python 单场预测
 
 ```bash
-python3 prediction_system.py list-leagues --json
-python3 prediction_system.py setup-openclaw --json
-python3 prediction_system.py health-check --json
-python3 prediction_system.py predict-match --league la_liga --home-team 巴塞罗那 --away-team 皇家马德里 --date 2026-05-11 --json
-python3 prediction_system.py predict-schedule --league la_liga --date 2026-05-11 --days 2 --json
-python3 prediction_system.py collect-data --league la_liga --date 2026-05-11 --json
-python3 prediction_system.py pending-results --days-back 14 --json
-python3 prediction_system.py save-result --match-id la_liga_20260511_巴塞罗那_皇家马德里 --home-score 2 --away-score 1 --json
-python3 prediction_system.py accuracy --refresh --json
+cd /Users/bytedance/trae_projects
+python3 - <<'PY'
+import sys, json
+sys.path.insert(0,'/Users/bytedance/trae_projects/europe_leagues')
+from enhanced_prediction_workflow import EnhancedPredictor
+p = EnhancedPredictor()
+r = p.predict_match(
+    '曼联', '布伦特福德', 'premier_league',
+    match_date='2026-04-28',
+    match_time='03:00',
+    match_id='1296070',
+    okooo_driver='local-chrome',
+    force_refresh_odds=True,
+)
+print(json.dumps(r['over_under'], ensure_ascii=False, indent=2))
+PY
 ```
 
-说明：
-- `--json` 输出适合自动化系统直接解析
-- `predict-schedule` / `save-result` 会修改联赛 `teams_2025-26.md`
-- `setup-openclaw` 会返回完整初始化命令和依赖状态
-- `health-check` 会返回 `openclaw_full_ready` 与缺失依赖列表
+## 可选：球队状态增强（SofaScore）
 
----
+项目支持在预测时自动抓取双方近 N 场的“阵型/控球/上一场首发/球员评分趋势”，并注入到 `analysis_context['team_context']`。
 
-## Agent 调用提示词
+- 默认开启；如需关闭：`ENABLE_TEAM_CONTEXT=0`
+- 场次数：`TEAM_CONTEXT_LAST_N=5`
 
-以下提示词可直接提供给 `openclaw`、自动化编排器或调度型 Agent，确保执行时遵循当前项目真实流程。
-
-### 统一入口提示词
-
-```text
-你正在操作的是一个“以 europe_leagues/<league>/teams_2025-26.md 为单一事实来源”的足球预测项目。
-
-执行任务时必须遵守：
-1. 先判断任务类型：环境检查、数据采集、赛前预测、赛果回填、准确率统计、只读查询。
-2. 除只读查询外，优先调用 prediction_system.py 的非交互命令，并附带 --json。
-3. 所有正式落盘只允许写入对应联赛的 teams_2025-26.md，不要把新结果写入 predictions/、analysis/predictions/*.md 或其它旧目录。
-4. 赛前预测必须按“确认比赛 -> collect-data -> 分析 -> predict-match/predict-schedule -> 写回 teams_2025-26.md”执行。
-5. 赛后处理必须按“确认比赛 -> 核验比分 -> save-result -> 必要时 accuracy --refresh”执行。
-6. 缺少 browser-use、Playwright 或实时源异常时，可以降级，但必须明确标记为 mock/降级数据。
-7. 如果用户只要求查看、解释、调研，默认不写文件。
-8. 如果准备创建新的主流程 markdown 文件，视为偏航，应立即停止并改回 teams_2025-26.md。
-```
-
-### 偏航纠正提示词
-
-```text
-如果你发现自己准备跳过数据采集直接生成预测，或者准备把结果写入旧模板文件，请立即停止并回到标准流程：
-
-- 环境检查：health-check
-- 数据采集：collect-data
-- 单场预测：predict-match
-- 批量预测：predict-schedule
-- 赛果回填：save-result
-- 准确率统计：accuracy --refresh
-
-查架构时优先阅读 README_使用指南.md、README.md、agent.md、docs/standards/workflow.md、agents/*.md。
-```
-
----
-
-## 📦 模块说明
-
-### 核心模块
-
-| 文件 | 功能 |
-|-----|------|
-| `prediction_system.py` | 统一入口，菜单系统 |
-| `enhanced_prediction_workflow.py` | 增强预测主程序 |
-| `result_manager.py` | 结果管理和准确率统计 |
-| `ml_prediction_models.py` | 10种预测模型 |
-| `optimized_prediction_workflow.py` | 原始预测程序 |
-
-### 数据目录
-```
-europe_leagues/
-├── premier_league/    # 英超
-├── serie_a/          # 意甲
-├── bundesliga/       # 德甲
-├── ligue_1/          # 法甲
-├── la_liga/          # 西甲
-└── .okooo-scraper/      # 运行时产物（快照/日志/准确率输出）
-```
-
----
-
-## 🔄 完整工作流程
-
-### 1. 预测阶段
-1. 系统生成未来几天的比赛预测
-2. 将预测结果写回各联赛 `teams_2025-26.md` 的赛程表“备注”列
-
-### 2. 比赛结束后
-1. 更新赛程表“比分”列为真实赛果（`x-y`）
-2. 可在备注列追加 `✅/❌`（或由脚本统一标注）
-3. 系统根据 `teams_2025-26.md` 直接统计准确率
-
-### 3. 准确率统计
-1. 系统自动计算整体准确率（直接解析 `teams_2025-26.md`）
-2. 按联赛统计准确率
-3. 输出到 `europe_leagues/.okooo-scraper/runtime/accuracy_stats.json`
-
----
-
-## 💻 使用示例
-
-### 示例1：交互式更新比赛结果
+示例：
 
 ```bash
-python3 result_manager.py --interactive
+cd /Users/bytedance/trae_projects
+ENABLE_TEAM_CONTEXT=1 TEAM_CONTEXT_LAST_N=5 python3 - <<'PY'
+import sys
+sys.path.insert(0,'/Users/bytedance/trae_projects/europe_leagues')
+from enhanced_prediction_workflow import EnhancedPredictor
+
+p = EnhancedPredictor()
+r = p.predict_match('曼联','布伦特福德','premier_league', match_date='2026-04-28', match_time='03:00', match_id='1296070', force_refresh_odds=False)
+print(r['analysis_context'].get('team_context', {}).get('ok'))
+PY
 ```
 
-然后选择：
-1. 查看待更新的比赛
-2. 输入比赛结果（主队进球、客队进球）
-3. 查看准确率统计
+## 常用文件
 
-### 示例2：生成新预测
+- `enhanced_prediction_workflow.py`：当前主预测流程
+- `okooo_save_snapshot.py`：当前主抓取脚本
+- `okooo_fetch_daily_schedule.py`：当天赛程与 MatchID 抓取
+- `okooo_live_snapshot.py`：实时快照读取与转换
+- `okooo_team_aliases.json`：球队简称映射
+- `result_manager.py`：赛果回填与准确率统计
 
-```bash
-python3 prediction_system.py
-```
+## 运行时目录
 
-选择：运行增强版预测系统
+- `europe_leagues/.okooo-scraper/snapshots/`
+- `europe_leagues/.okooo-scraper/schedules/`
+- `europe_leagues/.okooo-scraper/runtime/`
 
-### 示例3：查看准确率报告
+## 常见问题
 
-```bash
-python3 -c "from result_manager import ResultManager, print_accuracy_report; manager = ResultManager(); stats = manager.update_accuracy_stats(); print_accuracy_report(stats)"
-```
+### 为什么输出里还是 2.5？
 
----
+说明真实大小球没有成功注入，检查：
 
-## 📊 预测报告说明
+- 快照里是否有 `大小球.found=true`
+- `line_source` 是否为 `snapshot_final`
+- `market.final` 是否非空
 
-写回到 `teams_2025-26.md` 备注列的预测信息包含（取决于预测器版本与数据可用性）：
+### 为什么定位不到比赛？
 
-- 预测结果（主胜/平局/客胜）
-- 信心指数
-- 概率分布可视化
-- 最可能比分（Top 3）
-- 大小球分析
-- 球队实力对比
-- 爆冷风险分析
-- 动态调权诊断（如可用）
+优先排查：
 
----
+- 球队是否是简称
+- 是否缺少日期
+- 是否缺少比赛时间
+- 是否未先获取 `match_id`
 
-## 🔧 预测模型说明
+### 正式写回写到哪里？
 
-系统包含10种预测模型：
+只写：
 
-1. **泊松分布模型** - 基于进球概率
-2. **Dixon-Coles模型** - 修正泊松分布
-3. **Elo评级系统** - 基于球队等级
-4. **Glicko评级系统** - 更精确的评级
-5. **逻辑回归模型** - 多特征预测
-6. **随机森林模型** - 集成学习
-7. **xG模型** - 预期进球
-8. **贝叶斯模型** - 概率更新
-9. **专家系统** - 规则引擎
-10. **集成模型** - 多模型融合
-
----
-
-## 📈 准确率统计维度
-
-- **整体准确率** - 所有预测
-- **按联赛准确率** - 英超/意甲/德甲/法甲/西甲
-- **按模型准确率** - 各模型单独统计
-- **比分准确率** - 精确比分预测
-- **趋势** - 最近7天准确率变化
-
----
-
-## 💡 最佳实践建议
-
-1. **定期更新结果**: 比赛结束后尽快录入结果
-2. **关注高信心预测**: 信心 > 70% 的预测更可靠
-3. **注意爆冷警告**: 🟡中风险/🔴高风险需要谨慎
-4. **参考多模型**: 结合多个模型的预测进行决策
-5. **定期重训**: 有足够历史数据后优化模型权重
-
----
-
-## 🎉 系统亮点
-
-✅ 完全自动化预测流程
-✅ 多维度准确率统计
-✅ 智能缓存提升效率
-✅ 美观的Markdown报告
-✅ 完整的历史数据管理
-✅ 交互式操作界面
-✅ 支持命令行和菜单两种模式
-
----
-
-如有问题，请查看代码注释或联系维护者。
+- `europe_leagues/<league>/teams_2025-26.md`

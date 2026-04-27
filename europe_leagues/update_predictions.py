@@ -219,27 +219,16 @@ def update_upset_case_library():
     print(f"总案例数: {len(existing_cases)}")
 
 def main():
-    """主函数"""
-    print("=" * 60)
-    print("更新4-18、4-19五大联赛预测数据")
-    print("=" * 60)
-    
-    # 切换到项目根目录
-    os.chdir('/Users/lin/trae_projects/europe_leagues')
-    
-    # 更新各联赛预测文件
-    for league_code, league_info in LEAGUES.items():
-        print(f"\n更新 {league_info['name']}...")
-        file_path = league_info['file']
-        matches = league_info['matches']
-        update_prediction_file(file_path, matches)
-    
-    # 更新爆冷案例库
-    update_upset_case_library()
-    
-    print("\n" + "=" * 60)
-    print("更新完成！")
-    print("=" * 60)
+    """Deprecated: legacy script targeting analysis/predictions paths and hardcoded home directories."""
+    print("=" * 80)
+    print("该脚本已废弃：旧版预测文件与路径（analysis/predictions + 硬编码 /Users/lin）不再是主流程。")
+    print()
+    print("请改用当前正式入口：")
+    print("  - 预测写回:  cd europe_leagues && python3 prediction_system.py predict-schedule --league <league> --date <YYYY-MM-DD> --days 1 --json")
+    print("  - 赛果回填:  cd europe_leagues && python3 prediction_system.py save-result --match-id <match_id> --home-score <n> --away-score <n> --json")
+    print("  - 更新统计:  cd europe_leagues && python3 prediction_system.py accuracy --refresh --json")
+    print("=" * 80)
+    return
 
 if __name__ == "__main__":
     main()

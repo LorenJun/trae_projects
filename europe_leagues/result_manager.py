@@ -73,10 +73,42 @@ class ResultManager:
     def _parse_predicted_winner(self, note: str) -> Optional[str]:
         if not isinstance(note, str):
             return None
-        match = re.search(r'预测[:\s]*(主胜|平局|客胜)', note)
+        # Support both:
+        # - enhanced writeback: `预测:主胜 ...`
+        # - legacy fragments: `预测主胜✅` / `已结束/预测平局✅`
+        match = re.search(r'(?:预测\s*[:：]?\s*)(主胜|平局|客胜)', note)
         if not match:
             return None
         return {'主胜': 'home', '平局': 'draw', '客胜': 'away'}.get(match.group(1))
+
+    def _parse_predicted_scores(self, note: str) -> List[str]:
+        """Parse `比分:1-1/1-0` style fragments from the schedule note."""
+        if not isinstance(note, str):
+            return []
+        m = re.search(r'比分[:\s]*([0-9\-\/]+)', note)
+        if not m:
+            return []
+        raw = (m.group(1) or '').strip()
+        scores = []
+        for part in raw.split('/'):
+            s = part.strip()
+            if re.match(r'^\d+\s*-\s*\d+$', s):
+                scores.append(re.sub(r'\s+', '', s))
+        return scores
+
+    def _parse_predicted_ou(self, note: str) -> Optional[Dict[str, object]]:
+        """Parse `大小:小2.5(0.58)` fragments from the schedule note."""
+        if not isinstance(note, str):
+            return None
+        m = re.search(r'大小[:\s]*([大小])\s*([0-9]+(?:\.[0-9]+)?)', note)
+        if not m:
+            return None
+        side = m.group(1)
+        try:
+            line = float(m.group(2))
+        except Exception:
+            return None
+        return {'side': side, 'line': line}
 
     def _iter_teams_rows(self):
         """Yield match rows derived from all league tables."""
@@ -260,6 +292,10 @@ class ResultManager:
         """计算预测胜负准确率。"""
         total = 0
         correct = 0
+        total_score = 0
+        correct_score = 0
+        total_ou = 0
+        correct_ou = 0
         cutoff = datetime.now().timestamp() - (days * 86400)
 
         for row in self._iter_teams_rows():
@@ -281,15 +317,47 @@ class ResultManager:
             if predicted_winner == actual_winner:
                 correct += 1
 
+            # Score accuracy: hit if actual score is within top-2 predicted scores.
+            predicted_scores = self._parse_predicted_scores(row['note'])
+            if predicted_scores:
+                total_score += 1
+                actual_score = re.sub(r'\s+', '', (row['score_text'] or '').strip())
+                if actual_score in predicted_scores:
+                    correct_score += 1
+
+            # Over/Under accuracy: based on note line (normally 2.5 to avoid push).
+            ou = self._parse_predicted_ou(row['note'])
+            if ou and isinstance(ou.get('line'), (int, float)) and ou.get('side') in ('大', '小'):
+                try:
+                    hs, as_ = [int(x.strip()) for x in (row['score_text'] or '').split('-')]
+                    total_goals = hs + as_
+                except Exception:
+                    total_goals = None
+                if isinstance(total_goals, int):
+                    line = float(ou['line'])
+                    side = ou['side']
+                    # Push handling: if total_goals equals the line exactly, do not count.
+                    if abs(total_goals - line) < 1e-9:
+                        continue
+                    total_ou += 1
+                    actual_side = '大' if total_goals > line else '小'
+                    if actual_side == side:
+                        correct_ou += 1
+
         accuracy = (correct / total * 100) if total > 0 else 0
+        score_acc = (correct_score / total_score * 100) if total_score > 0 else 0
+        ou_acc = (correct_ou / total_ou * 100) if total_ou > 0 else 0
         return {
             'league': league,
             'total_predictions': total,
             'correct_predictions': correct,
             'win_accuracy': round(accuracy, 2),
-            'total_score_predictions': 0,
-            'correct_score_predictions': 0,
-            'score_accuracy': 0,
+            'total_score_predictions': total_score,
+            'correct_score_predictions': correct_score,
+            'score_accuracy': round(score_acc, 2),
+            'total_ou_predictions': total_ou,
+            'correct_ou_predictions': correct_ou,
+            'ou_accuracy': round(ou_acc, 2),
             'model_accuracy': {},
             'calculated_at': datetime.now().isoformat(),
             'days': days
@@ -358,6 +426,8 @@ def print_accuracy_report(stats: Dict):
     print(f"  胜负准确率: {overall['win_accuracy']}%")
     if overall.get('total_score_predictions', 0) > 0:
         print(f"  比分准确率: {overall['score_accuracy']}% ({overall['correct_score_predictions']}/{overall['total_score_predictions']})")
+    if overall.get('total_ou_predictions', 0) > 0:
+        print(f"  大小球准确率: {overall['ou_accuracy']}% ({overall['correct_ou_predictions']}/{overall['total_ou_predictions']})")
     
     print(f"\n【各联赛统计】")
     for league_code, league_stats in stats['by_league'].items():

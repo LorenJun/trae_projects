@@ -86,6 +86,9 @@ def _extract_current_odds_live_snapshot(snapshot):
     europe = snapshot.get('欧赔', {}) or {}
     asian = snapshot.get('亚值', {}) or {}
     kelly = snapshot.get('凯利', {}) or {}
+    totals = snapshot.get('大小球', {}) or {}
+    totals_initial = totals.get("initial", {}) if isinstance(totals, dict) else {}
+    totals_final = totals.get("final", {}) if isinstance(totals, dict) else {}
     return {
         'match_id': snapshot.get('match_id'),
         '胜平负赔率': {
@@ -99,6 +102,10 @@ def _extract_current_odds_live_snapshot(snapshot):
         '亚值': {
             'initial': asian.get('initial', {}),
             'final': asian.get('final', {}),
+        },
+        '大小球': {
+            'initial': totals_initial,
+            'final': totals_final,
         },
         '凯利': {
             'initial': kelly.get('initial', {}),
