@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Any
 import logging
 import re
 from glob import glob
+from collections import Counter
 
 # 添加项目路径
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -222,7 +223,46 @@ def _update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str,
                 prob = max(over_p, under_p)
                 ou_note = f"大小:{side}{line:g}({prob:.2f})"
 
-        bits = [x for x in (score_note, ou_note) if x]
+        # Total goals (0-7+) - keep a short top-2 summary
+        tg_note = ''
+        tg = pred.get('total_goals') or {}
+        if isinstance(tg, dict) and tg.get('available'):
+            top = tg.get('top_totals') or []
+            if isinstance(top, list) and top:
+                parts = []
+                for item in top[:2]:
+                    if not isinstance(item, dict):
+                        continue
+                    t = item.get('total')
+                    pr = item.get('prob')
+                    if t is None or pr is None:
+                        continue
+                    try:
+                        parts.append(f"{t}({float(pr):.2f})")
+                    except Exception:
+                        continue
+                tail_key = tg.get('tail_bucket')
+                tail_p = None
+                buckets = tg.get('buckets') or {}
+                if isinstance(buckets, dict) and tail_key in buckets:
+                    try:
+                        tail_p = float(buckets.get(tail_key))
+                    except Exception:
+                        tail_p = None
+                if parts:
+                    tail = f" {tail_key}({tail_p:.2f})" if isinstance(tail_p, float) else ''
+                    tg_note = f"进球数:{'/'.join(parts)}{tail}"
+
+        # Kelly staking - show recommended fraction for predicted outcome (very short)
+        stake_note = ''
+        staking = pred.get('staking') or {}
+        if isinstance(staking, dict) and isinstance(staking.get('recommended'), dict):
+            rec = staking.get('recommended') or {}
+            frac = rec.get('fraction')
+            if isinstance(frac, (int, float)) and frac > 0:
+                stake_note = f"仓位:{frac:.0%}"
+
+        bits = [x for x in (score_note, ou_note, tg_note, stake_note) if x]
         return ' '.join(bits).strip()
 
     def strip_existing_prediction_fragments(note: str) -> str:
@@ -628,6 +668,398 @@ class TeamDataManager:
         
         self.cache.set('analyze_team_strength', cache_params, result)
         return result
+
+
+class LeagueOverUnderLearning:
+    """联赛级大小球学习数据。
+
+    通过近两周已完赛比赛提取联赛节奏、大小球和 BTTS 特征，
+    并把这些统计作为比分/大小球预测的轻量修正项。
+    """
+
+    MIN_SAMPLE_SIZE = 6
+    DEFAULT_LOOKBACK_DAYS = 14
+
+    def __init__(self, base_dir: str = None):
+        self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
+        self.cache = PredictionCache()
+
+    @staticmethod
+    def _pct(value: int, total: int) -> float:
+        return float(value) / float(total) if total else 0.0
+
+    @staticmethod
+    def _safe_date(date_str: str) -> Optional[datetime]:
+        try:
+            return datetime.strptime(date_str, "%Y-%m-%d")
+        except Exception:
+            return None
+
+    def _teams_md_path(self, league_code: str) -> str:
+        return os.path.join(self.base_dir, league_code, 'teams_2025-26.md')
+
+    def _parse_finished_matches(
+        self,
+        league_code: str,
+        end_date: str,
+        lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    ) -> List[Dict[str, Any]]:
+        cache_params = {
+            'league_code': league_code,
+            'end_date': end_date,
+            'lookback_days': lookback_days,
+        }
+        cached = self.cache.get('league_ou_finished_matches', cache_params, ttl_hours=12)
+        if cached:
+            return cached
+
+        path = self._teams_md_path(league_code)
+        if not os.path.exists(path):
+            return []
+
+        end_dt = self._safe_date(end_date)
+        if not end_dt:
+            return []
+        start_dt = end_dt - timedelta(days=lookback_days)
+
+        matches: List[Dict[str, Any]] = []
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+        except Exception:
+            return []
+
+        for line in lines:
+            if not line.startswith('| 20'):
+                continue
+            cells = [c.strip() for c in line.strip().strip('|').split('|')]
+            if len(cells) < 6:
+                continue
+
+            date_str, _time, home_team, score, away_team, remark = cells[:6]
+            match_dt = self._safe_date(date_str)
+            if not match_dt:
+                continue
+            if not (start_dt <= match_dt < end_dt):
+                continue
+            if score == '-' or '进行中' in remark:
+                continue
+
+            m = re.match(r'^(\d+)-(\d+)$', score)
+            if not m:
+                continue
+
+            home_goals = int(m.group(1))
+            away_goals = int(m.group(2))
+            total_goals = home_goals + away_goals
+            matches.append({
+                'date': date_str,
+                'home_team': home_team,
+                'away_team': away_team,
+                'home_goals': home_goals,
+                'away_goals': away_goals,
+                'total_goals': total_goals,
+                'over15': total_goals >= 2,
+                'over25': total_goals >= 3,
+                'over35': total_goals >= 4,
+                'btts': home_goals > 0 and away_goals > 0,
+                'clean_sheet': home_goals == 0 or away_goals == 0,
+            })
+
+        self.cache.set('league_ou_finished_matches', cache_params, matches)
+        return matches
+
+    def get_recent_learning(
+        self,
+        league_code: str,
+        match_date: str,
+        lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    ) -> Dict[str, Any]:
+        cache_params = {
+            'league_code': league_code,
+            'match_date': match_date,
+            'lookback_days': lookback_days,
+        }
+        cached = self.cache.get('league_ou_learning', cache_params, ttl_hours=12)
+        if cached:
+            return cached
+
+        matches = self._parse_finished_matches(league_code, match_date, lookback_days=lookback_days)
+        sample_size = len(matches)
+        if sample_size == 0:
+            return {
+                'available': False,
+                'league_code': league_code,
+                'sample_size': 0,
+                'lookback_days': lookback_days,
+                'reason': 'no_finished_matches',
+            }
+
+        avg_goals = sum(m['total_goals'] for m in matches) / sample_size
+        over15_count = sum(1 for m in matches if m['over15'])
+        over25_count = sum(1 for m in matches if m['over25'])
+        over35_count = sum(1 for m in matches if m['over35'])
+        btts_count = sum(1 for m in matches if m['btts'])
+        clean_sheet_count = sum(1 for m in matches if m['clean_sheet'])
+        total_dist = Counter(m['total_goals'] for m in matches)
+
+        result = {
+            'available': True,
+            'league_code': league_code,
+            'sample_size': sample_size,
+            'lookback_days': lookback_days,
+            'match_window': {
+                'start': (self._safe_date(match_date) - timedelta(days=lookback_days)).strftime("%Y-%m-%d"),
+                'end': (self._safe_date(match_date) - timedelta(days=1)).strftime("%Y-%m-%d"),
+            },
+            'avg_goals': round(avg_goals, 3),
+            'over15_rate': round(self._pct(over15_count, sample_size), 4),
+            'over25_rate': round(self._pct(over25_count, sample_size), 4),
+            'over35_rate': round(self._pct(over35_count, sample_size), 4),
+            'btts_rate': round(self._pct(btts_count, sample_size), 4),
+            'clean_sheet_rate': round(self._pct(clean_sheet_count, sample_size), 4),
+            'goal_bins': {
+                '0': total_dist.get(0, 0),
+                '1': total_dist.get(1, 0),
+                '2': total_dist.get(2, 0),
+                '3': total_dist.get(3, 0),
+                '4_plus': sum(v for k, v in total_dist.items() if k >= 4),
+            },
+            'high_samples': [
+                {
+                    'date': m['date'],
+                    'home_team': m['home_team'],
+                    'away_team': m['away_team'],
+                    'score': f"{m['home_goals']}-{m['away_goals']}",
+                    'total_goals': m['total_goals'],
+                }
+                for m in sorted(matches, key=lambda item: (item['total_goals'], item['date']), reverse=True)[:3]
+            ],
+            'low_samples': [
+                {
+                    'date': m['date'],
+                    'home_team': m['home_team'],
+                    'away_team': m['away_team'],
+                    'score': f"{m['home_goals']}-{m['away_goals']}",
+                    'total_goals': m['total_goals'],
+                }
+                for m in sorted(matches, key=lambda item: (item['total_goals'], item['date']))[:3]
+            ],
+        }
+        self.cache.set('league_ou_learning', cache_params, result)
+        return result
+
+
+class TeamEWMALearning:
+    """从 teams_2025-26.md 回溯球队近期已完赛比赛，计算 EWMA 形态特征。
+
+    目标：
+    - 给 `home_form/away_form` 提供更稳定的默认值（若调用方未传）
+    - 提供 “近期进球/失球/积分趋势” 的结构化特征，便于后续融合与λ修正
+    """
+
+    def __init__(self, base_dir: str = None):
+        self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
+        self.cache = PredictionCache()
+
+    @staticmethod
+    def _safe_date(date_str: str) -> Optional[datetime]:
+        try:
+            return datetime.strptime(date_str, "%Y-%m-%d")
+        except Exception:
+            return None
+
+    @staticmethod
+    def _ewma(values: List[float], alpha: float) -> Optional[float]:
+        if not values:
+            return None
+        a = max(0.01, min(0.99, float(alpha)))
+        x = float(values[0])
+        for v in values[1:]:
+            x = a * float(v) + (1.0 - a) * x
+        return x
+
+    @staticmethod
+    def _points_for_result(team_goals: int, opp_goals: int) -> int:
+        if team_goals > opp_goals:
+            return 3
+        if team_goals < opp_goals:
+            return 0
+        return 1
+
+    def _teams_md_path(self, league_code: str) -> str:
+        return os.path.join(self.base_dir, league_code, 'teams_2025-26.md')
+
+    def _iter_finished_team_matches(
+        self,
+        league_code: str,
+        team_name: str,
+        before_date: str,
+        max_matches: int = 12,
+    ) -> List[Dict[str, Any]]:
+        cache_params = {
+            'league': league_code,
+            'team': team_name,
+            'before_date': before_date,
+            'max_matches': max_matches,
+        }
+        cached = self.cache.get('team_finished_matches', cache_params, ttl_hours=12)
+        if cached:
+            return cached
+
+        path = self._teams_md_path(league_code)
+        if not os.path.exists(path):
+            return []
+        cutoff = self._safe_date(before_date)
+        if not cutoff:
+            return []
+
+        rows: List[Dict[str, Any]] = []
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                lines = f.read().splitlines()
+        except Exception:
+            return []
+
+        for line in lines:
+            if not line.startswith('| 20'):
+                continue
+            cols = [c.strip() for c in line.strip().strip('|').split('|')]
+            if len(cols) < 6:
+                continue
+            date_str, _time, home, score, away, remark = cols[:6]
+            dt = self._safe_date(date_str)
+            if not dt or dt >= cutoff:
+                continue
+            if score == '-' or '进行中' in remark:
+                continue
+            m = re.match(r'^(\d+)-(\d+)$', score)
+            if not m:
+                continue
+            hg, ag = int(m.group(1)), int(m.group(2))
+
+            if home != team_name and away != team_name:
+                continue
+            is_home = home == team_name
+            tg = hg if is_home else ag
+            og = ag if is_home else hg
+            pts = self._points_for_result(tg, og)
+            rows.append({
+                'date': date_str,
+                'is_home': is_home,
+                'opponent': away if is_home else home,
+                'team_goals': tg,
+                'opp_goals': og,
+                'points': pts,
+                'score': score,
+            })
+
+        # newest first
+        rows.sort(key=lambda r: r['date'], reverse=True)
+        rows = rows[:max_matches]
+        self.cache.set('team_finished_matches', cache_params, rows)
+        return rows
+
+    def get_team_ewma_features(
+        self,
+        league_code: str,
+        team_name: str,
+        match_date: str,
+        n5: int = 5,
+        n10: int = 10,
+    ) -> Dict[str, Any]:
+        cache_params = {
+            'league': league_code,
+            'team': team_name,
+            'match_date': match_date,
+            'n5': n5,
+            'n10': n10,
+        }
+        cached = self.cache.get('team_ewma_features', cache_params, ttl_hours=12)
+        if cached:
+            return cached
+
+        rows = self._iter_finished_team_matches(league_code, team_name, before_date=match_date, max_matches=max(n10, n5))
+        if not rows:
+            return {
+                'available': False,
+                'team': team_name,
+                'league': league_code,
+                'reason': 'no_history',
+            }
+
+        # Prepare series (newest -> oldest)
+        pts = [float(r['points']) for r in rows]
+        gf = [float(r['team_goals']) for r in rows]
+        ga = [float(r['opp_goals']) for r in rows]
+
+        # Use slightly higher alpha for short window to emphasize recency.
+        # Keep it simple: alpha ~= 2/(n+1) typical EWMA heuristic.
+        a5 = 2.0 / (min(n5, len(rows)) + 1.0)
+        a10 = 2.0 / (min(n10, len(rows)) + 1.0)
+
+        def _win_rate(last_n: int) -> float:
+            recent = rows[:min(last_n, len(rows))]
+            if not recent:
+                return 0.0
+            wins = sum(1 for r in recent if r['points'] == 3)
+            return wins / len(recent)
+
+        def _form_scale(ewma_ppg: Optional[float]) -> int:
+            # Map EWMA points-per-game to 1..5
+            if ewma_ppg is None:
+                return 3
+            if ewma_ppg >= 2.2:
+                return 5
+            if ewma_ppg >= 1.6:
+                return 4
+            if ewma_ppg >= 1.0:
+                return 3
+            if ewma_ppg >= 0.5:
+                return 2
+            return 1
+
+        # EWMA of per-match values: points (0/1/3), goals for/against
+        ewma_pts_5 = self._ewma(pts[:min(n5, len(pts))], a5)
+        ewma_pts_10 = self._ewma(pts[:min(n10, len(pts))], a10)
+        ewma_gf_5 = self._ewma(gf[:min(n5, len(gf))], a5)
+        ewma_ga_5 = self._ewma(ga[:min(n5, len(ga))], a5)
+
+        feature = {
+            'available': True,
+            'team': team_name,
+            'league': league_code,
+            'sample_size': len(rows),
+            'windows': {
+                'n5': min(n5, len(rows)),
+                'n10': min(n10, len(rows)),
+            },
+            'ewma': {
+                'points_5': None if ewma_pts_5 is None else round(float(ewma_pts_5), 3),
+                'points_10': None if ewma_pts_10 is None else round(float(ewma_pts_10), 3),
+                'gf_5': None if ewma_gf_5 is None else round(float(ewma_gf_5), 3),
+                'ga_5': None if ewma_ga_5 is None else round(float(ewma_ga_5), 3),
+            },
+            'rates': {
+                'win_rate_5': round(_win_rate(5), 3),
+                'win_rate_10': round(_win_rate(10), 3),
+            },
+            'form_scale': _form_scale(ewma_pts_5),
+            'recent_matches': [
+                {
+                    'date': r['date'],
+                    'opponent': r['opponent'],
+                    'is_home': r['is_home'],
+                    'score': r['score'],
+                    'team_goals': r['team_goals'],
+                    'opp_goals': r['opp_goals'],
+                    'points': r['points'],
+                }
+                for r in rows[:5]
+            ],
+        }
+        self.cache.set('team_ewma_features', cache_params, feature)
+        return feature
 
 class HistoricalOddsReference:
     """历史赔率参考库。
@@ -1457,6 +1889,8 @@ class EnhancedPredictor:
     def __init__(self, base_dir: str = None):
         self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
         self.team_manager = TeamDataManager(base_dir)
+        self.league_ou_learning = LeagueOverUnderLearning(base_dir)
+        self.team_ewma_learning = TeamEWMALearning(base_dir)
         self.odds_reference = HistoricalOddsReference(base_dir)
         self.upset_analyzer = UpsetAnalyzer(base_dir)
         self.weight_adjuster = DynamicWeightAdjuster()
@@ -1466,6 +1900,167 @@ class EnhancedPredictor:
         # 初始化多模型融合
         self.model_fusion = MultiModelFusion()
         self.poisson_model = PoissonModel()
+
+    @staticmethod
+    def _normalize_probs(p: Dict[str, float]) -> Dict[str, float]:
+        h = float(p.get('home_win') or 0.0)
+        d = float(p.get('draw') or 0.0)
+        a = float(p.get('away_win') or 0.0)
+        s = h + d + a
+        if s <= 0:
+            return {'home_win': 0.0, 'draw': 0.0, 'away_win': 0.0}
+        return {'home_win': h / s, 'draw': d / s, 'away_win': a / s}
+
+    def _compute_total_goals_distribution(
+        self,
+        score_probs: Dict[str, float],
+        max_bucket: int = 7,
+    ) -> Dict[str, Any]:
+        """Compute total-goals distribution buckets from score probability table.
+
+        max_bucket=7 means output 0..7 and 7+ (tail) for readability.
+        """
+        if not isinstance(score_probs, dict) or not score_probs:
+            return {'available': False, 'reason': 'no_score_probs'}
+        buckets = {str(i): 0.0 for i in range(max_bucket + 1)}
+        buckets[f"{max_bucket}+"] = 0.0
+        for s, p in score_probs.items():
+            if not isinstance(p, (int, float)):
+                continue
+            m = re.match(r'^(\d+)\s*-\s*(\d+)$', str(s).strip())
+            if not m:
+                continue
+            tg = int(m.group(1)) + int(m.group(2))
+            if tg >= max_bucket:
+                buckets[f"{max_bucket}+"] += float(p)
+            else:
+                buckets[str(tg)] += float(p)
+
+        # normalize (score_probs may not sum to 1 if truncated somewhere)
+        total = sum(buckets.values())
+        if total > 0:
+            for k in list(buckets.keys()):
+                buckets[k] = buckets[k] / total
+
+        items = [(k, buckets[k]) for k in buckets.keys()]
+        top = sorted(items, key=lambda x: x[1], reverse=True)[:3]
+        return {
+            'available': True,
+            'buckets': {k: round(float(v), 6) for k, v in buckets.items()},
+            'top_totals': [{'total': k, 'prob': round(float(v), 4)} for k, v in top],
+            'tail_bucket': f"{max_bucket}+",
+        }
+
+    def _extract_decimal_odds_1x2(self, current_odds: Optional[Dict[str, Any]]) -> Dict[str, Optional[float]]:
+        """Extract decimal odds for home/draw/away from current_odds.
+
+        Priority: 竞彩胜平负 -> 欧赔终盘 -> None.
+        """
+        if not isinstance(current_odds, dict):
+            return {'home': None, 'draw': None, 'away': None, 'source': 'none'}
+
+        def _pick_final(block_name: str) -> Optional[Dict[str, Any]]:
+            blk = current_odds.get(block_name)
+            if isinstance(blk, dict):
+                fin = blk.get('final')
+                if isinstance(fin, dict):
+                    return fin
+            return None
+
+        def _f(x: Any) -> Optional[float]:
+            try:
+                if x is None:
+                    return None
+                v = float(str(x).strip())
+                return v if v > 1.01 else None
+            except Exception:
+                return None
+
+        # 1) Sporttery WDL odds (if present)
+        fin = _pick_final('胜平负赔率')
+        if fin:
+            return {
+                'home': _f(fin.get('home') if 'home' in fin else fin.get('主')),
+                'draw': _f(fin.get('draw') if 'draw' in fin else fin.get('平')),
+                'away': _f(fin.get('away') if 'away' in fin else fin.get('客')),
+                'source': '胜平负赔率.final',
+            }
+
+        # 2) Euro odds final
+        fin = _pick_final('欧赔')
+        if fin:
+            return {
+                'home': _f(fin.get('home') if 'home' in fin else fin.get('主')),
+                'draw': _f(fin.get('draw') if 'draw' in fin else fin.get('平')),
+                'away': _f(fin.get('away') if 'away' in fin else fin.get('客')),
+                'source': '欧赔.final',
+            }
+
+        return {'home': None, 'draw': None, 'away': None, 'source': 'none'}
+
+    @staticmethod
+    def _kelly_fraction(p: float, odds: float) -> Optional[float]:
+        """Kelly fraction with decimal odds.
+
+        f* = (b*p - q)/b, b=odds-1, q=1-p
+        """
+        try:
+            pp = float(p)
+            o = float(odds)
+            if o <= 1.01:
+                return None
+            b = o - 1.0
+            q = 1.0 - pp
+            f = (b * pp - q) / b
+            return max(0.0, min(1.0, float(f)))
+        except Exception:
+            return None
+
+    def _build_kelly_staking(
+        self,
+        final_probabilities: Dict[str, float],
+        current_odds: Optional[Dict[str, Any]],
+        cap_half: float = 0.05,
+        cap_quarter: float = 0.03,
+    ) -> Dict[str, Any]:
+        probs = self._normalize_probs(final_probabilities or {})
+        odds = self._extract_decimal_odds_1x2(current_odds)
+
+        out: Dict[str, Any] = {
+            'available': False,
+            'odds_source': odds.get('source'),
+            'odds': {'home': odds.get('home'), 'draw': odds.get('draw'), 'away': odds.get('away')},
+            'probabilities': probs,
+            'by_outcome': {},
+            'recommended': {},
+        }
+
+        if not (odds.get('home') and odds.get('draw') and odds.get('away')):
+            out['reason'] = 'missing_odds'
+            return out
+
+        by = {}
+        for key, p_key, o_key in (
+            ('主胜', 'home_win', 'home'),
+            ('平局', 'draw', 'draw'),
+            ('客胜', 'away_win', 'away'),
+        ):
+            f_full = self._kelly_fraction(probs.get(p_key, 0.0), odds.get(o_key) or 0.0)
+            if f_full is None:
+                by[key] = {'full': None, 'half_cap5': None, 'quarter_cap3': None}
+                continue
+            half = min(float(cap_half), 0.5 * f_full)
+            quarter = min(float(cap_quarter), 0.25 * f_full)
+            by[key] = {
+                'full': round(float(f_full), 6),
+                'half_cap5': round(float(half), 6),
+                'quarter_cap3': round(float(quarter), 6),
+            }
+
+        out['by_outcome'] = by
+        out['available'] = True
+        # Conservative recommendation: take the smaller of the two capped fractions for the predicted outcome.
+        return out
 
     def _apply_dynamic_weights(self, league_code: str) -> Dict[str, Any]:
         """把动态权重应用到融合器（若可用），并返回诊断信息。"""
@@ -1576,6 +2171,111 @@ class EnhancedPredictor:
             "cost": round(float(best_cost), 6),
         }
         return float(hl), float(al), diag
+
+    def _apply_league_ou_learning(
+        self,
+        league_code: str,
+        match_date: str,
+        home_team: str,
+        away_team: str,
+        home_lambda: float,
+        away_lambda: float,
+        strength_diff: float,
+    ) -> tuple[float, float, Dict[str, Any]]:
+        """用联赛级近两周大小球学习数据轻量修正 λ。
+
+        目标不是覆盖市场/模型，而是把联赛短期节奏、BTTS 和零封倾向
+        融入到比分与大小球预测中。
+        """
+        learning = self.league_ou_learning.get_recent_learning(
+            league_code=league_code,
+            match_date=match_date,
+        )
+        diag: Dict[str, Any] = {
+            'applied': False,
+            'league_code': league_code,
+            'home_team': home_team,
+            'away_team': away_team,
+            'learning': learning,
+        }
+        if not learning.get('available'):
+            diag['reason'] = learning.get('reason', 'unavailable')
+            return home_lambda, away_lambda, diag
+
+        sample_size = int(learning.get('sample_size', 0) or 0)
+        if sample_size < self.league_ou_learning.MIN_SAMPLE_SIZE:
+            diag['reason'] = f'sample_size<{self.league_ou_learning.MIN_SAMPLE_SIZE}'
+            return home_lambda, away_lambda, diag
+
+        base_total = max(0.6, float(home_lambda) + float(away_lambda))
+        league_avg = float(LEAGUE_CONFIG.get(league_code, {}).get('avg_goals') or 2.6)
+        recent_avg = float(learning.get('avg_goals') or league_avg)
+        over25_rate = float(learning.get('over25_rate') or 0.0)
+        over35_rate = float(learning.get('over35_rate') or 0.0)
+        btts_rate = float(learning.get('btts_rate') or 0.0)
+        clean_sheet_rate = float(learning.get('clean_sheet_rate') or 0.0)
+
+        sample_weight = min(0.22, 0.08 + sample_size * 0.008)
+        target_total = base_total * (1.0 - sample_weight) + recent_avg * sample_weight
+
+        total_scale = 1.0
+        signals: List[str] = []
+        if over25_rate >= 0.60:
+            total_scale += 0.04
+            signals.append('high_over25')
+        elif over25_rate <= 0.35:
+            total_scale -= 0.04
+            signals.append('low_over25')
+
+        if over35_rate >= 0.30:
+            total_scale += 0.02
+            signals.append('high_over35')
+        elif over35_rate <= 0.12:
+            total_scale -= 0.02
+            signals.append('low_over35')
+
+        target_total *= total_scale
+        target_total = max(0.8, min(4.2, target_total))
+
+        current_share = float(home_lambda) / base_total if base_total > 0 else 0.5
+        adjusted_share = current_share
+        if btts_rate >= 0.65 and abs(strength_diff) <= 18:
+            # 高互进球联赛里，弱势一方更容易拿到进球，适度收敛强弱差。
+            adjusted_share = 0.5 + (current_share - 0.5) * 0.88
+            signals.append('high_btts_balance')
+        elif clean_sheet_rate >= 0.55 and abs(strength_diff) >= 12:
+            # 零封倾向高时，适度放大强侧份额，弱侧更易哑火。
+            adjusted_share = 0.5 + (current_share - 0.5) * 1.08
+            signals.append('high_clean_sheet_skew')
+
+        adjusted_share = max(0.18, min(0.82, adjusted_share))
+        new_home_lambda = max(0.15, target_total * adjusted_share)
+        new_away_lambda = max(0.15, target_total * (1.0 - adjusted_share))
+
+        diag.update({
+            'applied': True,
+            'signals': signals,
+            'sample_size': sample_size,
+            'base_lambda': {
+                'home': round(float(home_lambda), 3),
+                'away': round(float(away_lambda), 3),
+                'total': round(base_total, 3),
+            },
+            'adjusted_lambda': {
+                'home': round(float(new_home_lambda), 3),
+                'away': round(float(new_away_lambda), 3),
+                'total': round(float(new_home_lambda + new_away_lambda), 3),
+            },
+            'league_avg_goals': round(league_avg, 3),
+            'recent_avg_goals': round(recent_avg, 3),
+            'over25_rate': round(over25_rate, 4),
+            'over35_rate': round(over35_rate, 4),
+            'btts_rate': round(btts_rate, 4),
+            'clean_sheet_rate': round(clean_sheet_rate, 4),
+            'sample_weight': round(sample_weight, 4),
+            'target_total_scale': round(total_scale, 4),
+        })
+        return new_home_lambda, new_away_lambda, diag
 
     def _apply_live_outcome_adjustment(
         self,
@@ -2186,6 +2886,31 @@ class EnhancedPredictor:
             "context_applied": {},
         }
 
+        # 0.2 EWMA 状态：若调用方未显式提供 form，则从 teams_2025-26.md 自动回溯计算。
+        try:
+            if "home_form" not in analysis_context or "away_form" not in analysis_context:
+                home_ewma = self.team_ewma_learning.get_team_ewma_features(
+                    league_code=league_code,
+                    team_name=home_team,
+                    match_date=match_date,
+                )
+                away_ewma = self.team_ewma_learning.get_team_ewma_features(
+                    league_code=league_code,
+                    team_name=away_team,
+                    match_date=match_date,
+                )
+                # Only fill when available and not provided by caller.
+                if "home_form" not in analysis_context and isinstance(home_ewma, dict) and home_ewma.get("available"):
+                    analysis_context["home_form"] = int(home_ewma.get("form_scale", 3))
+                if "away_form" not in analysis_context and isinstance(away_ewma, dict) and away_ewma.get("available"):
+                    analysis_context["away_form"] = int(away_ewma.get("form_scale", 3))
+                realtime["context_applied"]["ewma_form"] = {
+                    "home": home_ewma,
+                    "away": away_ewma,
+                }
+        except Exception as e:
+            realtime["context_applied"]["ewma_form"] = {"attempted": True, "error": str(e)}
+
         # 0. 优先刷新实时赔率快照（默认开启，可用 env OKOOO_REFRESH_LIVE=0 关闭）
         if (
             force_refresh_odds
@@ -2327,6 +3052,21 @@ class EnhancedPredictor:
             realtime["context_applied"]["lambda_calibration"] = cal_diag
         except Exception as e:
             realtime["context_applied"]["lambda_calibration"] = {"applied": False, "error": str(e)}
+
+        # 使用联赛近两周大小球学习数据，对比分/大小球 λ 做轻量修正。
+        try:
+            home_lambda, away_lambda, ou_learning_diag = self._apply_league_ou_learning(
+                league_code=league_code,
+                match_date=match_date,
+                home_team=home_team,
+                away_team=away_team,
+                home_lambda=home_lambda,
+                away_lambda=away_lambda,
+                strength_diff=strength_diff,
+            )
+            realtime["context_applied"]["league_over_under_learning"] = ou_learning_diag
+        except Exception as e:
+            realtime["context_applied"]["league_over_under_learning"] = {"applied": False, "error": str(e)}
         
         # 简化的xG计算
         home_xg = home_lambda * 0.8
@@ -2416,6 +3156,37 @@ class EnhancedPredictor:
         main_prediction = probs[0][0]
         confidence = probs[0][1]
 
+        # 5.5 凯利仓位建议（基于模型概率 + 欧赔/竞彩赔率；输出半凯利封顶5% + 1/4凯利封顶3%）
+        staking = {}
+        try:
+            kelly = self._build_kelly_staking(
+                final_probabilities=final_prob,
+                current_odds=current_odds,
+                cap_half=0.05,
+                cap_quarter=0.03,
+            )
+            recommended = {}
+            if isinstance(kelly, dict) and kelly.get("available"):
+                by = kelly.get("by_outcome") or {}
+                slot = by.get(main_prediction) if isinstance(by, dict) else None
+                if isinstance(slot, dict):
+                    half_cap5 = slot.get("half_cap5")
+                    quarter_cap3 = slot.get("quarter_cap3")
+                    cand = []
+                    if isinstance(half_cap5, (int, float)):
+                        cand.append(("half_cap5", float(half_cap5)))
+                    if isinstance(quarter_cap3, (int, float)):
+                        cand.append(("quarter_cap3", float(quarter_cap3)))
+                    if cand:
+                        # Combine two methods conservatively: take the smaller capped fraction.
+                        method, frac = sorted(cand, key=lambda x: x[1])[0]
+                        recommended = {"outcome": main_prediction, "method": method, "fraction": round(float(frac), 6)}
+            staking = {"kelly": kelly, "recommended": recommended}
+            realtime["context_applied"]["staking_kelly"] = {"available": bool(kelly.get("available")), "recommended": recommended}
+        except Exception as e:
+            staking = {"kelly": {"available": False, "error": str(e)}, "recommended": {}}
+            realtime["context_applied"]["staking_kelly"] = {"available": False, "error": str(e)}
+
         # 6. 爆冷分析（把模型输出也作为输入，便于案例库做“同向反打”学习）
         upset_potential = self.upset_analyzer.assess_upset_potential(
             home_team=home_team,
@@ -2442,6 +3213,7 @@ class EnhancedPredictor:
         dc_model = DixonColesModel(rho=rho_map.get(league_code, -0.10))
         score_result = dc_model.predict_with_dixon_coles(home_lambda, away_lambda)
         top_scores = sorted(score_result['score_probs'].items(), key=lambda x: x[1], reverse=True)[:3]
+        total_goals = self._compute_total_goals_distribution(score_result.get('score_probs', {}), max_bucket=7)
         
         # 8. 大小球预测
         # If current_odds still lacks totals, attempt a last-moment fetch (best-effort).
@@ -2468,6 +3240,17 @@ class EnhancedPredictor:
         over_under = self.poisson_model.predict_over_under(home_lambda, away_lambda, line=ou_line)
         if isinstance(over_under, dict):
             over_under["line_source"] = ou_line_source
+            learning_diag = realtime["context_applied"].get("league_over_under_learning", {})
+            if isinstance(learning_diag, dict) and learning_diag.get("applied"):
+                over_under["league_learning"] = {
+                    'sample_size': learning_diag.get('sample_size'),
+                    'signals': learning_diag.get('signals', []),
+                    'recent_avg_goals': learning_diag.get('recent_avg_goals'),
+                    'over25_rate': learning_diag.get('over25_rate'),
+                    'over35_rate': learning_diag.get('over35_rate'),
+                    'btts_rate': learning_diag.get('btts_rate'),
+                    'clean_sheet_rate': learning_diag.get('clean_sheet_rate'),
+                }
             # Attach market O/U (line + water) if we have it, for traceability in final conclusion.
             try:
                 market_ou = None
@@ -2494,12 +3277,15 @@ class EnhancedPredictor:
             'confidence': confidence,
             'all_probabilities': dict(probs),
             'top_scores': top_scores,
+            'total_goals': total_goals,
             'expected_goals': {
                 'home': home_lambda,
                 'away': away_lambda,
                 'total': home_lambda + away_lambda
             },
             'over_under': over_under,
+            'staking': staking,
+            'league_over_under_learning': realtime["context_applied"].get("league_over_under_learning"),
             'strength_diff': strength_diff,
             'home_strength': home_strength,
             'away_strength': away_strength,

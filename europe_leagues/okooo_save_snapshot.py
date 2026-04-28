@@ -234,6 +234,118 @@ def _find_rows_fuzzy(
     return bu.eval_json(js)
 
 
+def _find_rows_anywhere_on_current_page(
+    bu: Any,
+    team1: str,
+    team2: str,
+    date_hint: str = "",
+    time_hint: str = "",
+    league: str = "",
+    alias_table: Dict[str, Any] | None = None,
+    limit: int = 5,
+) -> Dict[str, Any]:
+    """Search the current page for candidate matches and MatchID.
+
+    Unlike `_find_rows_fuzzy`, this scans:
+    - anchors with `history.php?MatchID=...`
+    - any element containing `MatchID=...` in href/onclick/data-href
+    - nearby container text
+
+    This is more robust on cup/continental competition pages where the mobile
+    schedule markup differs from domestic league pages.
+    """
+    alias_table = alias_table or {}
+    t1_tokens = _norm_team_tokens_multi(_team_aliases(alias_table, league, team1))
+    t2_tokens = _norm_team_tokens_multi(_team_aliases(alias_table, league, team2))
+    d_tokens = _date_tokens(date_hint)
+    tm_tokens = _time_tokens(time_hint)
+    js = r"""
+(() => {
+  const t1 = %s;
+  const t2 = %s;
+  const ds = %s;
+  const ts = %s;
+  const requireDate = %s;
+  const requireTime = %s;
+
+  const norm = (s) => String(s || '').replace(/\s+/g, '').trim();
+  const hasAny = (compact, tokens) => (tokens || []).some(tok => tok && compact.includes(tok));
+
+  const nodes = Array.from(document.querySelectorAll('a,div,span,button,li,tr,td'));
+  const seen = new Set();
+  const rows = [];
+
+  const extractMid = (el) => {
+    const attrs = [];
+    const collectAttrs = (node) => {
+      if (!node || !node.getAttribute) return;
+      attrs.push(node.getAttribute('href') || '');
+      attrs.push(node.getAttribute('onclick') || '');
+      attrs.push(node.getAttribute('data-href') || '');
+      attrs.push(node.getAttribute('data-url') || '');
+    };
+    collectAttrs(el);
+    if (el && el.querySelectorAll) {
+      const inner = Array.from(el.querySelectorAll('a,[onclick],[data-href],[data-url]')).slice(0, 8);
+      for (const node of inner) collectAttrs(node);
+    }
+    const combined = attrs.join(' ');
+    const m = combined.match(/MatchID=(\d+)/i) || combined.match(/matchid=(\d+)/i);
+    return m ? m[1] : null;
+  };
+
+  for (const el of nodes) {
+    const mid = extractMid(el);
+    if (!mid || seen.has(mid)) continue;
+    const row = el.closest('li') || el.closest('tr') || el.closest('div') || el.parentElement;
+    const text = (row?.innerText || el.innerText || '').replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    const compact = norm(text);
+    const hasT1 = hasAny(compact, t1);
+    const hasT2 = hasAny(compact, t2);
+    const hasDate = ds.length ? hasAny(compact, ds) : true;
+    const hasTime = ts.length ? hasAny(compact, ts) : true;
+    if (!hasT1 || !hasT2) continue;
+    if (requireDate && !hasDate) continue;
+    if (requireTime && !hasTime) continue;
+
+    let href = '';
+    if (el && el.getAttribute) href = el.getAttribute('href') || '';
+    if ((!href || !/MatchID=/i.test(href)) && row && row.querySelector) {
+      const a = row.querySelector("a[href*='MatchID='], a[href*='matchid=']");
+      if (a && a.getAttribute) href = a.getAttribute('href') || href;
+    }
+    if (!href || !/MatchID=/i.test(href)) {
+      href = `https://m.okooo.com/match/history.php?MatchID=${mid}`;
+    } else if (href.startsWith('/')) {
+      href = location.origin + href;
+    }
+
+    const score =
+      10 +
+      10 +
+      (ds.length ? (hasDate ? 6 : 0) : 0) +
+      (ts.length ? (hasTime ? 8 : 0) : 0) +
+      Math.min(compact.length, 100) / 100.0;
+    rows.push({ mid, href, text, score });
+    seen.add(mid);
+  }
+
+  rows.sort((a, b) => b.score - a.score);
+  return JSON.stringify({count: rows.length, rows: rows.slice(0, %d)});
+})()
+""" % (
+        json.dumps(t1_tokens, ensure_ascii=False),
+        json.dumps(t2_tokens, ensure_ascii=False),
+        json.dumps(d_tokens, ensure_ascii=False),
+        json.dumps(tm_tokens, ensure_ascii=False),
+        "true" if bool(d_tokens) else "false",
+        "true" if bool(tm_tokens) else "false",
+        limit,
+    )
+    return bu.eval_json(js)
+
+
 def _find_existing_snapshot_by_match_id(out_dir: Path, match_id: str) -> Optional[Path]:
     """Return an existing snapshot JSON path in out_dir that matches match_id, else None."""
     if not match_id:
@@ -523,6 +635,7 @@ def _mobile_league_url(league: str) -> str | None:
         "西甲": "https://m.okooo.com/saishi/8/",
         "德甲": "https://m.okooo.com/saishi/35/",
         "法甲": "https://m.okooo.com/saishi/34/",
+        "欧冠": "https://m.okooo.com/saishi/7/",
         "中超": "https://m.okooo.com/saishi/649/",
         "英冠": "https://m.okooo.com/saishi/133/",
     }
@@ -833,6 +946,18 @@ def _find_match_id(
             limit=5,
         )
 
+    def find_rows_anywhere() -> Dict[str, Any]:
+        return _find_rows_anywhere_on_current_page(
+            bu,
+            team1,
+            team2,
+            date_hint=date_hint,
+            time_hint=time_hint,
+            league=league,
+            alias_table=alias_table or {},
+            limit=5,
+        )
+
     bu.open(REMEN_URL)
 
     # Click the league entry by visible text.
@@ -851,23 +976,31 @@ def _find_match_id(
 
     found = find_rows()
     if not isinstance(found, dict) or not found.get("rows"):
+        found = find_rows_anywhere()
+    if not isinstance(found, dict) or not found.get("rows"):
         league_url = _mobile_league_url(league)
         if league_url:
             bu.open(league_url)
             time.sleep(2.0)
             found = find_rows()
+            if not isinstance(found, dict) or not found.get("rows"):
+                found = find_rows_anywhere()
 
     # If still not found, try scrolling to load more schedule blocks.
     if not isinstance(found, dict) or not found.get("rows"):
         for _ in range(10):
             _eval_scroll_to_bottom(bu)
             found = find_rows()
+            if not isinstance(found, dict) or not found.get("rows"):
+                found = find_rows_anywhere()
             if isinstance(found, dict) and found.get("rows"):
                 break
         # One more try from top (some pages lazy-load above fold).
         if not isinstance(found, dict) or not found.get("rows"):
             _eval_scroll_to_top(bu)
             found = find_rows()
+            if not isinstance(found, dict) or not found.get("rows"):
+                found = find_rows_anywhere()
     if not isinstance(found, dict) or not found.get("rows"):
         raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
 
