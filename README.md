@@ -257,6 +257,19 @@ python3 prediction_system.py setup-openclaw --json
 - `health-check` 会返回 `openclaw_dependency_report`
 - `setup-openclaw` 会返回完整初始化命令和依赖状态
 
+### Harness Engineering 入口
+
+为了把当前项目从“脚本直连”收敛为“可编排执行”，已新增 Harness 风格入口：
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py harness-list --json
+python3 prediction_system.py harness-run --pipeline match_prediction --league la_liga --home-team 巴塞罗那 --away-team 皇家马德里 --date 2026-05-11 --json
+```
+
+设计说明见：
+- [docs/harness_engineering_design.md](./docs/harness_engineering_design.md)
+
 ---
 
 ## Agent 调用提示词

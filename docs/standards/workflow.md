@@ -153,7 +153,7 @@ python3 europe_leagues/okooo_save_snapshot.py \
 
 用途：将“近 N 场阵型/控球/上一场首发/球员评分趋势”等信息结构化注入预测上下文，用于提升基本面维度的可量化输入。
 
-- 开关：`ENABLE_TEAM_CONTEXT=1`
+- 默认开启；如需关闭：`ENABLE_TEAM_CONTEXT=0`
 - 近况窗口：`TEAM_CONTEXT_LAST_N=5`
 - 注入位置：`analysis_context['team_context']`
 - 缓存：`europe_leagues/.okooo-scraper/runtime/sofascore_team_ids.json`

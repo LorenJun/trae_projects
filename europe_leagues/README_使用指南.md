@@ -131,7 +131,7 @@ PY
 
 ```bash
 cd /Users/bytedance/trae_projects
-ENABLE_TEAM_CONTEXT=1 TEAM_CONTEXT_LAST_N=5 python3 - <<'PY'
+TEAM_CONTEXT_LAST_N=5 python3 - <<'PY'
 import sys
 sys.path.insert(0,'/Users/bytedance/trae_projects/europe_leagues')
 from enhanced_prediction_workflow import EnhancedPredictor

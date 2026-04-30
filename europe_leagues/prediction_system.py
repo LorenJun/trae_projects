@@ -521,6 +521,59 @@ def run_openclaw_setup_guide(args):
     emit_response(build_json_result("setup-openclaw", payload), as_json=args.json)
 
 
+def run_harness_list(args):
+    from harness import list_pipelines
+
+    payload = list_pipelines()
+    if args.json:
+        emit_response(build_json_result("harness-list", payload), as_json=True)
+        return
+
+    print("可用 Harness Pipelines:")
+    for item in payload:
+        print(f"- {item['name']}: {item['description']}")
+
+
+def run_harness_pipeline(args):
+    from harness import build_pipeline
+
+    analysis_context = None
+    if getattr(args, "context_file", ""):
+        with open(args.context_file, "r", encoding="utf-8") as f:
+            analysis_context = json.load(f)
+
+    inputs = {
+        "league": getattr(args, "league", ""),
+        "date": getattr(args, "date", ""),
+        "home_team": getattr(args, "home_team", ""),
+        "away_team": getattr(args, "away_team", ""),
+        "match_id": getattr(args, "match_id", ""),
+        "match_time": getattr(args, "match_time", ""),
+        "league_hint": getattr(args, "league_hint", ""),
+        "okooo_driver": getattr(args, "okooo_driver", "browser-use"),
+        "okooo_headed": bool(getattr(args, "okooo_headed", False)),
+        "no_refresh_odds": bool(getattr(args, "no_refresh_odds", False)),
+        "no_cache": bool(getattr(args, "no_cache", False)),
+        "analysis_context": analysis_context,
+        "home_score": getattr(args, "home_score", None),
+        "away_score": getattr(args, "away_score", None),
+        "refresh": bool(getattr(args, "refresh", False)),
+    }
+    pipeline = build_pipeline(args.pipeline)
+    result = pipeline.execute(inputs)
+
+    if args.json:
+        emit_response(build_json_result("harness-run", result), as_json=True)
+        return
+
+    print(f"Pipeline: {result['pipeline']}")
+    print(f"状态: {result['status']}")
+    if result["error"]:
+        print(f"错误: {result['error']}")
+    for stage in result["stages"]:
+        print(f"- {stage['stage']}: {stage['status']}")
+
+
 def show_interactive_menu():
     """显示交互式菜单"""
     while True:
@@ -663,6 +716,28 @@ def build_parser():
     parser_setup = subparsers.add_parser("setup-openclaw", help="输出 openclaw 初始化安装指引")
     add_json_flag(parser_setup)
 
+    parser_harness_list = subparsers.add_parser("harness-list", help="列出 Harness 风格的可编排 pipeline")
+    add_json_flag(parser_harness_list)
+
+    parser_harness_run = subparsers.add_parser("harness-run", help="通过 Harness pipeline 执行任务")
+    parser_harness_run.add_argument("--pipeline", required=True, help="pipeline 名称")
+    parser_harness_run.add_argument("--league", default="", help="联赛代码")
+    parser_harness_run.add_argument("--date", default="", help="比赛日期 YYYY-MM-DD")
+    parser_harness_run.add_argument("--home-team", default="", help="主队名称")
+    parser_harness_run.add_argument("--away-team", default="", help="客队名称")
+    parser_harness_run.add_argument("--match-id", default="", help="比赛 ID")
+    parser_harness_run.add_argument("--league-hint", default="", help="联赛提示")
+    parser_harness_run.add_argument("--time", dest="match_time", default="", help="比赛时间 HH:MM")
+    parser_harness_run.add_argument("--okooo-driver", default="browser-use", help="赔率刷新 driver")
+    parser_harness_run.add_argument("--okooo-headed", action="store_true", help="是否有头运行")
+    parser_harness_run.add_argument("--no-refresh-odds", action="store_true", help="不刷新赔率")
+    parser_harness_run.add_argument("--no-cache", action="store_true", help="跳过采集缓存")
+    parser_harness_run.add_argument("--context-file", default="", help="补充信息 JSON 文件")
+    parser_harness_run.add_argument("--home-score", type=int, help="主队进球")
+    parser_harness_run.add_argument("--away-score", type=int, help="客队进球")
+    parser_harness_run.add_argument("--refresh", action="store_true", help="result_recording 后刷新准确率")
+    add_json_flag(parser_harness_run)
+
     return parser
 
 
@@ -729,6 +804,10 @@ def main():
         run_openclaw_health_check(args)
     elif args.command == "setup-openclaw":
         run_openclaw_setup_guide(args)
+    elif args.command == "harness-list":
+        run_harness_list(args)
+    elif args.command == "harness-run":
+        run_harness_pipeline(args)
 
 
 if __name__ == "__main__":
