@@ -1,5 +1,14 @@
 # 澳客实时赔率与大小球抓取指南
 
+> 当前正式流程  
+> 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
+> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测  
+> 3. 结果写回 `europe_leagues/<league>/teams_2025-26.md`  
+> 4. 赛后用 `prediction_system.py save-result` 或 `bulk_fetch_and_update.py` 回填  
+> 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
+> 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
+> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`
+
 ## 目标
 
 本指南描述项目当前已经跑通的实时赔率抓取链路，重点覆盖：
@@ -8,18 +17,20 @@
 - 获取 `MatchID`
 - 抓取欧赔、亚值、凯利
 - 在 `亚值` 页面内切换到 `大小球` 子 tab 抓取真实盘口线与水位
-- 将快照直接交给预测流程，输出最终结论
+- 将快照、赛程和 `match_id` 交给正式预测流程，输出最终结论
 
 ## 当前主流程
 
 1. 先定位比赛：联赛、主客队、日期、必要时补 `match_time`
-2. 优先获取 `match_id`
+2. 优先调用 `prediction_system.py collect-data` 或获取 `match_id`
 3. 调用 `okooo_save_snapshot.py` 生成实时快照 JSON
-4. 由 `enhanced_prediction_workflow.py` 自动读取快照并预测
-5. 输出中检查：
+4. 通过 `prediction_system.py predict-match` 或 `harness-run --pipeline match_prediction` 进入正式预测流程
+5. 由 `EnhancedPredictor.predict_match()` 自动处理快照刷新、缺失大小球补抓和上下文注入
+6. 输出中检查：
    - `over_under.line`
    - `over_under.line_source`
    - `over_under.market.final`
+   - `realtime.okooo`
 
 ## 关键事实
 
@@ -42,7 +53,14 @@ python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026
 
 - `europe_leagues/.okooo-scraper/schedules/premier_league/2026-04-28.json`
 
-### 2. 用 MatchID 直接抓实时快照
+### 2. 先走标准采集入口
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py collect-data --league premier_league --date 2026-04-28 --json
+```
+
+### 3. 用 MatchID 直接抓实时快照
 
 ```bash
 cd /Users/bytedance/trae_projects
@@ -58,28 +76,32 @@ python3 europe_leagues/okooo_save_snapshot.py \
   --overwrite
 ```
 
-### 3. 直接跑最终预测
+### 4. 标准 CLI 跑最终预测
 
 ```bash
-cd /Users/bytedance/trae_projects
-python3 - <<'PY2'
-import sys, json
-sys.path.insert(0,'/Users/bytedance/trae_projects/europe_leagues')
-from enhanced_prediction_workflow import EnhancedPredictor
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py predict-match \
+  --league premier_league \
+  --home-team 曼联 \
+  --away-team 布伦特福德 \
+  --date 2026-04-28 \
+  --time 03:00 \
+  --match-id 1296070 \
+  --json
+```
 
-p = EnhancedPredictor()
-r = p.predict_match(
-    '曼联',
-    '布伦特福德',
-    'premier_league',
-    match_date='2026-04-28',
-    match_time='03:00',
-    match_id='1296070',
-    okooo_driver='local-chrome',
-    force_refresh_odds=True,
-)
-print(json.dumps(r['over_under'], ensure_ascii=False, indent=2))
-PY2
+### 5. 需要阶段化审计时走 Harness
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py harness-run \
+  --pipeline match_prediction \
+  --league premier_league \
+  --date 2026-04-28 \
+  --home-team 曼联 \
+  --away-team 布伦特福德 \
+  --time 03:00 \
+  --json
 ```
 
 ## 快照字段说明
@@ -129,6 +151,7 @@ PY2
 
 - `line_source=snapshot_final` 表示真实盘口线来自实时快照
 - `market.final` 表示最终使用的真实大/小水位
+- `realtime.okooo.refreshed=true` 表示预测前成功刷新过实时快照
 - 若抓取失败，会退回 `default_2.5`
 
 ## 稳定性策略
@@ -136,10 +159,11 @@ PY2
 ### 优先级
 
 1. 已知 `match_id` 时，直接抓，不再反复在赛程里模糊匹配
-2. 未知 `match_id` 时，优先用 `okooo_fetch_daily_schedule.py` 先落赛程 JSON
+2. 未知 `match_id` 时，优先用 `prediction_system.py collect-data` 或 `okooo_fetch_daily_schedule.py` 先落赛程 JSON
 3. 球队存在简称时，维护 `okooo_team_aliases.json`
 4. 大小球优先走 `亚值页 -> 大小球 tab`
 5. `/ou/`、`overunder.php`、`daxiao.php` 仅作为 fallback
+6. 最终进入预测流程时，优先使用 `prediction_system.py predict-match`
 
 ### 环境变量
 
@@ -179,7 +203,11 @@ PY2
 
 ### 3. 哪个脚本是当前正式流程？
 
-以这两个为准：
+以这些入口为准：
 
+- `prediction_system.py collect-data`
+- `prediction_system.py predict-match`
+- `prediction_system.py predict-schedule`
+- `prediction_system.py harness-run`
 - `okooo_save_snapshot.py`
 - `enhanced_prediction_workflow.py`

@@ -1,5 +1,9 @@
 # 实时赔率监控系统（优化版）
 
+> 当前说明：本文是扩展性方案稿，不是当前仓库的正式生产链路。  
+> 当前正式赔率链路以 `prediction_system.py collect-data / predict-match / predict-schedule`、`okooo_fetch_daily_schedule.py`、`okooo_save_snapshot.py`、`EnhancedPredictor.predict_match()` 为准。  
+> 真实大小球口径以澳客移动端 `handicap.php` 页内 `大小球` tab 和最终 `over_under.line_source` / `over_under.market.final` 为准。
+
 ## 系统概述
 
 本系统实现了对足球比赛赔率的实时监控，具有以下特点：
@@ -9,6 +13,12 @@
 - ✅ 智能告警规则
 - ✅ 实时通知
 - ✅ 历史数据存储
+
+## 与当前正式流程的关系
+
+- 正式生产流程优先使用澳客赛程与实时快照，而不是本文中的多博彩商融合示例
+- 若需要进入现行预测链路，先走 `collect-data` / `predict-match`，不要把本文示例直接视作主流程实现
+- 若后续将本文方案落地，输出仍应回到 `teams_2025-26.md` 与 `.okooo-scraper/runtime/`
 
 ---
 

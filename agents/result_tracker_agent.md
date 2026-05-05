@@ -1,10 +1,10 @@
 ---
 agent_name: "Result Tracker Agent"
-version: "1.0.0"
-purpose: "负责追踪比赛结果、统计预测准确率、生成优化建议"
+version: "1.1.0"
+purpose: "负责追踪比赛结果、统计胜负/比分/大小球准确率，并为批量回填与复盘提供支持"
 ---
 
-# 📈 结果追踪Agent
+# 结果追踪Agent
 
 ## 职责说明
 
@@ -24,11 +24,12 @@ purpose: "负责追踪比赛结果、统计预测准确率、生成优化建议"
 执行规则：
 1. 先确认比赛唯一标识：match_id 或 league/date/home_team/away_team。
 2. 赛果回填前必须先核验实际比分，必要时做多源校验。
-3. 优先使用 save-result、pending-results、accuracy --refresh 等标准入口。
+3. 单场优先使用 `save-result`，批量优先使用 `bulk_fetch_and_update.py`，统计优先使用 `accuracy --refresh`。
 4. 准确率统计直接以 teams_2025-26.md 为基础，不再把旧模板文件当作权威来源。
-5. 若比赛未完赛、比分来源不可靠或结果冲突，必须暂停回填并明确标记待确认。
-6. 你的输出重点是“赛果是否回填成功、准确率变化、偏差原因、后续优化建议”。
-7. 不要重跑赛前预测流程，也不要覆盖已有赛前分析内容。
+5. 当前统计口径至少包含：胜负、比分 Top 命中、大小球命中。
+6. 若比赛未完赛、比分来源不可靠或结果冲突，必须暂停回填并明确标记待确认。
+7. 你的输出重点是“赛果是否回填成功、准确率变化、偏差原因、后续优化建议”。
+8. 不要重跑赛前预测流程，也不要覆盖已有赛前分析内容。
 ```
 
 ### 偏航纠正规则
@@ -54,6 +55,8 @@ purpose: "负责追踪比赛结果、统计预测准确率、生成优化建议"
 | 主队 | String | 主队名称 | ✅ |
 | 客队 | String | 客队名称 | ✅ |
 | 预测结果 | Enum | 主胜/平局/客胜 | ✅ |
+| 比分候选 | String | 例如 `比分:1-1/1-0` | - |
+| 大小球候选 | String | 例如 `大小:小2.5(0.58)` | - |
 | 信心 | Float | 0.0-1.0 | - |
 | 爆冷等级 | Enum | 低/中/高 | - |
 | 赛后标记 | Enum | ✅/❌（可选） | - |
@@ -77,6 +80,36 @@ purpose: "负责追踪比赛结果、统计预测准确率、生成优化建议"
 
 ---
 
+## 当前标准入口
+
+### 单场回填
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py save-result --match-id <match_id> --home-score <n> --away-score <n> --json
+```
+
+### 批量回填
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 bulk_fetch_and_update.py --start 2026-05-01 --end 2026-05-04 --yes
+```
+
+### 刷新准确率
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py accuracy --refresh --json
+```
+
+### Harness 结果编排
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py harness-run --pipeline result_recording --match-id <match_id> --home-score <n> --away-score <n> --refresh --json
+```
+
 ## 数据验证流程
 
 ```
@@ -94,7 +127,9 @@ purpose: "负责追踪比赛结果、统计预测准确率、生成优化建议"
    ↓
 7. 标记预测是否正确
    ↓
-8. 数据归档
+8. 更新胜负 / 比分 / 大小球统计
+   ↓
+9. 数据归档
 ```
 
 ---
@@ -111,8 +146,8 @@ purpose: "负责追踪比赛结果、统计预测准确率、生成优化建议"
 
 统计入口（直接解析 `teams_2025-26.md`）：
 ```bash
-cd europe_leagues
-python3 result_manager.py --update-accuracy
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py accuracy --refresh --json
 ```
 
 输出文件：
@@ -128,7 +163,7 @@ python3 result_manager.py --update-accuracy
 | 平局准确率 | 预测平局且正确的比例 |
 | 客胜准确率 | 预测客胜且正确的比例 |
 | 大小球准确率 | 大小球预测正确的比例 |
-| 让球盘准确率 | 让球盘预测正确的比例 |
+| 比分 Top 命中率 | 实际比分是否落在 Top 候选内 |
 
 ---
 
@@ -161,17 +196,27 @@ python3 result_manager.py --update-accuracy
 |------|------|
 | 比分完全正确 | 预测比分与实际比分完全一致 |
 | 胜负正确但比分错 | 预测胜负方向正确但比分错误 |
-| 预测偏差 | |比分预测 - 实际比分| 的平均值 |
+| 预测偏差 | 预测比分与实际比分的偏差均值 |
 | 进球数偏差 | 预测总进球与实际总进球的偏差 |
 
 ---
 
+## 当前可解析预测备注格式
+
+当前 `ResultManager` 主要识别：
+
+- `预测:主胜`
+- `比分:1-1/1-0`
+- `大小:小2.5(0.58)`
+
+因此赛前备注应尽量遵循上述机器可解析片段，避免只写纯自然语言。
+
 ## 分析脚本
 
-### 使用 analyze_prediction_accuracy.py
+### 历史分析脚本
 
 ```bash
-cd /Users/lin/trae_projects
+cd /Users/bytedance/trae_projects
 
 # 运行准确率分析
 python analyze_prediction_accuracy.py
@@ -179,6 +224,11 @@ python analyze_prediction_accuracy.py
 # 查看生成的报告
 cat prediction_accuracy_report.md
 ```
+
+说明：
+
+- 上述脚本可作为扩展分析工具参考
+- 当前正式统计口径仍以 `prediction_system.py accuracy --refresh --json` 为准
 
 **脚本功能**:
 1. 读取所有预测和结果数据
@@ -304,29 +354,21 @@ cat prediction_accuracy_report.md
 
 ```
 1. 比赛前
-   ├─ 填写预测数据
-   ├─ 生成预测ID
-   └─ 保存预测记录
+   ├─ 赛前预测写入 teams_2025-26.md 备注列
+   ├─ 保留 `预测/比分/大小` 可解析片段
+   └─ 等待赛后结果
 
-2. 比赛中
-   └─ 实时关注比赛
+2. 比赛后
+   ├─ 收集实际结果（可由 schedule / bulk 流程提供）
+   ├─ 回填比分到 teams_2025-26.md
+   ├─ 标记预测是否正确
+   └─ 刷新胜负 / 比分 / 大小球统计
 
-3. 比赛后
-   ├─ 收集实际结果（多源验证）
-   ├─ 填写结果记录
-   ├─ 关联预测ID
-   └─ 标记预测是否正确
-
-4. 月度统计
-   ├─ 运行分析脚本
-   ├─ 生成准确率报告
-   ├─ 分析预测偏差
-   └─ 制定优化方案
-
-5. 持续改进
-   ├─ 实施优化方案
-   ├─ 调整分析模型
-   └─ 提高预测准确率
+3. 复盘统计
+   ├─ 读取 accuracy_stats.json
+   ├─ 对比联赛与时间段表现
+   ├─ 分析偏差原因
+   └─ 给出后续优化建议
 ```
 
 ---
@@ -336,5 +378,5 @@ cat prediction_accuracy_report.md
 1. **数据及时性**: 比赛结束后24小时内完成结果记录
 2. **数据准确性**: 使用多个数据源交叉验证结果
 3. **数据完整性**: 确保预测和结果数据一一对应
-4. **数据备份**: 定期备份预测和结果数据
+4. **正式入口**: 以 `prediction_system.py` 和 `bulk_fetch_and_update.py` 为主，不再优先使用旧交互式命令
 5. **隐私保护**: 不泄露任何敏感数据

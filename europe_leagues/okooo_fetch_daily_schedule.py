@@ -40,19 +40,57 @@ def _date_tokens(date_yyyy_mm_dd: str) -> List[str]:
 
 
 def _parse_row_text(text: str) -> Dict[str, Any]:
-    """Best-effort parse from a schedule row like: '第33轮 毕尔巴鄂 01:00 奥萨苏纳'."""
+    """Best-effort parse from a schedule row like: '第33轮 毕尔巴鄂 01:00 奥萨苏纳' or '完 毕尔巴鄂 2-1 奥萨苏纳'."""
     s = (text or "").strip()
     s = re.sub(r"\s+", " ", s)
-    m = re.search(r"^(?:第\d+轮\s+)?(.+?)\s+(\d{1,2}:\d{2})\s+(.+?)$", s)
-    if not m:
-        return {"raw_text": s}
-    home = m.group(1).strip()
-    kickoff = m.group(2).strip()
-    away = m.group(3).strip()
-    # Some rows embed another date token before time (e.g. '莱万特 04-24 01:00 塞维利亚').
-    home = re.sub(r"\b\d{1,2}-\d{1,2}\b", "", home).strip()
-    away = re.sub(r"\b\d{1,2}-\d{1,2}\b", "", away).strip()
-    return {"raw_text": s, "home_team": home, "away_team": away, "kickoff_time": kickoff}
+    result = {"raw_text": s}
+    
+    # Check if status is "完"
+    has_finish_marker = "完" in s
+    # Try to find score first: digits-digits or digits:digits with possible space
+    score_match = re.search(r"(\d{1,2})\s*[-:]\s*(\d{1,2})", s)
+    if score_match:
+        home_score = int(score_match.group(1))
+        away_score = int(score_match.group(2))
+        result["home_score"] = home_score
+        result["away_score"] = away_score
+        result["score"] = f"{home_score}-{away_score}"
+        result["status"] = "已结束"
+        # Remove score and finish marker for cleaner team/kickoff extraction
+        s_clean = re.sub(r"\b\d{1,2}\s*[-:]\s*\d{1,2}\b", "", s)
+        s_clean = re.sub(r"\b完\b", "", s_clean)
+    else:
+        result["status"] = "已结束" if has_finish_marker else "待进行"
+        s_clean = re.sub(r"\b完\b", "", s) if has_finish_marker else s
+    
+    # Try to find kickoff time
+    kickoff_match = re.search(r"(\d{1,2}:\d{2})", s_clean)
+    if kickoff_match:
+        result["kickoff_time"] = kickoff_match.group(1)
+        s_clean = re.sub(r"\b\d{1,2}:\d{2}\b", "", s_clean)
+    
+    # Remove round marker, 完/进行中 markers, extra spaces, date tokens
+    s_clean = re.sub(r"^第\d+轮", "", s_clean)
+    s_clean = re.sub(r"\b(?:完|进行中|未开始)\b", "", s_clean, flags=re.IGNORECASE)
+    s_clean = re.sub(r"\b\d{1,2}-\d{1,2}\b", "", s_clean)
+    s_clean = re.sub(r"\s+", " ", s_clean).strip()
+    
+    # Split into home and away
+    # If we have two teams, split on space and take first and last non-empty
+    parts = [p for p in s_clean.split() if p.strip()]
+    if len(parts) >= 2:
+        result["home_team"] = parts[0]
+        result["away_team"] = parts[-1]
+        # If more than 2 parts, combine middle parts with either first or last as needed
+        if len(parts) > 2:
+            # Heuristic: if we have a Chinese team name vs another, try to find the split
+            # For simplicity, take first and last as the team names for now
+            pass
+    elif len(parts) == 1:
+        # Only one team found, maybe the other is missing or messed up
+        result["home_team"] = parts[0]
+    
+    return result
 
 
 def main() -> None:
@@ -221,10 +259,8 @@ def main() -> None:
             continue
         item = {"match_id": r.get("mid"), "history_url": r.get("href")}
         item.update(_parse_row_text(r.get("text", "")))
-        # Keep only rows that look like upcoming fixtures (have kickoff time, not '完').
-        if "kickoff_time" not in item:
-            continue
-        if " 完 " in (item.get("raw_text", "") or "") or (item.get("raw_text", "") or "").endswith("完"):
+        # Keep all rows, both completed and upcoming (prioritize completed ones for our use case)
+        if not item.get("home_team") or not item.get("away_team"):
             continue
         # Filter out obvious other-date rows that embed a date token not matching args.date
         toks = set(_date_tokens(args.date))

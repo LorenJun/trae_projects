@@ -1,14 +1,24 @@
 ---
 document_title: "数据格式规范"
-version: "1.1.0"
-last_updated: "2026-04-27"
+version: "1.2.0"
+last_updated: "2026-05-04"
 ---
 
 # 数据格式规范
 
+> 当前正式流程  
+> 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
+> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测  
+> 3. 结果写回 `europe_leagues/<league>/teams_2025-26.md`  
+> 4. 赛后用 `prediction_system.py save-result` 或 `bulk_fetch_and_update.py` 回填  
+> 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
+> 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
+> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`
+
 本规范定义当前项目正式使用的数据格式，确保以下几类数据在项目内保持一致：
 
 - 联赛主文件 `teams_2025-26.md`
+- `collect-data` / Harness 输入输出结构
 - 澳客实时快照 JSON
 - 预测输出结构
 - 赛果回填与准确率统计相关结构
@@ -74,14 +84,14 @@ docs/
 | 主队 | String | `曼联` | 主队名称 |
 | 比分 | String | `-` / `1-0` | 未赛为 `-`，已赛为 `x-y` |
 | 客队 | String | `布伦特福德` | 客队名称 |
-| 备注 | String | `主胜；比分:1-0/1-1；大小:小3.0(...)` | 预测摘要与赛后标记 |
+| 备注 | String | `预测:主胜；比分:1-0/1-1；大小:小3.0(...)` | 预测摘要与赛后标记 |
 
 示例：
 
 ```markdown
 | 日期 | 时间 | 主队 | 比分 | 客队 | 备注 |
 |------|------|------|------|------|------|
-| 2026-04-28 | 03:00 | 曼联 | - | 布伦特福德 | 主胜；比分:1-0/1-1；大小:小3.0(大12.5%/小87.5%) |
+| 2026-04-28 | 03:00 | 曼联 | - | 布伦特福德 | 预测:主胜；比分:1-0/1-1；大小:小3.0(大12.5%/小87.5%) |
 ```
 
 ## 澳客赛程 JSON 格式
@@ -100,9 +110,14 @@ docs/
     {
       "match_id": "1296070",
       "time": "03:00",
+      "kickoff_time": "03:00",
       "home_team": "曼联",
       "away_team": "布伦特",
-      "status": "未开赛"
+      "status": "待进行",
+      "history_url": "https://m.okooo.com/match/history.php?MatchID=1296070",
+      "score": null,
+      "home_score": null,
+      "away_score": null
     }
   ]
 }
@@ -112,6 +127,41 @@ docs/
 
 - `away_team` 可能是简称，如 `布伦特`
 - 昵称、简称差异需通过 `europe_leagues/okooo_team_aliases.json` 处理
+- 已结束比赛允许带 `score`、`home_score`、`away_score`
+- 批量回填流程会直接消费赛程中的 `status=已结束` 与比分字段
+
+## `collect-data` 输出结构
+
+### 推荐用途
+
+- 作为 `predict-match`、`harness-run --pipeline match_prediction` 的上游输入
+- 作为批量赛程分析与数据检查的标准化返回
+
+### 推荐结构
+
+```json
+{
+  "league": "premier_league",
+  "date": "2026-04-28",
+  "count": 1,
+  "matches": [
+    {
+      "match_id": "1296070",
+      "home_team": "曼联",
+      "away_team": "布伦特福德",
+      "match_time": "03:00",
+      "status": "待进行",
+      "sources": ["okooo_schedule", "local_snapshot"]
+    }
+  ]
+}
+```
+
+说明：
+
+- `collect-data` 会优先复用赛程中的 `match_id`
+- 若本地已存在快照，允许通过 `sources` 反映已挂接到 `odds_data`
+- 该结构是预测主流程的标准上游形态之一
 
 ## 澳客实时快照 JSON 格式
 
@@ -123,12 +173,19 @@ docs/
 
 ```json
 {
+  "captured_at": "2026-04-28T02:05:10",
+  "driver": "local-chrome",
   "match_id": "1296070",
   "league": "premier_league",
-  "date": "2026-04-28",
-  "time": "03:00",
+  "match_date": "2026-04-28",
+  "match_time": "03:00",
+  "event": "曼联vs布伦特福德",
   "home_team": "曼联",
   "away_team": "布伦特福德",
+  "schedule": {
+    "text": "曼联 03:00 布伦特福德",
+    "href": "https://m.okooo.com/match/history.php?MatchID=1296070"
+  },
   "欧赔": {
     "initial": {"home": 2.06, "draw": 3.45, "away": 3.10},
     "final": {"home": 1.92, "draw": 3.78, "away": 3.74}
@@ -166,6 +223,7 @@ docs/
 | `delta.line` | Float | `0.0` | 盘口线变化 |
 | `delta.under` | Float | `0.0` | 小球水位变化 |
 | `_flow` | String | `asian_inner_tab` | 抓取路径来源 |
+| `_fallback_from` | String | `history_tab` | 若为 fallback，记录前序链路来源 |
 
 ### `_flow` 推荐取值
 
@@ -207,6 +265,12 @@ docs/
 }
 ```
 
+说明：
+
+- `current_odds` 一般由实时快照提取而来
+- 若预测前刷新失败，也可能来自本地已有 snapshot 或采集阶段挂接的数据
+- `EnhancedPredictor` 会在缺少真实大小球时尝试自动补抓
+
 ## 预测输出格式
 
 ### 核心输出字段
@@ -233,6 +297,22 @@ docs/
     "market": {
       "initial": {"over": 1.86, "line": 3.0, "under": 1.94},
       "final": {"over": 1.86, "line": 3.0, "under": 1.94}
+    }
+  },
+  "realtime": {
+    "okooo": {
+      "attempted": true,
+      "refreshed": true,
+      "snapshot_path": "/Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots/premier_league/曼联vs布伦特福德.json",
+      "match_id": "1296070",
+      "driver": "local-chrome",
+      "headed": false,
+      "errors": []
+    },
+    "context_applied": {
+      "ewma_form": {"home": {"available": true}, "away": {"available": true}},
+      "okooo_totals_fetch": {"attempted": true, "ok": true},
+      "team_context": {"attempted": true, "ok": true}
     }
   }
 }
@@ -268,6 +348,7 @@ docs/
 - 当 `line_source=snapshot_final` 时，说明真实大小球已成功注入预测
 - 当 `market.final` 非空时，最终结论中应同步展示大/小水位
 - 不允许把真实 `3.0`、`2.75` 的比赛继续按固定 `2.5` 解释
+- 若 `realtime.okooo.refreshed=false`，应视为旧快照或降级数据，需要在结论中明确标注
 
 ## 可选：球队状态增强（team_context）
 
@@ -337,16 +418,54 @@ docs/
 
 常见格式：
 
-- `主胜`
+- `预测:主胜`
 - `比分:1-0/1-1`
 - `大小:小3.0(大12.5%/小87.5%)`
 - `✅` / `❌`
+
+建议保持可机读前缀：
+
+- `预测:主胜`
+- `比分:1-0/1-1`
+- `大小:小2.5(0.58)`
 
 ### 准确率统计关注项
 
 - 胜平负命中率
 - 比分 Top 命中率
 - 大小球命中率
+
+### 准确率文件结构
+
+运行时统计文件：
+
+- `europe_leagues/.okooo-scraper/runtime/accuracy_stats.json`
+
+推荐结构：
+
+```json
+{
+  "overall": {
+    "total_predictions": 20,
+    "correct_predictions": 12,
+    "win_accuracy": 60.0,
+    "total_score_predictions": 18,
+    "correct_score_predictions": 5,
+    "score_accuracy": 27.78,
+    "total_ou_predictions": 17,
+    "correct_ou_predictions": 10,
+    "ou_accuracy": 58.82
+  },
+  "by_league": {
+    "premier_league": {
+      "total_predictions": 4,
+      "correct_predictions": 3,
+      "win_accuracy": 75.0
+    }
+  },
+  "last_updated": "2026-05-04T12:00:00"
+}
+```
 
 ## 文件命名规范
 
@@ -405,3 +524,4 @@ docs/
 
 - 正式写回只发生在 `teams_2025-26.md`
 - 不把主流程结果写入旧 `predictions/`、`reports/` 目录
+- 批量回填与准确率刷新只更新 `teams_2025-26.md` 与 `.okooo-scraper/runtime/`

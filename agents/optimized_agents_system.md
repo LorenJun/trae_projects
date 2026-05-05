@@ -1,8 +1,21 @@
 # 足球预测多Agent系统优化方案
 
+> 当前说明：本文是多 Agent 优化方案稿。当前仓库的正式执行链路已收敛为 `prediction_system.py`、`EnhancedPredictor`、`okooo_*`、`bulk_fetch_and_update.py` 和 `harness/football.py`。  
+> 阅读本文时，请以 `teams_2025-26.md` 为单一事实来源，并以 `collect-data -> predict-match/predict-schedule -> save-result/accuracy` 为正式流程口径。
+
 ## 系统概览
 
 本系统包含4个核心Agent，每个Agent负责特定的足球预测分析任务，通过协作完成完整的比赛预测分析流程。
+
+## 当前正式入口映射
+
+- 数据采集：`prediction_system.py collect-data --json`
+- 单场预测：`prediction_system.py predict-match --json`
+- 批量预测：`prediction_system.py predict-schedule --json`
+- Harness 编排：`prediction_system.py harness-run --pipeline match_prediction --json`
+- 单场回填：`prediction_system.py save-result --json`
+- 批量回填：`bulk_fetch_and_update.py`
+- 准确率统计：`prediction_system.py accuracy --refresh --json`
 
 ---
 

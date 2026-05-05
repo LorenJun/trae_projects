@@ -17,13 +17,12 @@ from __future__ import annotations
 import atexit
 import argparse
 import json
-import os
 import re
 import subprocess
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -31,7 +30,9 @@ import requests
 from websocket import create_connection
 
 REMEN_URL = "https://m.okooo.com/saishi/remen/"
-RETRY_DELAYS = [2.0, 4.0, 6.0]
+# Retry faster by default. For transient rendering issues we still retry, but
+# we avoid long fixed backoffs when the failure is clearly non-recoverable.
+RETRY_DELAYS = [0.6, 1.4, 3.0]
 CLICK_SETTLE_SECONDS = 2.5
 
 
@@ -116,6 +117,47 @@ def _time_tokens(hh_mm: str) -> list[str]:
     hh = int(m.group(1))
     mm = m.group(2)
     return [f"{hh:02d}:{mm}", f"{hh}:{mm}"]
+
+
+def _candidate_date_hints(date_yyyy_mm_dd: str, hh_mm: str = "") -> list[str]:
+    """Return candidate dates for schedule matching.
+
+    Some overnight matches are stored in local league files as the next calendar
+    day (e.g. `2026-05-04 02:45`) while the user may ask with the competition
+    day (`2026-05-03`). To avoid missing such rows, keep the original date
+    first, then add adjacent-day fallbacks for early-morning kickoffs.
+    """
+    raw = (date_yyyy_mm_dd or "").strip()
+    if not raw:
+        return []
+    out = [raw]
+    try:
+        base = datetime.strptime(raw, "%Y-%m-%d")
+    except Exception:
+        return out
+
+    hour = None
+    if hh_mm:
+        m = re.match(r"^(\d{1,2}):(\d{2})$", hh_mm.strip())
+        if m:
+            hour = int(m.group(1))
+
+    # Overnight games are commonly described by the previous "match day" or by
+    # the actual after-midnight calendar day across different data sources.
+    if hour is not None and hour <= 5:
+        out.append((base + timedelta(days=1)).strftime("%Y-%m-%d"))
+        out.append((base - timedelta(days=1)).strftime("%Y-%m-%d"))
+    else:
+        out.append((base - timedelta(days=1)).strftime("%Y-%m-%d"))
+        out.append((base + timedelta(days=1)).strftime("%Y-%m-%d"))
+
+    seen = set()
+    uniq = []
+    for item in out:
+        if item and item not in seen:
+            seen.add(item)
+            uniq.append(item)
+    return uniq
 
 
 def _alias_table_path() -> str:
@@ -612,6 +654,49 @@ def _is_success_payload(data: Dict[str, Any]) -> bool:
     return True
 
 
+def _classify_retry_error_message(msg: str) -> str:
+    """Classify retry errors so we can fail fast on clearly non-recoverable cases."""
+    s = (msg or "").lower()
+    if not s:
+        return "unknown"
+    if "failed to establish a new connection" in s or "connection refused" in s:
+        return "cdp_connection_refused"
+    if "port" in s and "did not respond" in s:
+        return "chrome_port_unavailable"
+    if "本地 chrome 远程调试端口启动失败" in msg:
+        return "chrome_start_failed"
+    if "no such file or directory" in s and "google chrome" in s:
+        return "chrome_binary_missing"
+    if "command not found" in s or "browser-use" in s and "not found" in s:
+        return "browser_use_missing"
+    if "timed out" in s or "timeout" in s:
+        return "timeout"
+    if "blocked" in s or "访问被阻断" in msg or "405" in s:
+        return "blocked"
+    return "other"
+
+
+def _should_stop_retrying_from_payload(data: Dict[str, Any]) -> tuple[bool, str]:
+    """Return (stop_now, reason) for a non-success payload."""
+    if not isinstance(data, dict):
+        return False, ""
+    if data.get("blocked"):
+        # Repeating the exact same extractor/session is usually wasteful; move to fallback path.
+        return True, "blocked"
+    err = data.get("error")
+    if isinstance(err, str):
+        kind = _classify_retry_error_message(err)
+        if kind in {
+            "cdp_connection_refused",
+            "chrome_port_unavailable",
+            "chrome_start_failed",
+            "chrome_binary_missing",
+            "browser_use_missing",
+        }:
+            return True, kind
+    return False, ""
+
+
 def _annotate_attempts(data: Dict[str, Any], attempts: list[Dict[str, Any]]) -> Dict[str, Any]:
     out = dict(data)
     out["_attempts"] = attempts
@@ -667,13 +752,217 @@ def _parse_europe_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
 (() => {
   const blocked = (document.body?.innerText||'').includes('访问被阻断') || (document.title||'').includes('405');
   if (blocked) return JSON.stringify({blocked:true});
+  const body = document.body?.innerText || '';
+  const lines = body.split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const compact = body.replace(/\s+/g, ' ').trim();
+  const numRe = /\d+(?:\.\d+)?/g;
+
+  const aliasPairs = [
+    ['Bet365', 'Bet365'],
+    ['bet365', 'Bet365'],
+    ['皇冠', '皇冠'],
+    ['Pinnacle', 'Pinnacle'],
+    ['平博', '平博'],
+    ['SBOBET', 'SBOBET'],
+    ['SBO', 'SBOBET'],
+    ['12BET', '12BET'],
+    ['易胜博', '易胜博'],
+    ['威廉.希尔', '威廉希尔'],
+    ['威廉希尔', '威廉希尔'],
+    ['立博', '立博'],
+    ['Bwin', 'Bwin'],
+    ['Interwetten', 'Interwetten'],
+    ['伟德', '伟德'],
+    ['韦德', '伟德'],
+    ['香港马会', '香港马会'],
+    ['澳门彩票', '澳门彩票'],
+    ['澳门', '澳门彩票'],
+    ['明陞', '明陞'],
+    ['利记', '利记']
+  ];
+  const companyAliases = aliasPairs.map(x => x[0]);
+  const priority = {
+    'Bet365': 9,
+    '皇冠': 8,
+    'Pinnacle': 8,
+    '澳门彩票': 7,
+    '易胜博': 6,
+    '威廉希尔': 6,
+    '立博': 5,
+    'Interwetten': 4,
+    'Bwin': 4,
+    '平博': 4,
+    'SBOBET': 4,
+    '12BET': 4,
+    '伟德': 3,
+    '香港马会': 3,
+    '明陞': 3,
+    '利记': 3,
+  };
+  const round4 = (v) => +Number(v).toFixed(4);
+  const normalizeCompany = (name) => {
+    const row = aliasPairs.find(x => x[0] === name);
+    return row ? row[1] : name;
+  };
+  const median = (arr) => {
+    const vals = (arr || []).filter(v => Number.isFinite(v)).slice().sort((a, b) => a - b);
+    if (!vals.length) return null;
+    const mid = Math.floor(vals.length / 2);
+    return vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2;
+  };
+  const weightedAvg = (items, getter) => {
+    let sum = 0;
+    let wsum = 0;
+    for (const item of items || []) {
+      const val = getter(item);
+      const w = item._priority || 1;
+      if (!Number.isFinite(val) || !Number.isFinite(w) || w <= 0) continue;
+      sum += val * w;
+      wsum += w;
+    }
+    return wsum > 0 ? sum / wsum : null;
+  };
+  const isNear = (v, med, pct) => {
+    if (!Number.isFinite(v) || !Number.isFinite(med) || med <= 0) return false;
+    return Math.abs(v - med) / med <= pct;
+  };
+
+  const parseLine = (line, companyAlias, sourceTag) => {
+    const idx = line.indexOf(companyAlias);
+    if (idx < 0) return null;
+    const company = normalizeCompany(companyAlias);
+    const tail = line.slice(idx + companyAlias.length).trim();
+    const nums = (tail.match(numRe) || []).map(x => parseFloat(x));
+    if (nums.length < 6) return null;
+    const initial = { home: nums[0], draw: nums[1], away: nums[2] };
+    const final = { home: nums[3], draw: nums[4], away: nums[5] };
+    const vals = [initial.home, initial.draw, initial.away, final.home, final.draw, final.away];
+    if (vals.some(v => !Number.isFinite(v) || v <= 1.01 || v >= 80)) return null;
+    return {
+      company,
+      initial,
+      final,
+      delta: {
+        home: round4(final.home - initial.home),
+        draw: round4(final.draw - initial.draw),
+        away: round4(final.away - initial.away),
+      },
+      _source: sourceTag,
+      _matched_line: line,
+      _priority: priority[company] || 1,
+    };
+  };
+
+  const dedup = new Map();
+  const pushCandidate = (item) => {
+    if (!item) return;
+    const key = [
+      item.company,
+      round4(item.initial.home),
+      round4(item.initial.draw),
+      round4(item.initial.away),
+      round4(item.final.home),
+      round4(item.final.draw),
+      round4(item.final.away)
+    ].join('|');
+    if (!dedup.has(key)) dedup.set(key, item);
+  };
+
+  const tableRows = [...document.querySelectorAll('tr')].map(tr => (tr.innerText || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  for (const company of companyAliases) {
+    for (const line of tableRows) pushCandidate(parseLine(line, company, 'table_row'));
+  }
+  for (const company of companyAliases) {
+    for (const line of lines) pushCandidate(parseLine(line, company, 'body_text_line'));
+  }
+  for (const company of companyAliases) {
+    const idx = compact.indexOf(company);
+    if (idx < 0) continue;
+    const windowText = compact.slice(Math.max(0, idx - 8), idx + 160);
+    pushCandidate(parseLine(windowText, company, 'body_text_window'));
+  }
+
+  const companies = [...dedup.values()];
+  if (companies.length) {
+    const medHome = median(companies.map(x => x.final.home));
+    const medDraw = median(companies.map(x => x.final.draw));
+    const medAway = median(companies.map(x => x.final.away));
+    let filtered = companies.filter(x =>
+      isNear(x.final.home, medHome, 0.22) &&
+      isNear(x.final.draw, medDraw, 0.28) &&
+      isNear(x.final.away, medAway, 0.28)
+    );
+    if (!filtered.length) filtered = companies;
+
+    const initial = {
+      home: round4(weightedAvg(filtered, x => x.initial.home)),
+      draw: round4(weightedAvg(filtered, x => x.initial.draw)),
+      away: round4(weightedAvg(filtered, x => x.initial.away)),
+    };
+    const final = {
+      home: round4(weightedAvg(filtered, x => x.final.home)),
+      draw: round4(weightedAvg(filtered, x => x.final.draw)),
+      away: round4(weightedAvg(filtered, x => x.final.away)),
+    };
+    const allCompanies = companies
+      .slice()
+      .sort((a, b) => (b._priority || 1) - (a._priority || 1) || a.company.localeCompare(b.company))
+      .map(x => ({
+        company: x.company,
+        initial: x.initial,
+        final: x.final,
+        delta: x.delta,
+        _source: x._source,
+        _matched_line: x._matched_line,
+      }));
+    const filteredNames = filtered
+      .slice()
+      .sort((a, b) => (b._priority || 1) - (a._priority || 1) || a.company.localeCompare(b.company))
+      .map(x => x.company);
+
+    return JSON.stringify({
+      found:true,
+      parsed:true,
+      company: filteredNames[0] || allCompanies[0]?.company || '',
+      company_mode: filtered.length > 1 ? 'multi_company_consensus' : 'single_company',
+      initial,
+      final,
+      delta:{
+        home: round4(final.home - initial.home),
+        draw: round4(final.draw - initial.draw),
+        away: round4(final.away - initial.away),
+      },
+      consensus:{
+        mode: filtered.length > 1 ? 'multi_company_consensus' : 'single_company',
+        company_count: allCompanies.length,
+        filtered_company_count: filtered.length,
+        companies: filteredNames,
+        all_companies: allCompanies.map(x => x.company),
+        final_median: {home: round4(medHome), draw: round4(medDraw), away: round4(medAway)},
+      },
+      companies: allCompanies,
+      _source:'multi_company_consensus',
+      _matched_line: filtered[0]?._matched_line || ''
+    });
+  }
+
   const row=[...document.querySelectorAll('tr')].find(tr=>(tr.innerText||'').includes('99家平均'));
   if(!row) return JSON.stringify({found:false});
   const num=(sel)=>{const el=row.querySelector(sel); if(!el) return null; const v=parseFloat((el.textContent||'').trim()); return Number.isFinite(v)?v:null;};
   const initial={home:num('span[type=sheng]'),draw:num('span[type=ping]'),away:num('span[type=fu]')};
   const final={home:num('span[type=xinsheng]'),draw:num('span[type=xinping]'),away:num('span[type=xinfu]')};
   const delta=(a,b)=> (a==null||b==null) ? null : +(a-b).toFixed(4);
-  return JSON.stringify({found:true, initial, final, delta:{home:delta(final.home,initial.home), draw:delta(final.draw,initial.draw), away:delta(final.away,initial.away)}});
+  return JSON.stringify({
+    found:true,
+    parsed:true,
+    company:'99家平均',
+    company_mode:'average_row_fallback',
+    initial,
+    final,
+    delta:{home:delta(final.home,initial.home), draw:delta(final.draw,initial.draw), away:delta(final.away,initial.away)},
+    consensus:{mode:'average_row_fallback', company_count:0, filtered_company_count:0, companies:[], all_companies:[]},
+    companies:[]
+  });
 })()
 """
     return bu.eval_json(js)
@@ -684,70 +973,304 @@ def _parse_asian_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
 (() => {
   const blocked = (document.body?.innerText||'').includes('访问被阻断') || (document.title||'').includes('405');
   if (blocked) return JSON.stringify({blocked:true});
+  const body = document.body?.innerText || '';
+  const lines = body.split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const compact = body.replace(/\s+/g, ' ').trim();
+
+  const aliasPairs = [
+    ['澳门彩票', '澳门彩票'],
+    ['澳门', '澳门彩票'],
+    ['Bet365', 'Bet365'],
+    ['bet365', 'Bet365'],
+    ['皇冠', '皇冠'],
+    ['Pinnacle', 'Pinnacle'],
+    ['平博', '平博'],
+    ['SBOBET', 'SBOBET'],
+    ['SBO', 'SBOBET'],
+    ['12BET', '12BET'],
+    ['易胜博', '易胜博'],
+    ['威廉.希尔', '威廉希尔'],
+    ['威廉希尔', '威廉希尔'],
+    ['立博', '立博'],
+    ['Bwin', 'Bwin'],
+    ['Interwetten', 'Interwetten'],
+    ['伟德', '伟德'],
+    ['韦德', '伟德'],
+    ['香港马会', '香港马会'],
+    ['明陞', '明陞'],
+    ['利记', '利记']
+  ];
+  const companyAliases = aliasPairs.map(x => x[0]);
+  const priority = {
+    'Bet365': 9,
+    '皇冠': 8,
+    'Pinnacle': 8,
+    '澳门彩票': 7,
+    '易胜博': 6,
+    '威廉希尔': 6,
+    '立博': 5,
+    'Bwin': 4,
+    'Interwetten': 4,
+    '平博': 4,
+    'SBOBET': 4,
+    '12BET': 4,
+    '伟德': 3,
+    '香港马会': 3,
+    '明陞': 3,
+    '利记': 3,
+  };
+  const round4 = (v) => +Number(v).toFixed(4);
+  const avg = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+  const normalizeCompany = (name) => {
+    const row = aliasPairs.find(x => x[0] === name);
+    return row ? row[1] : name;
+  };
+  const normalizeLineValue = (v) => Math.round(Number(v) * 4) / 4;
+  const lineKey = (v) => normalizeLineValue(v).toFixed(2);
+
+  const handicapMap = {
+    '平手': 0.0,
+    '平手/半球': -0.25,
+    '平/半': -0.25,
+    '半球': -0.5,
+    '半球/一球': -0.75,
+    '半/一': -0.75,
+    '一球': -1.0,
+    '一球/球半': -1.25,
+    '一/球半': -1.25,
+    '球半': -1.5,
+    '球半/两球': -1.75,
+    '两球': -2.0,
+    '两球/两球半': -2.25,
+    '两球半': -2.5,
+    '受让平手': 0.0,
+    '受让平手/半球': 0.25,
+    '受让平/半': 0.25,
+    '受让半球': 0.5,
+    '受让半球/一球': 0.75,
+    '受让半/一': 0.75,
+    '受让一球': 1.0,
+    '受让一球/球半': 1.25,
+    '受让一/球半': 1.25,
+    '受让球半': 1.5,
+    '受让球半/两球': 1.75,
+    '受让两球': 2.0,
+    '受让两球/两球半': 2.25,
+    '受让两球半': 2.5,
+  };
+  const parseHandicap = (text) => {
+    const s = String(text || '').replace(/\s+/g, '');
+    if (!s) return null;
+    if (Object.prototype.hasOwnProperty.call(handicapMap, s)) return handicapMap[s];
+    if (/^-?\d+(?:\.\d+)?$/.test(s)) return parseFloat(s);
+    return null;
+  };
+
+  const parseLine = (line, companyAlias, sourceTag) => {
+    const idx = line.indexOf(companyAlias);
+    if (idx < 0) return null;
+    const company = normalizeCompany(companyAlias);
+    const tail = line.slice(idx + companyAlias.length).trim();
+    const m = tail.match(/(\d+\.\d+)\s*([\u4e00-\u9fff\/半球两一平受让]+)\s*(\d+\.\d+)\s*(\d+\.\d+)\s*([\u4e00-\u9fff\/半球两一平受让]+)\s*(\d+\.\d+)/);
+    if (!m) return null;
+    const initialText = m[2].trim();
+    const finalText = m[5].trim();
+    const initialValue = parseHandicap(initialText);
+    const finalValue = parseHandicap(finalText);
+    const initial = {
+      home_water: parseFloat(m[1]),
+      handicap_text: initialText,
+      handicap_value: initialValue,
+      handicap: initialValue,
+      away_water: parseFloat(m[3]),
+    };
+    const final = {
+      home_water: parseFloat(m[4]),
+      handicap_text: finalText,
+      handicap_value: finalValue,
+      handicap: finalValue,
+      away_water: parseFloat(m[6]),
+    };
+    if (![initial.home_water, initial.away_water, final.home_water, final.away_water].every(v => Number.isFinite(v))) return null;
+    if (initialValue == null || finalValue == null) return null;
+    return {
+      company,
+      initial,
+      final,
+      delta: {
+        home_water: round4(final.home_water - initial.home_water),
+        handicap_value: round4(final.handicap_value - initial.handicap_value),
+        away_water: round4(final.away_water - initial.away_water),
+      },
+      _source: sourceTag,
+      _matched_line: line,
+      _priority: priority[company] || 1,
+    };
+  };
+
+  const dedup = new Map();
+  const pushCandidate = (item) => {
+    if (!item) return;
+    const key = [
+      item.company,
+      lineKey(item.initial.handicap_value),
+      lineKey(item.final.handicap_value),
+      round4(item.initial.home_water),
+      round4(item.initial.away_water),
+      round4(item.final.home_water),
+      round4(item.final.away_water),
+    ].join('|');
+    if (!dedup.has(key)) dedup.set(key, item);
+  };
+
+  const tableRows = [...document.querySelectorAll('tr')].map(tr => (tr.innerText || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  for (const company of companyAliases) {
+    for (const line of tableRows) pushCandidate(parseLine(line, company, 'table_row'));
+  }
+  for (const company of companyAliases) {
+    for (const line of lines) pushCandidate(parseLine(line, company, 'body_text_line'));
+  }
+  for (const company of companyAliases) {
+    const idx = compact.indexOf(company);
+    if (idx < 0) continue;
+    const windowText = compact.slice(Math.max(0, idx - 8), idx + 140);
+    pushCandidate(parseLine(windowText, company, 'body_text_window'));
+  }
+
+  const companies = [...dedup.values()];
+  if (companies.length) {
+    const finalGroups = {};
+    for (const item of companies) {
+      const key = lineKey(item.final.handicap_value);
+      if (!finalGroups[key]) finalGroups[key] = {items: [], count: 0, weight: 0};
+      finalGroups[key].items.push(item);
+      finalGroups[key].count += 1;
+      finalGroups[key].weight += item._priority || 1;
+    }
+    const orderedFinalGroups = Object.entries(finalGroups).sort((a, b) => {
+      if (b[1].count !== a[1].count) return b[1].count - a[1].count;
+      if (b[1].weight !== a[1].weight) return b[1].weight - a[1].weight;
+      return parseFloat(a[0]) - parseFloat(b[0]);
+    });
+    const finalKey = orderedFinalGroups[0][0];
+    const finalBucket = orderedFinalGroups[0][1];
+
+    const initialGroups = {};
+    for (const item of finalBucket.items) {
+      const key = lineKey(item.initial.handicap_value);
+      if (!initialGroups[key]) initialGroups[key] = {items: [], count: 0, weight: 0};
+      initialGroups[key].items.push(item);
+      initialGroups[key].count += 1;
+      initialGroups[key].weight += item._priority || 1;
+    }
+    const orderedInitialGroups = Object.entries(initialGroups).sort((a, b) => {
+      if (b[1].count !== a[1].count) return b[1].count - a[1].count;
+      if (b[1].weight !== a[1].weight) return b[1].weight - a[1].weight;
+      return parseFloat(a[0]) - parseFloat(b[0]);
+    });
+    const initialKey = orderedInitialGroups[0][0];
+    const initialBucket = orderedInitialGroups[0][1];
+
+    const finalLineCompanies = finalBucket.items;
+    const initialLineCompanies = initialBucket.items;
+    const finalLabel = finalLineCompanies[0]?.final?.handicap_text || '';
+    const initialLabel = initialLineCompanies[0]?.initial?.handicap_text || '';
+    const initial = {
+      home_water: round4(avg(initialLineCompanies.map(x => Number(x.initial.home_water)))),
+      handicap_text: initialLabel,
+      handicap_value: parseFloat(initialKey),
+      handicap: parseFloat(initialKey),
+      away_water: round4(avg(initialLineCompanies.map(x => Number(x.initial.away_water)))),
+    };
+    const final = {
+      home_water: round4(avg(finalLineCompanies.map(x => Number(x.final.home_water)))),
+      handicap_text: finalLabel,
+      handicap_value: parseFloat(finalKey),
+      handicap: parseFloat(finalKey),
+      away_water: round4(avg(finalLineCompanies.map(x => Number(x.final.away_water)))),
+    };
+    const allCompanies = companies
+      .slice()
+      .sort((a, b) => (b._priority || 1) - (a._priority || 1) || a.company.localeCompare(b.company))
+      .map(x => ({
+        company: x.company,
+        initial: x.initial,
+        final: x.final,
+        delta: x.delta,
+        _source: x._source,
+        _matched_line: x._matched_line,
+      }));
+    const consensusCompanies = finalLineCompanies
+      .slice()
+      .sort((a, b) => (b._priority || 1) - (a._priority || 1) || a.company.localeCompare(b.company))
+      .map(x => x.company);
+    return JSON.stringify({
+      found:true,
+      parsed:true,
+      company: consensusCompanies[0] || allCompanies[0]?.company || '',
+      company_mode: finalLineCompanies.length > 1 ? 'multi_company_consensus' : 'single_company',
+      initial,
+      final,
+      delta:{
+        home_water: round4(final.home_water - initial.home_water),
+        handicap_value: round4(final.handicap_value - initial.handicap_value),
+        away_water: round4(final.away_water - initial.away_water),
+      },
+      consensus:{
+        mode: finalLineCompanies.length > 1 ? 'multi_company_consensus' : 'single_company',
+        final_handicap: final.handicap_value,
+        final_handicap_text: final.handicap_text,
+        initial_handicap: initial.handicap_value,
+        initial_handicap_text: initial.handicap_text,
+        final_line_count: finalLineCompanies.length,
+        initial_line_count: initialLineCompanies.length,
+        company_count: allCompanies.length,
+        companies: consensusCompanies,
+        all_companies: allCompanies.map(x => x.company),
+      },
+      companies: allCompanies,
+      _source:'multi_company_consensus',
+      _matched_line: finalLineCompanies[0]?._matched_line || ''
+    });
+  }
+
   const row=[...document.querySelectorAll('tr')].find(tr=>(tr.innerText||'').includes('平均指数'));
   if(!row) return JSON.stringify({found:false});
   const s=(row.innerText||'').replace(/\s+/g,' ').trim();
   const m=s.match(/平均指数\s*(\d+\.\d+)\s*([\u4e00-\u9fff/]+)\s*(\d+\.\d+)\s*(\d+\.\d+)\s*([\u4e00-\u9fff/]+)\s*(\d+\.\d+)/);
   if(!m) return JSON.stringify({found:true, parsed:false, text:s});
-  const initial={home_water:parseFloat(m[1]), handicap_text:m[2], away_water:parseFloat(m[3])};
-  const final={home_water:parseFloat(m[4]), handicap_text:m[5], away_water:parseFloat(m[6])};
+  const initialText = m[2].trim();
+  const finalText = m[5].trim();
+  const initialValue = parseHandicap(initialText);
+  const finalValue = parseHandicap(finalText);
+  const initial={home_water:parseFloat(m[1]), handicap_text:initialText, handicap_value:initialValue, handicap:initialValue, away_water:parseFloat(m[3])};
+  const final={home_water:parseFloat(m[4]), handicap_text:finalText, handicap_value:finalValue, handicap:finalValue, away_water:parseFloat(m[6])};
   const delta=(a,b)=> (a==null||b==null) ? null : +(a-b).toFixed(4);
-  return JSON.stringify({found:true, parsed:true, initial, final, delta:{home_water:delta(final.home_water, initial.home_water), away_water:delta(final.away_water, initial.away_water)}});
+  return JSON.stringify({
+    found:true,
+    parsed:true,
+    company:'平均指数',
+    company_mode:'average_row_fallback',
+    initial,
+    final,
+    delta:{home_water:delta(final.home_water, initial.home_water), handicap_value:delta(final.handicap_value, initial.handicap_value), away_water:delta(final.away_water, initial.away_water)},
+    consensus:{mode:'average_row_fallback', company_count:0, filtered_company_count:0, companies:[], all_companies:[], final_handicap: final.handicap_value, final_handicap_text: final.handicap_text, initial_handicap: initial.handicap_value, initial_handicap_text: initial.handicap_text},
+    companies:[]
+  });
 })()
 """
     return bu.eval_json(js)
 
 
 def _parse_totals_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
-    """Parse Over/Under (大小球) average row on current page.
+    """Parse Over/Under (大小球) lines on current page.
 
-    Expected mobile row pattern:
-      澳门  1.82  3.0  1.90   1.77  2.75  1.95
-    Where:
-      initial: over, line, under
-      final:   over, line, under
+    New behavior:
+    - Parse as many company rows as possible from tables and body text.
+    - Build a market consensus line from the most common final line.
+    - Keep the company-level details for traceability.
     """
     js = r"""
-(() => {
-  const blocked = (document.body?.innerText||'').includes('访问被阻断') || (document.title||'').includes('405');
-  if (blocked) return JSON.stringify({blocked:true});
-
-  const rows = [...document.querySelectorAll('tr')];
-  const avgRow = rows.find(tr => {
-    const txt = (tr.innerText || '').replace(/\s+/g, ' ').trim();
-    return txt.includes('平均指数') || txt.includes('澳门');
-  });
-  if (!avgRow) return JSON.stringify({found:false});
-
-  const tds = [...avgRow.querySelectorAll('td')].map(td => (td.innerText||'').replace(/\s+/g,' ').trim());
-  const nums = [];
-  for (const td of tds) {
-    const m = td.match(/\d+(?:\.\d+)?/g) || [];
-    for (const x of m) nums.push(parseFloat(x));
-  }
-  // Need at least 6 numbers: init(over,line,under), final(over,line,under)
-  if (nums.length < 6) {
-    return JSON.stringify({found:true, parsed:false, text:(avgRow.innerText||'').replace(/\s+/g,' ').trim(), tds});
-  }
-
-  const initial = { over: nums[0], line: nums[1], under: nums[2] };
-  const final = { over: nums[3], line: nums[4], under: nums[5] };
-  const delta = {
-    over: +(final.over - initial.over).toFixed(4),
-    line: +(final.line - initial.line).toFixed(4),
-    under: +(final.under - initial.under).toFixed(4),
-  };
-
-  return JSON.stringify({found:true, parsed:true, initial, final, delta});
-})()
-"""
-    data = bu.eval_json(js)
-    if isinstance(data, dict) and data.get("found") and data.get("parsed"):
-        return data
-
-    # Fallback for the actual mobile UX: O/U is nested under 亚值 page and is often
-    # rendered as free text instead of a regular table row.
-    fallback_js = r"""
 (() => {
   const blocked = (document.body?.innerText||'').includes('访问被阻断') || (document.title||'').includes('405');
   if (blocked) return JSON.stringify({blocked:true});
@@ -756,56 +1279,244 @@ def _parse_totals_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
   const lines = body.split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
   const compact = body.replace(/\s+/g, ' ').trim();
 
-  const companyAliases = [
-    '澳门彩票', '澳门', 'Bet365', 'bet365', '皇冠', 'Pinnacle', '威廉.希尔', '立博'
+  const aliasPairs = [
+    ['澳门彩票', '澳门彩票'],
+    ['澳门', '澳门彩票'],
+    ['Bet365', 'Bet365'],
+    ['bet365', 'Bet365'],
+    ['皇冠', '皇冠'],
+    ['Pinnacle', 'Pinnacle'],
+    ['平博', '平博'],
+    ['SBOBET', 'SBOBET'],
+    ['SBO', 'SBOBET'],
+    ['12BET', '12BET'],
+    ['易胜博', '易胜博'],
+    ['威廉.希尔', '威廉希尔'],
+    ['威廉希尔', '威廉希尔'],
+    ['立博', '立博'],
+    ['Bwin', 'Bwin'],
+    ['Interwetten', 'Interwetten'],
+    ['伟德', '伟德'],
+    ['韦德', '伟德'],
+    ['香港马会', '香港马会'],
+    ['明陞', '明陞'],
+    ['利记', '利记']
   ];
+  const companyAliases = aliasPairs.map(x => x[0]);
+  const priority = {
+    'Bet365': 9,
+    '皇冠': 8,
+    'Pinnacle': 8,
+    '澳门彩票': 7,
+    '易胜博': 6,
+    '威廉希尔': 6,
+    '立博': 5,
+    'Bwin': 4,
+    'Interwetten': 4,
+    '平博': 4,
+    'SBOBET': 4,
+    '12BET': 4,
+    '伟德': 3,
+    '香港马会': 3,
+    '明陞': 3,
+    '利记': 3,
+  };
   const numRe = /\d+(?:\.\d+)?/g;
 
-  const parseLine = (line, company) => {
-    const idx = line.indexOf(company);
+  const normalizeLineValue = (v) => Math.round(Number(v) * 4) / 4;
+  const lineKey = (v) => normalizeLineValue(v).toFixed(2);
+  const round4 = (v) => +Number(v).toFixed(4);
+  const avg = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+  const normalizeCompany = (name) => {
+    const row = aliasPairs.find(x => x[0] === name);
+    return row ? row[1] : name;
+  };
+
+  const parseLine = (line, companyAlias, sourceTag) => {
+    const idx = line.indexOf(companyAlias);
     if (idx < 0) return null;
-    const tail = line.slice(idx + company.length).trim();
+    const company = normalizeCompany(companyAlias);
+    const tail = line.slice(idx + companyAlias.length).trim();
     const nums = (tail.match(numRe) || []).map(x => parseFloat(x));
     if (nums.length < 6) return null;
     return {
-      found: true,
-      parsed: true,
       company,
       initial: { over: nums[0], line: nums[1], under: nums[2] },
       final: { over: nums[3], line: nums[4], under: nums[5] },
       delta: {
-        over: +(nums[3] - nums[0]).toFixed(4),
-        line: +(nums[4] - nums[1]).toFixed(4),
-        under: +(nums[5] - nums[2]).toFixed(4),
+        over: round4(nums[3] - nums[0]),
+        line: round4(nums[4] - nums[1]),
+        under: round4(nums[5] - nums[2]),
       },
-      _source: 'body_text_line',
+      _source: sourceTag,
       _matched_line: line,
+      _priority: priority[company] || 1,
     };
   };
 
+  const dedup = new Map();
+  const pushCandidate = (item) => {
+    if (!item) return;
+    const key = [
+      item.company,
+      lineKey(item.initial.line),
+      lineKey(item.final.line),
+      round4(item.initial.over),
+      round4(item.initial.under),
+      round4(item.final.over),
+      round4(item.final.under)
+    ].join('|');
+    if (!dedup.has(key)) dedup.set(key, item);
+  };
+
+  const tableRows = [...document.querySelectorAll('tr')].map(tr => (tr.innerText || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
   for (const company of companyAliases) {
-    for (const line of lines) {
-      const parsed = parseLine(line, company);
-      if (parsed) return JSON.stringify(parsed);
+    for (const line of tableRows) {
+      pushCandidate(parseLine(line, company, 'table_row'));
     }
   }
-
+  for (const company of companyAliases) {
+    for (const line of lines) {
+      pushCandidate(parseLine(line, company, 'body_text_line'));
+    }
+  }
   for (const company of companyAliases) {
     const idx = compact.indexOf(company);
     if (idx < 0) continue;
-    const windowText = compact.slice(idx, idx + 120);
-    const parsed = parseLine(windowText, company);
-    if (parsed) {
-      parsed._source = 'body_text_window';
-      parsed._matched_line = windowText;
-      return JSON.stringify(parsed);
-    }
+    const windowText = compact.slice(Math.max(0, idx - 8), idx + 140);
+    pushCandidate(parseLine(windowText, company, 'body_text_window'));
   }
 
-  return JSON.stringify({found:false, _source:'body_text_fallback'});
+  const companies = [...dedup.values()];
+  if (!companies.length) {
+    const avgRow = [...document.querySelectorAll('tr')].find(tr => {
+      const txt = (tr.innerText || '').replace(/\s+/g, ' ').trim();
+      return txt.includes('平均指数') || txt.includes('澳门');
+    });
+    if (!avgRow) return JSON.stringify({found:false, _source:'multi_company_fallback'});
+    const tds = [...avgRow.querySelectorAll('td')].map(td => (td.innerText||'').replace(/\s+/g,' ').trim());
+    const nums = [];
+    for (const td of tds) {
+      const m = td.match(/\d+(?:\.\d+)?/g) || [];
+      for (const x of m) nums.push(parseFloat(x));
+    }
+    if (nums.length < 6) {
+      return JSON.stringify({found:true, parsed:false, text:(avgRow.innerText||'').replace(/\s+/g,' ').trim(), tds});
+    }
+    const initial = { over: nums[0], line: nums[1], under: nums[2] };
+    const final = { over: nums[3], line: nums[4], under: nums[5] };
+    return JSON.stringify({
+      found:true,
+      parsed:true,
+      company:'平均指数',
+      initial,
+      final,
+      delta:{
+        over: round4(final.over - initial.over),
+        line: round4(final.line - initial.line),
+        under: round4(final.under - initial.under),
+      },
+      consensus:{
+        mode:'average_row_fallback',
+        company_count:0,
+        final_line: final.line,
+        initial_line: initial.line,
+        companies:[]
+      },
+      companies:[]
+    });
+  }
+
+  const finalGroups = {};
+  for (const item of companies) {
+    const key = lineKey(item.final.line);
+    if (!finalGroups[key]) finalGroups[key] = {items: [], count: 0, weight: 0};
+    finalGroups[key].items.push(item);
+    finalGroups[key].count += 1;
+    finalGroups[key].weight += item._priority || 1;
+  }
+  const orderedFinalGroups = Object.entries(finalGroups).sort((a, b) => {
+    if (b[1].count !== a[1].count) return b[1].count - a[1].count;
+    if (b[1].weight !== a[1].weight) return b[1].weight - a[1].weight;
+    return parseFloat(b[0]) - parseFloat(a[0]);
+  });
+  const finalKey = orderedFinalGroups[0][0];
+  const finalBucket = orderedFinalGroups[0][1];
+
+  const initialGroups = {};
+  for (const item of finalBucket.items) {
+    const key = lineKey(item.initial.line);
+    if (!initialGroups[key]) initialGroups[key] = {items: [], count: 0, weight: 0};
+    initialGroups[key].items.push(item);
+    initialGroups[key].count += 1;
+    initialGroups[key].weight += item._priority || 1;
+  }
+  const orderedInitialGroups = Object.entries(initialGroups).sort((a, b) => {
+    if (b[1].count !== a[1].count) return b[1].count - a[1].count;
+    if (b[1].weight !== a[1].weight) return b[1].weight - a[1].weight;
+    return parseFloat(b[0]) - parseFloat(a[0]);
+  });
+  const initialKey = orderedInitialGroups[0][0];
+  const initialBucket = orderedInitialGroups[0][1];
+
+  const finalLineCompanies = finalBucket.items;
+  const consensusInitialItems = initialBucket.items;
+  const initial = {
+    over: round4(avg(consensusInitialItems.map(x => Number(x.initial.over)))),
+    line: parseFloat(initialKey),
+    under: round4(avg(consensusInitialItems.map(x => Number(x.initial.under)))),
+  };
+  const final = {
+    over: round4(avg(finalLineCompanies.map(x => Number(x.final.over)))),
+    line: parseFloat(finalKey),
+    under: round4(avg(finalLineCompanies.map(x => Number(x.final.under)))),
+  };
+  const allCompanies = companies
+    .slice()
+    .sort((a, b) => (b._priority || 1) - (a._priority || 1) || a.company.localeCompare(b.company))
+    .map(x => ({
+      company: x.company,
+      initial: x.initial,
+      final: x.final,
+      delta: x.delta,
+      _source: x._source,
+      _matched_line: x._matched_line,
+    }));
+
+  const consensusCompanies = finalLineCompanies
+    .slice()
+    .sort((a, b) => (b._priority || 1) - (a._priority || 1) || a.company.localeCompare(b.company))
+    .map(x => x.company);
+
+  return JSON.stringify({
+    found:true,
+    parsed:true,
+    company: consensusCompanies[0] || allCompanies[0]?.company || '',
+    company_mode: finalLineCompanies.length > 1 ? 'multi_company_consensus' : 'single_company',
+    initial,
+    final,
+    delta:{
+      over: round4(final.over - initial.over),
+      line: round4(final.line - initial.line),
+      under: round4(final.under - initial.under),
+    },
+    consensus:{
+      mode: finalLineCompanies.length > 1 ? 'multi_company_consensus' : 'single_company',
+      final_line: final.line,
+      initial_line: initial.line,
+      final_line_count: finalLineCompanies.length,
+      initial_line_count: consensusInitialItems.length,
+      company_count: allCompanies.length,
+      companies: consensusCompanies,
+      all_companies: allCompanies.map(x => x.company),
+    },
+    companies: allCompanies,
+    _source:'multi_company_consensus',
+    _matched_line: finalLineCompanies[0]?._matched_line || ''
+  });
 })()
 """
-    return bu.eval_json(fallback_js)
+    return bu.eval_json(js)
 
 
 def _parse_kelly_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
@@ -925,6 +1636,195 @@ def _parse_desktop_avg_row(row_cells: list[str]) -> Dict[str, Any]:
     }
 
 
+def _parse_desktop_europe_rows(rows: list[list[str]]) -> Dict[str, Any]:
+    alias_map = {
+        "bet365": "Bet365",
+        "皇冠": "皇冠",
+        "pinnacle": "Pinnacle",
+        "平博": "平博",
+        "sbobet": "SBOBET",
+        "12bet": "12BET",
+        "易胜博": "易胜博",
+        "威廉.希尔": "威廉希尔",
+        "威廉希尔": "威廉希尔",
+        "立博": "立博",
+        "bwin": "Bwin",
+        "interwetten": "Interwetten",
+        "伟德": "伟德",
+        "韦德": "伟德",
+        "香港马会": "香港马会",
+        "澳门彩票": "澳门彩票",
+        "澳门": "澳门彩票",
+        "明陞": "明陞",
+        "利记": "利记",
+    }
+    priority = {
+        "Bet365": 9,
+        "皇冠": 8,
+        "Pinnacle": 8,
+        "澳门彩票": 7,
+        "易胜博": 6,
+        "威廉希尔": 6,
+        "立博": 5,
+        "Interwetten": 4,
+        "Bwin": 4,
+        "平博": 4,
+        "SBOBET": 4,
+        "12BET": 4,
+        "伟德": 3,
+        "香港马会": 3,
+        "明陞": 3,
+        "利记": 3,
+    }
+
+    def normalize_company(text: str) -> str | None:
+        s = (text or "").strip()
+        s = s.split(" ")[0]
+        s = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff\.]", "", s)
+        low = s.lower()
+        for alias, norm in alias_map.items():
+            if alias in low or alias in s:
+                return norm
+        return None
+
+    def pick_float(cells: list[str], idx: int) -> float | None:
+        if idx >= len(cells):
+            return None
+        match = re.search(r"\d+\.\d+", cells[idx] or "")
+        if not match:
+            return None
+        try:
+            return float(match.group(0))
+        except Exception:
+            return None
+
+    def median(vals: list[float]) -> float | None:
+        arr = sorted(v for v in vals if isinstance(v, (int, float)))
+        if not arr:
+            return None
+        mid = len(arr) // 2
+        if len(arr) % 2:
+            return float(arr[mid])
+        return float((arr[mid - 1] + arr[mid]) / 2.0)
+
+    def weighted_avg(items: list[dict], getter) -> float | None:
+        total = 0.0
+        total_w = 0.0
+        for item in items:
+            v = getter(item)
+            w = float(item.get("_priority") or 1.0)
+            if v is None:
+                continue
+            total += float(v) * w
+            total_w += w
+        return round(total / total_w, 4) if total_w > 0 else None
+
+    def near(v: float | None, med: float | None, pct: float) -> bool:
+        if v is None or med is None or med <= 0:
+            return False
+        return abs(float(v) - med) / med <= pct
+
+    seen: set[tuple[Any, ...]] = set()
+    candidates: list[dict[str, Any]] = []
+    for cells in rows or []:
+        if len(cells) < 8:
+            continue
+        company = normalize_company(cells[1] if len(cells) > 1 else "")
+        if not company:
+            continue
+        initial = {"home": pick_float(cells, 2), "draw": pick_float(cells, 3), "away": pick_float(cells, 4)}
+        final = {"home": pick_float(cells, 5), "draw": pick_float(cells, 6), "away": pick_float(cells, 7)}
+        vals = [initial["home"], initial["draw"], initial["away"], final["home"], final["draw"], final["away"]]
+        if any(v is None or v <= 1.01 or v >= 80 for v in vals):
+            continue
+        key = (
+            company,
+            round(float(initial["home"]), 4),
+            round(float(initial["draw"]), 4),
+            round(float(initial["away"]), 4),
+            round(float(final["home"]), 4),
+            round(float(final["draw"]), 4),
+            round(float(final["away"]), 4),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(
+            {
+                "company": company,
+                "initial": initial,
+                "final": final,
+                "delta": {
+                    "home": round(float(final["home"]) - float(initial["home"]), 4),
+                    "draw": round(float(final["draw"]) - float(initial["draw"]), 4),
+                    "away": round(float(final["away"]) - float(initial["away"]), 4),
+                },
+                "_priority": priority.get(company, 1),
+                "_row_cells": cells,
+            }
+        )
+
+    if not candidates:
+        return {"found": False}
+
+    med_home = median([float(x["final"]["home"]) for x in candidates])
+    med_draw = median([float(x["final"]["draw"]) for x in candidates])
+    med_away = median([float(x["final"]["away"]) for x in candidates])
+    filtered = [
+        x
+        for x in candidates
+        if near(x["final"]["home"], med_home, 0.22)
+        and near(x["final"]["draw"], med_draw, 0.28)
+        and near(x["final"]["away"], med_away, 0.28)
+    ]
+    if not filtered:
+        filtered = candidates
+
+    initial = {
+        "home": weighted_avg(filtered, lambda x: x["initial"]["home"]),
+        "draw": weighted_avg(filtered, lambda x: x["initial"]["draw"]),
+        "away": weighted_avg(filtered, lambda x: x["initial"]["away"]),
+    }
+    final = {
+        "home": weighted_avg(filtered, lambda x: x["final"]["home"]),
+        "draw": weighted_avg(filtered, lambda x: x["final"]["draw"]),
+        "away": weighted_avg(filtered, lambda x: x["final"]["away"]),
+    }
+    filtered_names = [x["company"] for x in sorted(filtered, key=lambda x: (-int(x["_priority"]), x["company"]))]
+    all_names = [x["company"] for x in sorted(candidates, key=lambda x: (-int(x["_priority"]), x["company"]))]
+    return {
+        "found": True,
+        "parsed": True,
+        "company": filtered_names[0] if filtered_names else "",
+        "company_mode": "multi_company_consensus" if len(filtered) > 1 else "single_company",
+        "initial": initial,
+        "final": final,
+        "delta": {
+            "home": None if initial["home"] is None or final["home"] is None else round(float(final["home"]) - float(initial["home"]), 4),
+            "draw": None if initial["draw"] is None or final["draw"] is None else round(float(final["draw"]) - float(initial["draw"]), 4),
+            "away": None if initial["away"] is None or final["away"] is None else round(float(final["away"]) - float(initial["away"]), 4),
+        },
+        "consensus": {
+            "mode": "multi_company_consensus" if len(filtered) > 1 else "single_company",
+            "company_count": len(candidates),
+            "filtered_company_count": len(filtered),
+            "companies": filtered_names,
+            "all_companies": all_names,
+            "final_median": {"home": med_home, "draw": med_draw, "away": med_away},
+        },
+        "companies": [
+            {
+                "company": x["company"],
+                "initial": x["initial"],
+                "final": x["final"],
+                "delta": x["delta"],
+                "_row_cells": x["_row_cells"],
+            }
+            for x in sorted(candidates, key=lambda x: (-int(x["_priority"]), x["company"]))
+        ],
+    }
+
+
 def _find_match_id(
     bu: Any,
     league: str,
@@ -934,29 +1834,47 @@ def _find_match_id(
     time_hint: str = "",
     alias_table: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    def find_rows() -> Dict[str, Any]:
+    def find_rows(date_hint_current: str) -> Dict[str, Any]:
         return _find_rows_fuzzy(
             bu,
             team1,
             team2,
-            date_hint=date_hint,
+            date_hint=date_hint_current,
             time_hint=time_hint,
             league=league,
             alias_table=alias_table or {},
             limit=5,
         )
 
-    def find_rows_anywhere() -> Dict[str, Any]:
+    def find_rows_anywhere(date_hint_current: str) -> Dict[str, Any]:
         return _find_rows_anywhere_on_current_page(
             bu,
             team1,
             team2,
-            date_hint=date_hint,
+            date_hint=date_hint_current,
             time_hint=time_hint,
             league=league,
             alias_table=alias_table or {},
             limit=5,
         )
+
+    candidate_dates = _candidate_date_hints(date_hint, time_hint)
+    if not candidate_dates:
+        candidate_dates = [date_hint]
+
+    def search_with_candidates() -> Dict[str, Any]:
+        for current_date in candidate_dates:
+            found_local = find_rows(current_date)
+            if isinstance(found_local, dict) and found_local.get("rows"):
+                if current_date and current_date != date_hint:
+                    found_local["_matched_date_hint"] = current_date
+                return found_local
+            found_local = find_rows_anywhere(current_date)
+            if isinstance(found_local, dict) and found_local.get("rows"):
+                if current_date and current_date != date_hint:
+                    found_local["_matched_date_hint"] = current_date
+                return found_local
+        return {}
 
     bu.open(REMEN_URL)
 
@@ -974,33 +1892,25 @@ def _find_match_id(
     bu.eval_json(click_league)
     time.sleep(2.0)
 
-    found = find_rows()
-    if not isinstance(found, dict) or not found.get("rows"):
-        found = find_rows_anywhere()
+    found = search_with_candidates()
     if not isinstance(found, dict) or not found.get("rows"):
         league_url = _mobile_league_url(league)
         if league_url:
             bu.open(league_url)
             time.sleep(2.0)
-            found = find_rows()
-            if not isinstance(found, dict) or not found.get("rows"):
-                found = find_rows_anywhere()
+            found = search_with_candidates()
 
     # If still not found, try scrolling to load more schedule blocks.
     if not isinstance(found, dict) or not found.get("rows"):
         for _ in range(10):
             _eval_scroll_to_bottom(bu)
-            found = find_rows()
-            if not isinstance(found, dict) or not found.get("rows"):
-                found = find_rows_anywhere()
+            found = search_with_candidates()
             if isinstance(found, dict) and found.get("rows"):
                 break
         # One more try from top (some pages lazy-load above fold).
         if not isinstance(found, dict) or not found.get("rows"):
             _eval_scroll_to_top(bu)
-            found = find_rows()
-            if not isinstance(found, dict) or not found.get("rows"):
-                found = find_rows_anywhere()
+            found = search_with_candidates()
     if not isinstance(found, dict) or not found.get("rows"):
         raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
 
@@ -1164,17 +2074,31 @@ def _extract_europe_desktop(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
         r"""
 (() => {
   const rows=[...document.querySelectorAll('tr')];
-  const row=rows.find(r=>(r.innerText||'').includes('99家平均'));
-  if(!row) return JSON.stringify({found:false});
-  const tds=[...row.querySelectorAll('td')].map(td=>(td.innerText||'').replace(/\s+/g,' ').trim());
-  return JSON.stringify({found:true, tds});
+  const out = [];
+  for (const row of rows) {
+    const tds=[...row.querySelectorAll('td')].map(td=>(td.innerText||'').replace(/\s+/g,' ').trim());
+    if (tds.length >= 8) out.push(tds);
+  }
+  const avg=rows.find(r=>(r.innerText||'').includes('99家平均'));
+  const avg_tds = avg ? [...avg.querySelectorAll('td')].map(td=>(td.innerText||'').replace(/\s+/g,' ').trim()) : [];
+  return JSON.stringify({found: out.length > 0 || avg_tds.length > 0, rows: out, avg_tds});
 })()
 """
     )
-    if row_info.get("found") and row_info.get("tds"):
-        data = _parse_desktop_avg_row(row_info["tds"])
-    else:
-        data = _parse_europe_on_current_page(bu)
+    data = _parse_desktop_europe_rows(row_info.get("rows") or [])
+    if not data.get("found"):
+        if row_info.get("avg_tds"):
+            data = _parse_desktop_avg_row(row_info["avg_tds"])
+            data.setdefault("parsed", True)
+            data.setdefault("company", "99家平均")
+            data.setdefault("company_mode", "average_row_fallback")
+            data.setdefault(
+                "consensus",
+                {"mode": "average_row_fallback", "company_count": 0, "filtered_company_count": 0, "companies": [], "all_companies": []},
+            )
+            data.setdefault("companies", [])
+        else:
+            data = _parse_europe_on_current_page(bu)
     data["url"] = url
     data["_flow"] = "desktop_direct"
     return data
@@ -1211,16 +2135,20 @@ def _run_with_retries(
 ) -> Dict[str, Any]:
     attempts: list[Dict[str, Any]] = []
     last_data: Dict[str, Any] = {"found": False}
+    max_attempts = len(RETRY_DELAYS)
 
     # Always retry with fresh sessions. Headed mode is preferred because it is
     # empirically less likely to be blocked on okooo mobile pages.
     for index, delay in enumerate(RETRY_DELAYS, start=1):
         session = f"{session_prefix}_{datetime.now().strftime('%H%M%S')}_{index}"
         bu = client_factory(session)
+        stop_now = False
+        stop_reason = ""
         try:
             data = extractor(bu, *extractor_args)
             last_data = data
             success = _is_success_payload(data)
+            stop_now, stop_reason = _should_stop_retrying_from_payload(data)
             attempts.append(
                 {
                     "attempt": index,
@@ -1229,17 +2157,40 @@ def _run_with_retries(
                     "blocked": bool(isinstance(data, dict) and data.get("blocked")),
                     "found": None if not isinstance(data, dict) else data.get("found"),
                     "parsed": None if not isinstance(data, dict) else data.get("parsed"),
+                    "stop_retry": stop_now,
+                    "stop_reason": stop_reason or None,
                 }
             )
             if success:
                 return _annotate_attempts(data, attempts)
         except Exception as exc:
             last_data = {"error": str(exc)}
-            attempts.append({"attempt": index, "client": bu.__class__.__name__, "success": False, "error": str(exc)})
+            kind = _classify_retry_error_message(str(exc))
+            stop_now = kind in {
+                "cdp_connection_refused",
+                "chrome_port_unavailable",
+                "chrome_start_failed",
+                "chrome_binary_missing",
+                "browser_use_missing",
+            }
+            attempts.append(
+                {
+                    "attempt": index,
+                    "client": bu.__class__.__name__,
+                    "success": False,
+                    "error": str(exc),
+                    "error_kind": kind,
+                    "stop_retry": stop_now,
+                    "stop_reason": kind if stop_now else None,
+                }
+            )
         finally:
             bu.close()
 
-        time.sleep(delay)
+        if stop_now:
+            break
+        if index < max_attempts:
+            time.sleep(delay)
 
     return _annotate_attempts(last_data, attempts)
 
@@ -1271,32 +2222,55 @@ def _extract_kelly_with_fallback(match_id: str, client_factory: Callable[[str], 
 
 
 def _extract_europe_with_fallback(match_id: str, history_url: str, client_factory: Callable[[str], Any], session_prefix: str) -> Dict[str, Any]:
+    def _prefer_consensus(data: Dict[str, Any]) -> bool:
+        if not _is_success_payload(data):
+            return False
+        if not isinstance(data, dict):
+            return False
+        return data.get("company_mode") not in {"average_row_fallback", None}
+
     first = _run_with_retries("europe_mobile", f"{session_prefix}_mobile", client_factory, _extract_europe, match_id)
-    if _is_success_payload(first):
+    if _prefer_consensus(first):
         return first
     second = _run_with_retries("europe_history", f"{session_prefix}_history", client_factory, _extract_europe_from_history_flow, history_url)
-    if _is_success_payload(second):
+    if _prefer_consensus(second):
         second["_fallback_from"] = "mobile_direct"
         return second
     third = _run_with_retries("europe_desktop", f"{session_prefix}_desktop", client_factory, _extract_europe_desktop, match_id)
     if _is_success_payload(third):
         third["_fallback_from"] = "history_tab"
         return third
+    for candidate in (second, first):
+        if _is_success_payload(candidate):
+            return candidate
     return third if third.get("_attempts") else (second if second.get("_attempts") else first)
 
 
 def _extract_asian_with_fallback(match_id: str, history_url: str, client_factory: Callable[[str], Any], session_prefix: str) -> Dict[str, Any]:
+    def _prefer_consensus(data: Dict[str, Any]) -> bool:
+        if not _is_success_payload(data):
+            return False
+        if not isinstance(data, dict):
+            return False
+        if data.get("company_mode") == "multi_company_consensus":
+            return True
+        consensus = data.get("consensus") if isinstance(data.get("consensus"), dict) else {}
+        return int(consensus.get("company_count") or 0) >= 2
+
     first = _run_with_retries("asian_mobile", f"{session_prefix}_mobile", client_factory, _extract_asian, match_id)
-    if _is_success_payload(first):
+    if _prefer_consensus(first):
         return first
     second = _run_with_retries("asian_history", f"{session_prefix}_history", client_factory, _extract_asian_from_history_flow, history_url)
-    if _is_success_payload(second):
+    if _prefer_consensus(second):
         second["_fallback_from"] = "mobile_direct"
         return second
     third = _run_with_retries("asian_desktop", f"{session_prefix}_desktop", client_factory, _extract_asian_desktop, match_id)
     if _is_success_payload(third):
         third["_fallback_from"] = "history_tab"
         return third
+    for candidate in (second, first):
+        if _is_success_payload(candidate):
+            return candidate
     return third if third.get("_attempts") else (second if second.get("_attempts") else first)
 
 
@@ -1413,9 +2387,10 @@ def main() -> None:
     chrome_meta: Dict[str, Any] = {}
     if args.driver == "local-chrome":
         chrome_meta = _ensure_local_chrome(args.chrome_port, args.chrome_path, args.chrome_user_data_dir)
+        resolved_chrome_port = int(chrome_meta.get("port") or args.chrome_port)
 
         def client_factory(session_name: str) -> Any:
-            return LocalChromeSession(port=args.chrome_port, session_name=session_name)
+            return LocalChromeSession(port=resolved_chrome_port, session_name=session_name)
 
     else:
 

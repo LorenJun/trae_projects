@@ -45,12 +45,45 @@ def extract_current_odds(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     # We normalize it to the nested schema used by prediction workflow.
     totals_initial = totals.get("initial", {}) if isinstance(totals, dict) else {}
     totals_final = totals.get("final", {}) if isinstance(totals, dict) else {}
+    europe_out = {"initial": europe.get("initial", {}), "final": europe.get("final", {})}
+    if isinstance(europe, dict):
+        consensus = europe.get("consensus")
+        companies = europe.get("companies")
+        if isinstance(consensus, dict):
+            europe_out["consensus"] = consensus
+        if isinstance(companies, list):
+            europe_out["companies"] = companies
+        company_mode = europe.get("company_mode")
+        if company_mode:
+            europe_out["company_mode"] = company_mode
+    asian_out = {"initial": asian.get("initial", {}), "final": asian.get("final", {})}
+    if isinstance(asian, dict):
+        consensus = asian.get("consensus")
+        companies = asian.get("companies")
+        if isinstance(consensus, dict):
+            asian_out["consensus"] = consensus
+        if isinstance(companies, list):
+            asian_out["companies"] = companies
+        company_mode = asian.get("company_mode")
+        if company_mode:
+            asian_out["company_mode"] = company_mode
+    totals_out = {"initial": totals_initial, "final": totals_final}
+    if isinstance(totals, dict):
+        consensus = totals.get("consensus")
+        companies = totals.get("companies")
+        if isinstance(consensus, dict):
+            totals_out["consensus"] = consensus
+        if isinstance(companies, list):
+            totals_out["companies"] = companies
+        company_mode = totals.get("company_mode")
+        if company_mode:
+            totals_out["company_mode"] = company_mode
     return {
         "match_id": snapshot.get("match_id"),
-        "胜平负赔率": {"initial": europe.get("initial", {}), "final": europe.get("final", {})},
-        "欧赔": {"initial": europe.get("initial", {}), "final": europe.get("final", {})},
-        "亚值": {"initial": asian.get("initial", {}), "final": asian.get("final", {})},
-        "大小球": {"initial": totals_initial, "final": totals_final},
+        "胜平负赔率": dict(europe_out),
+        "欧赔": europe_out,
+        "亚值": asian_out,
+        "大小球": totals_out,
         "凯利": {"initial": kelly.get("initial", {}), "final": kelly.get("final", {})},
         "离散率": snapshot.get("离散率", {}) or {},
     }

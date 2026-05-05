@@ -1999,6 +1999,263 @@ class EnhancedPredictor:
         return {'home': None, 'draw': None, 'away': None, 'source': 'none'}
 
     @staticmethod
+    def _parse_handicap_value(value: Any) -> Optional[float]:
+        """Parse asian handicap text/value into a numeric line from home-team perspective.
+
+        Convention:
+        - Negative: home gives handicap
+        - Positive: away gives handicap
+        """
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            v = float(value)
+            return v if abs(v) > 1e-9 else 0.0
+
+        s = str(value).strip()
+        if not s:
+            return None
+
+        # Numeric forms like -0.5 / 0.25 / 0.5/1
+        try:
+            if "/" in s and not any(ch in s for ch in "球平受让"):
+                parts = [float(x) for x in s.split("/") if x]
+                if parts:
+                    return sum(parts) / len(parts)
+            return float(s)
+        except Exception:
+            pass
+
+        mapping = {
+            "平手": 0.0,
+            "平手/半球": -0.25,
+            "平/半": -0.25,
+            "半球": -0.5,
+            "半球/一球": -0.75,
+            "半/一": -0.75,
+            "一球": -1.0,
+            "一球/球半": -1.25,
+            "一/球半": -1.25,
+            "球半": -1.5,
+            "球半/两球": -1.75,
+            "两球": -2.0,
+            "两球/两球半": -2.25,
+            "两球半": -2.5,
+            "受让平手": 0.0,
+            "受让平手/半球": 0.25,
+            "受让平/半": 0.25,
+            "受让半球": 0.5,
+            "受让半球/一球": 0.75,
+            "受让半/一": 0.75,
+            "受让一球": 1.0,
+            "受让一球/球半": 1.25,
+            "受让一/球半": 1.25,
+            "受让球半": 1.5,
+            "受让球半/两球": 1.75,
+            "受让两球": 2.0,
+            "受让两球/两球半": 2.25,
+            "受让两球半": 2.5,
+        }
+        s = s.replace(" ", "")
+        if s in mapping:
+            return mapping[s]
+        return None
+
+    def _detect_market_odds_anomaly(
+        self,
+        league_code: str,
+        european_odds: Optional[Dict[str, Any]],
+        asian_handicap: Optional[Dict[str, Any]] = None,
+        base_home_lambda: Optional[float] = None,
+        base_away_lambda: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        diag: Dict[str, Any] = {
+            "available": False,
+            "trusted": True,
+            "score": 0.0,
+            "level": "none",
+            "reasons": [],
+            "signals": [],
+            "calibration_weight": 1.0,
+        }
+        if not isinstance(european_odds, dict):
+            diag["reason"] = "missing_european_odds"
+            return diag
+
+        final = european_odds.get("final")
+        if not isinstance(final, dict):
+            diag["reason"] = "missing_euro_final"
+            return diag
+
+        oh = self._to_float(final.get("home"))
+        od = self._to_float(final.get("draw"))
+        oa = self._to_float(final.get("away"))
+        if not oh or not od or not oa or min(oh, od, oa) <= 1.01:
+            diag["reason"] = "invalid_euro_final"
+            return diag
+
+        diag["available"] = True
+        ph = 1.0 / oh
+        pd = 1.0 / od
+        pa = 1.0 / oa
+        s = ph + pd + pa
+        ph, pd, pa = ph / s, pd / s, pa / s
+        fav_side = "home" if ph >= pa else "away"
+        fav_prob = ph if fav_side == "home" else pa
+        diag["market_implied_probs"] = {
+            "home": round(ph, 4),
+            "draw": round(pd, 4),
+            "away": round(pa, 4),
+        }
+        diag["market_favorite"] = fav_side
+
+        score = 0.0
+        reasons: List[str] = []
+        signals: List[str] = []
+
+        company_mode = str(european_odds.get("company_mode") or "")
+        consensus = european_odds.get("consensus") if isinstance(european_odds.get("consensus"), dict) else {}
+        filtered_company_count = int(consensus.get("filtered_company_count") or 0)
+        company_count = int(consensus.get("company_count") or 0)
+        diag["company_mode"] = company_mode or "unknown"
+        diag["filtered_company_count"] = filtered_company_count
+        diag["company_count"] = company_count
+
+        if company_mode == "average_row_fallback":
+            score += 0.18
+            reasons.append("欧赔仅拿到平均值回退")
+            signals.append("average_row_fallback")
+        elif filtered_company_count and filtered_company_count < 4:
+            score += 0.12
+            reasons.append(f"欧赔共识公司过少({filtered_company_count})")
+            signals.append("low_company_count")
+
+        # Cross-check with asian handicap direction/strength.
+        if isinstance(asian_handicap, dict):
+            fin = asian_handicap.get("final") if isinstance(asian_handicap.get("final"), dict) else {}
+            ini = asian_handicap.get("initial") if isinstance(asian_handicap.get("initial"), dict) else {}
+            hcp_raw = (
+                fin.get("handicap")
+                if "handicap" in fin
+                else fin.get("handicap_value")
+                if "handicap_value" in fin
+                else fin.get("盘口值")
+                if "盘口值" in fin
+                else fin.get("handicap_text")
+                if "handicap_text" in fin
+                else fin.get("盘口")
+            )
+            hcp_final = self._parse_handicap_value(hcp_raw)
+            hw_f = self._to_float(fin.get("home_water"))
+            aw_f = self._to_float(fin.get("away_water"))
+            hcp_initial = self._parse_handicap_value(
+                ini.get("handicap")
+                if "handicap" in ini
+                else ini.get("handicap_value")
+                if "handicap_value" in ini
+                else ini.get("盘口值")
+                if "盘口值" in ini
+                else ini.get("handicap_text")
+                if "handicap_text" in ini
+                else ini.get("盘口")
+            )
+
+            giver = None
+            if hcp_final is not None:
+                if hcp_final < -0.06:
+                    giver = "home"
+                elif hcp_final > 0.06:
+                    giver = "away"
+            diag["asian_final_handicap"] = hcp_final
+            diag["asian_giver"] = giver
+
+            strong_market = fav_prob >= 0.56
+            very_strong_market = fav_prob >= 0.62
+            hcp_mag = abs(hcp_final) if hcp_final is not None else None
+
+            if strong_market and giver and giver != fav_side:
+                score += 0.55
+                reasons.append("欧赔强侧与亚值让步方向相反")
+                signals.append("favorite_direction_mismatch")
+            elif very_strong_market and (giver is None or hcp_mag is None or hcp_mag < 0.75):
+                score += 0.42
+                reasons.append("欧赔强侧明显但亚值让步不足")
+                signals.append("favorite_depth_mismatch")
+            elif strong_market and hcp_mag is not None and hcp_mag < 0.25:
+                score += 0.22
+                reasons.append("欧赔偏强但亚值接近平手")
+                signals.append("near_level_handicap")
+
+            if fav_side == "home" and hw_f and hw_f >= 2.15 and very_strong_market:
+                score += 0.18
+                reasons.append("主强侧赔率低但主队终水偏高")
+                signals.append("home_water_high_vs_low_odds")
+            if fav_side == "away" and aw_f and aw_f >= 2.15 and very_strong_market:
+                score += 0.18
+                reasons.append("客强侧赔率低但客队终水偏高")
+                signals.append("away_water_high_vs_low_odds")
+
+            if hcp_initial is not None and hcp_final is not None and abs(hcp_final) + 0.24 < abs(hcp_initial) and very_strong_market:
+                score += 0.12
+                reasons.append("亚值明显退盘但欧赔仍保持强侧")
+                signals.append("retreat_vs_strong_odds")
+
+        # Cross-check against base model prior.
+        if base_home_lambda and base_away_lambda:
+            rho_map = {
+                "premier_league": -0.08,
+                "la_liga": -0.10,
+                "serie_a": -0.12,
+                "bundesliga": -0.06,
+                "ligue_1": -0.10,
+            }
+            dc = DixonColesModel(rho=rho_map.get(league_code, -0.10))
+            base_probs = dc.predict_with_dixon_coles(
+                max(0.15, float(base_home_lambda)),
+                max(0.15, float(base_away_lambda)),
+            )
+            base_home = float(base_probs.get("home_win") or 0.0)
+            base_away = float(base_probs.get("away_win") or 0.0)
+            base_fav_side = "home" if base_home >= base_away else "away"
+            base_fav_prob = base_home if base_fav_side == "home" else base_away
+            market_base_gap = fav_prob - base_fav_prob if fav_side == base_fav_side else fav_prob + base_fav_prob - 0.5
+            diag["base_model_probs"] = {
+                "home": round(base_home, 4),
+                "draw": round(float(base_probs.get("draw") or 0.0), 4),
+                "away": round(base_away, 4),
+            }
+            diag["base_model_favorite"] = base_fav_side
+
+            if fav_side != base_fav_side and fav_prob >= 0.54:
+                score += 0.28
+                reasons.append("欧赔强侧与基础模型方向相反")
+                signals.append("base_model_direction_mismatch")
+            elif market_base_gap >= 0.16 and fav_prob >= 0.58:
+                score += 0.22
+                reasons.append("欧赔强度显著高于基础模型")
+                signals.append("base_model_gap_large")
+
+        level = "none"
+        weight = 1.0
+        if score >= 0.72:
+            level = "high"
+            weight = 0.0
+        elif score >= 0.42:
+            level = "medium"
+            weight = 0.35
+        elif score >= 0.18:
+            level = "low"
+            weight = 0.7
+
+        diag["score"] = round(score, 4)
+        diag["level"] = level
+        diag["trusted"] = level == "none"
+        diag["reasons"] = reasons
+        diag["signals"] = signals
+        diag["calibration_weight"] = weight
+        return diag
+
+    @staticmethod
     def _kelly_fraction(p: float, odds: float) -> Optional[float]:
         """Kelly fraction with decimal odds.
 
@@ -2088,6 +2345,7 @@ class EnhancedPredictor:
         base_home_lambda: float,
         base_away_lambda: float,
         european_odds: Optional[Dict[str, Any]],
+        asian_handicap: Optional[Dict[str, Any]] = None,
     ) -> tuple[float, float, Dict[str, Any]]:
         """Use 1X2 (欧赔终盘) implied probabilities to calibrate expected goals (lambdas).
 
@@ -2108,6 +2366,29 @@ class EnhancedPredictor:
         od = self._to_float(final.get("draw"))
         oa = self._to_float(final.get("away"))
         if not oh or not od or not oa or min(oh, od, oa) <= 1.01:
+            return base_home_lambda, base_away_lambda, diag
+
+        anomaly_diag = self._detect_market_odds_anomaly(
+            league_code=league_code,
+            european_odds=european_odds,
+            asian_handicap=asian_handicap,
+            base_home_lambda=base_home_lambda,
+            base_away_lambda=base_away_lambda,
+        )
+        diag["odds_anomaly"] = anomaly_diag
+        weight = float(anomaly_diag.get("calibration_weight") or 1.0)
+        if anomaly_diag.get("level") == "high":
+            diag.update(
+                {
+                    "applied": False,
+                    "reason": "market_odds_anomaly_high",
+                    "kept_base_lambda": {
+                        "home": round(float(base_home_lambda), 3),
+                        "away": round(float(base_away_lambda), 3),
+                        "total": round(float(base_home_lambda + base_away_lambda), 3),
+                    },
+                }
+            )
             return base_home_lambda, base_away_lambda, diag
 
         # implied probs (remove margin via normalization)
@@ -2160,6 +2441,10 @@ class EnhancedPredictor:
             return base_home_lambda, base_away_lambda, diag
 
         hl, al, probs = best
+        if weight < 0.999:
+            hl = float(base_home_lambda) * (1.0 - weight) + float(hl) * weight
+            al = float(base_away_lambda) * (1.0 - weight) + float(al) * weight
+            probs = dc.predict_with_dixon_coles(hl, al)
         diag = {
             "applied": True,
             "source": "euro_final_1x2",
@@ -2169,6 +2454,8 @@ class EnhancedPredictor:
             "lambda_base": {"home": round(float(base_home_lambda), 3), "away": round(float(base_away_lambda), 3), "total": round(float(base_total), 3)},
             "lambda_calibrated": {"home": round(float(hl), 3), "away": round(float(al), 3), "total": round(float(hl + al), 3)},
             "cost": round(float(best_cost), 6),
+            "odds_anomaly": anomaly_diag,
+            "blend_weight": round(weight, 4),
         }
         return float(hl), float(al), diag
 
@@ -2455,6 +2742,825 @@ class EnhancedPredictor:
         diag["asian"] = {"handicap_initial": hcp_i, "handicap_final": hcp_f, "giver": giver, "retreat": retreat, "water_drift": water_drift}
         return {"home_win": p_h, "draw": p_d, "away_win": p_a}, diag
 
+    def _safe_match_date(self, date_str: str) -> Optional[datetime]:
+        try:
+            return datetime.strptime(date_str, "%Y-%m-%d")
+        except Exception:
+            return None
+
+    def _load_league_table(self, league_code: str) -> Dict[str, Dict[str, Any]]:
+        cache_params = {"league_code": league_code}
+        cached = self.cache.get("league_table_rows", cache_params, ttl_hours=12)
+        if cached:
+            return cached
+        path = os.path.join(self.base_dir, league_code, "teams_2025-26.md")
+        table: Dict[str, Dict[str, Any]] = {}
+        if not os.path.exists(path):
+            return table
+        try:
+            lines = open(path, "r", encoding="utf-8").read().splitlines()
+        except Exception:
+            return table
+        in_table = False
+        for line in lines:
+            if line.startswith("|") and "排名" in line and "球队" in line and "积分" in line:
+                in_table = True
+                continue
+            if not in_table:
+                continue
+            if not line.startswith("|"):
+                break
+            cols = [c.strip() for c in line.strip().strip("|").split("|")]
+            if len(cols) < 10 or cols[0] == "-----":
+                continue
+            try:
+                rank = int(cols[0])
+                team = cols[1]
+                table[team] = {
+                    "rank": rank,
+                    "team": team,
+                    "played": int(cols[2]),
+                    "wins": int(cols[3]),
+                    "draws": int(cols[4]),
+                    "losses": int(cols[5]),
+                    "gf": int(cols[6]),
+                    "ga": int(cols[7]),
+                    "gd": int(str(cols[8]).replace("+", "")),
+                    "points": int(cols[9]),
+                }
+            except Exception:
+                continue
+        self.cache.set("league_table_rows", cache_params, table)
+        return table
+
+    def _derive_motivation_profile(self, league_code: str, team_name: str) -> Dict[str, Any]:
+        table = self._load_league_table(league_code)
+        row = table.get(team_name)
+        if not isinstance(row, dict):
+            return {"available": False, "score": 75.0, "reason": "table_unavailable"}
+        total_teams = len(table) or 20
+        top4_pts = None
+        relegation_cut_pts = None
+        for team_row in table.values():
+            if not isinstance(team_row, dict):
+                continue
+            rank = team_row.get("rank")
+            pts = team_row.get("points")
+            if rank == 4:
+                top4_pts = pts
+            if rank == max(1, total_teams - 2):
+                relegation_cut_pts = pts
+
+        rank = int(row.get("rank") or total_teams)
+        pts = int(row.get("points") or 0)
+        score = 72.0
+        tags: List[str] = []
+        if rank <= 4:
+            score += 12.0
+            tags.append("欧战席位保护")
+        elif top4_pts is not None and abs(top4_pts - pts) <= 6:
+            score += 9.0
+            tags.append("冲击欧战区")
+        elif rank <= 8:
+            score += 4.0
+            tags.append("上半区竞争")
+        if relegation_cut_pts is not None and abs(pts - relegation_cut_pts) <= 6:
+            score += 10.0
+            tags.append("保级压力")
+        elif rank >= max(1, total_teams - 2):
+            score += 14.0
+            tags.append("降级区求分")
+        if 8 < rank < max(10, total_teams - 4):
+            score -= 4.0
+            tags.append("中游战意一般")
+        return {
+            "available": True,
+            "score": round(max(55.0, min(92.0, score)), 2),
+            "rank": rank,
+            "points": pts,
+            "tags": tags,
+            "table_row": row,
+        }
+
+    def _derive_h2h_context(self, league_code: str, home_team: str, away_team: str, match_date: str, limit: int = 6) -> Dict[str, Any]:
+        cache_params = {
+            "league_code": league_code,
+            "home_team": home_team,
+            "away_team": away_team,
+            "match_date": match_date,
+            "limit": limit,
+        }
+        cached = self.cache.get("match_h2h_context", cache_params, ttl_hours=12)
+        if cached:
+            return cached
+        path = os.path.join(self.base_dir, league_code, "teams_2025-26.md")
+        cutoff = self._safe_match_date(match_date)
+        out = {"available": False, "home_wins": 0, "away_wins": 0, "draws": 0, "matches": []}
+        if not os.path.exists(path) or not cutoff:
+            return out
+        try:
+            lines = open(path, "r", encoding="utf-8").read().splitlines()
+        except Exception:
+            return out
+        rows: List[Dict[str, Any]] = []
+        for line in lines:
+            if not line.startswith("| 20"):
+                continue
+            cols = [c.strip() for c in line.strip().strip("|").split("|")]
+            if len(cols) < 6:
+                continue
+            date_str, time_str, home, score, away, remark = cols[:6]
+            dt = self._safe_match_date(date_str)
+            if not dt or dt >= cutoff or score == "-" or "进行中" in remark:
+                continue
+            if not ((home == home_team and away == away_team) or (home == away_team and away == home_team)):
+                continue
+            m = re.match(r"^(\d+)-(\d+)$", score)
+            if not m:
+                continue
+            hg, ag = int(m.group(1)), int(m.group(2))
+            winner = "draw"
+            if hg > ag:
+                winner = "home" if home == home_team else "away"
+            elif hg < ag:
+                winner = "away" if home == home_team else "home"
+            rows.append({"date": date_str, "time": time_str, "home": home, "away": away, "score": score, "winner": winner})
+        rows.sort(key=lambda x: (x["date"], x["time"]), reverse=True)
+        rows = rows[:limit]
+        for row in rows:
+            if row["winner"] == "home":
+                out["home_wins"] += 1
+            elif row["winner"] == "away":
+                out["away_wins"] += 1
+            else:
+                out["draws"] += 1
+        out["available"] = bool(rows)
+        out["matches"] = rows
+        self.cache.set("match_h2h_context", cache_params, out)
+        return out
+
+    @staticmethod
+    def _formation_style(formation: str) -> Dict[str, Any]:
+        form = str(formation or "").strip()
+        if not form:
+            return {"formation": "", "style": "unknown", "score": 0.0}
+        nums = [int(x) for x in re.findall(r"\d+", form)]
+        if not nums:
+            return {"formation": form, "style": "unknown", "score": 0.0}
+        defenders = nums[0]
+        attackers = nums[-1]
+        midfielders = sum(nums[1:-1]) if len(nums) > 2 else 0
+        score = (attackers - defenders) * 0.18 + (midfielders - 3) * 0.06
+        if defenders >= 5:
+            style = "defensive"
+        elif attackers >= 3 and defenders <= 4:
+            style = "attacking"
+        else:
+            style = "balanced"
+        return {"formation": form, "style": style, "score": round(score, 3)}
+
+    @staticmethod
+    def _avg_key_player_rating(side_ctx: Dict[str, Any]) -> Optional[float]:
+        if not isinstance(side_ctx, dict):
+            return None
+        players = side_ctx.get("key_players")
+        if not isinstance(players, list) or not players:
+            return None
+        vals = []
+        for p in players[:3]:
+            if not isinstance(p, dict):
+                continue
+            try:
+                vals.append(float(p.get("avg_rating")))
+            except Exception:
+                continue
+        return (sum(vals) / len(vals)) if vals else None
+
+    def _build_market_intelligence(self, current_odds: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "available": False,
+            "signals": [],
+            "bookmaker_psychology": {"label": "unknown", "reason": ""},
+            "capital_flow": {"source": "odds_water_kelly_proxy", "home": 0.0, "draw": 0.0, "away": 0.0, "direction": "balanced", "strength": 0.0},
+            "market_resonance": {
+                "available": False,
+                "label": "unknown",
+                "summary": "",
+                "side_direction": "balanced",
+                "side_strength": 0.0,
+                "tempo_direction": "balanced",
+                "tempo_strength": 0.0,
+                "resonance_score": 0.0,
+                "flags": [],
+                "components": {},
+            },
+        }
+        if not isinstance(current_odds, dict):
+            return out
+        euro = current_odds.get("欧赔") or {}
+        asian = current_odds.get("亚值") or {}
+        kelly = current_odds.get("凯利") or {}
+        totals = current_odds.get("大小球") or {}
+
+        def pick(block: Any, stage: str, key: str) -> Optional[float]:
+            if not isinstance(block, dict):
+                return None
+            stage_block = block.get(stage)
+            if not isinstance(stage_block, dict):
+                return None
+            return self._to_float(stage_block.get(key))
+
+        def move_score(initial: Optional[float], final: Optional[float]) -> float:
+            if not initial or not final or initial <= 0:
+                return 0.0
+            return max(-0.18, min(0.18, (initial - final) / initial))
+
+        def direction_from_scores(score_map: Dict[str, float], min_top: float = 0.015, min_gap: float = 0.012) -> tuple[str, float, Dict[str, float]]:
+            ranked_local = sorted(score_map.items(), key=lambda x: x[1], reverse=True)
+            top_name_local, top_val_local = ranked_local[0]
+            second_val_local = ranked_local[1][1]
+            direction_local = top_name_local if top_val_local > min_top and (top_val_local - second_val_local) > min_gap else "balanced"
+            strength_local = round(max(0.0, top_val_local - second_val_local), 4)
+            return direction_local, strength_local, {k: round(float(v), 4) for k, v in score_map.items()}
+
+        home_score = move_score(pick(euro, "initial", "home"), pick(euro, "final", "home"))
+        draw_score = move_score(pick(euro, "initial", "draw"), pick(euro, "final", "draw"))
+        away_score = move_score(pick(euro, "initial", "away"), pick(euro, "final", "away"))
+
+        h_water_i = pick(asian, "initial", "home_water")
+        h_water_f = pick(asian, "final", "home_water")
+        a_water_i = pick(asian, "initial", "away_water")
+        a_water_f = pick(asian, "final", "away_water")
+        if h_water_i is not None and h_water_f is not None:
+            home_score += max(-0.08, min(0.08, (h_water_i - h_water_f) * 0.25))
+        if a_water_i is not None and a_water_f is not None:
+            away_score += max(-0.08, min(0.08, (a_water_i - a_water_f) * 0.25))
+
+        k_h = pick(kelly, "final", "home")
+        k_d = pick(kelly, "final", "draw")
+        k_a = pick(kelly, "final", "away")
+        kelly_vals = [x for x in [k_h, k_d, k_a] if isinstance(x, float)]
+        if len(kelly_vals) == 3:
+            avg_k = sum(kelly_vals) / 3.0
+            home_score += max(-0.05, min(0.05, (avg_k - k_h) * 0.35))
+            draw_score += max(-0.05, min(0.05, (avg_k - k_d) * 0.35))
+            away_score += max(-0.05, min(0.05, (avg_k - k_a) * 0.35))
+
+        signals: List[str] = []
+        if home_score >= 0.05:
+            signals.append("主胜赔率/水位走强")
+        if away_score >= 0.05:
+            signals.append("客胜赔率/水位走强")
+        if draw_score >= 0.045:
+            signals.append("平局赔率受压")
+        if home_score > 0.03 and h_water_f is not None and h_water_i is not None and h_water_f > h_water_i:
+            signals.append("主队赔率下降但主水升高，疑似诱主")
+        if draw_score > max(home_score, away_score) and draw_score >= 0.04:
+            signals.append("庄家有防平倾向")
+
+        scores = {"home": round(home_score, 4), "draw": round(draw_score, 4), "away": round(away_score, 4)}
+        direction, strength, _ = direction_from_scores(scores)
+        label = "balanced"
+        reason = "盘口与水位分歧不大"
+        if "庄家有防平倾向" in signals:
+            label = "guard_draw"
+            reason = "平赔压力和凯利/水位组合显示机构防平"
+        elif "主队赔率下降但主水升高，疑似诱主" in signals:
+            label = "tempt_home"
+            reason = "主胜热度上升但赔付未同步改善，存在诱主可能"
+        elif direction == "home":
+            label = "support_home"
+            reason = "欧赔、亚水和凯利更偏向主队"
+        elif direction == "away":
+            label = "support_away"
+            reason = "欧赔、亚水和凯利更偏向客队"
+
+        # 进一步做三盘口共振检测：欧赔(1X2) + 亚值(方向/深度/水位) + 大小球(节奏)
+        euro_direction = direction
+        euro_strength = strength
+
+        asian_direction = "balanced"
+        asian_strength = 0.0
+        asian_scores = {"home": 0.0, "draw": 0.0, "away": 0.0}
+        hcp_i_raw = None
+        hcp_f_raw = None
+        if isinstance(asian, dict):
+            ini_as = asian.get("initial") if isinstance(asian.get("initial"), dict) else {}
+            fin_as = asian.get("final") if isinstance(asian.get("final"), dict) else {}
+            hcp_i_raw = self._parse_handicap_value(
+                ini_as.get("handicap")
+                if "handicap" in ini_as
+                else ini_as.get("handicap_value")
+                if "handicap_value" in ini_as
+                else ini_as.get("盘口值")
+                if "盘口值" in ini_as
+                else ini_as.get("handicap_text")
+            )
+            hcp_f_raw = self._parse_handicap_value(
+                fin_as.get("handicap")
+                if "handicap" in fin_as
+                else fin_as.get("handicap_value")
+                if "handicap_value" in fin_as
+                else fin_as.get("盘口值")
+                if "盘口值" in fin_as
+                else fin_as.get("handicap_text")
+            )
+            h_mag = abs(hcp_f_raw) if hcp_f_raw is not None else 0.0
+            if hcp_f_raw is not None:
+                if hcp_f_raw < -0.06:
+                    asian_scores["home"] += min(0.22, 0.06 + h_mag * 0.13)
+                elif hcp_f_raw > 0.06:
+                    asian_scores["away"] += min(0.22, 0.06 + h_mag * 0.13)
+                else:
+                    asian_scores["draw"] += 0.06
+            if h_water_i is not None and h_water_f is not None:
+                asian_scores["home"] += max(-0.08, min(0.08, (h_water_i - h_water_f) * 0.28))
+            if a_water_i is not None and a_water_f is not None:
+                asian_scores["away"] += max(-0.08, min(0.08, (a_water_i - a_water_f) * 0.28))
+            if hcp_i_raw is not None and hcp_f_raw is not None:
+                # abs smaller => retreat; abs larger => stronger support
+                delta_hcp = abs(hcp_i_raw) - abs(hcp_f_raw)
+                if delta_hcp >= 0.24:
+                    asian_scores["draw"] += 0.05
+                elif delta_hcp <= -0.24:
+                    if hcp_f_raw < -0.06:
+                        asian_scores["home"] += 0.04
+                    elif hcp_f_raw > 0.06:
+                        asian_scores["away"] += 0.04
+            asian_direction, asian_strength, _ = direction_from_scores(asian_scores, min_top=0.03, min_gap=0.018)
+
+        totals_direction = "balanced"
+        totals_strength = 0.0
+        totals_scores = {"over": 0.0, "under": 0.0}
+        if isinstance(totals, dict):
+            ini_ou = totals.get("initial") if isinstance(totals.get("initial"), dict) else {}
+            fin_ou = totals.get("final") if isinstance(totals.get("final"), dict) else {}
+            ou_i = self._to_float(ini_ou.get("line"))
+            ou_f = self._to_float(fin_ou.get("line"))
+            over_i = self._to_float(ini_ou.get("over"))
+            over_f = self._to_float(fin_ou.get("over"))
+            under_i = self._to_float(ini_ou.get("under"))
+            under_f = self._to_float(fin_ou.get("under"))
+            if ou_i is not None and ou_f is not None:
+                if ou_f - ou_i >= 0.24:
+                    totals_scores["over"] += 0.14
+                elif ou_i - ou_f >= 0.24:
+                    totals_scores["under"] += 0.14
+            if over_i is not None and over_f is not None:
+                totals_scores["over"] += max(-0.08, min(0.08, (over_i - over_f) * 0.30))
+            if under_i is not None and under_f is not None:
+                totals_scores["under"] += max(-0.08, min(0.08, (under_i - under_f) * 0.30))
+            ranked_ou = sorted(totals_scores.items(), key=lambda x: x[1], reverse=True)
+            top_ou, top_ou_val = ranked_ou[0]
+            sec_ou_val = ranked_ou[1][1]
+            totals_direction = top_ou if top_ou_val > 0.03 and (top_ou_val - sec_ou_val) > 0.015 else "balanced"
+            totals_strength = round(max(0.0, top_ou_val - sec_ou_val), 4)
+
+        side_votes = [d for d in [euro_direction, asian_direction, direction] if d in {"home", "away", "draw"}]
+        resonance_flags: List[str] = []
+        side_direction = "balanced"
+        side_strength = 0.0
+        if side_votes:
+            home_votes = side_votes.count("home")
+            away_votes = side_votes.count("away")
+            draw_votes = side_votes.count("draw")
+            if home_votes >= 2 and home_votes > max(away_votes, draw_votes):
+                side_direction = "home"
+                side_strength = round(0.12 + euro_strength + asian_strength + strength, 4)
+                resonance_flags.append("home_side_resonance")
+            elif away_votes >= 2 and away_votes > max(home_votes, draw_votes):
+                side_direction = "away"
+                side_strength = round(0.12 + euro_strength + asian_strength + strength, 4)
+                resonance_flags.append("away_side_resonance")
+            elif draw_votes >= 2 and draw_votes >= max(home_votes, away_votes):
+                side_direction = "draw"
+                side_strength = round(0.10 + draw_score, 4)
+                resonance_flags.append("draw_guard_resonance")
+
+        if euro_direction in {"home", "away"} and asian_direction in {"home", "away"} and euro_direction != asian_direction:
+            resonance_flags.append("euro_asian_divergence")
+        if side_direction == "home" and totals_direction == "over":
+            resonance_flags.append("home_over_resonance")
+        elif side_direction == "home" and totals_direction == "under":
+            resonance_flags.append("home_under_resonance")
+        elif side_direction == "away" and totals_direction == "over":
+            resonance_flags.append("away_over_resonance")
+        elif side_direction == "away" and totals_direction == "under":
+            resonance_flags.append("away_under_resonance")
+        elif side_direction == "draw" and totals_direction == "under":
+            resonance_flags.append("draw_under_resonance")
+
+        resonance_label = "balanced"
+        resonance_summary = "三盘口暂未形成清晰共振"
+        resonance_score = round(max(0.0, side_strength + totals_strength), 4)
+        if "euro_asian_divergence" in resonance_flags:
+            resonance_label = "divergence"
+            resonance_summary = "欧赔与亚值方向不完全一致，市场存在背离"
+        elif side_direction == "home" and totals_direction == "over":
+            resonance_label = "home_over_resonance"
+            resonance_summary = "欧赔、亚值与大小球共同偏向主队主动进攻路径"
+        elif side_direction == "home" and totals_direction == "under":
+            resonance_label = "home_under_resonance"
+            resonance_summary = "欧赔、亚值支持主队，但总进球预期偏谨慎"
+        elif side_direction == "away" and totals_direction == "over":
+            resonance_label = "away_over_resonance"
+            resonance_summary = "市场共振更偏向客队主动拿结果且比赛节奏偏开放"
+        elif side_direction == "away" and totals_direction == "under":
+            resonance_label = "away_under_resonance"
+            resonance_summary = "市场更偏客队不败或偷走结果，且比赛节奏偏谨慎"
+        elif side_direction == "draw":
+            resonance_label = "draw_guard"
+            resonance_summary = "盘口结构更偏防平，主客胜并未形成单边共振"
+        elif side_direction == "home":
+            resonance_label = "home_side_resonance"
+            resonance_summary = "欧赔与亚值整体更偏主队一侧"
+        elif side_direction == "away":
+            resonance_label = "away_side_resonance"
+            resonance_summary = "欧赔与亚值整体更偏客队一侧"
+
+        if label == "tempt_home" and side_direction == "home":
+            resonance_flags.append("home_hot_trap_risk")
+            resonance_label = "tempt_home_resonance"
+            resonance_summary = "主队方向虽有共振，但赔付结构提示诱主风险"
+        if label == "guard_draw":
+            resonance_flags.append("draw_trap_protection")
+        if resonance_label != "balanced":
+            signals.append(f"三盘口画像:{resonance_label}")
+
+        out.update(
+            {
+                "available": bool(signals or any(abs(v) > 0.0 for v in scores.values())),
+                "signals": signals,
+                "bookmaker_psychology": {"label": label, "reason": reason},
+                "capital_flow": {
+                    "source": "odds_water_kelly_proxy",
+                    "home": scores["home"],
+                    "draw": scores["draw"],
+                    "away": scores["away"],
+                    "direction": direction,
+                    "strength": strength,
+                },
+                "raw": {"euro": euro, "asian": asian, "totals": totals, "kelly": kelly},
+                "market_resonance": {
+                    "available": True,
+                    "label": resonance_label,
+                    "summary": resonance_summary,
+                    "side_direction": side_direction,
+                    "side_strength": round(side_strength, 4),
+                    "tempo_direction": totals_direction,
+                    "tempo_strength": round(totals_strength, 4),
+                    "resonance_score": resonance_score,
+                    "flags": resonance_flags,
+                    "components": {
+                        "euro": {"direction": euro_direction, "strength": round(euro_strength, 4), "scores": scores},
+                        "asian": {
+                            "direction": asian_direction,
+                            "strength": round(asian_strength, 4),
+                            "scores": {k: round(float(v), 4) for k, v in asian_scores.items()},
+                            "initial_handicap": hcp_i_raw,
+                            "final_handicap": hcp_f_raw,
+                        },
+                        "totals": {
+                            "direction": totals_direction,
+                            "strength": round(totals_strength, 4),
+                            "scores": {k: round(float(v), 4) for k, v in totals_scores.items()},
+                        },
+                    },
+                },
+            }
+        )
+        return out
+
+
+    def _build_match_intelligence(
+        self,
+        league_code: str,
+        home_team: str,
+        away_team: str,
+        match_date: str,
+        analysis_context: Dict[str, Any],
+        current_odds: Optional[Dict[str, Any]],
+        home_strength: Dict[str, Any],
+        away_strength: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        team_ctx = analysis_context.get("team_context") if isinstance(analysis_context.get("team_context"), dict) else {}
+        home_ctx = team_ctx.get("home") if isinstance(team_ctx.get("home"), dict) else {}
+        away_ctx = team_ctx.get("away") if isinstance(team_ctx.get("away"), dict) else {}
+        home_ewma = self.team_ewma_learning.get_team_ewma_features(league_code, home_team, match_date)
+        away_ewma = self.team_ewma_learning.get_team_ewma_features(league_code, away_team, match_date)
+        h2h = self._derive_h2h_context(league_code, home_team, away_team, match_date)
+        home_mot = self._derive_motivation_profile(league_code, home_team)
+        away_mot = self._derive_motivation_profile(league_code, away_team)
+        market = self._build_market_intelligence(current_odds)
+
+        home_formations = home_ctx.get("formations") if isinstance(home_ctx.get("formations"), list) else []
+        away_formations = away_ctx.get("formations") if isinstance(away_ctx.get("formations"), list) else []
+        home_shape = self._formation_style(home_formations[0].get("formation") if home_formations else "")
+        away_shape = self._formation_style(away_formations[0].get("formation") if away_formations else "")
+
+        home_poss = self._to_float(home_ctx.get("avg_possession"))
+        away_poss = self._to_float(away_ctx.get("avg_possession"))
+        home_rating = self._avg_key_player_rating(home_ctx)
+        away_rating = self._avg_key_player_rating(away_ctx)
+        recent_home = home_ctx.get("recent") if isinstance(home_ctx.get("recent"), dict) else {}
+        recent_away = away_ctx.get("recent") if isinstance(away_ctx.get("recent"), dict) else {}
+        home_ppg = (float(recent_home.get("points") or 0.0) / max(1.0, float(recent_home.get("matches") or 1.0))) if recent_home else 0.0
+        away_ppg = (float(recent_away.get("points") or 0.0) / max(1.0, float(recent_away.get("matches") or 1.0))) if recent_away else 0.0
+
+        home_adv = 0.0
+        away_adv = 0.0
+        signals: List[str] = []
+        if home_poss is not None and away_poss is not None:
+            poss_edge = (home_poss - away_poss) / 100.0
+            home_adv += poss_edge * 0.30
+            away_adv -= poss_edge * 0.30
+            if abs(home_poss - away_poss) >= 4.5:
+                signals.append(f"控球倾向 {home_team}{home_poss:.1f}% vs {away_team}{away_poss:.1f}%")
+        if home_rating is not None and away_rating is not None:
+            rating_edge = home_rating - away_rating
+            home_adv += rating_edge * 0.08
+            away_adv -= rating_edge * 0.08
+        if home_ppg or away_ppg:
+            form_edge = home_ppg - away_ppg
+            home_adv += form_edge * 0.06
+            away_adv -= form_edge * 0.06
+        injury_edge = (float(away_strength.get("injured_count", 0)) - float(home_strength.get("injured_count", 0))) / 10.0
+        home_adv += injury_edge * 0.12
+        away_adv -= injury_edge * 0.12
+        mot_edge = (home_mot.get("score", 75.0) - away_mot.get("score", 75.0)) / 100.0
+        home_adv += mot_edge * 0.20
+        away_adv -= mot_edge * 0.20
+        if h2h.get("available"):
+            total_h2h = max(1, int(h2h.get("home_wins", 0)) + int(h2h.get("away_wins", 0)) + int(h2h.get("draws", 0)))
+            h2h_edge = (int(h2h.get("home_wins", 0)) - int(h2h.get("away_wins", 0))) / total_h2h
+            home_adv += h2h_edge * 0.06
+            away_adv -= h2h_edge * 0.06
+        if home_shape.get("style") == "attacking" and away_shape.get("style") == "defensive":
+            signals.append(f"{home_team}阵型更主动，{away_team}偏收缩")
+        if away_shape.get("style") == "attacking" and home_shape.get("style") == "defensive":
+            signals.append(f"{away_team}阵型更主动，{home_team}偏收缩")
+
+        capital_flow = market.get("capital_flow", {})
+        flow_dir = capital_flow.get("direction")
+        flow_strength = float(capital_flow.get("strength") or 0.0)
+        if flow_dir == "home":
+            home_adv += min(0.06, flow_strength * 1.2)
+            away_adv -= min(0.04, flow_strength * 0.8)
+            signals.append("资金流向代理偏主队")
+        elif flow_dir == "away":
+            away_adv += min(0.06, flow_strength * 1.2)
+            home_adv -= min(0.04, flow_strength * 0.8)
+            signals.append("资金流向代理偏客队")
+        elif flow_dir == "draw":
+            signals.append("资金流向代理偏平局")
+
+        home_adv = max(-0.12, min(0.12, home_adv))
+        away_adv = max(-0.12, min(0.12, away_adv))
+        draw_bias = 0.0
+        if market.get("bookmaker_psychology", {}).get("label") == "guard_draw":
+            draw_bias += 0.018
+        if flow_dir == "draw":
+            draw_bias += min(0.024, flow_strength * 1.5)
+        resonance = market.get("market_resonance") if isinstance(market.get("market_resonance"), dict) else {}
+        resonance_label = str(resonance.get("label") or "balanced")
+        resonance_score = float(resonance.get("resonance_score") or 0.0)
+        resonance_prob_delta_home = 0.0
+        resonance_prob_delta_away = 0.0
+        resonance_prob_delta_draw = 0.0
+        resonance_ou_delta = 0.0
+        resonance_signals: List[str] = []
+        if resonance_label == "home_over_resonance":
+            home_adv += 0.018
+            away_adv -= 0.006
+            draw_bias -= 0.006
+            resonance_prob_delta_home += 0.012
+            resonance_prob_delta_draw -= 0.006
+            resonance_ou_delta += 0.032
+            resonance_signals.append("三盘口共振支持主队开放局")
+        elif resonance_label == "home_under_resonance":
+            home_adv += 0.014
+            away_adv -= 0.004
+            draw_bias += 0.008
+            resonance_prob_delta_home += 0.008
+            resonance_prob_delta_draw += 0.006
+            resonance_ou_delta -= 0.03
+            resonance_signals.append("三盘口共振支持主队谨慎兑现")
+        elif resonance_label == "away_over_resonance":
+            away_adv += 0.018
+            home_adv -= 0.006
+            draw_bias -= 0.006
+            resonance_prob_delta_away += 0.012
+            resonance_prob_delta_draw -= 0.006
+            resonance_ou_delta += 0.032
+            resonance_signals.append("三盘口共振支持客队开放局")
+        elif resonance_label == "away_under_resonance":
+            away_adv += 0.014
+            home_adv -= 0.004
+            draw_bias += 0.008
+            resonance_prob_delta_away += 0.008
+            resonance_prob_delta_draw += 0.006
+            resonance_ou_delta -= 0.03
+            resonance_signals.append("三盘口共振支持客队谨慎兑现")
+        elif resonance_label == "draw_guard":
+            home_adv *= 0.95
+            away_adv *= 0.95
+            draw_bias += 0.012
+            resonance_prob_delta_draw += 0.012
+            resonance_ou_delta -= 0.012
+            resonance_signals.append("三盘口共振偏防平")
+        elif resonance_label == "divergence":
+            home_adv *= 0.92
+            away_adv *= 0.92
+            draw_bias += 0.01
+            resonance_prob_delta_draw += 0.01
+            resonance_signals.append("三盘口背离，提升平局与冷门容错")
+        elif resonance_label == "tempt_home_resonance":
+            home_adv -= 0.012
+            draw_bias += 0.01
+            resonance_prob_delta_home -= 0.008
+            resonance_prob_delta_draw += 0.01
+            resonance_ou_delta -= 0.008
+            resonance_signals.append("主队方向共振但存在诱盘风险")
+        elif resonance_label == "home_side_resonance":
+            home_adv += 0.01
+            away_adv -= 0.004
+            resonance_prob_delta_home += 0.006
+            resonance_signals.append("三盘口整体偏主队")
+        elif resonance_label == "away_side_resonance":
+            away_adv += 0.01
+            home_adv -= 0.004
+            resonance_prob_delta_away += 0.006
+            resonance_signals.append("三盘口整体偏客队")
+
+        if resonance_signals:
+            signals.extend(resonance_signals)
+
+        home_adv = max(-0.12, min(0.12, home_adv))
+        away_adv = max(-0.12, min(0.12, away_adv))
+        draw_bias = max(-0.015, min(0.05, draw_bias))
+
+        return {
+            "available": True,
+            "market": market,
+            "table": {"home": home_mot.get("table_row"), "away": away_mot.get("table_row")},
+            "motivation": {
+                "home": home_mot,
+                "away": away_mot,
+                "suggested_scores": {
+                    "home": round(float(analysis_context.get("home_motivation", home_mot.get("score", 75.0))), 2),
+                    "away": round(float(analysis_context.get("away_motivation", away_mot.get("score", 75.0))), 2),
+                },
+            },
+            "team_state": {
+                "home": {
+                    "recent": recent_home,
+                    "ewma": home_ewma,
+                    "avg_possession": home_poss,
+                    "formation": home_shape,
+                    "last_lineup": home_ctx.get("last_lineup"),
+                    "key_players": home_ctx.get("key_players", []),
+                    "injuries": {"injured_count": home_strength.get("injured_count", 0), "suspended_count": home_strength.get("suspended_count", 0)},
+                },
+                "away": {
+                    "recent": recent_away,
+                    "ewma": away_ewma,
+                    "avg_possession": away_poss,
+                    "formation": away_shape,
+                    "last_lineup": away_ctx.get("last_lineup"),
+                    "key_players": away_ctx.get("key_players", []),
+                    "injuries": {"injured_count": away_strength.get("injured_count", 0), "suspended_count": away_strength.get("suspended_count", 0)},
+                },
+            },
+            "head_to_head": h2h,
+            "signals": signals,
+            "quant_adjustment": {
+                "home_delta": round(home_adv, 4),
+                "away_delta": round(away_adv, 4),
+                "draw_delta": round(draw_bias, 4),
+                "home_lambda_scale": round(max(0.90, min(1.10, 1.0 + home_adv * 0.6)), 4),
+                "away_lambda_scale": round(max(0.90, min(1.10, 1.0 + away_adv * 0.6)), 4),
+                "resonance_label": resonance_label,
+                "resonance_score": round(resonance_score, 4),
+                "resonance_prob_delta_home": round(resonance_prob_delta_home, 4),
+                "resonance_prob_delta_away": round(resonance_prob_delta_away, 4),
+                "resonance_prob_delta_draw": round(resonance_prob_delta_draw, 4),
+                "resonance_ou_delta": round(max(-0.05, min(0.05, resonance_ou_delta)), 4),
+            },
+        }
+
+    def _apply_match_intelligence_adjustment(
+        self,
+        final_prob: Dict[str, float],
+        match_intelligence: Optional[Dict[str, Any]],
+    ) -> tuple[Dict[str, float], Dict[str, Any]]:
+        diag: Dict[str, Any] = {"applied": False, "source": "match_intelligence", "signals": [], "delta": {}}
+        if not isinstance(final_prob, dict) or not isinstance(match_intelligence, dict):
+            return final_prob, diag
+        qa = match_intelligence.get("quant_adjustment")
+        if not isinstance(qa, dict):
+            return final_prob, diag
+        p_h = float(final_prob.get("home_win", 0.0))
+        p_d = float(final_prob.get("draw", 0.0))
+        p_a = float(final_prob.get("away_win", 0.0))
+        delta_h = max(
+            -0.035,
+            min(
+                0.035,
+                float(qa.get("home_delta") or 0.0) * 0.22 + float(qa.get("resonance_prob_delta_home") or 0.0),
+            ),
+        )
+        delta_a = max(
+            -0.035,
+            min(
+                0.035,
+                float(qa.get("away_delta") or 0.0) * 0.22 + float(qa.get("resonance_prob_delta_away") or 0.0),
+            ),
+        )
+        delta_d = max(
+            -0.015,
+            min(
+                0.025,
+                float(qa.get("draw_delta") or 0.0) + float(qa.get("resonance_prob_delta_draw") or 0.0),
+            ),
+        )
+        if abs(delta_h) < 0.001 and abs(delta_a) < 0.001 and abs(delta_d) < 0.001:
+            return final_prob, diag
+        p_h = max(0.01, p_h + delta_h)
+        p_a = max(0.01, p_a + delta_a)
+        p_d = max(0.01, p_d + delta_d)
+        s = p_h + p_d + p_a
+        p_h, p_d, p_a = p_h / s, p_d / s, p_a / s
+        diag.update(
+            {
+                "applied": True,
+                "signals": match_intelligence.get("signals", []) + (match_intelligence.get("market", {}).get("signals", []) or []),
+                "delta": {"home": round(delta_h, 4), "draw": round(delta_d, 4), "away": round(delta_a, 4)},
+                "resonance_label": qa.get("resonance_label"),
+            }
+        )
+        return {"home_win": p_h, "draw": p_d, "away_win": p_a}, diag
+
+    def _apply_market_resonance_to_over_under(
+        self,
+        over_under: Optional[Dict[str, Any]],
+        match_intelligence: Optional[Dict[str, Any]],
+    ) -> tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+        diag: Dict[str, Any] = {"applied": False, "source": "market_resonance", "delta": 0.0}
+        if not isinstance(over_under, dict) or not isinstance(match_intelligence, dict):
+            return over_under, diag
+        qa = match_intelligence.get("quant_adjustment")
+        if not isinstance(qa, dict):
+            return over_under, diag
+        over = self._to_float(over_under.get("over"))
+        under = self._to_float(over_under.get("under"))
+        if over is None or under is None:
+            return over_under, diag
+        delta = max(-0.05, min(0.05, float(qa.get("resonance_ou_delta") or 0.0)))
+        if abs(delta) < 0.003:
+            return over_under, diag
+        over = max(0.01, min(0.99, over + delta))
+        under = max(0.01, min(0.99, 1.0 - over))
+        out = dict(over_under)
+        out["over"] = over
+        out["under"] = under
+        out["resonance_adjustment"] = {
+            "applied": True,
+            "delta": round(delta, 4),
+            "label": qa.get("resonance_label"),
+        }
+        diag.update(
+            {
+                "applied": True,
+                "delta": round(delta, 4),
+                "label": qa.get("resonance_label"),
+                "over": round(over, 4),
+                "under": round(under, 4),
+            }
+        )
+        return out, diag
+
+    def _finalize_match_intelligence(
+        self,
+        match_intelligence: Optional[Dict[str, Any]],
+        historical_odds_reference: Optional[Dict[str, Any]],
+        upset_potential: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        out = dict(match_intelligence or {})
+        if isinstance(historical_odds_reference, dict):
+            out["historical_odds_reference"] = {
+                "available": historical_odds_reference.get("available"),
+                "summary": historical_odds_reference.get("summary"),
+                "insights": historical_odds_reference.get("insights"),
+            }
+        if isinstance(upset_potential, dict):
+            out["upset_case"] = {
+                "level": upset_potential.get("level"),
+                "index": upset_potential.get("index"),
+                "factors": upset_potential.get("factors"),
+                "case_knowledge": upset_potential.get("case_knowledge"),
+            }
+        return out
+
     @staticmethod
     def _extract_current_odds_snapshot(match_record: Dict) -> Dict:
         """从赔率落盘记录中提取预测所需的赔率快照字段。"""
@@ -2475,24 +3581,45 @@ class EnhancedPredictor:
         asian = snapshot.get('亚值', {}) or {}
         kelly = snapshot.get('凯利', {}) or {}
         totals = snapshot.get('大小球', {}) or {}
+        euro_block = {
+            'initial': europe.get('initial', {}),
+            'final': europe.get('final', {}),
+        }
+        if isinstance(europe, dict):
+            if isinstance(europe.get('consensus'), dict):
+                euro_block['consensus'] = europe.get('consensus') or {}
+            if isinstance(europe.get('companies'), list):
+                euro_block['companies'] = europe.get('companies') or []
+            if europe.get('company_mode'):
+                euro_block['company_mode'] = europe.get('company_mode')
+        asian_block = {
+            'initial': asian.get('initial', {}),
+            'final': asian.get('final', {}),
+        }
+        if isinstance(asian, dict):
+            if isinstance(asian.get('consensus'), dict):
+                asian_block['consensus'] = asian.get('consensus') or {}
+            if isinstance(asian.get('companies'), list):
+                asian_block['companies'] = asian.get('companies') or []
+            if asian.get('company_mode'):
+                asian_block['company_mode'] = asian.get('company_mode')
+        ou_block = {
+            'initial': totals.get('initial', {}) if isinstance(totals, dict) else {},
+            'final': totals.get('final', {}) if isinstance(totals, dict) else {},
+        }
+        if isinstance(totals, dict):
+            if isinstance(totals.get('consensus'), dict):
+                ou_block['consensus'] = totals.get('consensus') or {}
+            if isinstance(totals.get('companies'), list):
+                ou_block['companies'] = totals.get('companies') or []
+            if totals.get('company_mode'):
+                ou_block['company_mode'] = totals.get('company_mode')
         return {
             'match_id': snapshot.get('match_id'),
-            '胜平负赔率': {
-                'initial': europe.get('initial', {}),
-                'final': europe.get('final', {}),
-            },
-            '欧赔': {
-                'initial': europe.get('initial', {}),
-                'final': europe.get('final', {}),
-            },
-            '亚值': {
-                'initial': asian.get('initial', {}),
-                'final': asian.get('final', {}),
-            },
-            '大小球': {
-                'initial': totals.get('initial', {}) if isinstance(totals, dict) else {},
-                'final': totals.get('final', {}) if isinstance(totals, dict) else {},
-            },
+            '胜平负赔率': dict(euro_block),
+            '欧赔': euro_block,
+            '亚值': asian_block,
+            '大小球': ou_block,
             '凯利': {
                 'initial': kelly.get('initial', {}),
                 'final': kelly.get('final', {}),
@@ -2646,7 +3773,16 @@ class EnhancedPredictor:
                     continue
 
                 merged = dict(current_odds or {})
-                merged["大小球"] = {"initial": totals.get("initial") or {}, "final": totals.get("final") or {}}
+                merged["大小球"] = {
+                    "initial": totals.get("initial") or {},
+                    "final": totals.get("final") or {},
+                }
+                if isinstance(totals.get("consensus"), dict):
+                    merged["大小球"]["consensus"] = totals.get("consensus") or {}
+                if isinstance(totals.get("companies"), list):
+                    merged["大小球"]["companies"] = totals.get("companies") or []
+                if totals.get("company_mode"):
+                    merged["大小球"]["company_mode"] = totals.get("company_mode")
                 diag["ok"] = True
                 diag["source_snapshot"] = out_path
                 return merged, diag
@@ -2982,7 +4118,7 @@ class EnhancedPredictor:
         )
 
         cache_params = {
-            'schema_v': 3,
+            'schema_v': 5,
             'home': home_team, 'away': away_team,
             'league': league_code, 'date': match_date,
             'current_odds': current_odds,
@@ -3006,6 +4142,38 @@ class EnhancedPredictor:
         # 1. 获取球队实力分析
         home_strength = self.team_manager.analyze_team_strength(league_code, home_team)
         away_strength = self.team_manager.analyze_team_strength(league_code, away_team)
+
+        # 1.1 构建多维比赛画像：球队基本面/战术/控球/伤停/H2H/盘口/资金流向代理
+        match_intelligence = self._build_match_intelligence(
+            league_code=league_code,
+            home_team=home_team,
+            away_team=away_team,
+            match_date=match_date,
+            analysis_context=analysis_context,
+            current_odds=current_odds,
+            home_strength=home_strength,
+            away_strength=away_strength,
+        )
+        realtime["context_applied"]["match_intelligence"] = {
+            "available": bool(match_intelligence.get("available")),
+            "signals": match_intelligence.get("signals", []),
+            "market_signals": (match_intelligence.get("market", {}) or {}).get("signals", []),
+        }
+        try:
+            mot = match_intelligence.get("motivation") if isinstance(match_intelligence, dict) else {}
+            if "home_motivation" not in analysis_context and isinstance(mot, dict):
+                sugg = mot.get("suggested_scores") or {}
+                if sugg.get("home") is not None:
+                    analysis_context["home_motivation"] = float(sugg["home"])
+                if sugg.get("away") is not None:
+                    analysis_context["away_motivation"] = float(sugg["away"])
+            h2h_ctx = match_intelligence.get("head_to_head") if isinstance(match_intelligence, dict) else {}
+            if isinstance(h2h_ctx, dict) and h2h_ctx.get("available"):
+                analysis_context.setdefault("h2h_home_wins", int(h2h_ctx.get("home_wins", 0)))
+                analysis_context.setdefault("h2h_away_wins", int(h2h_ctx.get("away_wins", 0)))
+                analysis_context.setdefault("h2h_draws", int(h2h_ctx.get("draws", 0)))
+        except Exception as e:
+            realtime["context_applied"]["match_intelligence_bind_error"] = str(e)
         
         # 2. 计算实力差距
         strength_diff = home_strength['strength'] - away_strength['strength']
@@ -3048,6 +4216,7 @@ class EnhancedPredictor:
                 base_home_lambda=base_home_lambda,
                 base_away_lambda=base_away_lambda,
                 european_odds=european_odds,
+                asian_handicap=asian_handicap,
             )
             realtime["context_applied"]["lambda_calibration"] = cal_diag
         except Exception as e:
@@ -3067,6 +4236,21 @@ class EnhancedPredictor:
             realtime["context_applied"]["league_over_under_learning"] = ou_learning_diag
         except Exception as e:
             realtime["context_applied"]["league_over_under_learning"] = {"applied": False, "error": str(e)}
+
+        # 使用多维画像做轻量 λ 修正，让控球/阵型/近况/伤停/资金流向代理真正参与结果。
+        try:
+            qa = match_intelligence.get("quant_adjustment") if isinstance(match_intelligence, dict) else {}
+            if isinstance(qa, dict):
+                hs = float(qa.get("home_lambda_scale") or 1.0)
+                as_ = float(qa.get("away_lambda_scale") or 1.0)
+                home_lambda = max(0.15, home_lambda * hs)
+                away_lambda = max(0.15, away_lambda * as_)
+                realtime["context_applied"]["match_intelligence_lambda_scale"] = {
+                    "home_lambda_scale": hs,
+                    "away_lambda_scale": as_,
+                }
+        except Exception as e:
+            realtime["context_applied"]["match_intelligence_lambda_scale"] = {"error": str(e)}
         
         # 简化的xG计算
         home_xg = home_lambda * 0.8
@@ -3153,6 +4337,20 @@ class EnhancedPredictor:
             probs.sort(key=lambda x: x[1], reverse=True)
         realtime["context_applied"]["live_outcome_adjustment"] = live_adj_diag
 
+        # 再叠加一次多维画像的轻量修正，让战术/控球/伤停/资金流向代理体现在最终概率上。
+        final_prob, match_intel_diag = self._apply_match_intelligence_adjustment(
+            final_prob=final_prob,
+            match_intelligence=match_intelligence,
+        )
+        if isinstance(match_intel_diag, dict):
+            realtime["context_applied"]["match_intelligence_adjustment"] = match_intel_diag
+        probs = [
+            ('主胜', final_prob['home_win']),
+            ('平局', final_prob['draw']),
+            ('客胜', final_prob['away_win'])
+        ]
+        probs.sort(key=lambda x: x[1], reverse=True)
+
         main_prediction = probs[0][0]
         confidence = probs[0][1]
 
@@ -3201,6 +4399,11 @@ class EnhancedPredictor:
             asian_handicap=asian_handicap,
             european_odds=european_odds,
         )
+        match_intelligence = self._finalize_match_intelligence(
+            match_intelligence=match_intelligence,
+            historical_odds_reference=historical_odds_reference,
+            upset_potential=upset_potential,
+        )
         
         # 7. 预测比分（Dixon-Coles 修正：更贴近低比分/平局分布）
         rho_map = {
@@ -3239,6 +4442,11 @@ class EnhancedPredictor:
         ou_line, ou_line_source = self._resolve_over_under_line(current_odds=current_odds, analysis_context=analysis_context)
         over_under = self.poisson_model.predict_over_under(home_lambda, away_lambda, line=ou_line)
         if isinstance(over_under, dict):
+            over_under, ou_resonance_diag = self._apply_market_resonance_to_over_under(
+                over_under=over_under,
+                match_intelligence=match_intelligence,
+            )
+            realtime["context_applied"]["market_resonance_over_under_adjustment"] = ou_resonance_diag
             over_under["line_source"] = ou_line_source
             learning_diag = realtime["context_applied"].get("league_over_under_learning", {})
             if isinstance(learning_diag, dict) and learning_diag.get("applied"):
@@ -3260,6 +4468,12 @@ class EnhancedPredictor:
                         fin = blk.get("final") if isinstance(blk.get("final"), dict) else {}
                         ini = blk.get("initial") if isinstance(blk.get("initial"), dict) else {}
                         market_ou = {"final": fin or {}, "initial": ini or {}}
+                        if isinstance(blk.get("consensus"), dict):
+                            market_ou["consensus"] = blk.get("consensus") or {}
+                        if isinstance(blk.get("companies"), list):
+                            market_ou["companies"] = blk.get("companies") or []
+                        if blk.get("company_mode"):
+                            market_ou["company_mode"] = blk.get("company_mode")
                 if market_ou:
                     over_under["market"] = market_ou
                     realtime["context_applied"]["ou_market"] = market_ou
@@ -3290,6 +4504,7 @@ class EnhancedPredictor:
             'home_strength': home_strength,
             'away_strength': away_strength,
             'upset_potential': upset_potential,
+            'match_intelligence': match_intelligence,
             'historical_odds_reference': historical_odds_reference,
             'model_predictions': fusion_result['all_models'],
             'final_probabilities': final_prob,

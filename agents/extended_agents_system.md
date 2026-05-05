@@ -1,10 +1,20 @@
 # 足球预测多Agent系统扩展方案
 
+> 当前说明：本文是扩展方案稿，不是当前仓库的正式运行说明。  
+> 当前正式主链路以 `prediction_system.py` 为入口，围绕 `collect-data -> predict-match/predict-schedule -> teams_2025-26.md -> save-result/accuracy` 组织；若涉及阶段化编排，则以 `harness-run` 为准。
+
 ## 系统扩展概览
 
 本扩展方案基于之前的优化版多Agent系统，新增核心功能：
 
 1. ✅ 引入机器学习模型提升预测准确率
+
+## 与当前正式流程的接口要求
+
+- 扩展方案若落地，输入应优先复用 `collect-data` 产出的赛程、`match_id` 与 `odds_data`
+- 赔率相关特征应优先读取真实 `大小球` 盘口与 `line_source`
+- 任何预测、评估、回填结果最终都应写回 `teams_2025-26.md` 或 `.okooo-scraper/runtime/`
+- 不应再把旧 `predictions/`、`reports/` 目录作为正式主流程产物
 
 ---
 

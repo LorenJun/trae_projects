@@ -1,10 +1,13 @@
 # 多模型分析系统实际应用方案
 
+> 当前说明：本文是通用多模型应用方案，不是当前仓库的正式执行文档。  
+> 当前正式流程以 `prediction_system.py collect-data / predict-match / predict-schedule / save-result / accuracy --refresh / harness-run` 为准，正式写回位置为 `europe_leagues/<league>/teams_2025-26.md`。
+
 ## 1. 系统架构设计
 
 ### 1.1 数据收集层
 - **实时数据接口**：对接主流体育数据提供商（如Opta、StatsBomb、WhoScored）
-- **历史数据仓库**：建立球队、球员、比赛的历史数据库
+- **历史数据沉淀**：在当前仓库中优先复用 `teams_2025-26.md`、`players/*.json` 与 `.okooo-scraper/runtime/`，而不是单独建设主流程历史数据库
 - **赔率数据接口**：对接多家博彩公司的实时赔率数据
 - **天气和场地数据**：收集比赛当天的天气情况和场地条件
 

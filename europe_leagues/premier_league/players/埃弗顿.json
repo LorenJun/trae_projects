@@ -13,16 +13,16 @@
       "market_value": 0,
       "stats": {
         "appearances": 6,
-        "minutes": 667,
+        "minutes": 672,
         "goals": 0,
         "assists": 1,
-        "yellow_cards": 3,
+        "yellow_cards": 4,
         "red_cards": 0,
         "clean_sheets": 3,
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Alcaraz Durán, Carlos Jonas",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
@@ -31,23 +31,23 @@
       "fpl_price_m": 5.2,
       "rating_metrics": {
         "source": "fpl",
-        "form": 0.0,
-        "points_per_game": 1.6,
-        "ict_index": 38.4,
-        "influence": 83.0,
-        "creativity": 144.5,
+        "form": 0.2,
+        "points_per_game": 1.5,
+        "ict_index": 38.7,
+        "influence": 84.2,
+        "creativity": 146.1,
         "threat": 156.0,
         "selected_by_percent": 0.1
       },
       "technical_stats": {
         "expected_goals": 1.04,
-        "expected_assists": 0.44,
-        "expected_goal_involvements": 1.48,
-        "expected_goals_conceded": 13.03,
-        "influence": 83.0,
-        "creativity": 144.5,
+        "expected_assists": 0.45,
+        "expected_goal_involvements": 1.49,
+        "expected_goals_conceded": 13.53,
+        "influence": 84.2,
+        "creativity": 146.1,
         "threat": 156.0,
-        "ict_index": 38.4
+        "ict_index": 38.7
       },
       "data_sources": [
         "fantasy.premierleague.com"
@@ -63,17 +63,17 @@
       "contract_until": "",
       "market_value": 0,
       "stats": {
-        "appearances": 19,
-        "minutes": 1662,
-        "goals": 6,
+        "appearances": 20,
+        "minutes": 1778,
+        "goals": 8,
         "assists": 0,
         "yellow_cards": 3,
         "red_cards": 0,
         "clean_sheets": 7,
         "saves": 0,
-        "bonus": 7
+        "bonus": 9
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Barry, Thierno Mamadou",
       "chance_of_playing_this_round": null,
       "chance_of_playing_next_round": null,
@@ -82,39 +82,39 @@
       "fpl_price_m": 5.7,
       "rating_metrics": {
         "source": "fpl",
-        "form": 1.0,
-        "points_per_game": 2.4,
-        "ict_index": 83.0,
-        "influence": 250.4,
-        "creativity": 180.8,
-        "threat": 424.0,
-        "selected_by_percent": 0.8
+        "form": 3.8,
+        "points_per_game": 2.6,
+        "ict_index": 97.9,
+        "influence": 333.6,
+        "creativity": 183.6,
+        "threat": 487.0,
+        "selected_by_percent": 0.7
       },
       "technical_stats": {
-        "expected_goals": 6.13,
-        "expected_assists": 0.39,
-        "expected_goal_involvements": 6.52,
-        "expected_goals_conceded": 29.31,
-        "influence": 250.4,
-        "creativity": 180.8,
-        "threat": 424.0,
-        "ict_index": 83.0
+        "expected_goals": 8.14,
+        "expected_assists": 0.4,
+        "expected_goal_involvements": 8.54,
+        "expected_goals_conceded": 31.1,
+        "influence": 333.6,
+        "creativity": 183.6,
+        "threat": 487.0,
+        "ict_index": 97.9
       },
       "understat_player_id": "12916",
       "shooting_stats": {
         "source": "understat",
-        "shots": 32,
-        "goals": 6,
-        "xg": 7.599746348336339,
-        "npxg": 7.599746348336339,
-        "xg_chain": 9.119870620779693,
+        "shots": 37,
+        "goals": 8,
+        "xg": 9.130181910470128,
+        "npxg": 9.130181910470128,
+        "xg_chain": 10.159722882322967,
         "xg_buildup": 2.1255453256890178
       },
       "passing_stats": {
         "source": "understat+fpl",
         "key_passes": 10,
         "xa": 0.9412833843380213,
-        "creativity_index": 180.8
+        "creativity_index": 183.6
       },
       "defensive_stats": {
         "source": "fpl",
@@ -122,26 +122,26 @@
         "saves": 0,
         "yellow_cards": 3,
         "red_cards": 0,
-        "expected_goals_conceded": 29.31
+        "expected_goals_conceded": 31.1
       },
       "advanced_stats": {
         "source": "understat",
-        "games": 33,
-        "minutes": 1685,
+        "games": 35,
+        "minutes": 1799,
         "position_code": "F S",
-        "xg": 7.599746348336339,
+        "xg": 9.130181910470128,
         "xa": 0.9412833843380213,
-        "npxg": 7.599746348336339,
-        "shots": 32,
+        "npxg": 9.130181910470128,
+        "shots": 37,
         "key_passes": 10,
-        "xg_chain": 9.119870620779693,
+        "xg_chain": 10.159722882322967,
         "xg_buildup": 2.1255453256890178
       },
       "heatmap": {
         "source": "understat_shots",
         "grid_rows": 5,
         "grid_cols": 6,
-        "shot_count": 105,
+        "shot_count": 110,
         "shot_density": [
           [
             0,
@@ -156,7 +156,7 @@
             0,
             0,
             0,
-            0,
+            1,
             8
           ],
           [
@@ -165,7 +165,7 @@
             0,
             0,
             4,
-            81
+            85
           ],
           [
             0,
@@ -211,23 +211,23 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Branthwaite, Jarrad Paul",
       "injury_reason": "Hamstring injury - Expected back 01 Jun",
-      "chance_of_playing_this_round": 100,
+      "chance_of_playing_this_round": 0,
       "chance_of_playing_next_round": 0,
       "squad_number": null,
       "photo": "480455.jpg",
       "fpl_price_m": 5.3,
       "rating_metrics": {
         "source": "fpl",
-        "form": 3.5,
+        "form": 1.8,
         "points_per_game": 3.2,
         "ict_index": 29.3,
         "influence": 175.0,
         "creativity": 42.8,
         "threat": 75.0,
-        "selected_by_percent": 0.4
+        "selected_by_percent": 0.3
       },
       "technical_stats": {
         "expected_goals": 0.34,
@@ -350,7 +350,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Coleman, Seamus",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
@@ -478,58 +478,58 @@
       "contract_until": "",
       "market_value": 0,
       "stats": {
-        "appearances": 25,
-        "minutes": 2186,
-        "goals": 7,
+        "appearances": 27,
+        "minutes": 2366,
+        "goals": 8,
         "assists": 6,
         "yellow_cards": 6,
         "red_cards": 0,
         "clean_sheets": 8,
         "saves": 0,
-        "bonus": 17
+        "bonus": 18
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Dewsbury-Hall, Kiernan Frank",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
       "squad_number": null,
       "photo": "215413.jpg",
-      "fpl_price_m": 5.1,
+      "fpl_price_m": 5.2,
       "rating_metrics": {
         "source": "fpl",
-        "form": 7.5,
+        "form": 6.2,
         "points_per_game": 5.1,
-        "ict_index": 141.2,
-        "influence": 537.4,
-        "creativity": 495.3,
-        "threat": 378.0,
-        "selected_by_percent": 6.4
+        "ict_index": 150.9,
+        "influence": 582.4,
+        "creativity": 523.5,
+        "threat": 402.0,
+        "selected_by_percent": 6.1
       },
       "technical_stats": {
-        "expected_goals": 3.71,
-        "expected_assists": 4.71,
-        "expected_goal_involvements": 8.42,
-        "expected_goals_conceded": 33.42,
-        "influence": 537.4,
-        "creativity": 495.3,
-        "threat": 378.0,
-        "ict_index": 141.2
+        "expected_goals": 3.88,
+        "expected_assists": 4.78,
+        "expected_goal_involvements": 8.66,
+        "expected_goals_conceded": 35.93,
+        "influence": 582.4,
+        "creativity": 523.5,
+        "threat": 402.0,
+        "ict_index": 150.9
       },
       "understat_player_id": "9739",
       "shooting_stats": {
         "source": "understat",
-        "shots": 32,
-        "goals": 7,
-        "xg": 3.730691362172365,
-        "npxg": 3.730691362172365,
-        "xg_chain": 11.686450354754925,
-        "xg_buildup": 6.375396005809307
+        "shots": 36,
+        "goals": 8,
+        "xg": 3.860382229089737,
+        "npxg": 3.860382229089737,
+        "xg_chain": 12.358229331672192,
+        "xg_buildup": 6.795769236981869
       },
       "passing_stats": {
         "source": "understat+fpl",
-        "key_passes": 30,
-        "xa": 5.720534685999155,
-        "creativity_index": 495.3
+        "key_passes": 32,
+        "xa": 5.842249553650618,
+        "creativity_index": 523.5
       },
       "defensive_stats": {
         "source": "fpl",
@@ -537,26 +537,26 @@
         "saves": 0,
         "yellow_cards": 6,
         "red_cards": 0,
-        "expected_goals_conceded": 33.42
+        "expected_goals_conceded": 35.93
       },
       "advanced_stats": {
         "source": "understat",
-        "games": 26,
-        "minutes": 2200,
+        "games": 28,
+        "minutes": 2380,
         "position_code": "M S",
-        "xg": 3.730691362172365,
-        "xa": 5.720534685999155,
-        "npxg": 3.730691362172365,
-        "shots": 32,
-        "key_passes": 30,
-        "xg_chain": 11.686450354754925,
-        "xg_buildup": 6.375396005809307
+        "xg": 3.860382229089737,
+        "xa": 5.842249553650618,
+        "npxg": 3.860382229089737,
+        "shots": 36,
+        "key_passes": 32,
+        "xg_chain": 12.358229331672192,
+        "xg_buildup": 6.795769236981869
       },
       "heatmap": {
         "source": "understat_shots",
         "grid_rows": 5,
         "grid_cols": 6,
-        "shot_count": 79,
+        "shot_count": 83,
         "shot_density": [
           [
             0,
@@ -577,17 +577,17 @@
           [
             0,
             0,
-            0,
+            1,
             0,
             19,
-            23
+            24
           ],
           [
             0,
             0,
             0,
             0,
-            16,
+            18,
             12
           ],
           [
@@ -616,42 +616,42 @@
       "contract_until": "",
       "market_value": 0,
       "stats": {
-        "appearances": 33,
-        "minutes": 2963,
+        "appearances": 35,
+        "minutes": 3143,
         "goals": 2,
-        "assists": 6,
-        "yellow_cards": 9,
+        "assists": 7,
+        "yellow_cards": 10,
         "red_cards": 0,
         "clean_sheets": 11,
         "saves": 0,
         "bonus": 13
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Garner, James David",
       "chance_of_playing_this_round": null,
       "chance_of_playing_next_round": null,
       "squad_number": null,
       "photo": "232928.jpg",
-      "fpl_price_m": 5.3,
+      "fpl_price_m": 5.2,
       "rating_metrics": {
         "source": "fpl",
-        "form": 3.0,
+        "form": 3.5,
         "points_per_game": 4.4,
-        "ict_index": 178.3,
-        "influence": 779.4,
-        "creativity": 785.2,
-        "threat": 216.0,
-        "selected_by_percent": 4.3
+        "ict_index": 188.6,
+        "influence": 826.0,
+        "creativity": 840.0,
+        "threat": 218.0,
+        "selected_by_percent": 3.9
       },
       "technical_stats": {
         "expected_goals": 1.99,
-        "expected_assists": 5.11,
-        "expected_goal_involvements": 7.1,
-        "expected_goals_conceded": 49.09,
-        "influence": 779.4,
-        "creativity": 785.2,
-        "threat": 216.0,
-        "ict_index": 178.3
+        "expected_assists": 5.36,
+        "expected_goal_involvements": 7.35,
+        "expected_goals_conceded": 51.71,
+        "influence": 826.0,
+        "creativity": 840.0,
+        "threat": 218.0,
+        "ict_index": 188.6
       },
       "understat_player_id": "7438",
       "shooting_stats": {
@@ -660,35 +660,35 @@
         "goals": 2,
         "xg": 2.012896182946861,
         "npxg": 2.012896182946861,
-        "xg_chain": 9.747104899957776,
-        "xg_buildup": 6.892208077944815
+        "xg_chain": 9.894019024446607,
+        "xg_buildup": 7.022888285107911
       },
       "passing_stats": {
         "source": "understat+fpl",
-        "key_passes": 46,
-        "xa": 5.597859499976039,
-        "creativity_index": 785.2
+        "key_passes": 49,
+        "xa": 5.713780008256435,
+        "creativity_index": 840.0
       },
       "defensive_stats": {
         "source": "fpl",
         "clean_sheets": 11,
         "saves": 0,
-        "yellow_cards": 9,
+        "yellow_cards": 10,
         "red_cards": 0,
-        "expected_goals_conceded": 49.09
+        "expected_goals_conceded": 51.71
       },
       "advanced_stats": {
         "source": "understat",
-        "games": 33,
-        "minutes": 2967,
+        "games": 35,
+        "minutes": 3147,
         "position_code": "D M",
         "xg": 2.012896182946861,
-        "xa": 5.597859499976039,
+        "xa": 5.713780008256435,
         "npxg": 2.012896182946861,
         "shots": 42,
-        "key_passes": 46,
-        "xg_chain": 9.747104899957776,
-        "xg_buildup": 6.892208077944815
+        "key_passes": 49,
+        "xg_chain": 9.894019024446607,
+        "xg_buildup": 7.022888285107911
       },
       "heatmap": {
         "source": "understat_shots",
@@ -749,48 +749,47 @@
       "position": "前锋",
       "age": 0,
       "nationality": "",
-      "transfer_status": "injured",
+      "transfer_status": "current",
       "join_date": "",
       "contract_until": "",
       "market_value": 0,
       "stats": {
-        "appearances": 14,
-        "minutes": 1341,
+        "appearances": 15,
+        "minutes": 1404,
         "goals": 8,
         "assists": 1,
-        "yellow_cards": 2,
+        "yellow_cards": 3,
         "red_cards": 0,
         "clean_sheets": 5,
         "saves": 0,
         "bonus": 13
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Gomes Betuncal, Norberto Bercique",
-      "injury_reason": "Head injury - Expected back 04 May",
-      "chance_of_playing_this_round": null,
-      "chance_of_playing_next_round": 0,
+      "chance_of_playing_this_round": 100,
+      "chance_of_playing_next_round": 100,
       "squad_number": null,
       "photo": "486385.jpg",
       "fpl_price_m": 5.0,
       "rating_metrics": {
         "source": "fpl",
-        "form": 8.0,
-        "points_per_game": 2.8,
-        "ict_index": 111.5,
-        "influence": 390.0,
-        "creativity": 137.1,
-        "threat": 604.0,
-        "selected_by_percent": 3.7
+        "form": 4.2,
+        "points_per_game": 2.7,
+        "ict_index": 115.8,
+        "influence": 400.2,
+        "creativity": 157.2,
+        "threat": 617.0,
+        "selected_by_percent": 2.9
       },
       "technical_stats": {
-        "expected_goals": 8.2,
+        "expected_goals": 8.4,
         "expected_assists": 0.22,
-        "expected_goal_involvements": 8.42,
-        "expected_goals_conceded": 21.24,
-        "influence": 390.0,
-        "creativity": 137.1,
-        "threat": 604.0,
-        "ict_index": 111.5
+        "expected_goal_involvements": 8.62,
+        "expected_goals_conceded": 22.07,
+        "influence": 400.2,
+        "creativity": 157.2,
+        "threat": 617.0,
+        "ict_index": 115.8
       },
       "data_sources": [
         "fantasy.premierleague.com"
@@ -816,7 +815,7 @@
         "saves": 0,
         "bonus": 12
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Grealish, Jack Peter",
       "injury_reason": "Foot injury - Expected back 01 Jun",
       "chance_of_playing_this_round": 0,
@@ -832,7 +831,7 @@
         "influence": 374.2,
         "creativity": 520.5,
         "threat": 397.0,
-        "selected_by_percent": 5.7
+        "selected_by_percent": 5.6
       },
       "technical_stats": {
         "expected_goals": 2.05,
@@ -940,13 +939,13 @@
       "position": "中场",
       "age": 0,
       "nationality": "",
-      "transfer_status": "current",
+      "transfer_status": "doubtful",
       "join_date": "",
       "contract_until": "",
       "market_value": 0,
       "stats": {
-        "appearances": 24,
-        "minutes": 2009,
+        "appearances": 25,
+        "minutes": 2094,
         "goals": 2,
         "assists": 3,
         "yellow_cards": 1,
@@ -955,48 +954,49 @@
         "saves": 0,
         "bonus": 4
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Gueye, Idrissa Gana",
+      "injury_reason": "Knock - 75% chance of playing",
       "chance_of_playing_this_round": 100,
-      "chance_of_playing_next_round": 100,
+      "chance_of_playing_next_round": 75,
       "squad_number": null,
       "photo": "80801.jpg",
       "fpl_price_m": 5.4,
       "rating_metrics": {
         "source": "fpl",
-        "form": 3.5,
-        "points_per_game": 3.4,
-        "ict_index": 83.2,
-        "influence": 379.8,
-        "creativity": 251.2,
-        "threat": 200.0,
+        "form": 2.2,
+        "points_per_game": 3.3,
+        "ict_index": 85.1,
+        "influence": 382.6,
+        "creativity": 259.2,
+        "threat": 208.0,
         "selected_by_percent": 0.1
       },
       "technical_stats": {
-        "expected_goals": 1.6,
-        "expected_assists": 1.71,
-        "expected_goal_involvements": 3.31,
-        "expected_goals_conceded": 30.46,
-        "influence": 379.8,
-        "creativity": 251.2,
-        "threat": 200.0,
-        "ict_index": 83.2
+        "expected_goals": 1.99,
+        "expected_assists": 1.84,
+        "expected_goal_involvements": 3.83,
+        "expected_goals_conceded": 31.26,
+        "influence": 382.6,
+        "creativity": 259.2,
+        "threat": 208.0,
+        "ict_index": 85.1
       },
       "understat_player_id": "668",
       "shooting_stats": {
         "source": "understat",
-        "shots": 28,
+        "shots": 29,
         "goals": 2,
-        "xg": 1.7643213793635368,
-        "npxg": 1.7643213793635368,
-        "xg_chain": 9.08712889160961,
-        "xg_buildup": 6.844726667739451
+        "xg": 1.9142106398940086,
+        "npxg": 1.9142106398940086,
+        "xg_chain": 9.138687188737094,
+        "xg_buildup": 6.896284964866936
       },
       "passing_stats": {
         "source": "understat+fpl",
         "key_passes": 13,
         "xa": 1.693690698593855,
-        "creativity_index": 251.2
+        "creativity_index": 259.2
       },
       "defensive_stats": {
         "source": "fpl",
@@ -1004,26 +1004,26 @@
         "saves": 0,
         "yellow_cards": 1,
         "red_cards": 1,
-        "expected_goals_conceded": 30.46
+        "expected_goals_conceded": 31.26
       },
       "advanced_stats": {
         "source": "understat",
-        "games": 24,
-        "minutes": 2033,
+        "games": 25,
+        "minutes": 2120,
         "position_code": "M",
-        "xg": 1.7643213793635368,
+        "xg": 1.9142106398940086,
         "xa": 1.693690698593855,
-        "npxg": 1.7643213793635368,
-        "shots": 28,
+        "npxg": 1.9142106398940086,
+        "shots": 29,
         "key_passes": 13,
-        "xg_chain": 9.08712889160961,
-        "xg_buildup": 6.844726667739451
+        "xg_chain": 9.138687188737094,
+        "xg_buildup": 6.896284964866936
       },
       "heatmap": {
         "source": "understat_shots",
         "grid_rows": 5,
         "grid_cols": 6,
-        "shot_count": 283,
+        "shot_count": 284,
         "shot_density": [
           [
             0,
@@ -1047,7 +1047,7 @@
             0,
             0,
             103,
-            47
+            48
           ],
           [
             0,
@@ -1083,8 +1083,8 @@
       "contract_until": "",
       "market_value": 0,
       "stats": {
-        "appearances": 13,
-        "minutes": 1117,
+        "appearances": 14,
+        "minutes": 1232,
         "goals": 0,
         "assists": 3,
         "yellow_cards": 8,
@@ -1093,7 +1093,7 @@
         "saves": 0,
         "bonus": 1
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Iroegbunam, Timothy Emeka",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
@@ -1102,23 +1102,23 @@
       "fpl_price_m": 4.8,
       "rating_metrics": {
         "source": "fpl",
-        "form": 0.5,
-        "points_per_game": 2.4,
-        "ict_index": 35.3,
-        "influence": 195.8,
-        "creativity": 93.8,
-        "threat": 65.0,
+        "form": 1.0,
+        "points_per_game": 2.3,
+        "ict_index": 40.1,
+        "influence": 219.6,
+        "creativity": 106.7,
+        "threat": 77.0,
         "selected_by_percent": 0.0
       },
       "technical_stats": {
-        "expected_goals": 0.41,
-        "expected_assists": 0.61,
-        "expected_goal_involvements": 1.02,
-        "expected_goals_conceded": 18.74,
-        "influence": 195.8,
-        "creativity": 93.8,
-        "threat": 65.0,
-        "ict_index": 35.3
+        "expected_goals": 0.5,
+        "expected_assists": 0.64,
+        "expected_goal_involvements": 1.14,
+        "expected_goals_conceded": 20.46,
+        "influence": 219.6,
+        "creativity": 106.7,
+        "threat": 77.0,
+        "ict_index": 40.1
       },
       "data_sources": [
         "fantasy.premierleague.com"
@@ -1134,17 +1134,17 @@
       "contract_until": "",
       "market_value": 0,
       "stats": {
-        "appearances": 24,
-        "minutes": 2138,
+        "appearances": 26,
+        "minutes": 2318,
         "goals": 3,
         "assists": 0,
-        "yellow_cards": 0,
+        "yellow_cards": 1,
         "red_cards": 1,
         "clean_sheets": 7,
         "saves": 0,
         "bonus": 8
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Keane, Michael Vincent",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
@@ -1153,66 +1153,66 @@
       "fpl_price_m": 4.5,
       "rating_metrics": {
         "source": "fpl",
-        "form": 0.5,
-        "points_per_game": 4.2,
-        "ict_index": 92.4,
-        "influence": 652.6,
-        "creativity": 30.1,
-        "threat": 241.0,
-        "selected_by_percent": 3.0
+        "form": 1.0,
+        "points_per_game": 4.1,
+        "ict_index": 97.9,
+        "influence": 698.6,
+        "creativity": 31.7,
+        "threat": 248.0,
+        "selected_by_percent": 2.6
       },
       "technical_stats": {
-        "expected_goals": 1.97,
-        "expected_assists": 0.2,
-        "expected_goal_involvements": 2.17,
-        "expected_goals_conceded": 37.43,
-        "influence": 652.6,
-        "creativity": 30.1,
-        "threat": 241.0,
-        "ict_index": 92.4
+        "expected_goals": 2.01,
+        "expected_assists": 0.23,
+        "expected_goal_involvements": 2.24,
+        "expected_goals_conceded": 40.05,
+        "influence": 698.6,
+        "creativity": 31.7,
+        "threat": 248.0,
+        "ict_index": 97.9
       },
       "understat_player_id": "1653",
       "shooting_stats": {
         "source": "understat",
-        "shots": 21,
+        "shots": 22,
         "goals": 3,
-        "xg": 3.3516049049794674,
-        "npxg": 3.3516049049794674,
-        "xg_chain": 4.437477028928697,
-        "xg_buildup": 3.4390816064551473
+        "xg": 3.3738929610699415,
+        "npxg": 3.3738929610699415,
+        "xg_chain": 4.471713448874652,
+        "xg_buildup": 3.4733180264011025
       },
       "passing_stats": {
         "source": "understat+fpl",
         "key_passes": 1,
         "xa": 0.097673699259758,
-        "creativity_index": 30.1
+        "creativity_index": 31.7
       },
       "defensive_stats": {
         "source": "fpl",
         "clean_sheets": 7,
         "saves": 0,
-        "yellow_cards": 0,
+        "yellow_cards": 1,
         "red_cards": 1,
-        "expected_goals_conceded": 37.43
+        "expected_goals_conceded": 40.05
       },
       "advanced_stats": {
         "source": "understat",
-        "games": 28,
-        "minutes": 2136,
+        "games": 30,
+        "minutes": 2316,
         "position_code": "D S",
-        "xg": 3.3516049049794674,
+        "xg": 3.3738929610699415,
         "xa": 0.097673699259758,
-        "npxg": 3.3516049049794674,
-        "shots": 21,
+        "npxg": 3.3738929610699415,
+        "shots": 22,
         "key_passes": 1,
-        "xg_chain": 4.437477028928697,
-        "xg_buildup": 3.4390816064551473
+        "xg_chain": 4.471713448874652,
+        "xg_buildup": 3.4733180264011025
       },
       "heatmap": {
         "source": "understat_shots",
         "grid_rows": 5,
         "grid_cols": 6,
-        "shot_count": 184,
+        "shot_count": 185,
         "shot_density": [
           [
             0,
@@ -1236,7 +1236,7 @@
             0,
             0,
             9,
-            152
+            153
           ],
           [
             0,
@@ -1282,7 +1282,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "King, Thomas Lloyd",
       "chance_of_playing_this_round": null,
       "chance_of_playing_next_round": null,
@@ -1323,8 +1323,8 @@
       "contract_until": "",
       "market_value": 0,
       "stats": {
-        "appearances": 13,
-        "minutes": 1095,
+        "appearances": 14,
+        "minutes": 1159,
         "goals": 0,
         "assists": 3,
         "yellow_cards": 1,
@@ -1333,7 +1333,7 @@
         "saves": 0,
         "bonus": 1
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "McNeil, Dwight James Matthew",
       "chance_of_playing_this_round": null,
       "chance_of_playing_next_round": null,
@@ -1342,39 +1342,39 @@
       "fpl_price_m": 5.5,
       "rating_metrics": {
         "source": "fpl",
-        "form": 2.0,
+        "form": 1.5,
         "points_per_game": 2.5,
-        "ict_index": 47.9,
-        "influence": 129.6,
-        "creativity": 217.3,
-        "threat": 131.0,
-        "selected_by_percent": 0.2
+        "ict_index": 52.1,
+        "influence": 140.4,
+        "creativity": 241.6,
+        "threat": 138.0,
+        "selected_by_percent": 0.1
       },
       "technical_stats": {
-        "expected_goals": 1.34,
-        "expected_assists": 0.96,
-        "expected_goal_involvements": 2.3,
-        "expected_goals_conceded": 17.81,
-        "influence": 129.6,
-        "creativity": 217.3,
-        "threat": 131.0,
-        "ict_index": 47.9
+        "expected_goals": 1.37,
+        "expected_assists": 1.91,
+        "expected_goal_involvements": 3.28,
+        "expected_goals_conceded": 18.61,
+        "influence": 140.4,
+        "creativity": 241.6,
+        "threat": 138.0,
+        "ict_index": 52.1
       },
       "understat_player_id": "6756",
       "shooting_stats": {
         "source": "understat",
-        "shots": 23,
+        "shots": 24,
         "goals": 0,
-        "xg": 1.4290371015667915,
-        "npxg": 1.4290371015667915,
-        "xg_chain": 4.286078460514545,
-        "xg_buildup": 2.359806075692177
+        "xg": 1.4632735215127468,
+        "npxg": 1.4632735215127468,
+        "xg_chain": 4.5996328964829445,
+        "xg_buildup": 2.5078608095645905
       },
       "passing_stats": {
         "source": "understat+fpl",
-        "key_passes": 13,
-        "xa": 1.4597698152065277,
-        "creativity_index": 217.3
+        "key_passes": 15,
+        "xa": 1.7390878200531006,
+        "creativity_index": 241.6
       },
       "defensive_stats": {
         "source": "fpl",
@@ -1382,26 +1382,26 @@
         "saves": 0,
         "yellow_cards": 1,
         "red_cards": 0,
-        "expected_goals_conceded": 17.81
+        "expected_goals_conceded": 18.61
       },
       "advanced_stats": {
         "source": "understat",
-        "games": 20,
-        "minutes": 1117,
+        "games": 21,
+        "minutes": 1183,
         "position_code": "F M S",
-        "xg": 1.4290371015667915,
-        "xa": 1.4597698152065277,
-        "npxg": 1.4290371015667915,
-        "shots": 23,
-        "key_passes": 13,
-        "xg_chain": 4.286078460514545,
-        "xg_buildup": 2.359806075692177
+        "xg": 1.4632735215127468,
+        "xa": 1.7390878200531006,
+        "npxg": 1.4632735215127468,
+        "shots": 24,
+        "key_passes": 15,
+        "xg_chain": 4.5996328964829445,
+        "xg_buildup": 2.5078608095645905
       },
       "heatmap": {
         "source": "understat_shots",
         "grid_rows": 5,
         "grid_cols": 6,
-        "shot_count": 304,
+        "shot_count": 305,
         "shot_density": [
           [
             0,
@@ -1417,7 +1417,7 @@
             0,
             0,
             44,
-            22
+            23
           ],
           [
             0,
@@ -1461,8 +1461,8 @@
       "contract_until": "",
       "market_value": 0,
       "stats": {
-        "appearances": 28,
-        "minutes": 2509,
+        "appearances": 30,
+        "minutes": 2689,
         "goals": 0,
         "assists": 1,
         "yellow_cards": 5,
@@ -1471,7 +1471,7 @@
         "saves": 0,
         "bonus": 2
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Mykolenko, Vitalii",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
@@ -1480,23 +1480,23 @@
       "fpl_price_m": 4.9,
       "rating_metrics": {
         "source": "fpl",
-        "form": 3.0,
-        "points_per_game": 3.2,
-        "ict_index": 89.2,
-        "influence": 485.4,
-        "creativity": 342.9,
-        "threat": 65.0,
-        "selected_by_percent": 0.8
+        "form": 2.0,
+        "points_per_game": 3.1,
+        "ict_index": 93.3,
+        "influence": 519.4,
+        "creativity": 347.7,
+        "threat": 67.0,
+        "selected_by_percent": 0.6
       },
       "technical_stats": {
         "expected_goals": 0.28,
-        "expected_assists": 2.33,
-        "expected_goal_involvements": 2.61,
-        "expected_goals_conceded": 41.32,
-        "influence": 485.4,
-        "creativity": 342.9,
-        "threat": 65.0,
-        "ict_index": 89.2
+        "expected_assists": 2.35,
+        "expected_goal_involvements": 2.63,
+        "expected_goals_conceded": 43.94,
+        "influence": 519.4,
+        "creativity": 347.7,
+        "threat": 67.0,
+        "ict_index": 93.3
       },
       "understat_player_id": "10291",
       "shooting_stats": {
@@ -1505,14 +1505,14 @@
         "goals": 0,
         "xg": 0.2774586006999016,
         "npxg": 0.2774586006999016,
-        "xg_chain": 6.6850278824567795,
-        "xg_buildup": 5.717512307688594
+        "xg_chain": 6.736586179584265,
+        "xg_buildup": 5.769070604816079
       },
       "passing_stats": {
         "source": "understat+fpl",
         "key_passes": 19,
         "xa": 1.0271244905889034,
-        "creativity_index": 342.9
+        "creativity_index": 347.7
       },
       "defensive_stats": {
         "source": "fpl",
@@ -1520,20 +1520,20 @@
         "saves": 0,
         "yellow_cards": 5,
         "red_cards": 0,
-        "expected_goals_conceded": 41.32
+        "expected_goals_conceded": 43.94
       },
       "advanced_stats": {
         "source": "understat",
-        "games": 28,
-        "minutes": 2513,
+        "games": 30,
+        "minutes": 2693,
         "position_code": "D",
         "xg": 0.2774586006999016,
         "xa": 1.0271244905889034,
         "npxg": 0.2774586006999016,
         "shots": 9,
         "key_passes": 19,
-        "xg_chain": 6.6850278824567795,
-        "xg_buildup": 5.717512307688594
+        "xg_chain": 6.736586179584265,
+        "xg_buildup": 5.769070604816079
       },
       "heatmap": {
         "source": "understat_shots",
@@ -1599,8 +1599,8 @@
       "contract_until": "",
       "market_value": 0,
       "stats": {
-        "appearances": 27,
-        "minutes": 2331,
+        "appearances": 29,
+        "minutes": 2511,
         "goals": 6,
         "assists": 3,
         "yellow_cards": 2,
@@ -1609,7 +1609,7 @@
         "saves": 0,
         "bonus": 7
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Ndiaye, Iliman-Cheikh Baroy",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
@@ -1618,23 +1618,23 @@
       "fpl_price_m": 6.2,
       "rating_metrics": {
         "source": "fpl",
-        "form": 3.0,
-        "points_per_game": 4.4,
-        "ict_index": 145.8,
-        "influence": 556.2,
-        "creativity": 426.6,
-        "threat": 473.0,
-        "selected_by_percent": 5.2
+        "form": 2.5,
+        "points_per_game": 4.2,
+        "ict_index": 155.2,
+        "influence": 576.4,
+        "creativity": 443.9,
+        "threat": 530.0,
+        "selected_by_percent": 4.4
       },
       "technical_stats": {
-        "expected_goals": 5.13,
-        "expected_assists": 4.25,
-        "expected_goal_involvements": 9.38,
-        "expected_goals_conceded": 35.59,
-        "influence": 556.2,
-        "creativity": 426.6,
-        "threat": 473.0,
-        "ict_index": 145.8
+        "expected_goals": 6.21,
+        "expected_assists": 4.29,
+        "expected_goal_involvements": 10.5,
+        "expected_goals_conceded": 38.21,
+        "influence": 576.4,
+        "creativity": 443.9,
+        "threat": 530.0,
+        "ict_index": 155.2
       },
       "data_sources": [
         "fantasy.premierleague.com"
@@ -1650,17 +1650,17 @@
       "contract_until": "",
       "market_value": 0,
       "stats": {
-        "appearances": 30,
-        "minutes": 2726,
-        "goals": 0,
+        "appearances": 32,
+        "minutes": 2880,
+        "goals": 1,
         "assists": 3,
-        "yellow_cards": 2,
+        "yellow_cards": 4,
         "red_cards": 1,
         "clean_sheets": 10,
         "saves": 0,
         "bonus": 2
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "O'Brien, Jake Patrick",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
@@ -1669,23 +1669,23 @@
       "fpl_price_m": 4.9,
       "rating_metrics": {
         "source": "fpl",
-        "form": 2.5,
-        "points_per_game": 3.3,
-        "ict_index": 90.1,
-        "influence": 518.0,
-        "creativity": 247.5,
-        "threat": 132.0,
+        "form": 3.0,
+        "points_per_game": 3.4,
+        "ict_index": 99.8,
+        "influence": 568.4,
+        "creativity": 259.0,
+        "threat": 167.0,
         "selected_by_percent": 0.7
       },
       "technical_stats": {
-        "expected_goals": 0.94,
-        "expected_assists": 0.91,
-        "expected_goal_involvements": 1.85,
-        "expected_goals_conceded": 46.97,
-        "influence": 518.0,
-        "creativity": 247.5,
-        "threat": 132.0,
-        "ict_index": 90.1
+        "expected_goals": 1.11,
+        "expected_assists": 0.96,
+        "expected_goal_involvements": 2.07,
+        "expected_goals_conceded": 49.22,
+        "influence": 568.4,
+        "creativity": 259.0,
+        "threat": 167.0,
+        "ict_index": 99.8
       },
       "data_sources": [
         "fantasy.premierleague.com"
@@ -1702,7 +1702,7 @@
       "market_value": 0,
       "stats": {
         "appearances": 3,
-        "minutes": 237,
+        "minutes": 238,
         "goals": 0,
         "assists": 0,
         "yellow_cards": 0,
@@ -1711,7 +1711,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Patterson, Nathan Kenneth",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
@@ -1720,10 +1720,10 @@
       "fpl_price_m": 4.4,
       "rating_metrics": {
         "source": "fpl",
-        "form": 0.0,
-        "points_per_game": 3.5,
-        "ict_index": 8.6,
-        "influence": 63.6,
+        "form": 0.2,
+        "points_per_game": 3.1,
+        "ict_index": 8.8,
+        "influence": 65.6,
         "creativity": 6.4,
         "threat": 17.0,
         "selected_by_percent": 0.0
@@ -1732,11 +1732,11 @@
         "expected_goals": 0.03,
         "expected_assists": 0.04,
         "expected_goal_involvements": 0.07,
-        "expected_goals_conceded": 3.55,
-        "influence": 63.6,
+        "expected_goals_conceded": 3.67,
+        "influence": 65.6,
         "creativity": 6.4,
         "threat": 17.0,
-        "ict_index": 8.6
+        "ict_index": 8.8
       },
       "understat_player_id": "10292",
       "shooting_stats": {
@@ -1760,12 +1760,12 @@
         "saves": 0,
         "yellow_cards": 0,
         "red_cards": 0,
-        "expected_goals_conceded": 3.55
+        "expected_goals_conceded": 3.67
       },
       "advanced_stats": {
         "source": "understat",
-        "games": 6,
-        "minutes": 240,
+        "games": 7,
+        "minutes": 241,
         "position_code": "D S",
         "xg": 0.1701965481042862,
         "xa": 0.0,
@@ -1839,17 +1839,17 @@
       "contract_until": "",
       "market_value": 0,
       "stats": {
-        "appearances": 33,
-        "minutes": 2970,
+        "appearances": 35,
+        "minutes": 3150,
         "goals": 0,
         "assists": 0,
         "yellow_cards": 4,
         "red_cards": 0,
         "clean_sheets": 11,
-        "saves": 91,
+        "saves": 93,
         "bonus": 11
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Pickford, Jordan Lee",
       "chance_of_playing_this_round": null,
       "chance_of_playing_next_round": null,
@@ -1858,23 +1858,23 @@
       "fpl_price_m": 5.6,
       "rating_metrics": {
         "source": "fpl",
-        "form": 0.5,
-        "points_per_game": 3.8,
-        "ict_index": 79.8,
-        "influence": 785.8,
-        "creativity": 10.2,
+        "form": 0.8,
+        "points_per_game": 3.7,
+        "ict_index": 83.6,
+        "influence": 813.4,
+        "creativity": 20.3,
         "threat": 2.0,
-        "selected_by_percent": 14.0
+        "selected_by_percent": 13.0
       },
       "technical_stats": {
         "expected_goals": 0.0,
-        "expected_assists": 0.15,
-        "expected_goal_involvements": 0.15,
-        "expected_goals_conceded": 49.15,
-        "influence": 785.8,
-        "creativity": 10.2,
+        "expected_assists": 0.16,
+        "expected_goal_involvements": 0.16,
+        "expected_goals_conceded": 51.77,
+        "influence": 813.4,
+        "creativity": 20.3,
         "threat": 2.0,
-        "ict_index": 79.8
+        "ict_index": 83.6
       },
       "understat_player_id": "741",
       "shooting_stats": {
@@ -1888,28 +1888,28 @@
       },
       "passing_stats": {
         "source": "understat+fpl",
-        "key_passes": 1,
-        "xa": 0.08211705088615417,
-        "creativity_index": 10.2
+        "key_passes": 2,
+        "xa": 0.2333715260028839,
+        "creativity_index": 20.3
       },
       "defensive_stats": {
         "source": "fpl",
         "clean_sheets": 11,
-        "saves": 91,
+        "saves": 93,
         "yellow_cards": 4,
         "red_cards": 0,
-        "expected_goals_conceded": 49.15
+        "expected_goals_conceded": 51.77
       },
       "advanced_stats": {
         "source": "understat",
-        "games": 33,
-        "minutes": 2970,
+        "games": 35,
+        "minutes": 3150,
         "position_code": "GK",
         "xg": 0.0,
-        "xa": 0.08211705088615417,
+        "xa": 0.2333715260028839,
         "npxg": 0.0,
         "shots": 0,
-        "key_passes": 1,
+        "key_passes": 2,
         "xg_chain": 2.5715485978871584,
         "xg_buildup": 2.4894315768033266
       },
@@ -1977,17 +1977,17 @@
       "contract_until": "",
       "market_value": 0,
       "stats": {
-        "appearances": 2,
-        "minutes": 358,
+        "appearances": 3,
+        "minutes": 448,
         "goals": 0,
-        "assists": 0,
+        "assists": 1,
         "yellow_cards": 0,
         "red_cards": 0,
         "clean_sheets": 2,
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Röhl, Merlin",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
@@ -1996,39 +1996,39 @@
       "fpl_price_m": 5.0,
       "rating_metrics": {
         "source": "fpl",
-        "form": 0.0,
-        "points_per_game": 1.5,
-        "ict_index": 16.6,
-        "influence": 67.6,
-        "creativity": 66.2,
-        "threat": 32.0,
+        "form": 1.2,
+        "points_per_game": 1.8,
+        "ict_index": 17.5,
+        "influence": 68.2,
+        "creativity": 67.2,
+        "threat": 39.0,
         "selected_by_percent": 0.0
       },
       "technical_stats": {
-        "expected_goals": 0.5,
+        "expected_goals": 0.57,
         "expected_assists": 0.21,
-        "expected_goal_involvements": 0.71,
-        "expected_goals_conceded": 8.22,
-        "influence": 67.6,
-        "creativity": 66.2,
-        "threat": 32.0,
-        "ict_index": 16.6
+        "expected_goal_involvements": 0.78,
+        "expected_goals_conceded": 9.56,
+        "influence": 68.2,
+        "creativity": 67.2,
+        "threat": 39.0,
+        "ict_index": 17.5
       },
       "understat_player_id": "11331",
       "shooting_stats": {
         "source": "understat",
-        "shots": 7,
+        "shots": 8,
         "goals": 0,
-        "xg": 0.3806900344789028,
-        "npxg": 0.3806900344789028,
-        "xg_chain": 0.9362909588962793,
+        "xg": 0.46047965809702873,
+        "npxg": 0.46047965809702873,
+        "xg_chain": 1.0160805825144053,
         "xg_buildup": 0.392738439142704
       },
       "passing_stats": {
         "source": "understat+fpl",
         "key_passes": 5,
         "xa": 0.2557048462331295,
-        "creativity_index": 66.2
+        "creativity_index": 67.2
       },
       "defensive_stats": {
         "source": "fpl",
@@ -2036,26 +2036,26 @@
         "saves": 0,
         "yellow_cards": 0,
         "red_cards": 0,
-        "expected_goals_conceded": 8.22
+        "expected_goals_conceded": 9.56
       },
       "advanced_stats": {
         "source": "understat",
-        "games": 12,
-        "minutes": 322,
+        "games": 13,
+        "minutes": 412,
         "position_code": "M S",
-        "xg": 0.3806900344789028,
+        "xg": 0.46047965809702873,
         "xa": 0.2557048462331295,
-        "npxg": 0.3806900344789028,
-        "shots": 7,
+        "npxg": 0.46047965809702873,
+        "shots": 8,
         "key_passes": 5,
-        "xg_chain": 0.9362909588962793,
+        "xg_chain": 1.0160805825144053,
         "xg_buildup": 0.392738439142704
       },
       "heatmap": {
         "source": "understat_shots",
         "grid_rows": 5,
         "grid_cols": 6,
-        "shot_count": 43,
+        "shot_count": 44,
         "shot_density": [
           [
             0,
@@ -2071,7 +2071,7 @@
             0,
             0,
             5,
-            4
+            5
           ],
           [
             0,
@@ -2115,17 +2115,17 @@
       "contract_until": "",
       "market_value": 0,
       "stats": {
-        "appearances": 32,
-        "minutes": 2880,
+        "appearances": 34,
+        "minutes": 3060,
         "goals": 1,
-        "assists": 1,
-        "yellow_cards": 5,
+        "assists": 2,
+        "yellow_cards": 7,
         "red_cards": 0,
         "clean_sheets": 11,
         "saves": 0,
         "bonus": 9
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Tarkowski, James Alan",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
@@ -2134,23 +2134,23 @@
       "fpl_price_m": 5.7,
       "rating_metrics": {
         "source": "fpl",
-        "form": 2.0,
-        "points_per_game": 4.6,
-        "ict_index": 131.9,
-        "influence": 818.4,
-        "creativity": 187.0,
-        "threat": 310.0,
-        "selected_by_percent": 13.2
+        "form": 1.8,
+        "points_per_game": 4.4,
+        "ict_index": 140.5,
+        "influence": 870.2,
+        "creativity": 209.5,
+        "threat": 322.0,
+        "selected_by_percent": 11.5
       },
       "technical_stats": {
         "expected_goals": 2.21,
-        "expected_assists": 1.32,
-        "expected_goal_involvements": 3.53,
-        "expected_goals_conceded": 46.45,
-        "influence": 818.4,
-        "creativity": 187.0,
-        "threat": 310.0,
-        "ict_index": 131.9
+        "expected_assists": 1.53,
+        "expected_goal_involvements": 3.74,
+        "expected_goals_conceded": 49.07,
+        "influence": 870.2,
+        "creativity": 209.5,
+        "threat": 322.0,
+        "ict_index": 140.5
       },
       "understat_player_id": "1665",
       "shooting_stats": {
@@ -2159,35 +2159,35 @@
         "goals": 1,
         "xg": 2.482551906257868,
         "npxg": 2.482551906257868,
-        "xg_chain": 5.312925855629146,
-        "xg_buildup": 4.703979062847793
+        "xg_chain": 5.483145142905414,
+        "xg_buildup": 4.788687917403877
       },
       "passing_stats": {
         "source": "understat+fpl",
-        "key_passes": 14,
-        "xa": 1.3793210610747337,
-        "creativity_index": 187.0
+        "key_passes": 16,
+        "xa": 1.510411523282528,
+        "creativity_index": 209.5
       },
       "defensive_stats": {
         "source": "fpl",
         "clean_sheets": 11,
         "saves": 0,
-        "yellow_cards": 5,
+        "yellow_cards": 7,
         "red_cards": 0,
-        "expected_goals_conceded": 46.45
+        "expected_goals_conceded": 49.07
       },
       "advanced_stats": {
         "source": "understat",
-        "games": 32,
-        "minutes": 2880,
+        "games": 34,
+        "minutes": 3060,
         "position_code": "D",
         "xg": 2.482551906257868,
-        "xa": 1.3793210610747337,
+        "xa": 1.510411523282528,
         "npxg": 2.482551906257868,
         "shots": 16,
-        "key_passes": 14,
-        "xg_chain": 5.312925855629146,
-        "xg_buildup": 4.703979062847793
+        "key_passes": 16,
+        "xg_chain": 5.483145142905414,
+        "xg_buildup": 4.788687917403877
       },
       "heatmap": {
         "source": "understat_shots",
@@ -2263,7 +2263,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Travers, Mark John",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
@@ -2314,7 +2314,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "english_name": "Welch, Reece Belfield",
       "chance_of_playing_this_round": null,
       "chance_of_playing_next_round": null,
@@ -2329,7 +2329,7 @@
         "influence": 0.0,
         "creativity": 0.0,
         "threat": 0.0,
-        "selected_by_percent": 0.2
+        "selected_by_percent": 0.1
       },
       "technical_stats": {
         "expected_goals": 0.0,
@@ -2361,7 +2361,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -2375,7 +2375,7 @@
       "market_value": 0,
       "stats": {
         "appearances": 6,
-        "minutes": 495,
+        "minutes": 496,
         "goals": 0,
         "assists": 0,
         "yellow_cards": 0,
@@ -2384,7 +2384,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
       "squad_number": null,
@@ -2392,7 +2392,7 @@
       "fpl_price_m": 4.5,
       "rating_metrics": {
         "source": "fpl",
-        "form": 0.0,
+        "form": 0.2,
         "points_per_game": 1.7,
         "ict_index": 20.5,
         "influence": 58.6,
@@ -2404,7 +2404,7 @@
         "expected_goals": 0.79,
         "expected_assists": 0.21,
         "expected_goal_involvements": 1.0,
-        "expected_goals_conceded": 10.79,
+        "expected_goals_conceded": 10.91,
         "influence": 58.6,
         "creativity": 66.6,
         "threat": 78.0,
@@ -2432,12 +2432,12 @@
         "saves": 0,
         "yellow_cards": 0,
         "red_cards": 0,
-        "expected_goals_conceded": 10.79
+        "expected_goals_conceded": 10.91
       },
       "advanced_stats": {
         "source": "understat",
-        "games": 11,
-        "minutes": 496,
+        "games": 12,
+        "minutes": 497,
         "position_code": "M S",
         "xg": 0.43910516798496246,
         "xa": 0.12138871103525162,
@@ -2521,7 +2521,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
       "squad_number": null,
@@ -2567,7 +2567,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -2590,7 +2590,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "chance_of_playing_this_round": null,
       "chance_of_playing_next_round": null,
       "squad_number": null,
@@ -2636,7 +2636,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -2655,7 +2655,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -2674,7 +2674,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -2697,7 +2697,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "chance_of_playing_this_round": null,
       "chance_of_playing_next_round": null,
       "squad_number": null,
@@ -2747,7 +2747,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "injury_reason": "has joined Port Vale on loan for the rest of the season.",
       "chance_of_playing_this_round": 0,
       "chance_of_playing_next_round": 0,
@@ -2794,7 +2794,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -2813,7 +2813,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -2836,7 +2836,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "chance_of_playing_this_round": null,
       "chance_of_playing_next_round": null,
       "squad_number": null,
@@ -2886,7 +2886,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "injury_reason": "has joined Stockport County on loan for the rest of the season.",
       "chance_of_playing_this_round": 0,
       "chance_of_playing_next_round": 0,
@@ -2933,7 +2933,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -2956,7 +2956,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "chance_of_playing_this_round": null,
       "chance_of_playing_next_round": null,
       "squad_number": null,
@@ -2997,7 +2997,7 @@
       "market_value": 0,
       "stats": {
         "appearances": 1,
-        "minutes": 271,
+        "minutes": 296,
         "goals": 0,
         "assists": 0,
         "yellow_cards": 2,
@@ -3006,7 +3006,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
       "squad_number": null,
@@ -3014,23 +3014,23 @@
       "fpl_price_m": 4.8,
       "rating_metrics": {
         "source": "fpl",
-        "form": 1.0,
+        "form": 0.8,
         "points_per_game": 1.1,
-        "ict_index": 14.5,
-        "influence": 24.0,
-        "creativity": 22.2,
-        "threat": 103.0,
+        "ict_index": 17.1,
+        "influence": 27.2,
+        "creativity": 35.2,
+        "threat": 113.0,
         "selected_by_percent": 0.1
       },
       "technical_stats": {
-        "expected_goals": 0.54,
-        "expected_assists": 0.17,
-        "expected_goal_involvements": 0.71,
-        "expected_goals_conceded": 5.27,
-        "influence": 24.0,
-        "creativity": 22.2,
-        "threat": 103.0,
-        "ict_index": 14.5
+        "expected_goals": 0.61,
+        "expected_assists": 0.71,
+        "expected_goal_involvements": 1.32,
+        "expected_goals_conceded": 5.65,
+        "influence": 27.2,
+        "creativity": 35.2,
+        "threat": 113.0,
+        "ict_index": 17.1
       },
       "data_sources": [
         "fantasy.premierleague.com"
@@ -3047,7 +3047,7 @@
       "market_value": 0,
       "stats": {
         "appearances": 1,
-        "minutes": 271,
+        "minutes": 296,
         "goals": 0,
         "assists": 0,
         "yellow_cards": 2,
@@ -3056,7 +3056,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
       "squad_number": null,
@@ -3064,23 +3064,23 @@
       "fpl_price_m": 4.8,
       "rating_metrics": {
         "source": "fpl",
-        "form": 1.0,
+        "form": 0.8,
         "points_per_game": 1.1,
-        "ict_index": 14.5,
-        "influence": 24.0,
-        "creativity": 22.2,
-        "threat": 103.0,
+        "ict_index": 17.1,
+        "influence": 27.2,
+        "creativity": 35.2,
+        "threat": 113.0,
         "selected_by_percent": 0.1
       },
       "technical_stats": {
-        "expected_goals": 0.54,
-        "expected_assists": 0.17,
-        "expected_goal_involvements": 0.71,
-        "expected_goals_conceded": 5.27,
-        "influence": 24.0,
-        "creativity": 22.2,
-        "threat": 103.0,
-        "ict_index": 14.5
+        "expected_goals": 0.61,
+        "expected_assists": 0.71,
+        "expected_goal_involvements": 1.32,
+        "expected_goals_conceded": 5.65,
+        "influence": 27.2,
+        "creativity": 35.2,
+        "threat": 113.0,
+        "ict_index": 17.1
       },
       "data_sources": [
         "fantasy.premierleague.com"
@@ -3102,7 +3102,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3121,7 +3121,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3135,7 +3135,7 @@
       "market_value": 0,
       "stats": {
         "appearances": 1,
-        "minutes": 271,
+        "minutes": 296,
         "goals": 0,
         "assists": 0,
         "yellow_cards": 2,
@@ -3144,7 +3144,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
       "squad_number": null,
@@ -3152,23 +3152,23 @@
       "fpl_price_m": 4.8,
       "rating_metrics": {
         "source": "fpl",
-        "form": 1.0,
+        "form": 0.8,
         "points_per_game": 1.1,
-        "ict_index": 14.5,
-        "influence": 24.0,
-        "creativity": 22.2,
-        "threat": 103.0,
+        "ict_index": 17.1,
+        "influence": 27.2,
+        "creativity": 35.2,
+        "threat": 113.0,
         "selected_by_percent": 0.1
       },
       "technical_stats": {
-        "expected_goals": 0.54,
-        "expected_assists": 0.17,
-        "expected_goal_involvements": 0.71,
-        "expected_goals_conceded": 5.27,
-        "influence": 24.0,
-        "creativity": 22.2,
-        "threat": 103.0,
-        "ict_index": 14.5
+        "expected_goals": 0.61,
+        "expected_assists": 0.71,
+        "expected_goal_involvements": 1.32,
+        "expected_goals_conceded": 5.65,
+        "influence": 27.2,
+        "creativity": 35.2,
+        "threat": 113.0,
+        "ict_index": 17.1
       },
       "data_sources": [
         "fantasy.premierleague.com"
@@ -3190,7 +3190,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3209,7 +3209,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3232,7 +3232,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "chance_of_playing_this_round": null,
       "chance_of_playing_next_round": null,
       "squad_number": null,
@@ -3278,7 +3278,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3301,7 +3301,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "injury_reason": "has joined Accrington on loan for the rest of the season.",
       "chance_of_playing_this_round": 0,
       "chance_of_playing_next_round": 0,
@@ -3348,7 +3348,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3367,7 +3367,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3386,7 +3386,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3405,7 +3405,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3424,7 +3424,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3438,7 +3438,7 @@
       "market_value": 0,
       "stats": {
         "appearances": 1,
-        "minutes": 271,
+        "minutes": 296,
         "goals": 0,
         "assists": 0,
         "yellow_cards": 2,
@@ -3447,7 +3447,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
       "squad_number": null,
@@ -3455,23 +3455,23 @@
       "fpl_price_m": 4.8,
       "rating_metrics": {
         "source": "fpl",
-        "form": 1.0,
+        "form": 0.8,
         "points_per_game": 1.1,
-        "ict_index": 14.5,
-        "influence": 24.0,
-        "creativity": 22.2,
-        "threat": 103.0,
+        "ict_index": 17.1,
+        "influence": 27.2,
+        "creativity": 35.2,
+        "threat": 113.0,
         "selected_by_percent": 0.1
       },
       "technical_stats": {
-        "expected_goals": 0.54,
-        "expected_assists": 0.17,
-        "expected_goal_involvements": 0.71,
-        "expected_goals_conceded": 5.27,
-        "influence": 24.0,
-        "creativity": 22.2,
-        "threat": 103.0,
-        "ict_index": 14.5
+        "expected_goals": 0.61,
+        "expected_assists": 0.71,
+        "expected_goal_involvements": 1.32,
+        "expected_goals_conceded": 5.65,
+        "influence": 27.2,
+        "creativity": 35.2,
+        "threat": 113.0,
+        "ict_index": 17.1
       },
       "data_sources": [
         "fantasy.premierleague.com"
@@ -3493,7 +3493,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3512,7 +3512,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3531,7 +3531,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3550,7 +3550,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3569,7 +3569,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3583,7 +3583,7 @@
       "market_value": 0,
       "stats": {
         "appearances": 3,
-        "minutes": 237,
+        "minutes": 238,
         "goals": 0,
         "assists": 0,
         "yellow_cards": 0,
@@ -3592,7 +3592,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
       "squad_number": null,
@@ -3600,10 +3600,10 @@
       "fpl_price_m": 4.4,
       "rating_metrics": {
         "source": "fpl",
-        "form": 0.0,
-        "points_per_game": 3.5,
-        "ict_index": 8.6,
-        "influence": 63.6,
+        "form": 0.2,
+        "points_per_game": 3.1,
+        "ict_index": 8.8,
+        "influence": 65.6,
         "creativity": 6.4,
         "threat": 17.0,
         "selected_by_percent": 0.0
@@ -3612,11 +3612,11 @@
         "expected_goals": 0.03,
         "expected_assists": 0.04,
         "expected_goal_involvements": 0.07,
-        "expected_goals_conceded": 3.55,
-        "influence": 63.6,
+        "expected_goals_conceded": 3.67,
+        "influence": 65.6,
         "creativity": 6.4,
         "threat": 17.0,
-        "ict_index": 8.6
+        "ict_index": 8.8
       },
       "data_sources": [
         "fantasy.premierleague.com"
@@ -3633,7 +3633,7 @@
       "market_value": 0,
       "stats": {
         "appearances": 1,
-        "minutes": 271,
+        "minutes": 296,
         "goals": 0,
         "assists": 0,
         "yellow_cards": 2,
@@ -3642,7 +3642,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "chance_of_playing_this_round": 100,
       "chance_of_playing_next_round": 100,
       "squad_number": null,
@@ -3650,23 +3650,23 @@
       "fpl_price_m": 4.8,
       "rating_metrics": {
         "source": "fpl",
-        "form": 1.0,
+        "form": 0.8,
         "points_per_game": 1.1,
-        "ict_index": 14.5,
-        "influence": 24.0,
-        "creativity": 22.2,
-        "threat": 103.0,
+        "ict_index": 17.1,
+        "influence": 27.2,
+        "creativity": 35.2,
+        "threat": 113.0,
         "selected_by_percent": 0.1
       },
       "technical_stats": {
-        "expected_goals": 0.54,
-        "expected_assists": 0.17,
-        "expected_goal_involvements": 0.71,
-        "expected_goals_conceded": 5.27,
-        "influence": 24.0,
-        "creativity": 22.2,
-        "threat": 103.0,
-        "ict_index": 14.5
+        "expected_goals": 0.61,
+        "expected_assists": 0.71,
+        "expected_goal_involvements": 1.32,
+        "expected_goals_conceded": 5.65,
+        "influence": 27.2,
+        "creativity": 35.2,
+        "threat": 113.0,
+        "ict_index": 17.1
       },
       "data_sources": [
         "fantasy.premierleague.com"
@@ -3688,7 +3688,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3707,7 +3707,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3726,7 +3726,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3745,7 +3745,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3768,7 +3768,7 @@
         "saves": 0,
         "bonus": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "injury_reason": "has joined Port Vale on loan for the rest of the season.",
       "chance_of_playing_this_round": 0,
       "chance_of_playing_next_round": 0,
@@ -3815,7 +3815,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3834,7 +3834,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3853,7 +3853,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3872,7 +3872,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3891,7 +3891,7 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     },
     {
@@ -3910,10 +3910,10 @@
         "yellow_cards": 0,
         "red_cards": 0
       },
-      "last_updated": "2026-04-24T22:27:34",
+      "last_updated": "2026-05-05T22:13:24",
       "data_sources": []
     }
   ],
-  "last_updated": "Fri, 24 Apr 2026 14:40:09 GMT",
+  "last_updated": "Tue, 05 May 2026 14:55:43 GMT",
   "season": "2026"
 }

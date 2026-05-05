@@ -1,11 +1,15 @@
 # 足球联赛预测更新总结
 
+> 当前说明：本文记录的是早期独立预测文件更新情况。  
+> 当前正式流程已切换为写回 `europe_leagues/<league>/teams_2025-26.md` 备注列，不再以 `analysis/predictions/*.md` 作为主流程产物。  
+> 因此下列路径与统计描述仅作历史参考。
+
 ## 更新时间：2026-04-18
 
 ## 各联赛预测文件更新情况
 
 ### 1. 英超联赛
-**文件路径**：/Users/lin/trae_projects/europe_leagues/premier_league/analysis/predictions/2026-04-18_predictions.md
+**历史文件路径**：/Users/bytedance/trae_projects/europe_leagues/premier_league/analysis/predictions/2026-04-18_predictions.md
 
 **更新内容**：
 - 包含8场比赛预测
@@ -14,7 +18,7 @@
 - 实时更新的统计字段
 
 ### 2. 德甲联赛
-**文件路径**：/Users/lin/trae_projects/europe_leagues/bundesliga/analysis/predictions/2026-04-18_predictions.md
+**历史文件路径**：/Users/bytedance/trae_projects/europe_leagues/bundesliga/analysis/predictions/2026-04-18_predictions.md
 
 **更新内容**：
 - 包含8场比赛预测
@@ -24,7 +28,7 @@
 - 详细的置信度排序和冷门风险提示
 
 ### 3. 意甲联赛
-**文件路径**：/Users/lin/trae_projects/europe_leagues/serie_a/analysis/predictions/2026-04-18_predictions.md
+**历史文件路径**：/Users/bytedance/trae_projects/europe_leagues/serie_a/analysis/predictions/2026-04-18_predictions.md
 
 **更新内容**：
 - 包含9场比赛预测
@@ -34,7 +38,7 @@
 - 详细的多维度分析和风险评估
 
 ### 4. 法甲联赛
-**文件路径**：/Users/lin/trae_projects/europe_leagues/ligue_1/analysis/predictions/2026-04-18_predictions.md
+**历史文件路径**：/Users/bytedance/trae_projects/europe_leagues/ligue_1/analysis/predictions/2026-04-18_predictions.md
 
 **更新内容**：
 - 包含8场比赛预测
@@ -44,12 +48,12 @@
 
 ## 预测分析框架
 
-所有预测文件均采用统一的分析框架：
+早期独立预测文件采用的分析框架如下，当前正式链路已不再直接使用：
 
 1. **预测数据总览**：包含比赛基本信息、预测结果、预测概率等
 2. **置信度排序**：按预测概率从高到低排序，提供推荐理由
 3. **冷门风险提示**：分析可能出现的冷门情况及风险因素
-4. **统计字段**：实时更新比赛完成情况和预测准确率
+4. **统计字段**：早期报告内嵌的完成情况与预测准确率
 5. **重点比赛详细分析**：
    - 关键分析要点（联赛排名、近期状态、攻防能力等）
    - 战意评估
@@ -68,4 +72,10 @@
 
 ## 风险提示
 
-以上分析基于现有数据和专业分析，仅供参考。足球比赛存在不确定性，请理性对待预测结果。
+当前正式建议：
+
+1. 先执行 `prediction_system.py collect-data --json`
+2. 再执行 `prediction_system.py predict-match` 或 `predict-schedule`
+3. 将预测写回 `teams_2025-26.md`
+4. 赛后执行 `save-result` 或 `bulk_fetch_and_update.py`
+5. 最后执行 `prediction_system.py accuracy --refresh --json`
