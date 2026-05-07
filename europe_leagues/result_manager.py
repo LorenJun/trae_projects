@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""
-比赛结果管理和准确率更新系统
-"""
+"""模块说明：负责赛果写回、预测归档、准确率统计、爆冷案例同步与结果管理。
+
+比赛结果管理和准确率更新系统"""
 
 import json
 import logging
@@ -10,13 +10,16 @@ import re
 import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pathlib import Path
 
 # 添加项目路径
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
 from agent_runtime_registry import get_runtime_profile
+from collectors.aliasing import load_team_alias_map
+from runtime.memory_samples import sync_prediction_memory_samples
+from runtime.paths import get_default_paths
+from storage import AccuracyStatsStore, PredictionArchiveStore, TeamsMarkdownStore
 
 # 配置日志
 logging.basicConfig(
@@ -52,12 +55,14 @@ PREDICTED_WINNER_TEXT = {
 class ResultManager:
     """结果管理器，直接以 teams_2025-26.md 为单一事实来源。"""
 
-    def __init__(self):
-        self.base_dir = os.path.dirname(os.path.abspath(__file__))
-        runtime_dir = os.path.join(self.base_dir, '.okooo-scraper', 'runtime')
-        os.makedirs(runtime_dir, exist_ok=True)
-        self.accuracy_file = os.path.join(runtime_dir, 'accuracy_stats.json')
-        self.prediction_archive_file = os.path.join(runtime_dir, 'prediction_archive.json')
+    def __init__(self, base_dir: Optional[str] = None):
+        self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
+        self.paths = get_default_paths(self.base_dir)
+        self.accuracy_store = AccuracyStatsStore(self.base_dir)
+        self.prediction_archive_store = PredictionArchiveStore(self.base_dir)
+        self.teams_store = TeamsMarkdownStore(self.base_dir)
+        self.accuracy_file = str(self.accuracy_store.path)
+        self.prediction_archive_file = str(self.prediction_archive_store.path)
         self.upset_library_file = os.path.join(self.base_dir, '爆冷案例库.json')
         self.upset_export_file = os.path.join(self.base_dir, 'upset_cases.json')
         self.team_alias_map = self._load_team_alias_map()
@@ -67,33 +72,7 @@ class ResultManager:
 
     def _load_team_alias_map(self) -> Dict[str, Dict[str, str]]:
         """Load team alias map as {league: {alias_or_name: canonical_name}}."""
-        path = Path(self.base_dir) / "okooo_team_aliases.json"
-        if not path.exists():
-            return {}
-        try:
-            raw = json.loads(path.read_text(encoding='utf-8'))
-        except Exception:
-            return {}
-        if not isinstance(raw, dict):
-            return {}
-
-        out: Dict[str, Dict[str, str]] = {}
-        for league, mapping in raw.items():
-            if not isinstance(mapping, dict):
-                continue
-            league_map: Dict[str, str] = {}
-            for canonical, aliases in mapping.items():
-                if not canonical:
-                    continue
-                canonical_name = str(canonical).strip()
-                league_map[canonical_name] = canonical_name
-                if isinstance(aliases, list):
-                    for alias in aliases:
-                        alias_name = str(alias or '').strip()
-                        if alias_name:
-                            league_map[alias_name] = canonical_name
-            out[str(league).strip()] = league_map
-        return out
+        return load_team_alias_map(self.base_dir)
 
     def _normalize_team_name(self, league_code: str, name: str) -> str:
         raw_name = (name or '').strip()
@@ -103,7 +82,7 @@ class ResultManager:
         return league_map.get(raw_name, raw_name)
 
     def _teams_md_path(self, league_code: str) -> str:
-        return os.path.join(self.base_dir, league_code, 'teams_2025-26.md')
+        return self.teams_store.path_for_league(league_code)
 
     def _match_id_for_teams_row(self, league_code: str, match_date: str, home_team: str, away_team: str) -> str:
         return f"{league_code}_{match_date.replace('-', '')}_{home_team}_{away_team}"
@@ -389,14 +368,7 @@ class ResultManager:
         return "临场执行与战意出现偏差"
 
     def _load_prediction_archive(self) -> Dict[str, Dict[str, Any]]:
-        if not os.path.exists(self.prediction_archive_file):
-            return {}
-        try:
-            with open(self.prediction_archive_file, 'r', encoding='utf-8') as f:
-                payload = json.load(f)
-            return payload if isinstance(payload, dict) else {}
-        except Exception:
-            return {}
+        return self.prediction_archive_store.load()
 
     def _normalized_prediction_runtime_profile(self) -> Dict[str, Any]:
         return json.loads(json.dumps(self.prediction_runtime_profile, ensure_ascii=False))
@@ -440,8 +412,7 @@ class ResultManager:
         }
 
     def _save_prediction_archive(self, archive: Dict[str, Dict[str, Any]]) -> None:
-        with open(self.prediction_archive_file, 'w', encoding='utf-8') as f:
-            json.dump(archive, f, ensure_ascii=False, indent=2)
+        self.prediction_archive_store.save(archive)
 
     def _archive_prediction(self, prediction_data: Dict[str, Any]) -> None:
         match_id = str(prediction_data.get('match_id') or '').strip()
@@ -735,11 +706,17 @@ class ResultManager:
             away_candidate = parts[1].strip()
             result_data = self._update_teams_row_score_by_team_names(home_candidate, away_candidate, home_score, away_score, league=league, date_override=date_override)
             result_data['upset_sync'] = self._auto_sync_upset_case(result_data)
+            from runtime.result_sync import mark_result_sync_completed
+            mark_result_sync_completed(self.base_dir, result_data.get("match_id", ""), result_data.get("actual_score", ""), result_data.get("actual_winner", ""))
+            sync_prediction_memory_samples(self.base_dir, limit=100)
             logger.info("保存比赛结果: %s vs %s -> %s", home_candidate, away_candidate, result_data['actual_score'])
             return result_data
         else:
             result_data = self._update_teams_row_score(identifier, home_score, away_score)
             result_data['upset_sync'] = self._auto_sync_upset_case(result_data)
+            from runtime.result_sync import mark_result_sync_completed
+            mark_result_sync_completed(self.base_dir, result_data.get("match_id", ""), result_data.get("actual_score", ""), result_data.get("actual_winner", ""))
+            sync_prediction_memory_samples(self.base_dir, limit=100)
             logger.info("保存比赛结果: %s -> %s", identifier, result_data['actual_score'])
             return result_data
 
@@ -1029,8 +1006,7 @@ class ResultManager:
         for league_code in LEAGUE_NAMES.keys():
             stats['by_league'][league_code] = self.calculate_accuracy(league=league_code)
 
-        with open(self.accuracy_file, 'w', encoding='utf-8') as f:
-            json.dump(stats, f, ensure_ascii=False, indent=2)
+        self.accuracy_store.save(stats)
 
         logger.info("准确率统计已更新")
         return stats
@@ -1062,7 +1038,7 @@ class ResultManager:
             'home_team': home_team,
             'away_team': away_team,
             'match_date': match_date,
-            'match_time': '',
+            'match_time': str(enhanced_pred.get('match_time') or ''),
             'predicted_winner': predicted_winner,
             'predicted_score': predicted_score,
             'predicted_scores': predicted_scores,
@@ -1079,18 +1055,29 @@ class ResultManager:
             {
                 'match_id': match_id,
                 'league': league_code,
+                'league_name': LEAGUE_NAMES.get(league_code, league_code),
                 'match_date': match_date,
                 'home_team': home_team,
                 'away_team': away_team,
+                'prediction': prediction_result,
                 'predicted_winner': predicted_winner,
                 'predicted_scores': predicted_scores,
+                'top_scores': enhanced_pred.get('top_scores', []),
+                'over_under': enhanced_pred.get('over_under', {}),
+                'market_snapshot': enhanced_pred.get('market_snapshot', {}),
                 'predicted_ou': predicted_ou,
                 'confidence': enhanced_pred.get('confidence'),
+                'upset_potential': enhanced_pred.get('upset_potential', {}),
+                'match_intelligence': enhanced_pred.get('match_intelligence', {}),
+                'realtime': enhanced_pred.get('realtime', {}),
                 'runtime_profile': enhanced_pred.get('runtime_profile', {}),
                 'note': f"预测:{prediction_result} 信心:{float(enhanced_pred.get('confidence') or 0):.2f}".strip(),
+                'full_prediction': enhanced_pred,
                 'archived_at': datetime.now().isoformat(),
             }
         )
+        from runtime.result_sync import register_prediction_result_sync
+        register_prediction_result_sync(self.base_dir, prediction_data)
         logger.info("预测已写入 teams 文件，兼容返回预测对象: %s", match_id)
         return prediction_data
 

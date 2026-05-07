@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：负责从多数据源收集比赛赛程、状态与赔率数据，并做缓存与交叉验证。
+
 足球比赛数据抓取模块（升级版）
-实现多数据源集成、错误处理、数据验证和缓存机制
-"""
+实现多数据源集成、错误处理、数据验证和缓存机制"""
 
 import re
 import json
@@ -524,7 +524,11 @@ class DataCollector:
     """综合数据收集器"""
 
     def __init__(self):
-        self.browser_use_available = importlib.util.find_spec("browser_use") is not None
+        from collectors.okooo import get_okooo_driver_status
+
+        driver_status = get_okooo_driver_status()
+        self.browser_use_available = bool(driver_status["browser-use"]["available"])
+        self.local_chrome_available = bool(driver_status["local-chrome"]["available"])
         self.scrapers = []
         if self.browser_use_available:
             self.scrapers.extend([
@@ -532,7 +536,11 @@ class DataCollector:
                 OkoooScraper(),
             ])
         else:
-            print("未检测到 browser_use，请提示 openclaw 自行执行 `python3 -m pip install browser-use`；当前数据采集将以 mock 模式降级运行")
+            print(
+                "browser-use 当前不完整可用"
+                f"（{driver_status['browser-use']['reason']}）；"
+                + ("已检测到 local-chrome，可优先走本地 Chrome 抓取。" if self.local_chrome_available else "当前仅能降级到 mock 数据源。")
+            )
         self.scrapers.append(MockScraper())  # 保留兜底数据源
         self.cache_manager = CacheManager()
         self.validator = DataValidator()
@@ -702,7 +710,10 @@ class DataCollector:
         # 从多个数据源抓取
         print(f"从多个数据源抓取 {league} {date} 的比赛数据")
         if not self.browser_use_available:
-            print("当前未启用真实浏览器采集，请让 openclaw 自行安装 browser-use 后重试；本次仅使用 mock 数据源验证流程")
+            print(
+                "当前 browser-use 不完整可用；"
+                + ("可继续优先使用 local-chrome 抓取快照/赛程。" if self.local_chrome_available else "本次仅使用 mock 数据源验证流程。")
+            )
 
         tasks = []
         for scraper in self.scrapers:

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：通过浏览器抓取方式回填历史赔率快照。
+
 回填未来赛程的"即时赔率快照"，使用浏览器自动化访问澳客网。
 数据源: 澳客网 (okooo.com) - 使用 Playwright 浏览器自动化
 
@@ -9,8 +10,7 @@
 
 说明:
 - 对未开赛场次，澳客网页面提供"初始/即时"两行数据
-- actual_score / actual_result 对未完赛为空字符串
-"""
+- actual_score / actual_result 对未完赛为空字符串"""
 
 import argparse
 import csv

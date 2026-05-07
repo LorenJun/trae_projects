@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""
-导出爆冷案例分析报告
-"""
+"""模块说明：用于导出爆冷案例与相关分析报告。
+
+导出爆冷案例分析报告"""
 
 import sys
 sys.path.append('/Users/lin/trae_projects/europe_leagues')

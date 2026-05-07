@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：保留的比赛预测脚本入口，用于历史链路兼容或独立试验。
+
 足球比赛预测分析模块
-基于赔率数据（欧指、亚盘、凯利指数）进行综合预测分析
-"""
+基于赔率数据（欧指、亚盘、凯利指数）进行综合预测分析"""
 
 import math
 from typing import Dict, List, Optional, Tuple

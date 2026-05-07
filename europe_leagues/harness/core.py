@@ -1,3 +1,5 @@
+"""模块说明：定义 Harness 编排的上下文、阶段和流水线执行骨架。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

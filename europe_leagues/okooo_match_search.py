@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：提供澳客比赛搜索与结果过滤能力，辅助 MatchID 定位。
+
 澳客网比赛搜索工具
-根据球队名称搜索正确的比赛ID
-"""
+根据球队名称搜索正确的比赛ID"""
 
 import re
 import time

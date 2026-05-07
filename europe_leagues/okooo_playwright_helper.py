@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：封装 Playwright 相关浏览器能力，服务澳客页面抓取脚本。
+
 澳客网(okooo.com) Playwright 辅助模块
-提供增强的反爬虫功能和数据提取功能
-"""
+提供增强的反爬虫功能和数据提取功能"""
 
 import random
 import time

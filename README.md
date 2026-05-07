@@ -14,7 +14,8 @@ created_date: "2026-04-18"
 > 4. 赛后用 `prediction_system.py save-result` 或 `bulk_fetch_and_update.py` 回填  
 > 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
-> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`
+> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`  
+> 当前实现说明：`prediction_system.py` 为兼容入口，真实命令路由在 `europe_leagues/app/cli.py`
 
 一个以欧洲联赛为核心的足球预测分析系统，当前正式链路已收敛为：
 
@@ -35,6 +36,18 @@ created_date: "2026-04-18"
 - 📈 **结果追踪Agent** - 准确率统计与持续优化
 - 🧠 **可选：球队状态增强** - 使用 SofaScore 注入阵型/控球/上一场首发/球员评分趋势（`team_context`）
 - 🧩 **Harness 编排入口** - 以阶段化 pipeline 执行单场预测或赛后回填
+
+### 当前代码结构
+
+当前代码已完成一轮模块化整改，正式结构不再只依赖单个超大文件，而是收敛为：
+
+- `europe_leagues/app/cli.py`：CLI 命令路由与 JSON envelope
+- `europe_leagues/domain/predictor.py`：领域外壳，向接口层屏蔽内部实现
+- `europe_leagues/enhanced_prediction_workflow.py`：预测主流程编排核心
+- `europe_leagues/domain/*.py`：features / odds / intelligence / inference / persistence 等领域服务
+- `europe_leagues/collectors/*.py`：赛程、快照、SofaScore、别名归一化
+- `europe_leagues/models/*.py`：Poisson / Dixon-Coles / Fusion
+- `europe_leagues/storage/*.py` 与 `runtime/*.py`：SoT、归档、准确率、缓存与路径
 
 ### 统一职业身份
 
@@ -61,7 +74,7 @@ created_date: "2026-04-18"
 Step 1: 确认比赛信息
 Step 2: collect-data / 赛程抓取，定位 match_id
 Step 3: predict-match / predict-schedule
-Step 4: EnhancedPredictor 自动刷新快照、补大小球、补 EWMA form、按需注入 team_context
+Step 4: DomainPredictor / EnhancedPredictor 编排层自动刷新快照、补大小球、补 EWMA form、按需注入 team_context
 Step 5: 写回 teams_2025-26.md
 Step 6: save-result / bulk_fetch_and_update.py 回填赛果
 Step 7: accuracy --refresh 更新胜负 / 比分 / 大小球统计
@@ -416,15 +429,19 @@ python3 prediction_system.py harness-run --pipeline result_recording --match-id 
 trae_projects/
 ├── agent.md                          # 项目总览
 ├── README.md                         # 本文件
+├── agent_runtime_registry.py         # persona/runtime_profile 注册表
 ├── package.json                      # 项目依赖
 │
 ├── agents/                           # 专业Agent目录
 │   ├── data_collector_agent.md      # 数据采集Agent
+│   ├── football_actuary_persona.md  # 统一职业身份
 │   ├── match_analyzer_agent.md      # 比赛分析Agent
 │   ├── odds_analyzer_agent.md       # 赔率分析Agent
 │   └── result_tracker_agent.md      # 结果追踪Agent
 │
 ├── docs/                             # 文档目录
+│   ├── architecture/                 # 架构分析
+│   │   └── europe_leagues_architecture.md
 │   └── standards/                    # 标准规范
 │       ├── data_format.md            # 数据格式规范
 │       ├── workflow.md               # 工作流程规范
@@ -433,20 +450,29 @@ trae_projects/
 ├── .trae/                            # Trae技能目录
 │   └── skills/
 │       ├── football-match-analysis/  # 足球分析核心技能
+│       ├── okooo-match-finder/       # MatchID / 赛程 / 快照入口
 │       ├── browser-use/              # 浏览器自动化
 │       └── ...
 │
 ├── europe_leagues/                   # 欧洲联赛数据
-│   ├── premier_league/               # 英超
-│   ├── la_liga/                      # 西甲
-│   ├── serie_a/                      # 意甲
-│   ├── bundesliga/                   # 德甲
-│   ├── ligue_1/                      # 法甲
+│   ├── app/                          # CLI 主实现
+│   ├── harness/                      # Harness 编排
+│   ├── domain/                       # 领域服务与预测外壳
+│   ├── collectors/                   # 赛程/快照/上下文采集
+│   ├── models/                       # 概率模型
+│   ├── storage/                      # SoT/归档/准确率
+│   ├── runtime/                      # 缓存与运行时路径
+│   ├── prediction_system.py          # 兼容 CLI 入口
+│   ├── enhanced_prediction_workflow.py # 预测主编排
+│   ├── premier_league/               # 英超联赛数据
+│   ├── la_liga/                      # 西甲联赛数据
+│   ├── serie_a/                      # 意甲联赛数据
+│   ├── bundesliga/                   # 德甲联赛数据
+│   ├── ligue_1/                      # 法甲联赛数据
 │   └── README.md                     # 联赛数据说明
 │
 ├── scripts/                          # 脚本目录
-│   ├── poisson_analysis.py           # 泊松分布分析
-│   └── analyze_prediction_accuracy.py # 准确率分析
+│   └── setup_openclaw_env.sh         # OpenClaw 初始化
 │
 └── .gitignore                        # Git忽略文件
 ```
@@ -503,3 +529,4 @@ trae_projects/
 |------|------|------|
 | 1.0.0 | 2026-04-18 | 初始版本，完整框架搭建 |
 | 1.1.0 | 2026-05-04 | 同步正式预测链路、Harness、批量回填与准确率统计口径 |
+| 1.2.0 | 2026-05-07 | 同步模块化整改后的目录结构、CLI 路由、领域服务与 skill 说明 |

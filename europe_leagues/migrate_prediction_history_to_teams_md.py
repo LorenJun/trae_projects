@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：把历史预测记录迁移到 teams_2025-26.md 的备注结构中。
+
 One-time migration:
   prediction_history/{predictions.json,results.json} -> europe_leagues/<league>/teams_2025-26.md
 
 After this, the project should treat teams_2025-26.md as the single source of truth:
   - score column: actual score
-  - note column: prediction info
-"""
+  - note column: prediction info"""
 
 from __future__ import annotations
 

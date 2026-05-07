@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：抓取澳客单场赔率页面并落盘欧赔、亚盘、大小球与凯利快照。
+
 Fetch an okooo match snapshot via browser-use (user-like browsing) and save JSON to disk.
 
 Output naming rule:
@@ -9,8 +10,7 @@ Example:
 
 Notes:
 - This script intentionally depends only on `browser-use` CLI (not Playwright) because direct HTTP
-  requests are often blocked (405) and some environments don't have Playwright installed.
-"""
+  requests are often blocked (405) and some environments don't have Playwright installed."""
 
 from __future__ import annotations
 
@@ -2322,8 +2322,8 @@ def main() -> None:
     parser.add_argument(
         "--driver",
         choices=["browser-use", "local-chrome"],
-        default="browser-use",
-        help="抓取驱动：browser-use 或 local-chrome（通过本地 Chrome CDP 抓取）",
+        default="local-chrome",
+        help="抓取驱动：local-chrome 或 browser-use（默认 local-chrome，更快）",
     )
     parser.add_argument(
         "--out-dir",

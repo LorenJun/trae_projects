@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""模块说明：补齐英超球员中文名映射。"""
+
 from __future__ import annotations
 
 import csv

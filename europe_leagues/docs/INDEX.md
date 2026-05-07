@@ -8,7 +8,8 @@
 > 4. 赛后用 `prediction_system.py save-result` 或 `bulk_fetch_and_update.py` 回填  
 > 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
-> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`
+> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`  
+> 当前实现说明：`prediction_system.py` 为兼容入口，真实 CLI 路由在 `app/cli.py`
 
 ## 统一职业身份
 
@@ -47,7 +48,7 @@
 - `PRD_足球预测系统_2026.md`：飞书文档排版版 PRD（含目录与表格规范）
 
 ## Skills
-- `football-match-analysis`：基于 `collect-data / 实时快照 / EnhancedPredictor / Harness` 的正式比赛预测 skill
+- `football-match-analysis`：基于 `collect-data / 实时快照 / app/cli.py -> DomainPredictor -> EnhancedPredictor / Harness` 的正式比赛预测 skill
 - `okooo-match-finder`：定位 `match_id`、赛程与快照入口的上游 skill
 - `update-five-leagues-players`：五大联赛球员数据更新（名单→中文名/号码→统计/热区→审计）
 - `update-five-leagues-schedules`：五大联赛赛程更新（500 轮次接口，未完赛比分为 `-`）

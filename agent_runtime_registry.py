@@ -1,3 +1,5 @@
+"""模块说明：读取 persona 与各类 Agent 文档，生成项目统一使用的 runtime_profile 与六维身份元数据。"""
+
 from __future__ import annotations
 
 import os

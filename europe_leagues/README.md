@@ -11,30 +11,55 @@
 > 4. 赛后用 `prediction_system.py save-result` 或 `bulk_fetch_and_update.py` 回填  
 > 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
-> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`
+> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`  
+> 当前实现说明：`prediction_system.py` 为兼容入口，真实 CLI 路由在 `app/cli.py`
 
 ## 项目结构
 
 ```
 europe_leagues/
+├── app/                     # CLI 主实现与 JSON 路由
+│   └── cli.py
+├── harness/                 # Harness 编排层
+│   ├── core.py
+│   └── football.py
+├── domain/                  # 领域服务与预测外壳
+│   ├── predictor.py
+│   ├── features.py
+│   ├── odds.py
+│   ├── intelligence.py
+│   ├── upset.py
+│   ├── live.py
+│   ├── inference.py
+│   ├── postprocess.py
+│   ├── persistence.py
+│   ├── reporting.py
+│   ├── writeback.py
+│   └── team_strength.py
+├── collectors/              # 赛程/快照/上下文采集
+├── models/                  # Poisson / Dixon-Coles / Fusion
+├── storage/                 # SoT / 归档 / 准确率
+├── runtime/                 # 缓存与运行时路径
+├── prediction_system.py     # 兼容 CLI 入口
+├── enhanced_prediction_workflow.py # 预测主编排
+├── result_manager.py        # 赛果回填与归档兼容管理器
 ├── premier_league/          # 英超联赛
-│   ├── teams_2025-26.md    # 球队信息
+│   ├── teams_2025-26.md    # 单一事实来源
 │   └── analysis/           # 分析数据
-│       ├── odds/           # 赔率数据落盘（可选）
-│       └── odds_snapshots/ # 赔率快照落盘（可选）
 ├── la_liga/                 # 西甲联赛
-│   ├── teams_2025-26.md    # 球队信息
-│   └── analysis/           # 分析数据
 ├── serie_a/                 # 意甲联赛
-│   ├── teams_2025-26.md    # 球队信息
-│   └── analysis/           # 分析数据
 ├── bundesliga/             # 德甲联赛
-│   ├── teams_2025-26.md    # 球队信息
-│   └── analysis/           # 分析数据
 └── ligue_1/                # 法甲联赛
-    ├── teams_2025-26.md    # 球队信息
-    └── analysis/           # 分析数据
 ```
+
+## 当前分层说明
+
+- 接口层：`prediction_system.py`、`app/cli.py`
+- 编排层：`harness/*`、`domain/predictor.py`、`enhanced_prediction_workflow.py`
+- 领域层：`domain/features.py`、`odds.py`、`intelligence.py`、`inference.py`、`postprocess.py` 等
+- 采集层：`collectors/*` 与保留的 `okooo_*`、`data_collector.py`
+- 存储层：`storage/*`、`runtime/*`、`result_manager.py`
+- 数据层：各联赛目录下的 `teams_2025-26.md`、`analysis/*`、`players/*.json`
 
 ## 使用方法
 
@@ -101,7 +126,7 @@ python3 prediction_system.py accuracy --refresh --json
 
 ## 技术要求
 
-- Python 3.6+
+- Python 3.9+
 - pandas 库
 - 基本的Markdown编辑能力
 

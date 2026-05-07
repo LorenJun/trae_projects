@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：提供澳客抓取辅助函数与通用页面解析工具。
+
 澳客网(okooo.com) Playwright 辅助模块 v2
-针对澳客网反爬虫机制优化的数据提取模块
-"""
+针对澳客网反爬虫机制优化的数据提取模块"""
 
 import random
 import re

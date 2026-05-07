@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：抓取或整理 Sofascore 球队上下文信息，用于补强预测分析输入。
+
 Fetch recent team state (tactics/formation, possession, last lineup, player form)
 using the public Sofascore JSON endpoints.
 
@@ -10,8 +11,7 @@ Design goals:
 
 Note:
 - Starting lineup for *upcoming* matches is generally not available. We use the
-  most recent finished match lineup as "latest XI" and compute recent player ratings.
-"""
+  most recent finished match lineup as "latest XI" and compute recent player ratings."""
 
 from __future__ import annotations
 

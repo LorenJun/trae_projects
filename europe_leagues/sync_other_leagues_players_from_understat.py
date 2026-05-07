@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""模块说明：从 Understat 同步其他联赛球员基础数据。"""
+
 from __future__ import annotations
 
 import json

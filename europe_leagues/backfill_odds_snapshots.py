@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：执行历史赔率快照回填任务的兼容脚本入口。
+
 澳客网(okooo.com) 赔率数据采集脚本
 使用 Playwright 绕过反爬虫机制
-支持自动查找比赛ID
-"""
+支持自动查找比赛ID"""
 
 import argparse
 import json

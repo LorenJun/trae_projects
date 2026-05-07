@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：根据 teams_2025-26.md 已写回的赛果更新积分榜。
+
 Update standings tables in five leagues teams_2025-26.md by computing from finished match results
 already present in the schedule tables.
 
@@ -15,8 +16,7 @@ What it does:
   - Updates only the "## 积分榜（截至第X轮）" header and the table under it.
 
 Limitations:
-  - If teams_2025-26.md only contains a partial season schedule/results, the standings reflect that subset.
-"""
+  - If teams_2025-26.md only contains a partial season schedule/results, the standings reflect that subset."""
 
 from __future__ import annotations
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：审计球员资料完整性，识别缺失字段与待补数据。
+
 Audit completeness of players/*.json for the 4 leagues:
 La Liga / Bundesliga / Serie A / Ligue 1.
 
@@ -8,8 +9,7 @@ Checks:
 - per-player has cn name (wikidata_id) and shirt number (shirt_number or shirt_numbers)
 - quick detection of "likely incomplete roster" (very low player count)
 
-Outputs a concise report to stdout.
-"""
+Outputs a concise report to stdout."""
 
 from __future__ import annotations
 

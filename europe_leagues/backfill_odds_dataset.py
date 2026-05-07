@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：构建或回填训练用的历史赔率与赛果数据集。
+
 回填五大联赛赔率数据 - 使用 okooo.com (澳客网) 数据源
 
 注意: 此脚本已完全迁移至使用 okooo.com 数据源
 
 输出位置:
 - <league>/analysis/odds/<date_range>_odds.json
-- <league>/analysis/odds/<date_range>_odds.csv
-"""
+- <league>/analysis/odds/<date_range>_odds.csv"""
 
 import csv
 import json

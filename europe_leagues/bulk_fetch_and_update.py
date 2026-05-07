@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：批量抓取近期已完赛比赛结果，并回写到各联赛 teams_2025-26.md。
+
 Bulk fetch recent results from okooo and update teams_2025-26.md files.
 
 Usage:
-  python3 bulk_fetch_and_update.py --start 2026-05-01 --end 2026-05-04
-"""
+  python3 bulk_fetch_and_update.py --start 2026-05-01 --end 2026-05-04"""
 
 import argparse
 import json

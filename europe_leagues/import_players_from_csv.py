@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：从 CSV 导入球员数据到项目内部结构。
+
 Import player roster + season stats + injury status into <league>/players/*.json from a CSV.
 
 Why CSV:
@@ -21,8 +22,7 @@ CSV columns (header required):
 - expected_return: YYYY-MM-DD (optional)
 - appearances, goals, assists, yellow_cards, red_cards: integers (optional)
 
-Extra columns are ignored.
-"""
+Extra columns are ignored."""
 
 from __future__ import annotations
 

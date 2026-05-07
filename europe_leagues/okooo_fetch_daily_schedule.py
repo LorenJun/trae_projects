@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：抓取澳客指定日期赛程并生成可复用的日程数据文件。
+
 Fetch a single day's schedule from okooo mobile league page and save to JSON.
 
 This is designed for the "daily schedule only" use case:
@@ -7,8 +8,7 @@ This is designed for the "daily schedule only" use case:
   - Extract MatchID + teams + kickoff time + history url
   - Save under europe_leagues/.okooo-scraper/schedules/<league_code>/YYYY-MM-DD.json
 
-It reuses local-chrome CDP utilities from okooo_save_snapshot.py.
-"""
+It reuses local-chrome CDP utilities from okooo_save_snapshot.py."""
 
 from __future__ import annotations
 

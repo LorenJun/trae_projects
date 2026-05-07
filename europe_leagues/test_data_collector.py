@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""
-测试数据收集器的功能
-"""
+"""模块说明：验证数据采集与交叉校验链路的测试脚本。
+
+测试数据收集器的功能"""
 
 import asyncio
 from data_collector import DataCollector

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：生成英超球员 CSV 数据文件，供后续导入或校对。
+
 Generate `premier_league_players_2026.csv` from the official Premier League
 2025/26 squad-lists article.
 
 Data fidelity:
 - Source: official squad list article (first-hand roster names)
 - Includes: first-team squad players + registered U21 players
-- Does NOT invent unavailable fields; unknown columns stay empty
-"""
+- Does NOT invent unavailable fields; unknown columns stay empty"""
 
 from __future__ import annotations
 

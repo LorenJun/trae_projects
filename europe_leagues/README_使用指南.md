@@ -7,7 +7,8 @@
 > 4. 赛后用 `prediction_system.py save-result` 或 `bulk_fetch_and_update.py` 回填  
 > 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
-> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`
+> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`  
+> 当前实现说明：`prediction_system.py` 为兼容入口，真实 CLI 路由在 `app/cli.py`
 
 ## 统一职业身份
 
@@ -47,7 +48,7 @@
 - 实时欧赔/亚值/凯利抓取
 - 亚值页内 `大小球` tab 抓取真实盘口线与水位
 - 预测输出内置 `over_under.market`
-- `EnhancedPredictor` 自动补 EWMA form、缺失大小球、可选 `team_context`
+- `DomainPredictor` / `EnhancedPredictor` 编排层自动补 EWMA form、缺失大小球、可选 `team_context`
 - `teams_2025-26.md` 作为正式写回与历史学习来源
 - 支持 `bulk_fetch_and_update.py` 批量赛果回填
 - 支持 `harness-run` 阶段化编排
@@ -95,7 +96,7 @@ python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026
 2. 若比赛简称可能不一致，先检查 `okooo_team_aliases.json`
 3. 优先调用 `prediction_system.py collect-data`，或抓当天赛程获取 `match_id`
 4. 调用 `prediction_system.py predict-match` / `predict-schedule`
-5. 由 `EnhancedPredictor.predict_match()` 自动：
+5. 由 `prediction_system.py` 转发到 `app/cli.py`，再进入 `DomainPredictor` / `EnhancedPredictor` 自动：
    - 刷新实时快照
    - 缺失大小球时自动补抓
    - 回填 EWMA 近况
@@ -168,10 +169,12 @@ cd /Users/bytedance/trae_projects
 python3 - <<'PY'
 import sys, json
 sys.path.insert(0,'/Users/bytedance/trae_projects/europe_leagues')
-from enhanced_prediction_workflow import EnhancedPredictor
-p = EnhancedPredictor()
+from domain.predictor import DomainPredictor
+p = DomainPredictor()
 r = p.predict_match(
-    '曼联', '布伦特福德', 'premier_league',
+    home_team='曼联',
+    away_team='布伦特福德',
+    league_code='premier_league',
     match_date='2026-04-28',
     match_time='03:00',
     match_id='1296070',
@@ -224,18 +227,28 @@ cd /Users/bytedance/trae_projects
 TEAM_CONTEXT_LAST_N=5 python3 - <<'PY'
 import sys
 sys.path.insert(0,'/Users/bytedance/trae_projects/europe_leagues')
-from enhanced_prediction_workflow import EnhancedPredictor
+from domain.predictor import DomainPredictor
 
-p = EnhancedPredictor()
-r = p.predict_match('曼联','布伦特福德','premier_league', match_date='2026-04-28', match_time='03:00', match_id='1296070', force_refresh_odds=False)
+p = DomainPredictor()
+r = p.predict_match(
+    home_team='曼联',
+    away_team='布伦特福德',
+    league_code='premier_league',
+    match_date='2026-04-28',
+    match_time='03:00',
+    match_id='1296070',
+    force_refresh_odds=False,
+)
 print(r['analysis_context'].get('team_context', {}).get('ok'))
 PY
 ```
 
 ## 常用文件
 
-- `prediction_system.py`：当前正式 CLI 入口
-- `enhanced_prediction_workflow.py`：当前主预测流程
+- `prediction_system.py`：兼容 CLI 入口
+- `app/cli.py`：当前正式 CLI 路由
+- `domain/predictor.py`：领域外壳
+- `enhanced_prediction_workflow.py`：当前主预测编排
 - `okooo_save_snapshot.py`：当前主抓取脚本
 - `okooo_fetch_daily_schedule.py`：当天赛程与 MatchID 抓取
 - `okooo_live_snapshot.py`：实时快照读取与转换

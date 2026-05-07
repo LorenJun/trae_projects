@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""
-测试使用 Playwright 获取澳客网赔率数据
-"""
+"""模块说明：验证澳客浏览器抓取能力的测试脚本。
+
+测试使用 Playwright 获取澳客网赔率数据"""
 
 import re
 import sys

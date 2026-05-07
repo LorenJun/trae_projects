@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：从 Sofascore 补充球员名单、号码等阵容信息。
+
 Supplement missing roster members + jersey numbers using Sofascore API.
 
 Why:
@@ -20,8 +21,7 @@ Behavior:
     - If player missing, add a new minimal player entry (stats remain 0/unknown).
   - Adds `data_sources += sofascore.com`.
 
-This does not overwrite existing `shirt_number_source` unless missing.
-"""
+This does not overwrite existing `shirt_number_source` unless missing."""
 
 from __future__ import annotations
 

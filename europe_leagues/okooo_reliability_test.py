@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：用于测试澳客抓取链路的稳定性与可用性。
+
 澳客抓取链路稳定性测试工具（面向沉淀成熟方案）。
 
 用法示例:
@@ -9,8 +10,7 @@ cases.json 示例:
 [
   {"league": "la_liga", "league_hint": "西甲", "home_team": "巴塞罗那", "away_team": "皇家马德里", "date": "2026-04-23"},
   {"league": "premier_league", "league_hint": "英超", "home_team": "切尔西", "away_team": "阿森纳", "date": "2026-04-23"}
-]
-"""
+]"""
 
 import argparse
 import json
@@ -47,7 +47,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", required=True, help="用例 JSON 文件路径")
     parser.add_argument("--repeat", type=int, default=3, help="每个用例重复次数")
-    parser.add_argument("--driver", default="browser-use", choices=["browser-use", "local-chrome"], help="优先 driver")
+    parser.add_argument("--driver", default="local-chrome", choices=["browser-use", "local-chrome"], help="优先 driver（默认 local-chrome）")
     parser.add_argument("--headed", action="store_true", help="browser-use 有头模式")
     parser.add_argument("--sleep", type=float, default=1.0, help="每次调用间隔秒数（降低被封风险）")
     parser.add_argument("--out", default="", help="可选：输出报告 JSON 路径")

@@ -1,292 +1,351 @@
 ---
 title: Europe Leagues 项目架构与模块划分
 owner: europe_leagues
-version: v1.0
+version: v2.1
 last_updated: 2026-05-07
 ---
 
 # Europe Leagues 项目架构与模块划分（技术分析）
 
 本文目标：
-- 把当前仓库从“脚本集合”抽象成清晰的分层架构，解释每层输入/输出与依赖关系
-- 给出可落地的模块拆分建议（不重写业务，先治理连接层与边界）
+- 用“整改后的真实代码结构”解释当前项目的分层、依赖与职责边界
+- 说明哪些模块已经拆分完成，哪些地方仍保留兼容壳或存量脚本
 
 范围：
 - 代码：`/Users/bytedance/trae_projects/europe_leagues`
-- 上位身份/提示词：`/Users/bytedance/trae_projects/agents/*.md` + `agent_runtime_registry.py`
+- 治理与 persona：`/Users/bytedance/trae_projects/agents/*.md`、`agent_runtime_registry.py`
 
 ---
 
-## 1. 仓库总览（What’s in the repo）
+## 1. 仓库总览
 
-从目录结构看，项目主要由 3 类内容组成：
-- **产品化入口**：统一 CLI + Harness 编排
-- **领域能力**：采集、预测、模型、写回、赛后统计
-- **数据与产物**：联赛赛程/球员库、赔率快照、运行时统计与归档
+当前仓库已不再只是“脚本集合”，而是形成了 6 类稳定模块：
+- **接口层**：CLI 入口、JSON envelope、自动化命令
+- **编排层**：Harness pipeline/stage/context
+- **领域层**：预测主流程编排与拆分后的领域服务
+- **采集层**：赛程、快照、上下文与别名归一化
+- **模型与存储层**：模型、SoT 写回、归档、统计、运行时路径
+- **治理层**：persona、六维定义、runtime_profile 注入
 
 ### 1.1 关键入口
 
-- CLI 统一入口：`europe_leagues/prediction_system.py`
-- Harness 编排层：`europe_leagues/harness/*`
-- 核心预测器（主业务）：`europe_leagues/enhanced_prediction_workflow.py`
-- 数据采集：`europe_leagues/data_collector.py` + `europe_leagues/okooo_*`
-- 赛果与统计：`europe_leagues/result_manager.py`
+- CLI 兼容入口：`europe_leagues/prediction_system.py`
+- CLI 实际实现：`europe_leagues/app/cli.py`
+- 领域外壳：`europe_leagues/domain/predictor.py`
+- 预测编排核心：`europe_leagues/enhanced_prediction_workflow.py`
+- Harness 编排：`europe_leagues/harness/*`
+- persona/runtime registry：`agent_runtime_registry.py`
 
-### 1.2 单一事实来源（SoT）
+### 1.2 单一事实来源
 
-项目当前对“事实/写回”的约束很明确：
+项目当前对“事实/写回”的约束保持不变：
 - **赛程/赛果/预测备注**以 `europe_leagues/<league>/teams_2025-26.md` 为单一事实来源（SoT）
-- **运行时产物**写入 `europe_leagues/.okooo-scraper/runtime/`（统计、日志、归档等）
+- **运行时统计/归档**写入 `europe_leagues/.okooo-scraper/runtime/`
+- **赔率快照/赛程抓取**写入 `europe_leagues/.okooo-scraper/snapshots/` 和 `schedules/`
 
 ---
 
-## 2. 分层架构（Layered Architecture）
+## 2. 分层架构
 
-建议用“外到内”六层来理解/划分模块：
-- L0 接口层：CLI / Harness（对外调用方式）
-- L1 编排层：Pipeline/Stage（任务拆解、审计、可重放）
-- L2 领域层：预测流程（特征、规则、融合、解释）
-- L3 数据层：采集/快照/上下文（赛程、赔率、阵容等）
-- L4 存储层：写回与归档（teams_2025-26.md / runtime json）
-- L5 治理层：persona/六维/可审计元数据（跨模块统一口径）
+建议继续用“外到内”六层理解当前代码：
+- L0 接口层：CLI / Harness
+- L1 编排层：orchestration / pipeline / stage
+- L2 领域层：特征、赔率、推理、后处理、持久化
+- L3 采集层：赛程、快照、球队上下文、别名归一化
+- L4 模型与存储层：Poisson / Dixon-Coles / Fusion / SoT / 归档 / 准确率
+- L5 治理层：persona / 六维 / runtime_profile
 
 ```mermaid
 flowchart TB
   subgraph L0[接口层]
-    CLI[prediction_system.py]
+    Compat[prediction_system.py]
+    CLI[app/cli.py]
     HarnessCLI[harness-run / harness-list]
   end
 
   subgraph L1[编排层]
+    DP[domain/predictor.py]
+    EP[enhanced_prediction_workflow.py]
     HP[HarnessPipeline]
-    ST[PipelineStage]
-    CTX[HarnessContext]
   end
 
   subgraph L2[领域层]
-    EP[EnhancedPredictor]
-    MM[MultiModelFusion / Poisson / Dixon-Coles]
+    FE[features.py]
+    OD[odds.py]
+    IN[intelligence.py / upset.py]
+    LV[live.py / inference.py]
+    PP[postprocess.py / persistence.py]
+    RP[reporting.py / writeback.py / team_strength.py]
   end
 
-  subgraph L3[数据层]
-    DC[DataCollector]
-    OK[okooo_fetch_daily_schedule / okooo_save_snapshot / okooo_live_snapshot]
-    SC[sofascore_team_context]
+  subgraph L3[采集层]
+    COL[collectors/*]
+    Legacy[data_collector.py / okooo_* / sofascore_team_context.py]
   end
 
-  subgraph L4[存储层]
+  subgraph L4[模型与存储层]
+    Models[models/*]
+    Storage[storage/*]
+    Runtime[runtime/*]
     SoT[teams_2025-26.md]
-    RT[.okooo-scraper/runtime/*]
-    SS[.okooo-scraper/snapshots/*]
   end
 
   subgraph L5[治理层]
-    PR[agents/*.md persona]
-    RR[agent_runtime_registry.py]
+    Persona[agents/*.md]
+    Registry[agent_runtime_registry.py]
   end
 
-  CLI --> EP
-  CLI --> DC
-  HarnessCLI --> HP --> ST --> CTX
-  ST --> DC
-  ST --> EP
-  EP --> MM
-  EP --> OK
-  EP --> SC
-  EP --> SoT
-  EP --> RT
-  OK --> SS
-  RR --> CLI
-  RR --> HP
-  RR --> EP
-  RR --> Result[ResultManager]
-  Result --> SoT
-  Result --> RT
+  Compat --> CLI
+  CLI --> DP --> EP
+  HarnessCLI --> HP --> EP
+  EP --> FE
+  EP --> OD
+  EP --> IN
+  EP --> LV
+  EP --> PP
+  EP --> RP
+  EP --> COL
+  EP --> Legacy
+  EP --> Models
+  EP --> Storage
+  EP --> Runtime
+  Storage --> SoT
+  Registry --> CLI
+  Registry --> HP
+  Registry --> EP
+  Persona --> Registry
 ```
 
 ---
 
-## 3. 核心模块划分（按职责）
+## 3. 核心模块划分
 
-### 3.1 接口层（CLI / Harness）
+### 3.1 接口层
 
-| 模块 | 文件 | 职责 | 关键输出 |
-|---|---|---|---|
-| CLI | `prediction_system.py` | 统一子命令入口；屏蔽 stdout 噪音；输出 JSON 便于自动化 | `build_json_result()` 结构化输出 |
-| Harness | `harness/core.py` | Context/Stage/Pipeline；审计执行；结构化输出 | `stages[]` + `artifacts` |
-| Football Pipeline | `harness/football.py` | 把“采集/预测/写回/赛后统计”注册为 pipeline | `match_prediction` / `result_recording` |
+| 模块 | 文件 | 当前职责 |
+|---|---|---|
+| CLI 兼容入口 | `prediction_system.py` | 对外保持旧命令路径不变，内部仅转发到 `app/cli.py` |
+| CLI 主实现 | `app/cli.py` | 子命令路由、JSON envelope、`runtime_profile` 注入、命令级编排 |
+| Harness Core | `harness/core.py` | `HarnessContext` / `PipelineStage` / `HarnessPipeline` / 审计输出 |
+| Football Harness | `harness/football.py` | 注册 `match_prediction`、`result_recording` 等 pipeline |
 
 要点：
-- Harness 解决“连接层”治理问题：输入/阶段/产物/错误审计标准化
-- CLI 解决“调用层”治理问题：统一命令、统一 JSON envelope、适配自动化（openclaw）
+- `prediction_system.py` 现在是兼容壳，不再承担真实命令实现
+- 自动化调用应继续使用 `python3 prediction_system.py ... --json`
+- 新功能优先落在 `app/cli.py`，避免再次把兼容层做厚
 
-### 3.2 领域层（预测核心）
+### 3.2 编排与领域层
 
-| 模块 | 文件 | 职责 |
+| 模块 | 文件 | 当前职责 |
 |---|---|---|
-| 预测主流程（大文件） | `enhanced_prediction_workflow.py` | 预测端到端：读取上下文、刷新快照、特征计算、模型融合、生成解释、写回 SoT、归档与记忆 |
-| 旧流程兼容 | `optimized_prediction_workflow.py` | 复用增强预测结果，保持旧入口/旧结构的兼容 |
-| 模型集合 | `ml_prediction_models.py` | 泊松/迪克森科尔斯/融合等 |
+| 领域外壳 | `domain/predictor.py` | 对接口层暴露 `DomainPredictor`，屏蔽内部实现细节 |
+| 预测编排核心 | `enhanced_prediction_workflow.py` | 保留主流程 orchestration，协调 live refresh、推理、后处理、持久化 |
+| 特征服务 | `domain/features.py` | EWMA、联赛大小球学习、analysis_context 增强 |
+| 赔率服务 | `domain/odds.py` | 盘口解析、历史赔率参考、大小球线解析与补抓 |
+| 情报与爆冷 | `domain/intelligence.py`、`domain/upset.py` | 比赛画像、市场共振、爆冷风险识别 |
+| 临场与推理 | `domain/live.py`、`domain/inference.py` | 快照刷新、输入准备、核心推理链、临场修正 |
+| 后处理与持久化 | `domain/postprocess.py`、`domain/persistence.py` | 概率归一、凯利、结果对象装配、缓存/归档/MEMORY 写回 |
+| 报告/写回/球队实力 | `domain/reporting.py`、`domain/writeback.py`、`domain/team_strength.py` | 报告格式化、`teams_2025-26.md` 写回、球队强度分析 |
 
-现实问题（为什么“代码过于庞大”）：
-- `enhanced_prediction_workflow.py` 同时承担 L2 领域逻辑 + L3 数据适配 + L4 写回归档，导致“单文件超大、耦合度高、改动风险大”
+要点：
+- `EnhancedPredictor` 仍然存在，但已从“超大业务全集”收缩为 orchestrator
+- 当前最重要的结构变化不是删除旧类，而是把高耦合逻辑迁到可复用服务模块
+- `TeamDataManager` 等旧名称保留兼容别名，用于降低外部调用回归风险
 
-### 3.3 数据层（采集 / 快照 / 上下文）
+### 3.3 采集层
 
-| 模块 | 文件 | 数据来源 | 输出 |
-|---|---|---|---|
-| 赛程采集 | `data_collector.py` | sporttery / schedules cache / 其他 | `MatchData[]` |
-| okooo 赛程与快照 | `okooo_fetch_daily_schedule.py` / `okooo_save_snapshot.py` / `okooo_live_snapshot.py` | okooo 移动端页面（含赔率 tab） | `.okooo-scraper/schedules/*` + `.okooo-scraper/snapshots/*` |
-| 阵容/状态上下文 | `sofascore_team_context.py` | sofascore | `analysis_context.team_context` |
-| 映射与归一化 | `okooo_team_aliases.json` | 人工维护 | 名称归一化、跨源对齐 |
-
-### 3.4 存储层（写回 / 归档 / 统计）
-
-| 模块 | 文件/目录 | 职责 |
+| 模块 | 文件 | 当前职责 |
 |---|---|---|
-| 写回 SoT | `<league>/teams_2025-26.md` | 赛程表备注列写回预测；比分列写回真实赛果 |
-| 预测归档 | `.okooo-scraper/runtime/prediction_archive.json` | 按 match_id 归档预测结果（供赛后回填/复盘） |
-| 准确率统计 | `.okooo-scraper/runtime/accuracy_stats.json` | 从 SoT 解析计算胜负/比分/大小球等 |
-| 日志 | `.okooo-scraper/runtime/*.log` | 运行诊断 |
+| 采集包 | `collectors/okooo.py`、`sporttery.py`、`sofascore.py`、`aliasing.py`、`odds_snapshots.py` | 新的采集/归一化/快照读取边界 |
+| 存量脚本 | `data_collector.py`、`okooo_*`、`sofascore_team_context.py` | 仍作为历史入口与调试脚本保留 |
+| 联赛数据 | `<league>/analysis/*`、`players/*.json` | 赛程快照、赔率落盘、球员与上下文数据 |
+
+要点：
+- `collectors/` 是整改后的正式抽象层
+- `okooo_*` 和 `data_collector.py` 仍在使用，但更适合作为脚本入口或兼容实现
+- `OddsSnapshotRepository` 已集中处理 CSV/JSON 快照读取与 `current_odds` 转换
+
+### 3.4 模型与存储层
+
+| 模块 | 文件 | 当前职责 |
+|---|---|---|
+| 模型 | `models/poisson.py`、`models/dixon_coles.py`、`models/fusion.py` | 核心概率模型与模型融合 |
+| 存储 | `storage/teams_md.py`、`archive.py`、`accuracy.py` | SoT 读写、归档、准确率统计的稳定边界 |
+| 运行时 | `runtime/cache.py`、`runtime/paths.py` | 缓存与 `.okooo-scraper` 路径管理 |
+| 赛果管理 | `result_manager.py` | 历史兼容的赛果回填与 archive 迁移管理器 |
 
 ---
 
-## 4. 端到端流程图（How it runs）
+## 4. 端到端流程图
 
-### 4.1 单场预测（predict-match）
+### 4.1 单场预测
 
 ```mermaid
 sequenceDiagram
   autonumber
   participant U as User/Automation
-  participant CLI as prediction_system.py
+  participant Compat as prediction_system.py
+  participant CLI as app/cli.py
+  participant DP as DomainPredictor
   participant EP as EnhancedPredictor
-  participant OK as okooo_live_snapshot.py
-  participant DC as data_collector.py
-  participant RM as result_manager.py
+  participant Live as LiveRefreshService
+  participant Infer as InferencePipelineService
+  participant Persist as PredictionPersistenceService
   participant SoT as teams_2025-26.md
-  participant RT as .okooo-scraper/runtime
 
-  U->>CLI: predict-match --league --date --home --away
-  CLI->>EP: predict_match(...)
-  EP->>OK: refresh_snapshot() (可选)
-  EP->>DC: collect / context (可选)
-  EP->>EP: 特征+融合+解释
-  EP->>SoT: 写回备注列（预测）
-  EP->>RM: save_prediction_from_enhanced()
-  RM->>RT: 写 prediction_archive.json
-  EP-->>CLI: result (含 runtime_profile)
+  U->>Compat: predict-match --json
+  Compat->>CLI: main()
+  CLI->>DP: predict_match(...)
+  DP->>EP: predict_match(...)
+  EP->>Live: prepare_prediction_inputs(...)
+  EP->>Infer: run(...)
+  EP->>Persist: persist_prediction(...)
+  Persist->>SoT: 写回预测备注
+  EP-->>CLI: result + runtime_profile
   CLI-->>U: JSON envelope
 ```
 
-### 4.2 赛后回填（save-result + accuracy）
+### 4.2 赛后回填
 
 ```mermaid
 flowchart LR
-  A[save-result] --> B[result_manager.save_result]
-  B --> C[写回 teams_2025-26.md 比分/备注]
+  A[predict-match / predict-schedule] --> R[result_sync_registry.json]
+  R --> T[result-sync-daemon / auto-sync-results]
+  T --> B[result_manager.py]
+  B --> C[storage / teams_2025-26.md]
   C --> D[accuracy --refresh]
-  D --> E[解析 teams_2025-26.md]
-  E --> F[写 accuracy_stats.json]
+  D --> E[accuracy_stats.json]
+  B --> M[MEMORY.md / prediction_memory_odds_samples.json]
 ```
 
-### 4.3 Harness 编排（match_prediction pipeline）
+### 4.3 Harness 编排
 
 ```mermaid
 flowchart TB
   H[harness-run match_prediction] --> S1[collect_data stage]
   S1 --> S2[predict_match stage]
-  S2 --> OUT[结构化输出: inputs/artifacts/stages/runtime_profile]
+  S2 --> OUT[inputs / artifacts / stages / runtime_profile]
 ```
 
 ---
 
-## 5. 为什么会“庞大”（结构性原因）
+## 5. 本轮整改结果
 
-核心原因不是“功能多”，而是“边界不清晰导致功能堆叠在少数文件里”：
-- `enhanced_prediction_workflow.py` 既做预测（L2），又做数据适配（L3），又做写回/归档（L4），属于典型“超大聚合根”
-- 大量脚本复用同一份 SoT（teams md）是正确的，但写回/解析逻辑散落在多个文件中，导致变更需要跨多处验证
-- 采集/快照/上下文输入是异构来源（okooo、sporttery、sofascore），但归一化/命名对齐逻辑存在多处实现（维护成本高）
+本轮已经完成的核心整改包括：
+- CLI 路由迁入 `app/cli.py`，`prediction_system.py` 降为兼容壳
+- `EnhancedPredictor` 的 features、odds、writeback、upset、intelligence、snapshot、reporting、postprocess、persistence、live、inference、team_strength 已下沉到 `domain/` 或 `collectors/`
+- `collectors/`、`models/`、`storage/`、`runtime/` 四类目录已落地
+- `runtime_profile` 已贯穿 CLI、Harness、预测结果对象和 `prediction_archive.json`
+- `runtime/result_sync.py` 已提供“预测后按开球时间推算完赛后 2 小时自动同步赛果”的运行时调度能力
+- `runtime/memory_samples.py` 已把滚动记忆、赔率变化与已完赛结果同步成结构化样本，供历史赔率参考复用
+- 项目主范围内的 Python 模块已统一补充文件头 `模块说明`，方便后续定位职责边界
+- 保留旧入口与兼容类型，避免外部自动化调用中断
+
+仍然保留的现实约束：
+- `enhanced_prediction_workflow.py` 仍是关键 orchestration 文件，还不是“极薄外壳”
+- `data_collector.py`、`okooo_*`、`result_manager.py` 等历史脚本仍在被主流程或周边脚本依赖
+- 仍需逐步把更多脚本入口收敛到 `collectors/`、`storage/` 与 `app/cli.py`
 
 ---
 
-## 6. 模块拆分建议（可落地，不重写）
-
-目标：不推翻现有代码，而是把“自然边界”提取成可维护模块，逐步把大文件切薄。
-
-### 6.1 建议的目标目录（建议）
+## 6. 整改后目录（现状）
 
 ```text
 europe_leagues/
   app/
-    cli.py                 # 替代/承载 prediction_system.py 的命令路由
+    cli.py
   harness/
     core.py
     football.py
   domain/
-    predictor.py           # EnhancedPredictor 外壳（只保留 orchestration）
-    features.py            # 特征工程/状态回溯（EWMA 等）
-    odds.py                # 赔率结构、归一化、盘口信号
-    writeback.py           # teams_2025-26.md 写回
+    predictor.py
+    features.py
+    odds.py
+    upset.py
+    intelligence.py
+    live.py
+    inference.py
+    postprocess.py
+    persistence.py
+    reporting.py
+    writeback.py
+    team_strength.py
   collectors/
-    sporttery.py
-    okooo.py               # schedule/snapshot driver
+    aliasing.py
+    odds_snapshots.py
+    okooo.py
     sofascore.py
-    aliasing.py            # team alias map
+    sporttery.py
   models/
     poisson.py
     dixon_coles.py
     fusion.py
   storage/
-    teams_md.py            # SoT 读写
-    archive.py             # prediction_archive.json
-    accuracy.py            # accuracy_stats.json
+    teams_md.py
+    archive.py
+    accuracy.py
   runtime/
-    paths.py               # .okooo-scraper 统一路径管理
+    cache.py
+    paths.py
+  enhanced_prediction_workflow.py
+  prediction_system.py
+  result_manager.py
+  data_collector.py
+  okooo_*.py
+  <league>/teams_2025-26.md
 ```
 
-拆分原则：
-- **先抽 IO/存储（L4）**：写回/归档/统计抽出来最稳，回归风险最小
-- **再抽数据适配（L3）**：okooo/sporttery/sofascore 归一化抽出来
-- **最后抽领域逻辑（L2）**：把特征、融合、解释拆成可单测的组件
-
-### 6.2 用 Harness 做“迁移护栏”
-
-拆分过程中，用 Harness 保证“对外行为不变”：
-- pipeline/stage 输出保持稳定
-- 每次拆分只替换一个 stage 的 handler（或内部调用），便于回滚与审计
+兼容策略：
+- `prediction_system.py` 保留旧调用路径
+- `optimized_prediction_workflow.py` 保留旧结果结构兼容
+- `TeamDataManager` 等旧命名通过兼容别名继续可用
 
 ---
 
-## 7. 与 persona/六维的运行时承接（治理层）
+## 7. 与 persona/六维的运行时承接
 
-当前仓库已把 persona 六维落到运行时输出，形成审计链：
-- persona/agent 文档来源：`/agents/*.md`
-- 运行时 registry：`agent_runtime_registry.py`
-- 输出承接点：
-  - CLI JSON envelope：`prediction_system.py build_json_result()`
-  - Harness output：`harness/core.py HarnessPipeline.execute()`
-  - 预测结果对象：`EnhancedPredictor.predict_match()` 返回中包含 `runtime_profile`
-  - 归档：`ResultManager.save_prediction_from_enhanced()` 写入 `prediction_archive.json`
+当前仓库已把 persona 六维真正接入运行时输出：
+- 文档来源：`agents/*.md`
+- registry：`agent_runtime_registry.py`
+- CLI 注入：`app/cli.py build_json_result()`
+- Harness 注入：`harness/core.py HarnessPipeline.execute()`
+- 预测结果注入：`EnhancedPredictor.predict_match()`
+- 归档注入：`result_manager.py` / `prediction_archive.json`
 
 ```mermaid
 flowchart LR
   A[agents/*.md] --> B[agent_runtime_registry.py]
   B --> C[CLI runtime_profile]
   B --> D[Harness runtime_profile]
-  B --> E[Prediction result runtime_profile]
-  E --> F[prediction_archive.json runtime_profile]
+  B --> E[predict_match runtime_profile]
+  E --> F[prediction_archive.json]
 ```
 
 ---
 
-## 8. 快速定位：从“需求”到“改哪里”
+## 8. 快速定位
 
 | 你想改什么 | 优先改哪里 | 备注 |
 |---|---|---|
-| 新增命令/对外入口 | `prediction_system.py` / 后续 `app/cli.py` | 先走 JSON envelope |
-| 新增编排任务 | `harness/football.py` | 先分 stage，再接 handler |
-| 调整预测逻辑 | `enhanced_prediction_workflow.py`（建议逐步拆到 `domain/`） | 注意写回/归档的副作用 |
-| 调整采集来源 | `data_collector.py` / `okooo_*` / `sofascore_team_context.py` | 注意 alias 对齐 |
-| 调整写回格式 | `enhanced_prediction_workflow.py` / `result_manager.py` | 建议抽到 `storage/teams_md.py` |
+| 新增命令/对外入口 | `app/cli.py` | `prediction_system.py` 仅保留兼容 |
+| 新增编排任务 | `harness/football.py` | 先定义 stage，再接 handler |
+| 调整预测主链 | `enhanced_prediction_workflow.py`、`domain/*` | 优先改对应 service，而不是把逻辑再塞回主文件 |
+| 调整采集来源 | `collectors/*`、必要时 `okooo_*` | 旧脚本仍可能是实际抓取入口 |
+| 调整写回/归档 | `domain/writeback.py`、`domain/persistence.py`、`storage/*` | 注意 SoT 与 archive 一致性 |
+| 调整 persona/runtime | `agents/*.md`、`agent_runtime_registry.py` | 输出会影响 CLI / Harness / archive |
 
+---
+
+## 9. 本次验证结论
+
+2026-05-07 本轮完成后，已验证以下链路可运行：
+- `python3 prediction_system.py list-leagues --json`
+- `python3 prediction_system.py harness-list --json`
+- `python3 prediction_system.py health-check --json`
+- `python3 prediction_system.py predict-match --json`
+- `python3 prediction_system.py auto-sync-results --json`
+- `python3 prediction_system.py accuracy --refresh --json`
+
+本轮额外修复：
+- `predict-match --no-refresh-odds` 现在会同时跳过大小球补抓，避免在“禁用刷新”场景下仍然等待澳客抓取超时
+- `poisson_analysis.py` 已从非法 Markdown 文本整理为可编译的说明脚本，整仓 Python 语法检查可通过

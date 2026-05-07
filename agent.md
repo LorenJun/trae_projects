@@ -20,7 +20,7 @@ last_updated_date: "2026-05-04"
 
 ## 项目概述
 
-本项目是一个以欧洲联赛为核心的足球预测系统，当前已完成“赛程/MatchID -> 实时赔率快照 -> EnhancedPredictor -> teams 写回/准确率统计”的主流程收敛，并支持可选的 Sofascore 球队状态增强（team_context）与 Harness 编排入口。
+本项目是一个以欧洲联赛为核心的足球预测系统，当前已完成“赛程/MatchID -> 实时赔率快照 -> `app/cli.py` -> `DomainPredictor` / `EnhancedPredictor` -> teams 写回/准确率统计”的主流程收敛，并支持可选的 Sofascore 球队状态增强（team_context）与 Harness 编排入口。
 
 ### 当前核心功能
 
@@ -41,6 +41,7 @@ trae_projects/
 ├── agent.md
 ├── agents/
 │   ├── data_collector_agent.md
+│   ├── football_actuary_persona.md
 │   ├── match_analyzer_agent.md
 │   ├── odds_analyzer_agent.md
 │   └── result_tracker_agent.md
@@ -51,17 +52,40 @@ trae_projects/
 │   ├── chrome-mcp/
 │   └── playwright-cli/
 └── europe_leagues/
+    ├── app/cli.py
+    ├── harness/
+    │   ├── core.py
+    │   └── football.py
+    ├── domain/
+    │   ├── predictor.py
+    │   ├── features.py
+    │   ├── odds.py
+    │   ├── intelligence.py
+    │   ├── upset.py
+    │   ├── live.py
+    │   ├── inference.py
+    │   ├── postprocess.py
+    │   ├── persistence.py
+    │   ├── reporting.py
+    │   ├── writeback.py
+    │   └── team_strength.py
+    ├── collectors/
+    ├── models/
+    ├── storage/
+    ├── runtime/
+    ├── prediction_system.py
     ├── enhanced_prediction_workflow.py
-    ├── bulk_fetch_and_update.py
-    ├── okooo_save_snapshot.py
-    ├── okooo_fetch_daily_schedule.py
-    ├── okooo_live_snapshot.py
-    ├── harness/football.py
-    ├── okooo_team_aliases.json
     ├── result_manager.py
     ├── <league>/teams_2025-26.md
     └── .okooo-scraper/
 ```
+
+当前含义：
+
+- `prediction_system.py` 仅作为兼容入口，实际命令实现已迁移到 `app/cli.py`
+- `DomainPredictor` 是接口层与预测核心之间的稳定外壳
+- `EnhancedPredictor` 仍保留主流程编排职责，但大部分子能力已拆到 `domain/`、`collectors/`、`storage/`、`runtime/`
+- `agents/*.md` 与 `agent_runtime_registry.py` 共同决定运行时输出中的 `runtime_profile`
 
 ## 单一事实来源
 
@@ -105,7 +129,7 @@ trae_projects/
 
 - 输出中区分 `模型结论`、`盘口结论`、`综合结论`
 - 明确样本边界、降级情况与风险提示
-- 正式流程服从 `prediction_system.py`、`EnhancedPredictor`、`bulk_fetch_and_update.py` 与 `harness`
+- 正式流程服从 `prediction_system.py` -> `app/cli.py`、`DomainPredictor` / `EnhancedPredictor`、`bulk_fetch_and_update.py` 与 `harness`
 - 正式写回仍以 `teams_2025-26.md` 为准
 
 ## Agent 分工
@@ -176,9 +200,10 @@ trae_projects/
 用于执行完整的单场足球预测，要求：
 
 - 优先走 `prediction_system.py predict-match`
+- 由 `app/cli.py` -> `DomainPredictor` -> `EnhancedPredictor` 调度真实主链
 - 自动拉实时快照并处理大小球补抓
 - 使用真实大小球盘口线
-- 输出终版结论与必要诊断字段
+- 输出终版结论、必要诊断字段和 `runtime_profile`
 
 ### `okooo-match-finder`
 
@@ -186,7 +211,7 @@ trae_projects/
 
 - 定位 `match_id`
 - 输出可抓取入口与赛程上下文
-- 为实时快照、批量采集、批量结果更新提供稳定前置输入
+- 为实时快照、批量采集、Harness 预测和批量结果更新提供稳定前置输入
 
 ## 当前标准流程
 
@@ -196,7 +221,7 @@ Step 2: 抓赛程并获取 MatchID / kickoff_time
 Step 3: 通过 `collect-data` 复用赛程与已有快照
 Step 4: 刷新实时快照（欧赔/亚值/大小球/凯利）
 Step 4.5: 自动补 EWMA form、缺失大小球，按需注入 `team_context`
-Step 5: 运行增强预测流程
+Step 5: 运行 `DomainPredictor` / `EnhancedPredictor` 编排流程
 Step 6: 输出最终结论
 Step 7: 批量或单场写回 teams_2025-26.md
 Step 8: 赛后回填真实比分并更新胜负/比分/大小球准确率

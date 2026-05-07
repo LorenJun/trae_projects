@@ -1,8 +1,11 @@
+"""模块说明：注册足球领域 Harness pipeline，并桥接预测与赛果回填流程。"""
+
 from __future__ import annotations
 
 import asyncio
 from typing import Any, Dict, List
 
+from domain.features import ensure_analysis_context
 from .core import HarnessContext, HarnessPipeline, PipelineStage
 
 
@@ -34,7 +37,7 @@ def _pick_selected_match(context: HarnessContext) -> Dict[str, Any]:
 
 
 def _stage_collect_data(context: HarnessContext) -> Dict[str, Any]:
-    from data_collector import DataCollector
+    from collectors.sporttery import DataCollector
 
     collector = DataCollector()
     league = context.get("league")
@@ -61,9 +64,9 @@ def _stage_collect_data(context: HarnessContext) -> Dict[str, Any]:
 
 
 def _stage_predict_match(context: HarnessContext) -> Dict[str, Any]:
-    from enhanced_prediction_workflow import EnhancedPredictor
+    from domain.predictor import DomainPredictor
 
-    predictor = EnhancedPredictor()
+    predictor = DomainPredictor()
     selected_match = _pick_selected_match(context)
     return predictor.predict_match(
         home_team=context.get("home_team"),
@@ -72,11 +75,11 @@ def _stage_predict_match(context: HarnessContext) -> Dict[str, Any]:
         match_date=context.get("date"),
         match_id=context.get("match_id", "") or selected_match.get("match_id", ""),
         force_refresh_odds=not bool(context.get("no_refresh_odds", False)),
-        okooo_driver=context.get("okooo_driver", "browser-use"),
+        okooo_driver=context.get("okooo_driver", "local-chrome"),
         okooo_headed=bool(context.get("okooo_headed", False)),
         match_time=context.get("match_time", "") or selected_match.get("match_time", ""),
         league_hint=context.get("league_hint", None),
-        analysis_context=context.get("analysis_context", None),
+        analysis_context=ensure_analysis_context(context.get("analysis_context", None)),
     )
 
 

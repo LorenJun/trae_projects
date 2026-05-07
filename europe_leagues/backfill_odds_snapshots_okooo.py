@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：使用澳客数据回填历史赔率快照数据集。
+
 回填未来赛程的"即时赔率快照"，用于生成带历史相似盘路的预测报告。
 数据源: 澳客网 (okooo.com) - 使用浏览器自动化
 
@@ -11,8 +12,7 @@
 
 说明:
 - 对未开赛场次，澳客网页面提供"初始/即时"两行数据；本脚本将"即时"写入 final 字段。
-- actual_score / actual_result 对未完赛为空字符串。
-"""
+- actual_score / actual_result 对未完赛为空字符串。"""
 
 import argparse
 import csv

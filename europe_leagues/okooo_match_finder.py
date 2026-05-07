@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：按球队与日期定位澳客比赛 MatchID，辅助后续快照与预测。
+
 澳客网比赛查找工具
-根据球队名称自动搜索并验证正确的比赛ID
-"""
+根据球队名称自动搜索并验证正确的比赛ID"""
 
 import re
 from playwright.sync_api import sync_playwright

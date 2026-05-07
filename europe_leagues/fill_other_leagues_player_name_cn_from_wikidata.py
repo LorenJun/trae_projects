@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：从 Wikidata 补齐其他联赛球员中文名。
+
 Fill player Chinese names for La Liga / Bundesliga / Serie A / Ligue 1 using Wikidata.
 
 Rationale:
@@ -16,8 +17,7 @@ Behavior:
 - Conservative: if not confidently a footballer, leaves as-is.
 
 Cache:
-- Writes a local cache to avoid re-querying.
-"""
+- Writes a local cache to avoid re-querying."""
 
 from __future__ import annotations
 

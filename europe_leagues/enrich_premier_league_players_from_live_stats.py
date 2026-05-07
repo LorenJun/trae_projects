@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""模块说明：用实时统计补强英超球员数据。"""
+
 from __future__ import annotations
 
 import json

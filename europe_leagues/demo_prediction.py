@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：提供预测流程的演示性脚本与调用示例。
+
 预测流程演示脚本
-展示完整的预测流程
-"""
+展示完整的预测流程"""
 
 from enhanced_prediction_workflow import EnhancedPredictor, LEAGUE_CONFIG
 

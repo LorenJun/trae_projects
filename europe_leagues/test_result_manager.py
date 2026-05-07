@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""
-ResultManager 和 DataCollector 的回归测试。
-"""
+"""模块说明：验证 ResultManager 赛果写回与准确率统计逻辑的测试脚本。
+
+ResultManager 和 DataCollector 的回归测试。"""
 
 import asyncio
 import tempfile

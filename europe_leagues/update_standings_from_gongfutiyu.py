@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""
+"""模块说明：从功夫体育等来源同步积分榜并更新项目数据。
+
 Update five-league standings (积分榜) in teams_2025-26.md by scraping gongfutiyu.com.
 
 We intentionally avoid bs4; standings are available in Next.js __NEXT_DATA__ JSON.
 
 Output:
   - Updates only the "## 积分榜（截至第X轮）" header line and the markdown table under it.
-  - Does NOT modify other sections.
-"""
+  - Does NOT modify other sections."""
 
 from __future__ import annotations
 

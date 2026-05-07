@@ -1,3 +1,5 @@
+"""模块说明：封装单场澳客实时快照刷新流程，供预测主链按需调用。"""
+
 import json
 import os
 import subprocess
@@ -118,7 +120,7 @@ def refresh_snapshot(
     home_team: str,
     away_team: str,
     match_date: str,
-    driver: str = "browser-use",
+    driver: str = "local-chrome",
     match_id: str = "",
     headed: bool = False,
     match_time: str = "",

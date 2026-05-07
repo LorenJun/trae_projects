@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""
-为所有球员JSON文件生成完整的球员信息
-"""
+"""模块说明：生成项目所需的球员基础数据文件。
+
+为所有球员JSON文件生成完整的球员信息"""
 
 import os
 import json
