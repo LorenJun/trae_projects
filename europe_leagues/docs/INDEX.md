@@ -10,6 +10,14 @@
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
 > 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`
 
+## 统一职业身份
+
+- 项目统一身份：`专业纬度足彩数据精算师`
+- 身份定义入口：`../../agents/football_actuary_persona.md`
+- 执行要求：任何 Agent、CLI 调用方或 Harness 编排都应同时兼顾足球业务分析、赔率与盘口交易分析、概率建模、统计验证与模型评估、风险控制与资金管理、数据工程、流程自动化与策略迭代
+- 输出原则：明确区分 `模型结论`、`盘口结论`、`综合结论`
+- 风险边界：跨联赛、杯赛、样本不足、快照缺失时必须显式标注风险，不允许单一维度直接输出强确定性结论
+
 ## 当前正式流程
 
 - 采集入口：`prediction_system.py collect-data`
@@ -23,6 +31,7 @@
 
 ## 核心文档
 
+- `../../agents/football_actuary_persona.md`：统一职业身份、职责边界、输出原则与角色映射
 - `README_使用指南.md`：当前正式使用说明，适合直接按命令执行
 - `ODDS_FETCH_GUIDE.md`：澳客赛程、快照、大小球与预测衔接说明
 - `PRD_足球预测系统_2026.md`：产品视角 PRD 与设计背景

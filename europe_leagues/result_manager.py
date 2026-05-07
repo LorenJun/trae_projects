@@ -16,6 +16,8 @@ from pathlib import Path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+from agent_runtime_registry import get_runtime_profile
+
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -59,6 +61,9 @@ class ResultManager:
         self.upset_library_file = os.path.join(self.base_dir, '爆冷案例库.json')
         self.upset_export_file = os.path.join(self.base_dir, 'upset_cases.json')
         self.team_alias_map = self._load_team_alias_map()
+        self.prediction_runtime_profile = get_runtime_profile(
+            ["data_collector", "match_analyzer", "odds_analyzer"]
+        )
 
     def _load_team_alias_map(self) -> Dict[str, Dict[str, str]]:
         """Load team alias map as {league: {alias_or_name: canonical_name}}."""
@@ -392,6 +397,47 @@ class ResultManager:
             return payload if isinstance(payload, dict) else {}
         except Exception:
             return {}
+
+    def _normalized_prediction_runtime_profile(self) -> Dict[str, Any]:
+        return json.loads(json.dumps(self.prediction_runtime_profile, ensure_ascii=False))
+
+    def _prediction_archive_entry_needs_migration(self, entry: Dict[str, Any]) -> bool:
+        if not isinstance(entry, dict):
+            return True
+        runtime_profile = entry.get("runtime_profile")
+        if not isinstance(runtime_profile, dict):
+            return True
+        return runtime_profile != self.prediction_runtime_profile
+
+    def migrate_prediction_archive_runtime_profiles(self) -> Dict[str, Any]:
+        archive = self._load_prediction_archive()
+        total_records = len(archive)
+        migrated_count = 0
+
+        for match_id, entry in list(archive.items()):
+            if not isinstance(entry, dict):
+                archive[match_id] = {
+                    "match_id": str(match_id),
+                    "runtime_profile": self._normalized_prediction_runtime_profile(),
+                }
+                migrated_count += 1
+                continue
+            if self._prediction_archive_entry_needs_migration(entry):
+                entry["runtime_profile"] = self._normalized_prediction_runtime_profile()
+                archive[match_id] = entry
+                migrated_count += 1
+
+        if migrated_count:
+            self._save_prediction_archive(archive)
+
+        return {
+            "archive_file": self.prediction_archive_file,
+            "total_records": total_records,
+            "migrated_records": migrated_count,
+            "dimension_schema_version": self.prediction_runtime_profile.get("dimension_schema_version"),
+            "agent_roles": self.prediction_runtime_profile.get("agent_roles", []),
+            "updated_at": datetime.now().isoformat(),
+        }
 
     def _save_prediction_archive(self, archive: Dict[str, Dict[str, Any]]) -> None:
         with open(self.prediction_archive_file, 'w', encoding='utf-8') as f:
@@ -1025,6 +1071,7 @@ class ResultManager:
             'predicted_ou': predicted_ou,
             'correct': False,
             'model_predictions': enhanced_pred.get('model_predictions', {}),
+            'runtime_profile': enhanced_pred.get('runtime_profile', {}),
             'full_prediction': enhanced_pred,
             'saved_at': datetime.now().isoformat()
         }
@@ -1039,6 +1086,7 @@ class ResultManager:
                 'predicted_scores': predicted_scores,
                 'predicted_ou': predicted_ou,
                 'confidence': enhanced_pred.get('confidence'),
+                'runtime_profile': enhanced_pred.get('runtime_profile', {}),
                 'note': f"预测:{prediction_result} 信心:{float(enhanced_pred.get('confidence') or 0):.2f}".strip(),
                 'archived_at': datetime.now().isoformat(),
             }

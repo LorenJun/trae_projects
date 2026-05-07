@@ -19,6 +19,8 @@ from datetime import datetime, timedelta
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+from agent_runtime_registry import get_runtime_profile
+
 
 def print_header():
     """打印系统标题"""
@@ -54,11 +56,38 @@ def run_quietly(func):
     return result, stdout_buffer.getvalue(), stderr_buffer.getvalue()
 
 
-def build_json_result(command, data=None, captured_stdout="", captured_stderr="", success=True):
+COMMAND_AGENT_ROLES = {
+    "list-leagues": [],
+    "predict-match": ["data_collector", "match_analyzer", "odds_analyzer"],
+    "predict-schedule": ["data_collector", "match_analyzer", "odds_analyzer"],
+    "collect-data": ["data_collector"],
+    "pending-results": ["result_tracker"],
+    "save-result": ["result_tracker"],
+    "accuracy": ["result_tracker"],
+    "health-check": [],
+    "setup-openclaw": [],
+    "harness-list": [],
+    "harness-run": [],
+}
+
+
+def get_command_runtime_profile(command):
+    return get_runtime_profile(COMMAND_AGENT_ROLES.get(command, []))
+
+
+def build_json_result(
+    command,
+    data=None,
+    captured_stdout="",
+    captured_stderr="",
+    success=True,
+    runtime_profile=None,
+):
     payload = {
         "success": success,
         "command": command,
         "generated_at": datetime.now().isoformat(),
+        "runtime_profile": runtime_profile or get_command_runtime_profile(command),
     }
     if data is not None:
         payload["data"] = data
@@ -313,7 +342,7 @@ def run_openclaw_predict_match(args):
         if getattr(args, "context_file", ""):
             with open(args.context_file, "r", encoding="utf-8") as f:
                 ctx = json.load(f)
-        return predictor.predict_match(
+        result = predictor.predict_match(
             home_team=args.home_team,
             away_team=args.away_team,
             league_code=args.league,
@@ -326,6 +355,8 @@ def run_openclaw_predict_match(args):
             league_hint=getattr(args, "league_hint", None),
             analysis_context=ctx,
         )
+        result.setdefault("runtime_profile", get_command_runtime_profile("predict-match"))
+        return result
 
     if args.json:
         result, captured_stdout, captured_stderr = run_quietly(_execute)
@@ -350,6 +381,7 @@ def run_openclaw_predict_schedule(args):
         predictor = EnhancedPredictor()
         base_date = datetime.strptime(args.date, "%Y-%m-%d")
         updates = []
+        runtime_profile = get_command_runtime_profile("predict-schedule")
 
         for league_code in leagues:
             for day_offset in range(args.days):
@@ -362,6 +394,7 @@ def run_openclaw_predict_schedule(args):
                         "match_date": match_date,
                         "teams_file": teams_file,
                         "updated": bool(teams_file),
+                        "runtime_profile": runtime_profile,
                     }
                 )
         return updates
@@ -393,6 +426,7 @@ def run_openclaw_collect_data(args):
             "count": len(matches),
             "matches": [serialize_match_data(match) for match in matches],
             "use_cache": not args.no_cache,
+            "runtime_profile": get_command_runtime_profile("collect-data"),
         }
 
     if args.json:
@@ -414,7 +448,10 @@ def run_openclaw_pending_results(args):
         from result_manager import ResultManager
 
         manager = ResultManager()
-        return manager.get_pending_matches(days_back=args.days_back)
+        return {
+            "matches": manager.get_pending_matches(days_back=args.days_back),
+            "runtime_profile": get_command_runtime_profile("pending-results"),
+        }
 
     if args.json:
         result, captured_stdout, captured_stderr = run_quietly(_execute)
@@ -425,8 +462,8 @@ def run_openclaw_pending_results(args):
         return
 
     pending = _execute()
-    print(f"待更新结果比赛: {len(pending)} 场")
-    for item in pending:
+    print(f"待更新结果比赛: {len(pending['matches'])} 场")
+    for item in pending["matches"]:
         print(f"- {item['match_date']} {item['home_team']} vs {item['away_team']}")
 
 
@@ -435,7 +472,10 @@ def run_openclaw_save_result(args):
         from result_manager import ResultManager
 
         manager = ResultManager()
-        return manager.save_result(args.match_id, args.home_score, args.away_score)
+        result = manager.save_result(args.match_id, args.home_score, args.away_score)
+        if isinstance(result, dict):
+            result.setdefault("runtime_profile", get_command_runtime_profile("save-result"))
+        return result
 
     if args.json:
         result, captured_stdout, captured_stderr = run_quietly(_execute)
@@ -455,9 +495,13 @@ def run_openclaw_accuracy(args):
 
         manager = ResultManager()
         if args.refresh:
-            return manager.update_accuracy_stats()
-        with open(manager.accuracy_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+            result = manager.update_accuracy_stats()
+        else:
+            with open(manager.accuracy_file, "r", encoding="utf-8") as f:
+                result = json.load(f)
+        if isinstance(result, dict):
+            result.setdefault("runtime_profile", get_command_runtime_profile("accuracy"))
+        return result
 
     if args.json:
         result, captured_stdout, captured_stderr = run_quietly(_execute)
@@ -497,12 +541,32 @@ def run_openclaw_health_check(args):
                 "reason": "未安装 browser-use，真实浏览器采集链路不可用",
                 "install_command": f"bash {os.path.join(PROJECT_ROOT, 'scripts', 'setup_openclaw_env.sh')}",
             }
+        report["runtime_profile"] = get_command_runtime_profile("health-check")
         return report
 
     if args.json:
         result, captured_stdout, captured_stderr = run_quietly(_execute)
         emit_response(
             build_json_result("health-check", result, captured_stdout, captured_stderr),
+            as_json=True,
+        )
+        return
+
+    report = _execute()
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+def run_openclaw_migrate_archive(args):
+    def _execute():
+        from result_manager import ResultManager
+
+        manager = ResultManager()
+        return manager.migrate_prediction_archive_runtime_profiles()
+
+    if args.json:
+        result, captured_stdout, captured_stderr = run_quietly(_execute)
+        emit_response(
+            build_json_result("migrate-archive", result, captured_stdout, captured_stderr),
             as_json=True,
         )
         return
@@ -526,7 +590,14 @@ def run_harness_list(args):
 
     payload = list_pipelines()
     if args.json:
-        emit_response(build_json_result("harness-list", payload), as_json=True)
+        emit_response(
+            build_json_result(
+                "harness-list",
+                payload,
+                runtime_profile=get_command_runtime_profile("harness-list"),
+            ),
+            as_json=True,
+        )
         return
 
     print("可用 Harness Pipelines:")
@@ -563,7 +634,14 @@ def run_harness_pipeline(args):
     result = pipeline.execute(inputs)
 
     if args.json:
-        emit_response(build_json_result("harness-run", result), as_json=True)
+        emit_response(
+            build_json_result(
+                "harness-run",
+                result,
+                runtime_profile=result.get("runtime_profile") or get_command_runtime_profile("harness-run"),
+            ),
+            as_json=True,
+        )
         return
 
     print(f"Pipeline: {result['pipeline']}")
@@ -713,6 +791,9 @@ def build_parser():
     parser_health = subparsers.add_parser("health-check", help="检查核心依赖与运行状态")
     add_json_flag(parser_health)
 
+    parser_migrate_archive = subparsers.add_parser("migrate-archive", help="迁移并补全 prediction_archive.json 元数据")
+    add_json_flag(parser_migrate_archive)
+
     parser_setup = subparsers.add_parser("setup-openclaw", help="输出 openclaw 初始化安装指引")
     add_json_flag(parser_setup)
 
@@ -802,6 +883,8 @@ def main():
         run_openclaw_accuracy(args)
     elif args.command == "health-check":
         run_openclaw_health_check(args)
+    elif args.command == "migrate-archive":
+        run_openclaw_migrate_archive(args)
     elif args.command == "setup-openclaw":
         run_openclaw_setup_guide(args)
     elif args.command == "harness-list":

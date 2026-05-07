@@ -38,6 +38,7 @@ class HarnessContext:
     pipeline: str
     intent: str
     inputs: Dict[str, Any]
+    runtime_profile: Dict[str, Any] = field(default_factory=dict)
     request_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     started_at: str = field(default_factory=_utcnow)
     artifacts: Dict[str, Any] = field(default_factory=dict)
@@ -62,6 +63,7 @@ class HarnessContext:
             "pipeline": self.pipeline,
             "intent": self.intent,
             "started_at": self.started_at,
+            "runtime_profile": self.runtime_profile,
             "inputs": self.inputs,
             "artifacts": self.artifacts,
             "stage_records": [record.to_dict() for record in self.stage_records],
@@ -120,12 +122,22 @@ class HarnessPipeline:
     intent: str
     description: str
     stages: List[PipelineStage]
+    runtime_agent_roles: List[str] = field(default_factory=list)
 
     def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        runtime_profile: Dict[str, Any] = {}
+        try:
+            from agent_runtime_registry import get_runtime_profile
+
+            runtime_profile = get_runtime_profile(self.runtime_agent_roles)
+        except Exception:
+            runtime_profile = {}
+
         context = HarnessContext(
             pipeline=self.name,
             intent=self.intent,
             inputs=inputs,
+            runtime_profile=runtime_profile,
         )
         status = "success"
         error = ""
@@ -145,6 +157,7 @@ class HarnessPipeline:
             "request_id": context.request_id,
             "started_at": context.started_at,
             "finished_at": _utcnow(),
+            "runtime_profile": context.runtime_profile,
             "inputs": context.inputs,
             "artifacts": context.artifacts,
             "stages": [record.to_dict() for record in context.stage_records],

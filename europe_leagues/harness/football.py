@@ -8,12 +8,12 @@ from .core import HarnessContext, HarnessPipeline, PipelineStage
 
 PIPELINE_REGISTRY = {
     "match_prediction": {
-        "intent": "赛前单场预测",
-        "description": "按 Harness 阶段执行 collect -> predict，返回可审计结果。",
+        "intent": "专业纬度足彩数据精算师视角下的赛前单场预测",
+        "description": "按 Harness 阶段执行 collect -> predict，要求区分模型、盘口与综合结论，并返回可审计结果。",
     },
     "result_recording": {
-        "intent": "赛后赛果回填",
-        "description": "按 Harness 阶段执行 save-result -> accuracy，返回可审计结果。",
+        "intent": "专业纬度足彩数据精算师视角下的赛后赛果回填",
+        "description": "按 Harness 阶段执行 save-result -> accuracy，服务于统计验证、复盘优化与可审计结果沉淀。",
     },
 }
 
@@ -116,17 +116,18 @@ def build_pipeline(name: str) -> HarnessPipeline:
             name=name,
             intent=PIPELINE_REGISTRY[name]["intent"],
             description=PIPELINE_REGISTRY[name]["description"],
+            runtime_agent_roles=["data_collector", "match_analyzer", "odds_analyzer"],
             stages=[
                 PipelineStage(
                     name="collect_data",
-                    description="收集赛程与赔率上下文",
+                    description="以精算师身份收集赛程、match_id、赔率与上下文输入",
                     handler=_stage_collect_data,
                     required_inputs=["league", "date"],
                     artifact_key="collect_data",
                 ),
                 PipelineStage(
                     name="predict_match",
-                    description="执行增强版单场预测",
+                    description="执行增强版单场预测，并服务于模型、盘口、综合结论的统一表达",
                     handler=_stage_predict_match,
                     required_inputs=["league", "date", "home_team", "away_team"],
                     artifact_key="predict_match",
@@ -138,17 +139,18 @@ def build_pipeline(name: str) -> HarnessPipeline:
             name=name,
             intent=PIPELINE_REGISTRY[name]["intent"],
             description=PIPELINE_REGISTRY[name]["description"],
+            runtime_agent_roles=["result_tracker"],
             stages=[
                 PipelineStage(
                     name="save_result",
-                    description="写回比赛实际比分",
+                    description="写回比赛实际比分，服务于精算师的赛后验证闭环",
                     handler=_stage_save_result,
                     required_inputs=["match_id", "home_score", "away_score"],
                     artifact_key="save_result",
                 ),
                 PipelineStage(
                     name="refresh_accuracy",
-                    description="更新准确率统计",
+                    description="更新准确率统计，支撑精算师的统计验证与策略复盘",
                     handler=_stage_accuracy,
                     required_inputs=[],
                     artifact_key="accuracy",

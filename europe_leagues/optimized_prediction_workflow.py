@@ -312,6 +312,11 @@ def predict_match(home_team, away_team, league_code, match_date, current_odds=No
                 'away_strength': enhanced.get('away_strength', {}),
                 'upset_potential': enhanced.get('upset_potential', {}),
                 'match_date': match_date,
+                'top_scores': enhanced.get('top_scores', []),
+                'over_under': enhanced.get('over_under', {}),
+                'realtime': enhanced.get('realtime', {}),
+                'analysis_context': enhanced.get('analysis_context', {}),
+                'runtime_profile': enhanced.get('runtime_profile', {}),
                 # 额外字段：方便你核对“动态调权是否进入主流程”
                 'applied_model_weights': enhanced.get('applied_model_weights'),
                 'historical_odds_reference': enhanced.get('historical_odds_reference'),

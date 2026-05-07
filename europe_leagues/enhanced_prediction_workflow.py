@@ -27,6 +27,7 @@ import subprocess
 # 导入机器学习模型
 from ml_prediction_models import MultiModelFusion, PoissonModel, DixonColesModel
 from result_manager import ResultManager
+from agent_runtime_registry import get_runtime_profile
 
 # 配置日志
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1900,6 +1901,111 @@ class EnhancedPredictor:
         # 初始化多模型融合
         self.model_fusion = MultiModelFusion()
         self.poisson_model = PoissonModel()
+        self.runtime_profile = get_runtime_profile(
+            ["data_collector", "match_analyzer", "odds_analyzer"]
+        )
+
+    def _memory_file_path(self) -> str:
+        return os.path.join(PROJECT_ROOT, "MEMORY.md")
+
+    def _format_memory_prediction_entry(self, result: Dict[str, Any]) -> str:
+        league_name = str(result.get("league_name") or result.get("league_code") or "-")
+        league_code = str(result.get("league_code") or "-")
+        match_date = str(result.get("match_date") or "-")
+        home_team = str(result.get("home_team") or "-")
+        away_team = str(result.get("away_team") or "-")
+        prediction = str(result.get("prediction") or "-")
+        confidence = float(result.get("confidence") or 0.0)
+        key = f"{league_code}|{match_date}|{home_team}|{away_team}"
+
+        top_scores = []
+        for item in result.get("top_scores", [])[:3]:
+            if isinstance(item, (list, tuple)) and item:
+                top_scores.append(str(item[0]))
+        score_summary = " > ".join(top_scores) if top_scores else "-"
+
+        over_under = result.get("over_under") if isinstance(result.get("over_under"), dict) else {}
+        over_prob = float(over_under.get("over") or 0.0)
+        under_prob = float(over_under.get("under") or 0.0)
+        ou_line = over_under.get("line")
+        if isinstance(ou_line, (int, float)):
+            line_label = f"{ou_line:g}"
+        else:
+            line_label = "?"
+        ou_direction = "小球" if under_prob >= over_prob else "大球"
+        ou_confidence = max(over_prob, under_prob)
+        updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        return (
+            f"- [{key}] {match_date} {league_name} {home_team} vs {away_team} -> "
+            f"{prediction} ({confidence:.1%}) | 比分: {score_summary} | "
+            f"大小球: {ou_direction} {line_label} ({ou_confidence:.1%}) | "
+            f"更新时间: {updated_at}"
+        )
+
+    def _update_prediction_memory(self, result: Dict[str, Any]) -> None:
+        memory_path = self._memory_file_path()
+        if not os.path.exists(memory_path):
+            logger.warning("未找到 MEMORY.md，跳过预测结果记忆更新")
+            return
+
+        start_marker = "<!-- prediction-memory:start -->"
+        end_marker = "<!-- prediction-memory:end -->"
+        section_title = "### 预测结果滚动记忆"
+        section_note = "> 自动记录最近 50 场预测结果；同一场比赛重复预测时，覆盖旧记录并刷新到顶部。"
+        max_entries = 50
+
+        try:
+            with open(memory_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            entry = self._format_memory_prediction_entry(result)
+            entry_key = entry.split("]", 1)[0] + "]"
+
+            marker_block = re.compile(
+                rf"{re.escape(start_marker)}\n(?P<body>.*?){re.escape(end_marker)}",
+                re.DOTALL,
+            )
+            match = marker_block.search(content)
+
+            if match:
+                existing_entries = [
+                    line.strip()
+                    for line in match.group("body").splitlines()
+                    if line.strip().startswith("- ")
+                ]
+                existing_entries = [line for line in existing_entries if not line.startswith(entry_key)]
+                new_entries = [entry] + existing_entries[: max_entries - 1]
+                replacement = start_marker + "\n" + "\n".join(new_entries) + "\n" + end_marker
+                content = marker_block.sub(replacement, content, count=1)
+            else:
+                section = (
+                    f"{section_title}\n\n"
+                    f"{section_note}\n\n"
+                    f"{start_marker}\n"
+                    f"{entry}\n"
+                    f"{end_marker}\n\n"
+                )
+                insert_anchor = "### 技术栈总结"
+                if insert_anchor in content:
+                    content = content.replace(insert_anchor, section + insert_anchor, 1)
+                else:
+                    content = content.rstrip() + "\n\n---\n\n" + section
+
+            footer_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            footer_matches = list(re.finditer(r"\*预测记录更新时间: .*?\*", content))
+            if footer_matches:
+                last_match = footer_matches[-1]
+                content = (
+                    content[: last_match.start()]
+                    + f"*预测记录更新时间: {footer_ts}*"
+                    + content[last_match.end() :]
+                )
+
+            with open(memory_path, "w", encoding="utf-8") as f:
+                f.write(content)
+        except Exception as e:
+            logger.warning(f"更新 MEMORY.md 失败: {e}")
 
     @staticmethod
     def _normalize_probs(p: Dict[str, float]) -> Dict[str, float]:
@@ -4131,6 +4237,9 @@ class EnhancedPredictor:
         cached = self.cache.get('predict_match', cache_params)
         if cached:
             logger.info(f"使用缓存预测: {home_team} vs {away_team}")
+            if "runtime_profile" not in cached:
+                cached["runtime_profile"] = self.runtime_profile
+            self._update_prediction_memory(cached)
             return cached
         
         
@@ -4511,10 +4620,16 @@ class EnhancedPredictor:
             'applied_model_weights': applied_weights,
             'realtime': realtime,
             'analysis_context': analysis_context,
+            'runtime_profile': self.runtime_profile,
             'timestamp': datetime.now().isoformat()
         }
         
         self.cache.set('predict_match', cache_params, result)
+        try:
+            self.result_manager.save_prediction_from_enhanced(result, league_code)
+        except Exception as e:
+            logger.warning(f"归档单场预测失败: {e}")
+        self._update_prediction_memory(result)
         logger.info(f"预测完成: {home_team} vs {away_team} -> {main_prediction} ({confidence:.1%})")
         
         return result
