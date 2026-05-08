@@ -17,6 +17,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from agent_runtime_registry import get_runtime_profile
 from collectors.aliasing import load_team_alias_map
+from domain.writeback import TeamsWritebackGateway
 from runtime.memory_samples import sync_prediction_memory_samples
 from runtime.paths import get_default_paths
 from runtime.rag_store import sync_rag_index
@@ -80,6 +81,7 @@ class ResultManager:
         self.accuracy_store = AccuracyStatsStore(self.base_dir)
         self.prediction_archive_store = PredictionArchiveStore(self.base_dir)
         self.teams_store = TeamsMarkdownStore(self.base_dir)
+        self.teams_writeback = TeamsWritebackGateway(self.base_dir)
         self.accuracy_file = str(self.accuracy_store.path)
         self.prediction_archive_file = str(self.prediction_archive_store.path)
         self.upset_library_file = os.path.join(self.base_dir, '爆冷案例库.json')
@@ -142,6 +144,38 @@ class ResultManager:
         if explicit:
             return explicit
         return self._match_id_for_teams_row(league_code, match_date, home_team, away_team)
+
+    @staticmethod
+    def _safe_float(value: Any) -> Optional[float]:
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    def _resolve_prediction_summary(self, enhanced_pred: Dict[str, Any]) -> tuple[str, float]:
+        final_probabilities = enhanced_pred.get('final_probabilities')
+        if isinstance(final_probabilities, dict):
+            ranked = [
+                ('主胜', self._safe_float(final_probabilities.get('home_win')) or 0.0),
+                ('平局', self._safe_float(final_probabilities.get('draw')) or 0.0),
+                ('客胜', self._safe_float(final_probabilities.get('away_win')) or 0.0),
+            ]
+            ranked.sort(key=lambda item: item[1], reverse=True)
+            if ranked and ranked[0][1] > 0:
+                return ranked[0][0], float(ranked[0][1])
+
+        all_probabilities = enhanced_pred.get('all_probabilities')
+        if isinstance(all_probabilities, dict):
+            ranked = []
+            for label in ('主胜', '平局', '客胜'):
+                ranked.append((label, self._safe_float(all_probabilities.get(label)) or 0.0))
+            ranked.sort(key=lambda item: item[1], reverse=True)
+            if ranked and ranked[0][1] > 0:
+                return ranked[0][0], float(ranked[0][1])
+
+        prediction_result = str(enhanced_pred.get('prediction') or '').strip() or '平局'
+        confidence = self._safe_float(enhanced_pred.get('confidence')) or 0.0
+        return prediction_result, float(confidence)
 
     @staticmethod
     def _canonical_competition_code(*values: Any) -> str:
@@ -927,13 +961,82 @@ class ResultManager:
                     'note': note,
                 }
 
-    def _append_result_marker(self, note: str, predicted_winner: Optional[str], actual_winner: Optional[str]) -> str:
-        if not note or predicted_winner not in PREDICTED_WINNER_TEXT or actual_winner not in PREDICTED_WINNER_TEXT:
-            return note
+    @staticmethod
+    def _strip_review_fragments(note: str) -> str:
+        text = str(note or '').strip()
+        if not text:
+            return ''
+        text = re.sub(r'\s*[✅❌]\s*$', '', text).strip()
+        text = re.sub(r'^\s*(进行中|已完赛|已结束)(?:[/／][^；;]+)?[；;]?\s*', '', text)
+        text = re.sub(r'[；;]\s*赛果:[^；;]*', '', text)
+        text = re.sub(r'[；;]\s*复盘:[^；\n]*', '', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text.rstrip('；; ').strip()
 
-        cleaned = re.sub(r'\s*[✅❌]\s*$', '', note).strip()
-        marker = '✅' if predicted_winner == actual_winner else '❌'
-        return f"{cleaned} {marker}".strip()
+    @staticmethod
+    def _review_ou_status(predicted_ou: Optional[Dict[str, object]], actual_score: str) -> str:
+        parsed_score = ResultManager._parse_completed_score(actual_score)
+        normalized_ou = ResultManager._normalize_predicted_ou_value(predicted_ou)
+        if not normalized_ou or not parsed_score:
+            return '大小球缺失'
+        home_score, away_score = parsed_score
+        total_goals = home_score + away_score
+        line = float(normalized_ou['line'])
+        if abs(total_goals - line) < 1e-9:
+            return '大小球走水'
+        actual_side = '大' if total_goals > line else '小'
+        return '大小球命中' if actual_side == str(normalized_ou['side']) else '大小球未中'
+
+    def _build_review_summary(
+        self,
+        predicted_winner: Optional[str],
+        predicted_scores: List[str],
+        predicted_ou: Optional[Dict[str, object]],
+        actual_winner: Optional[str],
+        actual_score: str,
+    ) -> str:
+        parts: List[str] = []
+        if predicted_winner in PREDICTED_WINNER_TEXT and actual_winner in PREDICTED_WINNER_TEXT:
+            parts.append('胜平负命中' if predicted_winner == actual_winner else '胜平负未中')
+        else:
+            parts.append('胜平负缺失')
+
+        normalized_score = re.sub(r'\s+', '', str(actual_score or '').strip())
+        if predicted_scores:
+            parts.append('比分命中' if normalized_score in predicted_scores else '比分未中')
+        else:
+            parts.append('比分缺失')
+
+        parts.append(self._review_ou_status(predicted_ou, actual_score))
+        return ' '.join(parts).strip()
+
+    def _build_completed_review_note(
+        self,
+        note: str,
+        predicted_winner: Optional[str],
+        predicted_scores: List[str],
+        predicted_ou: Optional[Dict[str, object]],
+        actual_winner: Optional[str],
+        actual_score: str,
+    ) -> str:
+        base_note = self._strip_review_fragments(note)
+        result_text = self._result_text(actual_winner, actual_score)
+        review_summary = self._build_review_summary(
+            predicted_winner=predicted_winner,
+            predicted_scores=predicted_scores,
+            predicted_ou=predicted_ou,
+            actual_winner=actual_winner,
+            actual_score=actual_score,
+        )
+
+        parts = ['已完赛']
+        if base_note:
+            parts.append(base_note)
+        if result_text:
+            parts.append(f'赛果:{result_text}')
+        if review_summary:
+            parts.append(f'复盘:{review_summary}')
+        return '；'.join(parts)
 
     def _load_league_standings(self, league_code: str) -> Dict[str, Dict[str, int]]:
         path = self._teams_md_path(league_code)
@@ -1506,8 +1609,17 @@ class ResultManager:
                 actual_score = f"{home_score}-{away_score}"
                 actual_winner = self._parse_score_to_winner(actual_score)
                 predicted_winner = self._parse_predicted_winner(note)
+                predicted_scores = self._parse_predicted_scores(note)
+                predicted_ou = self._parse_predicted_ou(note)
                 cols[3] = actual_score
-                cols[5] = self._append_result_marker(note, predicted_winner, actual_winner)
+                cols[5] = self._build_completed_review_note(
+                    note=note,
+                    predicted_winner=predicted_winner,
+                    predicted_scores=predicted_scores,
+                    predicted_ou=predicted_ou,
+                    actual_winner=actual_winner,
+                    actual_score=actual_score,
+                )
                 out_lines.append("| " + " | ".join(cols) + " |\n")
                 changed = True
                 updated_row = {
@@ -1524,8 +1636,8 @@ class ResultManager:
                     'away_score': away_score,
                     'note': cols[5],
                     'predicted_winner': predicted_winner,
-                    'predicted_scores': self._parse_predicted_scores(cols[5]),
-                    'predicted_ou': self._parse_predicted_ou(cols[5]),
+                    'predicted_scores': predicted_scores,
+                    'predicted_ou': predicted_ou,
                     'saved_at': datetime.now().isoformat(),
                 }
 
@@ -1763,8 +1875,17 @@ class ResultManager:
             actual_score = f"{home_score}-{away_score}"
             actual_winner = self._parse_score_to_winner(actual_score)
             predicted_winner = self._parse_predicted_winner(note)
+            predicted_scores = self._parse_predicted_scores(note)
+            predicted_ou = self._parse_predicted_ou(note)
             cols[3] = actual_score
-            cols[5] = self._append_result_marker(note, predicted_winner, actual_winner)
+            cols[5] = self._build_completed_review_note(
+                note=note,
+                predicted_winner=predicted_winner,
+                predicted_scores=predicted_scores,
+                predicted_ou=predicted_ou,
+                actual_winner=actual_winner,
+                actual_score=actual_score,
+            )
             lines[chosen['index']] = "| " + " | ".join(cols) + " |\n"
             with open(path, 'w', encoding='utf-8') as f:
                 f.writelines(lines)
@@ -1782,8 +1903,8 @@ class ResultManager:
                 'away_score': away_score,
                 'note': cols[5],
                 'predicted_winner': predicted_winner,
-                'predicted_scores': self._parse_predicted_scores(cols[5]),
-                'predicted_ou': self._parse_predicted_ou(cols[5]),
+                'predicted_scores': predicted_scores,
+                'predicted_ou': predicted_ou,
                 'saved_at': datetime.now().isoformat(),
                 'matched_date_offset': chosen['date_distance'],
             }
@@ -1927,8 +2048,9 @@ class ResultManager:
         enhanced_pred['teams_match_id'] = teams_match_id
         enhanced_pred['internal_match_id'] = match_id
         enhanced_pred['storage_mode'] = storage_mode
-
-        prediction_result = enhanced_pred.get('prediction', '')
+        prediction_result, prediction_confidence = self._resolve_prediction_summary(enhanced_pred)
+        enhanced_pred['prediction'] = prediction_result
+        enhanced_pred['confidence'] = prediction_confidence
         predicted_winner = {'主胜': 'home', '客胜': 'away', '平局': 'draw'}.get(prediction_result)
         top_scores = enhanced_pred.get('top_scores', [])
         predicted_scores = [score for score, _prob in top_scores[:2]] if top_scores else []
@@ -1960,7 +2082,7 @@ class ResultManager:
             'predicted_winner': predicted_winner,
             'predicted_score': predicted_score,
             'predicted_scores': predicted_scores,
-            'predicted_probability': str(enhanced_pred.get('confidence', '')),
+            'predicted_probability': prediction_confidence,
             'over_under': (
                 '大球'
                 if over_under_available and enhanced_pred.get('over_under', {}).get('over', 0) > enhanced_pred.get('over_under', {}).get('under', 0)
@@ -1993,13 +2115,13 @@ class ResultManager:
                 'over_under': enhanced_pred.get('over_under', {}),
                 'market_snapshot': enhanced_pred.get('market_snapshot', {}),
                 'predicted_ou': predicted_ou,
-                'confidence': enhanced_pred.get('confidence'),
+                'confidence': prediction_confidence,
                 'upset_potential': enhanced_pred.get('upset_potential', {}),
                 'match_intelligence': enhanced_pred.get('match_intelligence', {}),
                 'realtime': enhanced_pred.get('realtime', {}),
                 'storage_mode': storage_mode,
                 'runtime_profile': enhanced_pred.get('runtime_profile', {}),
-                'note': f"预测:{prediction_result} 信心:{float(enhanced_pred.get('confidence') or 0):.2f}".strip(),
+                'note': f"预测:{prediction_result} 信心:{prediction_confidence:.2f}".strip(),
                 'full_prediction': enhanced_pred,
                 'archived_at': datetime.now().isoformat(),
             }
@@ -2007,6 +2129,10 @@ class ResultManager:
         from runtime.result_sync import register_prediction_result_sync
         register_prediction_result_sync(self.base_dir, prediction_data)
         if teams_match_id:
+            try:
+                self.teams_writeback.write_prediction(league_code, enhanced_pred)
+            except Exception as exc:
+                logger.warning("自动更新 teams_2025-26.md 预测备注失败: %s", exc)
             logger.info("预测已关联联赛 SoT 行: %s", teams_match_id)
         else:
             logger.info("预测按 runtime-only 归档，不写入联赛 SoT: %s", match_id)

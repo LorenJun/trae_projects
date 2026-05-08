@@ -12,6 +12,39 @@ def _normalize_team_name(value: str) -> str:
     return (value or '').strip().replace(' ', '')
 
 
+def _safe_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def resolve_prediction_summary(prediction: Dict[str, Any]) -> tuple[str, float]:
+    final_probabilities = prediction.get('final_probabilities')
+    if isinstance(final_probabilities, dict):
+        ranked = [
+            ('主胜', _safe_float(final_probabilities.get('home_win')) or 0.0),
+            ('平局', _safe_float(final_probabilities.get('draw')) or 0.0),
+            ('客胜', _safe_float(final_probabilities.get('away_win')) or 0.0),
+        ]
+        ranked.sort(key=lambda item: item[1], reverse=True)
+        if ranked and ranked[0][1] > 0:
+            return ranked[0][0], float(ranked[0][1])
+
+    all_probabilities = prediction.get('all_probabilities')
+    if isinstance(all_probabilities, dict):
+        ranked = [
+            ('主胜', _safe_float(all_probabilities.get('主胜')) or 0.0),
+            ('平局', _safe_float(all_probabilities.get('平局')) or 0.0),
+            ('客胜', _safe_float(all_probabilities.get('客胜')) or 0.0),
+        ]
+        ranked.sort(key=lambda item: item[1], reverse=True)
+        if ranked and ranked[0][1] > 0:
+            return ranked[0][0], float(ranked[0][1])
+
+    return str(prediction.get('prediction') or '平局').strip() or '平局', _safe_float(prediction.get('confidence')) or 0.0
+
+
 def format_upset_note(upset: Any) -> str:
     if isinstance(upset, str):
         return f"爆冷:{upset or '-'}".strip()
@@ -114,7 +147,22 @@ def strip_existing_prediction_fragments(note: str) -> str:
     return base.rstrip('；; /／').strip()
 
 
-def update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str, predictions: List[Dict[str, Any]]) -> int:
+def build_prediction_note(prediction: Dict[str, Any]) -> str:
+    prediction_text, confidence = resolve_prediction_summary(prediction)
+    score_ou_note = format_score_ou_note(prediction)
+    upset_note = format_upset_note(prediction.get('upset_potential'))
+    applied_weights = prediction.get('applied_model_weights')
+    dyn = ''
+    if isinstance(applied_weights, dict) and 'has_enough_samples' in applied_weights:
+        dyn = '动态调权:已生效' if applied_weights.get('has_enough_samples') else '动态调权:样本不足'
+    return f"预测:{prediction_text} 信心:{confidence:.2f} {score_ou_note} {upset_note}{(' ' + dyn) if dyn else ''}".strip()
+
+
+def update_teams_md_prediction_notes(
+    teams_path: str,
+    predictions: List[Dict[str, Any]],
+    match_date: Optional[str] = None,
+) -> int:
     try:
         lines = open(teams_path, 'r', encoding='utf-8').read().splitlines(True)
     except Exception:
@@ -122,10 +170,11 @@ def update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str, 
 
     prediction_index = {}
     for prediction in predictions:
-        home = _normalize_team_name(prediction.get('home_team'))
-        away = _normalize_team_name(prediction.get('away_team'))
-        if home and away:
-            prediction_index[(match_date, home, away)] = prediction
+        home = _normalize_team_name(str(prediction.get('home_team') or ''))
+        away = _normalize_team_name(str(prediction.get('away_team') or ''))
+        date = str(prediction.get('match_date') or match_date or '').strip()
+        if home and away and date:
+            prediction_index[(date, home, away)] = prediction
 
     changed = 0
     out_lines = []
@@ -150,16 +199,13 @@ def update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str, 
             out_lines.append(line)
             continue
 
-        confidence = float(prediction.get('confidence') or 0.0)
-        upset_note = format_upset_note(prediction.get('upset_potential'))
-        score_ou_note = format_score_ou_note(prediction)
-        applied_weights = prediction.get('applied_model_weights')
-        dyn = ''
-        if isinstance(applied_weights, dict) and 'has_enough_samples' in applied_weights:
-            dyn = '动态调权:已生效' if applied_weights.get('has_enough_samples') else '动态调权:样本不足'
         merged = strip_existing_prediction_fragments(note).rstrip('；; ').strip()
-        pred_note = f"预测:{prediction.get('prediction')} 信心:{confidence:.2f} {score_ou_note} {upset_note}{(' ' + dyn) if dyn else ''}".strip()
-        cells[5] = f'{merged}；{pred_note}' if merged else pred_note
+        pred_note = build_prediction_note(prediction)
+        new_note = f'{merged}；{pred_note}' if merged else pred_note
+        if new_note == note:
+            out_lines.append(line)
+            continue
+        cells[5] = new_note
         out_lines.append('| ' + ' | '.join(cells) + ' |\n')
         changed += 1
 
@@ -172,6 +218,10 @@ def update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str, 
     return changed
 
 
+def update_teams_md_with_enhanced_predictions(teams_path: str, match_date: str, predictions: List[Dict[str, Any]]) -> int:
+    return update_teams_md_prediction_notes(teams_path, predictions, match_date=match_date)
+
+
 class TeamsWritebackGateway:
     def __init__(self, base_dir: Optional[str] = None):
         self.store = TeamsMarkdownStore(base_dir)
@@ -181,3 +231,6 @@ class TeamsWritebackGateway:
 
     def write_predictions(self, league_code: str, match_date: str, predictions: List[Dict[str, Any]]) -> int:
         return update_teams_md_with_enhanced_predictions(self.teams_file_path(league_code), match_date, predictions)
+
+    def write_prediction(self, league_code: str, prediction: Dict[str, Any]) -> int:
+        return update_teams_md_prediction_notes(self.teams_file_path(league_code), [prediction])

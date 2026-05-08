@@ -1,60 +1,67 @@
 ---
 project_name: "Football Prediction Agent"
-version: "1.4.0"
+version: "1.5.0"
 author: "LorenJun"
 email: "jl.07221@qq.com"
 created_date: "2026-04-18"
 last_updated_date: "2026-05-08"
 ---
 
-# 足球比赛预测分析Agent
+# Football Prediction Agent
 
-> 当前正式流程  
-> 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
+> 当前正式主链  
+> 1. `prediction_system.py collect-data` 获取赛程、`match_id` 与输入上下文  
 > 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层  
-> 3. 五大联赛 SoT 写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写入 `MEMORY.md` 与 runtime-only 归档  
-> 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
-> 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
-> 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
-> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`
-> 欧战正式 competition config：`europa_league`、`champions_league`、`conference_league` 已进入主链，但写回仍保持 `runtime_only`
+> 3. 五大联赛写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写入 `MEMORY.md` 与 `.okooo-scraper/runtime/*`  
+> 4. 赛后通过 `save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
+> 5. 最后通过 `accuracy --refresh` 刷新胜负 / 比分 / 大小球统计  
+> 6. 如需可审计阶段结果，使用 `harness-run --pipeline ... --json`
 
-## 项目概述
+## 1. Agent 定义
 
-本项目是一个以欧洲联赛为核心的足球预测系统，当前已完成“赛程/MatchID -> 实时赔率快照 -> `app/cli.py` -> `DomainPredictor` / `EnhancedPredictor` -> `HybridRAGService` -> SoT/runtime-only 双路径写回 -> 准确率统计”的主流程收敛，并支持可选的 Sofascore 球队状态增强（team_context）与 Harness 编排入口。
+`Football Prediction Agent` 不是单一的“足球评论员”或“赔率解读器”，而是围绕 `Europe Leagues` 项目构建的一套统一分析主体。  
+它的真实执行身份来自：
 
-### 当前核心功能
+- [football_actuary_persona.md](./agents/football_actuary_persona.md)
+- [agent_runtime_registry.py](./agent_runtime_registry.py)
 
-- 多联赛比赛分析与预测
-- 实时欧赔、亚值、凯利抓取
-- 从 `亚值` 页面内 `大小球` tab 抓取真实盘口线与水位
-- 可选：SofaScore 近况增强（阵型/控球/上一场首发/球员评分趋势）注入 `analysis_context['team_context']`
-- 多模型融合、Dixon-Coles、动态调权、临场修正
-- EWMA 近况自动回填、缺失大小球自动补抓
-- 混合检索 RAG 记忆层、盘口相似案例与爆冷案例召回
-- 新预测原生写入 `RAG记忆:`，历史记录可通过 `sync-memory-rag` 回填
-- 预测结果按“双路径写回”落到 `teams_2025-26.md` 或 `MEMORY.md` / runtime archive
-- `europa_league`、`champions_league`、`conference_league` 作为正式 competition config 直接复用欧战快照与真实盘口链路
-- 赛果回填与准确率统计（胜负 / 比分 / 大小球）
-- Harness pipeline：`match_prediction` / `result_recording`
+当前统一身份为：
 
-## 当前架构
+- `专业纬度足彩数据精算师`
+
+这意味着所有预测、回填、复盘与自动化调用，都要同时覆盖 6 个维度：
+
+1. 足球业务分析
+2. 赔率与盘口交易分析
+3. 概率建模
+4. 统计验证与模型评估
+5. 风险控制与资金管理
+6. 数据工程、流程自动化与策略迭代
+
+统一输出要求：
+
+- 区分 `模型结论`、`盘口结论`、`综合结论`
+- 明确样本边界、快照缺失、降级路径与风险提示
+- 不把单一维度结果包装成强确定性结论
+
+## 2. 当前项目架构
+
+项目当前已经收敛为“接口层 -> 编排层 -> 领域层 -> 采集层 -> 模型与存储层 -> 治理层”的结构：
 
 ```text
 trae_projects/
 ├── agent.md
+├── README.md
+├── agent_runtime_registry.py
 ├── agents/
-│   ├── data_collector_agent.md
 │   ├── football_actuary_persona.md
+│   ├── data_collector_agent.md
 │   ├── match_analyzer_agent.md
 │   ├── odds_analyzer_agent.md
 │   └── result_tracker_agent.md
-├── .trae/skills/
-│   ├── football-match-analysis/
-│   ├── okooo-match-finder/
-│   ├── browser-use/
-│   ├── chrome-mcp/
-│   └── playwright-cli/
+├── docs/
+│   └── architecture/
+│       └── europe_leagues_architecture.md
 └── europe_leagues/
     ├── app/cli.py
     ├── harness/
@@ -64,228 +71,229 @@ trae_projects/
     │   ├── predictor.py
     │   ├── features.py
     │   ├── odds.py
-    │   ├── rag.py
-    │   ├── intelligence.py
-    │   ├── upset.py
     │   ├── live.py
     │   ├── inference.py
     │   ├── postprocess.py
     │   ├── persistence.py
+    │   ├── rag.py
     │   ├── reporting.py
     │   ├── writeback.py
-    │   └── team_strength.py
+    │   ├── team_strength.py
+    │   ├── intelligence.py
+    │   └── upset.py
     ├── collectors/
     ├── models/
     ├── storage/
     ├── runtime/
-    │   ├── memory_samples.py
-    │   ├── result_sync.py
-    │   └── rag_store.py
-    ├── prediction_system.py
+    ├── .okooo-scraper/
+    │   ├── runtime/
+    │   ├── snapshots/
+    │   └── schedules/
     ├── enhanced_prediction_workflow.py
-    ├── result_manager.py
-    ├── <league>/teams_2025-26.md
-    └── .okooo-scraper/
+    ├── prediction_system.py
+    └── result_manager.py
 ```
 
-当前含义：
+关键含义：
 
-- `prediction_system.py` 仅作为兼容入口，实际命令实现已迁移到 `app/cli.py`
-- `DomainPredictor` 是接口层与预测核心之间的稳定外壳
-- `EnhancedPredictor` 仍保留主流程编排职责，但大部分子能力已拆到 `domain/`、`collectors/`、`storage/`、`runtime/`
-- `agents/*.md` 与 `agent_runtime_registry.py` 共同决定运行时输出中的 `runtime_profile`
+- `prediction_system.py` 是兼容入口，真实命令实现集中在 `europe_leagues/app/cli.py`
+- `domain/predictor.py` 作为接口层对外稳定外壳，内部仍调用 `EnhancedPredictor`
+- `enhanced_prediction_workflow.py` 仍是主编排核心，但主要子能力已下沉到 `domain/*`
+- `runtime/paths.py` 已统一 runtime、snapshots、schedules 与 `MEMORY.md` 路径
+- `.okooo-scraper/runtime/` 是当前真实的运行时落盘目录
 
-## 事实与写回边界
+更完整的架构说明见：
+
+- [europe_leagues_architecture.md](./docs/architecture/europe_leagues_architecture.md)
+
+## 3. 事实写回边界
 
 当前项目采用双路径写回：
 
 - 五大联赛 SoT：`europe_leagues/<league>/teams_2025-26.md`
-- 欧战/杯赛 runtime-only：`MEMORY.md`、`prediction_archive.json`、`prediction_memory_odds_samples.json`、`result_sync_registry.json`
-- RAG 索引：`rag_cases.json`、`rag_index.json`、`rag_registry.json`
-- 欧战 canonical 归档字段：`league_code`、`league_name`、`snapshot_dir`、`snapshot_dir_aliases`、`snapshot_path`、`line_source`
+- 跨联赛滚动记忆：项目根 `MEMORY.md`
+- 运行时归档与索引：`europe_leagues/.okooo-scraper/runtime/*.json`
 
-运行时抓取与缓存目录：
+当前实际 runtime 文件包括：
 
-- `europe_leagues/.okooo-scraper/snapshots/`
-- `europe_leagues/.okooo-scraper/schedules/`
-- `europe_leagues/.okooo-scraper/runtime/`
+- `prediction_archive.json`
+- `prediction_memory_odds_samples.json`
+- `result_sync_registry.json`
+- `accuracy_stats.json`
+- `rag_cases.json`
+- `rag_index.json`
+- `rag_registry.json`
+- `sofascore_team_ids.json`
 
-## 统一职业身份
+这意味着：
 
-当前项目所有 Agent、主流程与复盘链路，统一采用：
+- 五大联赛比赛要优先落回各自 `teams_2025-26.md`
+- 欧战/杯赛不强写联赛 SoT，而是写入 `MEMORY.md` 和 runtime archive
+- 文档或脚本如果仍把 `prediction_archive.json` 视为根目录文件，已经不准确
 
-- [专业纬度足彩数据精算师](./agents/football_actuary_persona.md)
+## 4. 正式联赛范围
 
-作为上位职业身份约束。
+当前正式纳入主链、可直接使用 CLI / Harness 预测的 competition code：
 
-其核心含义是：
+- `premier_league`
+- `la_liga`
+- `serie_a`
+- `bundesliga`
+- `ligue_1`
+- `europa_league`
+- `champions_league`
+- `conference_league`
 
-- 不只看基本面
-- 不只看盘口
-- 不只跑模型
-- 不只统计结果
+注意：
 
-而是同时从以下专业纬度工作：
+- 仓库中存在某个目录，不等于它已经接入正式预测主链
+- `afc_champions_league/` 当前更偏数据目录，不属于现行 `LEAGUE_CONFIG`
 
-1. 足球业务分析
-2. 赔率与盘口交易分析
-3. 概率建模
-4. 统计验证与模型评估
-5. 风险控制与资金管理
-6. 数据工程、流程自动化与策略迭代
+## 5. Agent 职责拆分
 
-统一要求：
-
-- 输出中区分 `模型结论`、`盘口结论`、`综合结论`
-- 明确样本边界、降级情况与风险提示
-- 正式流程服从 `prediction_system.py` -> `app/cli.py`、`DomainPredictor` / `EnhancedPredictor`、`bulk_fetch_and_update.py` 与 `harness`
-- 正式写回必须遵守“双路径写回”，并避免把结果写回旧 `predictions/`、`reports/` 目录
-
-## Agent 分工
-
-### 数据采集Agent
+### 数据采集 Agent
 
 负责：
 
-- 获取赛程
-- 定位 `match_id`
-- 刷新实时快照
-- 维护球队简称映射
-- 为批量结果回填准备当天已结束比赛
+- 赛程抓取
+- `match_id` 定位
+- 澳客实时快照刷新
+- 别名归一与输入质量控制
 
-当前要求：
+当前实现重点：
 
-- 优先使用 `okooo_fetch_daily_schedule.py`
-- 自动化场景优先使用 `prediction_system.py collect-data`
-- 已知 `match_id` 时直接抓快照
-- 大小球优先走 `handicap.php` 页面内 `大小球` tab
-- 在精算师职业画像中，主要承担“第 6 维数据工程、流程自动化与策略迭代中的输入准备与质量控制”职责
+- 正式入口优先 `prediction_system.py collect-data`
+- `collectors/sporttery.py` 是当前正式赛程采集边界
+- `collectors/okooo.py` 负责 `local-chrome` / `browser-use` driver 状态探测与切换
+- 已知 `match_id` 时优先复用本地已有快照
 
-### 比赛分析Agent
+### 比赛分析 Agent
 
 负责：
 
-- 基本面、战术、伤停、战意、历史交锋
-- 结合赔率上下文解释比分与节奏
+- 基本面、战术、伤停、赛程背景、交锋与比赛脚本分析
+- 结合 EWMA form、team context、match intelligence 解释预测结果
 
-当前要求：
+当前实现重点：
 
-- 若真实大小球线已存在，不再沿用固定 `2.5` 解释比赛节奏
-- 可结合 `analysis_context['team_context']`、EWMA form 与 `match_intelligence`
-- 在精算师职业画像中，主要承担“第 1 维足球业务分析 + 第 5 维风险控制支持中的比赛脚本解释”职责
+- 不允许继续把固定 `2.5` 当成正式大小球线
+- 有真实盘口时，节奏解释必须基于真实 `over_under.line`
+- 样本不足、快照缺失时必须明确说明边界
 
-### 赔率分析Agent
+### 赔率分析 Agent
 
 负责：
 
-- 欧赔、亚值、凯利、大小球、水位
-- 庄家心理、盘口错配、冷热识别
+- 欧赔、亚值、凯利、大小球、水位与盘口错配分析
+- 冷热识别、风险识别与庄家行为解释
 
-当前要求：
+当前实现重点：
 
-- 最终报告里要明确输出真实大小球盘口线与大/小水位
-- 重点检查 `over_under.line_source` 与 `over_under.market.final`
-- 在精算师职业画像中，主要承担“第 2 维赔率与盘口交易分析 + 第 5 维风险控制支持中的盘口风险识别”职责
+- 重点检查 `over_under.line_source`
+- 重点检查 `over_under.market.final`
+- 真实大小球线优先来自澳客 `handicap.php` 页内 `大小球` tab
 
-### 结果追踪Agent
+### 结果追踪 Agent
 
 负责：
 
 - 赛果回填
 - 准确率统计
-- 历史学习数据更新
+- 滚动记忆样本刷新
+- RAG 索引联动更新
 
-当前要求：
+当前实现重点：
 
-- 五大联赛以 `teams_2025-26.md` 为 SoT，欧战/杯赛以 `MEMORY.md` + runtime archive 为准
-- 支持 `bulk_fetch_and_update.py` 批量回填
-- 支持 `auto-sync-results` 与 `result-sync-daemon`
-- 统计胜负、比分、大小球准确率
+- 五大联赛以 `teams_2025-26.md` 为 SoT
+- 欧战/杯赛以 `MEMORY.md` + runtime archive 为准
 - 赛果更新后同步刷新 `prediction_memory_odds_samples.json` 与 RAG 索引
-- 在精算师职业画像中，主要承担“第 4 维统计验证与模型评估 + 第 6 维策略迭代支持”职责
 
-## 技能说明
-
-### `football-match-analysis`
-
-用于执行完整的单场足球预测，要求：
-
-- 优先走 `prediction_system.py predict-match`
-- 由 `app/cli.py` -> `DomainPredictor` -> `EnhancedPredictor` 调度真实主链
-- 自动拉实时快照并处理大小球补抓
-- 自动检索 RAG 相似记忆并生成 `retrieved_memory_explanation`
-- 使用真实大小球盘口线
-- 输出终版结论、必要诊断字段和 `runtime_profile`
-
-### `okooo-match-finder`
-
-用于：
-
-- 定位 `match_id`
-- 输出可抓取入口与赛程上下文
-- 为实时快照、批量采集、Harness 预测和批量结果更新提供稳定前置输入
-
-## 当前标准流程
+## 6. 标准执行流程
 
 ```text
-Step 1: 确认联赛、对阵、日期、必要时比赛时间
-Step 2: 抓赛程并获取 MatchID / kickoff_time
-Step 3: 通过 `collect-data` 复用赛程与已有快照
-Step 4: 刷新实时快照（欧赔/亚值/大小球/凯利）
-Step 4.5: 自动补 EWMA form、缺失大小球，按需注入 `team_context`
-Step 5: 运行 `DomainPredictor` / `EnhancedPredictor` + `HybridRAGService` 编排流程
-Step 6: 输出最终结论与 `retrieved_memory_explanation`
-Step 7: 按比赛类型写回 teams_2025-26.md 或 MEMORY.md / runtime archive
-Step 8: 赛后回填真实比分并更新胜负/比分/大小球准确率
+Step 1: 确认联赛、对阵、日期，必要时补比赛时间
+Step 2: 通过 collect-data 或赛程抓取定位 match_id
+Step 3: 执行 predict-match / predict-schedule
+Step 4: 主链自动补快照、EWMA form、RAG 检索与临场输入
+Step 5: 检查关键结果字段与风险边界
+Step 6: 按比赛类型写回 SoT 或 runtime-only 归档
+Step 7: 赛后回填真实比分
+Step 8: 刷新准确率、滚动记忆样本与 RAG 索引
 ```
 
-## 推荐命令
+可审计执行入口：
 
-### 抓赛程
+- `prediction_system.py harness-run --pipeline match_prediction`
+- `prediction_system.py harness-run --pipeline result_recording`
 
-```bash
-cd /Users/bytedance/trae_projects
-python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026-04-28
-```
+## 7. 当前推荐命令
 
-### 抓实时快照
-
-```bash
-cd /Users/bytedance/trae_projects
-python3 europe_leagues/okooo_save_snapshot.py --driver local-chrome --league 英超 --team1 曼联 --team2 布伦特福德 --date 2026-04-28 --time 03:00 --match-id 1296070 --overwrite
-```
-
-### 跑单场预测
+### 环境检查
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py predict-match --league premier_league --home-team 曼联 --away-team 布伦特福德 --date 2026-04-28 --json
+python3 prediction_system.py setup-openclaw --json
+python3 prediction_system.py health-check --json
+```
+
+### 赛程采集
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py collect-data --league premier_league --date 2026-05-11 --json
+```
+
+### 单场预测
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py predict-match --league premier_league --home-team 曼联 --away-team 布伦特福德 --date 2026-05-11 --json
+```
+
+### 欧战单场预测
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py predict-match --league champions_league --home-team 阿森纳 --away-team 马竞 --date 2026-05-08 --match-id 1324472 --no-refresh-odds --json
 ```
 
 ### 批量预测
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py predict-schedule --league premier_league --date 2026-04-28 --days 1 --json
+python3 prediction_system.py predict-schedule --league la_liga --date 2026-05-11 --days 2 --json
 ```
 
-### Harness 入口
+### Harness
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py harness-run --pipeline match_prediction --league premier_league --date 2026-04-28 --home-team 曼联 --away-team 布伦特福德 --json
+python3 prediction_system.py harness-list --json
+python3 prediction_system.py harness-run --pipeline match_prediction --league la_liga --home-team 巴塞罗那 --away-team 皇家马德里 --date 2026-05-11 --json
 ```
 
-### 批量结果回填
+### 赛果回填
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py save-result --match-id la_liga_20260511_巴塞罗那_皇家马德里 --home-score 2 --away-score 1 --json
+python3 prediction_system.py auto-sync-results --json
 python3 bulk_fetch_and_update.py --start 2026-05-01 --end 2026-05-04 --yes
+python3 prediction_system.py accuracy --refresh --json
 ```
 
-## 结果验收标准
+### RAG 维护
 
-预测结果中应优先检查：
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py rag-rebuild --json
+python3 prediction_system.py rag-diagnose --json
+python3 prediction_system.py sync-memory-rag --dry-run --json
+```
+
+## 8. 结果验收重点
+
+正式预测结果中优先检查：
 
 - `final_probabilities`
 - `top_scores`
@@ -293,6 +301,29 @@ python3 bulk_fetch_and_update.py --start 2026-05-01 --end 2026-05-04 --yes
 - `over_under.line_source`
 - `over_under.market.final`
 - `realtime.okooo`
+- `retrieved_memory`
 - `retrieved_memory_explanation`
+- `runtime_profile`
 
-若 `line_source=snapshot_final`，说明真实大小球数据已成功进入预测流程。
+解释原则：
+
+- `line_source=snapshot_final` 或 `snapshot_initial`，表示真实大小球线已进入主链
+- `line_source=missing_real_line` 时，可以保留胜平负结论，但必须标记为“待补真实盘口”
+
+## 9. 行为边界
+
+当前调用方必须遵守：
+
+1. 优先使用 `prediction_system.py` 非交互命令，并尽量附带 `--json`
+2. 不把新结果写入旧 `predictions/`、`reports/` 或历史模板目录
+3. 若用户只要求查看、解释、调研，默认不写文件
+4. 如需阶段化、可审计结果，优先使用 Harness
+5. 遇到 `browser-use`、快照、实时源缺失，可降级，但必须显式标记为降级或 mock 数据
+
+## 10. 参考文档
+
+- [README.md](./README.md)
+- [europe_leagues_architecture.md](./docs/architecture/europe_leagues_architecture.md)
+- [workflow.md](./docs/standards/workflow.md)
+- [data_format.md](./docs/standards/data_format.md)
+- [football_actuary_persona.md](./agents/football_actuary_persona.md)

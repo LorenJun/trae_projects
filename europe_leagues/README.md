@@ -3,6 +3,8 @@
 > 当前说明：本文件已按现行正式链路更新。  
 > 正式入口优先使用 `prediction_system.py collect-data / predict-match / predict-schedule / save-result / accuracy --refresh / harness-run`。  
 > 正式写回遵守“双路径”：五大联赛写 `europe_leagues/<league>/teams_2025-26.md`，欧战/杯赛写 `MEMORY.md` 与 runtime-only 归档；旧 `analysis/predictions/` 与 `analysis/results/` 不再作为主流程输出。
+> 
+> 项目架构文档：[docs/architecture.md](./docs/architecture.md) - 包含完整的技术分析、分层架构、模块划分与端到端流程图
 >
 > 当前正式流程  
 > 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  

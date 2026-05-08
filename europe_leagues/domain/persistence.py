@@ -386,6 +386,57 @@ class PredictionPersistenceService:
         first_line = normalized.splitlines()[0].strip() if normalized.splitlines() else ''
         return any(first_line.startswith(prefix) for prefix in entry_prefixes) or any(marker in normalized for marker in memory_id_markers)
 
+    @classmethod
+    def _merge_completed_memory_details(cls, new_entry: str, existing_entry: str) -> str:
+        if not cls._memory_entry_is_completed(existing_entry):
+            return new_entry
+
+        new_lines = [line.rstrip() for line in str(new_entry or '').splitlines() if line.strip()]
+        existing_lines = [line.rstrip() for line in str(existing_entry or '').splitlines() if line.strip()]
+        if not new_lines:
+            return existing_entry
+
+        extras = []
+        for line in existing_lines[1:]:
+            stripped = line.strip()
+            if stripped.startswith('■ 赛果:') or stripped.startswith('· '):
+                extras.append(line)
+        return '\n'.join(new_lines + [line for line in extras if line not in new_lines])
+
+    @staticmethod
+    def _safe_float(value: Any) -> float | None:
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    @classmethod
+    def _resolve_prediction_summary(cls, result: Dict[str, Any]) -> tuple[str, float]:
+        final_probabilities = result.get('final_probabilities')
+        if isinstance(final_probabilities, dict):
+            ranked = [
+                ('主胜', cls._safe_float(final_probabilities.get('home_win')) or 0.0),
+                ('平局', cls._safe_float(final_probabilities.get('draw')) or 0.0),
+                ('客胜', cls._safe_float(final_probabilities.get('away_win')) or 0.0),
+            ]
+            ranked.sort(key=lambda item: item[1], reverse=True)
+            if ranked and ranked[0][1] > 0:
+                return ranked[0][0], float(ranked[0][1])
+
+        all_probabilities = result.get('all_probabilities')
+        if isinstance(all_probabilities, dict):
+            ranked = []
+            for label in ('主胜', '平局', '客胜'):
+                ranked.append((label, cls._safe_float(all_probabilities.get(label)) or 0.0))
+            ranked.sort(key=lambda item: item[1], reverse=True)
+            if ranked and ranked[0][1] > 0:
+                return ranked[0][0], float(ranked[0][1])
+
+        predicted_winner = str(result.get('predicted_winner') or '').strip()
+        prediction = str(result.get('prediction') or {'home': '主胜', 'away': '客胜', 'draw': '平局'}.get(predicted_winner, '平局'))
+        confidence = cls._safe_float(result.get('confidence')) or 0.0
+        return prediction, float(confidence)
+
     @staticmethod
     def _memory_risk_points(result: Dict[str, Any]) -> list[str]:
         points: list[str] = []
@@ -534,9 +585,7 @@ class PredictionPersistenceService:
             or result.get('competition_stage')
             or ''
         ).strip()
-        predicted_winner = str(result.get('predicted_winner') or '').strip()
-        prediction = str(result.get('prediction') or {'home': '主胜', 'away': '客胜', 'draw': '平局'}.get(predicted_winner, '-'))
-        confidence = float(result.get('confidence') or 0.0)
+        prediction, confidence = self._resolve_prediction_summary(result)
         dedupe_id, display_identity = self._canonical_memory_identity(result)
         key = display_identity
 
@@ -574,7 +623,6 @@ class PredictionPersistenceService:
             ou_confidence = confidence if ou_direction in ('大球', '小球') else 0.0
             ou_summary = f'{ou_direction} {line_label} ({ou_confidence:.1%})' if ou_direction in ('大球', '小球') else '待补真实盘口'
         risk_summary = self.format_memory_risk_summary(result)
-        market_changes = self.format_memory_market_changes(result)
         updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         title = f'{league_name}{competition_stage_name}' if competition_stage_name and competition_stage_name not in league_name else league_name
         actual_winner = str(result.get('actual_winner') or '').strip()
@@ -632,7 +680,11 @@ class PredictionPersistenceService:
                     line for line in existing_entries
                     if not self._memory_entry_matches_aliases(line, entry_prefixes, memory_id_markers)
                 ]
-                latest_entry = max(alias_entries + [entry], key=self._memory_entry_sort_key)
+                latest_completed = None
+                completed_aliases = [line for line in alias_entries if self._memory_entry_is_completed(line)]
+                if completed_aliases:
+                    latest_completed = max(completed_aliases, key=self._memory_entry_sort_key)
+                latest_entry = self._merge_completed_memory_details(entry, latest_completed) if latest_completed else entry
                 new_entries = sorted(
                     [latest_entry] + retained_entries,
                     key=self._memory_entry_sort_key,
