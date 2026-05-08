@@ -34,7 +34,7 @@ def _prediction_memory_key_to_match_id(memory_key: str) -> Optional[str]:
     return f"{league_code}_{match_date.replace('-', '')}_{home_team}_{away_team}"
 
 
-def _extract_prediction_memory_keys(content: str, limit: int) -> List[str]:
+def _extract_prediction_memory_entries(content: str, limit: int) -> List[Dict[str, str]]:
     marker = re.search(
         r'<!-- prediction-memory:start -->\n(?P<body>.*?)<!-- prediction-memory:end -->',
         content,
@@ -42,15 +42,18 @@ def _extract_prediction_memory_keys(content: str, limit: int) -> List[str]:
     )
     if not marker:
         return []
-    keys: List[str] = []
+    entries: List[Dict[str, str]] = []
     for raw_line in marker.group('body').splitlines():
         line = raw_line.strip()
         if not line.startswith('- ['):
             continue
-        keys.append(line.split(']', 1)[0][3:])
-        if len(keys) >= limit:
+        memory_key = line.split(']', 1)[0][3:]
+        memory_id_match = re.search(r'记忆ID:\s*([^|]+)', line)
+        memory_id = str(memory_id_match.group(1) or '').strip() if memory_id_match else ''
+        entries.append({'memory_key': memory_key, 'memory_id': memory_id})
+        if len(entries) >= limit:
             break
-    return keys
+    return entries
 
 
 def build_prediction_memory_samples(base_dir: Optional[str] = None, limit: int = 100) -> Dict[str, Any]:
@@ -81,14 +84,33 @@ def build_prediction_memory_samples(base_dir: Optional[str] = None, limit: int =
     completed_samples = 0
     seen_ids = set()
 
-    for memory_key in _extract_prediction_memory_keys(content, limit):
-        match_id = _prediction_memory_key_to_match_id(memory_key)
+    for memory_entry in _extract_prediction_memory_entries(content, limit):
+        memory_key = memory_entry.get('memory_key') or ''
+        memory_id = str(memory_entry.get('memory_id') or '').strip()
+        match_id = memory_id or _prediction_memory_key_to_match_id(memory_key)
         if not match_id or match_id in seen_ids:
             continue
         seen_ids.add(match_id)
         total_candidates += 1
 
         archived = archive.get(match_id)
+        if not isinstance(archived, dict) and memory_id:
+            for archive_key, archive_value in archive.items():
+                if not isinstance(archive_value, dict):
+                    continue
+                candidates = {
+                    str(archive_key).strip(),
+                    str(archive_value.get('match_id') or '').strip(),
+                    str(archive_value.get('external_match_id') or '').strip(),
+                    str(archive_value.get('internal_match_id') or '').strip(),
+                }
+                full_prediction = archive_value.get('full_prediction')
+                if isinstance(full_prediction, dict):
+                    candidates.add(str(full_prediction.get('match_id') or '').strip())
+                if memory_id in candidates:
+                    archived = archive_value
+                    match_id = str(memory_id)
+                    break
         if not isinstance(archived, dict):
             continue
         league_code = str(archived.get('league') or '').strip()
@@ -102,9 +124,20 @@ def build_prediction_memory_samples(base_dir: Optional[str] = None, limit: int =
             continue
 
         actual_row = results_map.get(match_id) or {}
-        actual_winner_code = str(actual_row.get('actual_winner') or '').strip()
+        archived_prediction = archived.get('full_prediction') if isinstance(archived.get('full_prediction'), dict) else {}
+        actual_winner_code = str(
+            actual_row.get('actual_winner')
+            or archived.get('actual_winner')
+            or archived_prediction.get('actual_winner')
+            or ''
+        ).strip()
         actual_result = WINNER_TEXT.get(actual_winner_code, '')
-        actual_score = str(actual_row.get('actual_score') or '').strip()
+        actual_score = str(
+            actual_row.get('actual_score')
+            or archived.get('actual_score')
+            or archived_prediction.get('actual_score')
+            or ''
+        ).strip()
         if actual_result and actual_score:
             completed_samples += 1
 

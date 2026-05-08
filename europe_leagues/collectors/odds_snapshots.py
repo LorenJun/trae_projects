@@ -11,6 +11,12 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+LEAGUE_EXTERNAL_SNAPSHOT_ALIASES = {
+    'europa_league': ['europa_league', '欧联', '欧罗巴'],
+    'champions_league': ['champions_league', '欧冠'],
+    'conference_league': ['conference_league', '欧协联'],
+}
+
 
 class OddsSnapshotRepository:
     def __init__(self, base_dir: str, odds_reference: Any = None):
@@ -172,11 +178,10 @@ class OddsSnapshotRepository:
         }
 
     def _external_snapshot_dirs(self, league_code: str) -> List[str]:
-        dirs = [
-            os.path.join(self.base_dir, '.okooo-scraper', 'snapshots', league_code),
-            os.path.join(self.base_dir, 'okooo_snapshots'),
-            os.path.join(self.base_dir, 'okooo_snapshots', league_code),
-        ]
+        aliases = LEAGUE_EXTERNAL_SNAPSHOT_ALIASES.get(league_code, [league_code] if league_code else [''])
+        dirs = [os.path.join(self.base_dir, '.okooo-scraper', 'snapshots', alias) for alias in aliases if alias]
+        dirs.append(os.path.join(self.base_dir, 'okooo_snapshots'))
+        dirs.extend(os.path.join(self.base_dir, 'okooo_snapshots', alias) for alias in aliases if alias)
         seen = set()
         out: List[str] = []
         for item in dirs:
@@ -200,47 +205,46 @@ class OddsSnapshotRepository:
 
     def get_matches_from_odds_snapshots(self, league_code: str, match_date: str) -> List[Dict[str, Any]]:
         snapshot_dir = os.path.join(self.base_dir, league_code, 'analysis', 'odds_snapshots')
-        if not os.path.isdir(snapshot_dir):
-            return []
-
         matches: List[Dict[str, Any]] = []
-        for file_path in sorted(glob(os.path.join(snapshot_dir, '*_odds_snapshot.json'))):
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    payload = json.load(f)
-            except Exception:
-                continue
-            for record in payload.get('matches', []):
-                if record.get('match_date') != match_date:
+        if os.path.isdir(snapshot_dir):
+            for file_path in sorted(glob(os.path.join(snapshot_dir, '*_odds_snapshot.json'))):
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        payload = json.load(f)
+                except Exception:
                     continue
-                matches.append({
-                    'home_team': record.get('home_team'),
-                    'away_team': record.get('away_team'),
-                    'current_odds': self.extract_current_odds_snapshot(record),
-                })
+                for record in payload.get('matches', []):
+                    if record.get('match_date') != match_date:
+                        continue
+                    matches.append({
+                        'home_team': record.get('home_team'),
+                        'away_team': record.get('away_team'),
+                        'current_odds': self.extract_current_odds_snapshot(record),
+                    })
         matches = [m for m in matches if m.get('home_team') and m.get('away_team')]
         if matches:
             return matches
 
         csv_matches: List[Dict[str, Any]] = []
-        for file_path in sorted(glob(os.path.join(snapshot_dir, '*_odds_snapshot.csv'))):
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        if row.get('match_date') != match_date:
-                            continue
-                        home = (row.get('home_team') or '').strip()
-                        away = (row.get('away_team') or '').strip()
-                        if not home or not away:
-                            continue
-                        csv_matches.append({
-                            'home_team': home,
-                            'away_team': away,
-                            'current_odds': self.extract_current_odds_from_csv_row(row),
-                        })
-            except Exception:
-                continue
+        if os.path.isdir(snapshot_dir):
+            for file_path in sorted(glob(os.path.join(snapshot_dir, '*_odds_snapshot.csv'))):
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            if row.get('match_date') != match_date:
+                                continue
+                            home = (row.get('home_team') or '').strip()
+                            away = (row.get('away_team') or '').strip()
+                            if not home or not away:
+                                continue
+                            csv_matches.append({
+                                'home_team': home,
+                                'away_team': away,
+                                'current_odds': self.extract_current_odds_from_csv_row(row),
+                            })
+                except Exception:
+                    continue
         csv_matches = [m for m in csv_matches if m.get('home_team') and m.get('away_team')]
         if csv_matches:
             logger.info("使用 CSV 赔率快照进行预测: %s %s, matches=%s", league_code, match_date, len(csv_matches))

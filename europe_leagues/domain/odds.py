@@ -17,6 +17,12 @@ from runtime.memory_samples import load_prediction_memory_samples
 
 logger = logging.getLogger(__name__)
 
+EXTERNAL_SNAPSHOT_DIR_ALIASES = {
+    'europa_league': ['europa_league', '欧联', '欧罗巴'],
+    'champions_league': ['champions_league', '欧冠'],
+    'conference_league': ['conference_league', '欧协联'],
+}
+
 
 def build_odds_runtime_options(driver: str = 'local-chrome', headed: bool = False, no_refresh_odds: bool = False) -> Dict[str, Any]:
     return {
@@ -31,11 +37,10 @@ def external_snapshot_root(base_dir: str) -> str:
 
 
 def external_snapshot_dirs(base_dir: str, league_code: str) -> List[str]:
-    dirs = [
-        os.path.join(external_snapshot_root(base_dir), league_code),
-        os.path.join(base_dir, 'okooo_snapshots'),
-        os.path.join(base_dir, 'okooo_snapshots', league_code),
-    ]
+    aliases = EXTERNAL_SNAPSHOT_DIR_ALIASES.get(league_code, [league_code] if league_code else [''])
+    dirs = [os.path.join(external_snapshot_root(base_dir), alias) for alias in aliases if alias]
+    dirs.append(os.path.join(base_dir, 'okooo_snapshots'))
+    dirs.extend(os.path.join(base_dir, 'okooo_snapshots', alias) for alias in aliases if alias)
     seen = set()
     result = []
     for item in dirs:
@@ -49,15 +54,7 @@ def resolve_over_under_line(
     current_odds: Optional[Dict[str, Any]],
     analysis_context: Dict[str, Any],
     to_float,
-) -> Tuple[float, str]:
-    try:
-        if isinstance(analysis_context, dict) and 'ou_line' in analysis_context:
-            value = to_float(analysis_context.get('ou_line'))
-            if isinstance(value, float) and 0.5 <= value <= 6.5:
-                return float(value), 'analysis_context'
-    except Exception:
-        pass
-
+) -> Tuple[Optional[float], str]:
     try:
         if isinstance(current_odds, dict):
             totals = current_odds.get('大小球')
@@ -81,7 +78,7 @@ def resolve_over_under_line(
     except Exception:
         pass
 
-    return 2.5, 'default_2.5'
+    return None, 'missing_real_line'
 
 
 def auto_fetch_okooo_totals_if_needed(
@@ -107,7 +104,7 @@ def auto_fetch_okooo_totals_if_needed(
 
     try:
         _line, src = resolve_over_under_line(current_odds=current_odds, analysis_context=analysis_context, to_float=to_float)
-        if src in ('snapshot_final', 'snapshot_initial', 'analysis_context'):
+        if src in ('snapshot_final', 'snapshot_initial'):
             diag['skipped'] = f'ou_line already resolved from {src}'
             return current_odds, diag
     except Exception:

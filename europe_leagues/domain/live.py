@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 from collectors.okooo import build_okooo_driver_chain
 from collectors.okooo import describe_unavailable_okooo_drivers
 from collectors.okooo import extract_current_odds as extract_okooo_current_odds
+from collectors.okooo import find_snapshot_by_match_id
 from collectors.okooo import refresh_snapshot as refresh_okooo_snapshot
 from domain.features import auto_enrich_team_context_if_enabled
 from domain.odds import auto_fetch_okooo_totals_if_needed
@@ -47,6 +48,67 @@ class LiveRefreshService:
             },
             'context_applied': {},
         }
+
+    @staticmethod
+    def _has_real_totals_line(current_odds: Optional[Dict[str, Any]]) -> bool:
+        if not isinstance(current_odds, dict):
+            return False
+        totals = current_odds.get('大小球')
+        if not isinstance(totals, dict):
+            return False
+        final = totals.get('final') if isinstance(totals.get('final'), dict) else {}
+        initial = totals.get('initial') if isinstance(totals.get('initial'), dict) else {}
+        return bool(final.get('line') not in (None, '') or initial.get('line') not in (None, ''))
+
+    def hydrate_existing_snapshot_odds(
+        self,
+        *,
+        league_code: str,
+        current_odds: Optional[Dict[str, Any]],
+        realtime: Dict[str, Any],
+        match_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        if self._has_real_totals_line(current_odds):
+            return current_odds
+        mid = str(match_id or realtime.get('okooo', {}).get('match_id') or '').strip()
+        if not mid:
+            realtime['context_applied']['existing_snapshot_odds'] = {
+                'attempted': False,
+                'ok': False,
+                'reason': 'missing_match_id',
+            }
+            return current_odds
+        try:
+            found = find_snapshot_by_match_id(self.base_dir, league_code, mid)
+            if not found:
+                realtime['context_applied']['existing_snapshot_odds'] = {
+                    'attempted': True,
+                    'ok': False,
+                    'reason': 'snapshot_not_found',
+                    'match_id': mid,
+                }
+                return current_odds
+            path, payload = found
+            merged = dict(current_odds or {})
+            merged.update(extract_okooo_current_odds(payload))
+            realtime['context_applied']['existing_snapshot_odds'] = {
+                'attempted': True,
+                'ok': True,
+                'snapshot_path': path,
+                'match_id': str(payload.get('match_id') or mid),
+            }
+            if isinstance(realtime.get('okooo'), dict):
+                realtime['okooo']['snapshot_path'] = str(path or '')
+                realtime['okooo']['match_id'] = str(payload.get('match_id') or mid)
+            return merged
+        except Exception as exc:
+            realtime['context_applied']['existing_snapshot_odds'] = {
+                'attempted': True,
+                'ok': False,
+                'reason': 'snapshot_load_error',
+                'error': str(exc),
+            }
+            return current_odds
 
     def fill_ewma_form(
         self,
@@ -211,6 +273,12 @@ class LiveRefreshService:
             match_date=effective_match_date,
             analysis_context=effective_analysis_context,
             realtime=realtime,
+        )
+        current_odds = self.hydrate_existing_snapshot_odds(
+            league_code=league_code,
+            current_odds=current_odds,
+            realtime=realtime,
+            match_id=match_id,
         )
         current_odds = self.refresh_live_snapshot(
             league_code=league_code,

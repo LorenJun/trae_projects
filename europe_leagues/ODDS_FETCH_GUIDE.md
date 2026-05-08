@@ -2,12 +2,12 @@
 
 > 当前正式流程  
 > 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
-> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测  
-> 3. 结果写回 `europe_leagues/<league>/teams_2025-26.md`  
-> 4. 赛后用 `prediction_system.py save-result` 或 `bulk_fetch_and_update.py` 回填  
+> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层  
+> 3. 五大联赛 SoT 写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写入 `MEMORY.md` 与 runtime-only 归档  
+> 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
 > 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
-> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`
+> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`
 
 ## 目标
 
@@ -25,12 +25,13 @@
 2. 优先调用 `prediction_system.py collect-data` 或获取 `match_id`
 3. 调用 `okooo_save_snapshot.py` 生成实时快照 JSON
 4. 通过 `prediction_system.py predict-match` 或 `harness-run --pipeline match_prediction` 进入正式预测流程
-5. 由 `EnhancedPredictor.predict_match()` 自动处理快照刷新、缺失大小球补抓和上下文注入
+5. 由 `EnhancedPredictor.predict_match()` 自动处理快照刷新、缺失大小球补抓、RAG 检索和上下文注入
 6. 输出中检查：
    - `over_under.line`
    - `over_under.line_source`
    - `over_under.market.final`
    - `realtime.okooo`
+   - `retrieved_memory_explanation`
 
 ## 关键事实
 
@@ -152,7 +153,7 @@ python3 prediction_system.py harness-run \
 - `line_source=snapshot_final` 表示真实盘口线来自实时快照
 - `market.final` 表示最终使用的真实大/小水位
 - `realtime.okooo.refreshed=true` 表示预测前成功刷新过实时快照
-- 若抓取失败，会退回 `default_2.5`
+- 若缺少真实盘口，正式输出应落为 `line_source=missing_real_line`，并明确标记“待补真实盘口”，不再回退 `default_2.5`
 
 ## 稳定性策略
 

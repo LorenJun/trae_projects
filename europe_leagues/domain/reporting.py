@@ -43,11 +43,16 @@ class PredictionReportService:
                 report += f"  {score}: {prob:.1%}\n"
 
             ou = pred['over_under']
-            ou_line = ou.get('line')
-            line_label = f"{ou_line:g}" if isinstance(ou_line, (int, float)) else '?'
-            report += f"\n**大小球分析** ({line_label}球):\n"
-            report += f"  大球: {ou['over']:.1%} | 小球: {ou['under']:.1%}\n"
-            report += f"  预期总进球: {ou['total_lambda']:.2f}\n"
+            if isinstance(ou, dict) and ou.get('available'):
+                ou_line = ou.get('line')
+                line_label = f"{ou_line:g}" if isinstance(ou_line, (int, float)) else '?'
+                report += f"\n**大小球分析** ({line_label}球):\n"
+                report += f"  大球: {ou['over']:.1%} | 小球: {ou['under']:.1%}\n"
+                report += f"  预期总进球: {ou['total_lambda']:.2f}\n"
+                report += f"  盘口来源: {ou.get('line_source', 'unknown')}\n"
+            else:
+                report += "\n**大小球分析**:\n"
+                report += "  待补真实盘口，当前不输出正式大小球结论。\n"
 
             hs = pred['home_strength']
             aws = pred['away_strength']
@@ -83,6 +88,25 @@ class PredictionReportService:
                     report += (
                         f"  - {similar['match_date']} {similar['home_team']} vs {similar['away_team']} "
                         f"=> {similar['actual_result']} ({similar['actual_score']}) [相似度 {similar['similarity']:.2f}]\n"
+                    )
+
+            rag_explanation = str(pred.get('retrieved_memory_explanation') or '').strip()
+            rag_memory = pred.get('retrieved_memory', {}) if isinstance(pred.get('retrieved_memory'), dict) else {}
+            if rag_explanation:
+                report += f"\n**RAG记忆解释**:\n  {rag_explanation}\n"
+            if rag_memory.get('similar_cases'):
+                report += "  相似记忆样本:\n"
+                for similar in rag_memory.get('similar_cases', [])[:3]:
+                    report += (
+                        f"  - {similar.get('match_date', '-') } {similar.get('home_team', '-')} vs {similar.get('away_team', '-')} "
+                        f"=> {similar.get('actual_result', '-') } ({similar.get('actual_score', '-')}) [分数 {float(similar.get('similarity_score') or 0.0):.2f}]\n"
+                    )
+            if rag_memory.get('market_cases'):
+                report += "  盘口记忆样本:\n"
+                for similar in rag_memory.get('market_cases', [])[:2]:
+                    report += (
+                        f"  - {similar.get('match_date', '-') } {similar.get('home_team', '-')} vs {similar.get('away_team', '-')} "
+                        f"=> {similar.get('actual_result', '-') } ({similar.get('actual_score', '-')}) [盘口分 {float(similar.get('similarity_score') or 0.0):.2f}]\n"
                     )
 
             report += "\n" + "-" * 60 + "\n"

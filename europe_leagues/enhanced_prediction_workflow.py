@@ -18,6 +18,7 @@ from domain.inference import InferencePipelineService
 from domain.live import LiveRefreshService
 from domain.persistence import PredictionPersistenceService
 from domain.postprocess import PredictionPostprocessService
+from domain.rag import LightweightRAGService
 from domain.reporting import PredictionReportService
 from domain.team_strength import TeamStrengthService
 from domain.upset import UpsetAnalyzer
@@ -86,6 +87,24 @@ LEAGUE_CONFIG = {
         'code': 'la_liga',
         'teams': ['巴塞罗那', '皇家马德里', '马德里竞技', '塞维利亚', '皇家社会', '比利亚雷亚尔', '贝蒂斯', '瓦伦西亚', '毕尔巴鄂竞技', '奥萨苏纳'],
         'avg_goals': 2.6
+    },
+    'europa_league': {
+        'name': '欧联',
+        'code': 'europa_league',
+        'teams': [],
+        'avg_goals': 2.75
+    },
+    'champions_league': {
+        'name': '欧冠',
+        'code': 'champions_league',
+        'teams': [],
+        'avg_goals': 2.9
+    },
+    'conference_league': {
+        'name': '欧协联',
+        'code': 'conference_league',
+        'teams': [],
+        'avg_goals': 2.7
     }
 }
 
@@ -286,6 +305,7 @@ class EnhancedPredictor:
         self.cache = PredictionCache()
         self.result_manager = ResultManager(base_dir=self.base_dir)
         self.postprocess_service = PredictionPostprocessService(LEAGUE_CONFIG)
+        self.rag_service = LightweightRAGService(self.base_dir)
         self.persistence_service = PredictionPersistenceService(self.base_dir, self.cache, self.result_manager)
         # 初始化多模型融合
         self.model_fusion = MultiModelFusion()
@@ -618,7 +638,18 @@ class EnhancedPredictor:
             realtime["context_applied"]["staking_kelly"] = {"available": False, "error": str(e)}
         
         # 构建完整结果
+        retrieved_memory = self.rag_service.retrieve_match_memory(
+            league_code=league_code,
+            home_team=home_team,
+            away_team=away_team,
+            market_snapshot=self.postprocess_service.build_market_snapshot(current_odds),
+            match_id=match_id,
+            analysis_context=analysis_context,
+            historical_odds_reference=historical_odds_reference,
+            top_k=5,
+        )
         result = self.postprocess_service.build_prediction_result(
+            match_id=match_id,
             home_team=home_team,
             away_team=away_team,
             league_code=league_code,
@@ -644,6 +675,7 @@ class EnhancedPredictor:
             realtime=realtime,
             analysis_context=analysis_context,
             runtime_profile=self.runtime_profile,
+            retrieved_memory=retrieved_memory,
             current_odds=current_odds,
         )
 

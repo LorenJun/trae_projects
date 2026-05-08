@@ -1,28 +1,31 @@
 ---
 document_title: "工作流程规范"
-version: "1.2.0"
-last_updated: "2026-05-04"
+version: "1.3.0"
+last_updated: "2026-05-08"
 ---
 
 # 工作流程规范
 
 > 当前正式流程  
 > 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
-> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测  
-> 3. 结果写回 `europe_leagues/<league>/teams_2025-26.md`  
-> 4. 赛后用 `prediction_system.py save-result` 或 `bulk_fetch_and_update.py` 回填  
+> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层  
+> 3. 五大联赛 SoT 写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写入 `MEMORY.md` 与 runtime-only 归档  
+> 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
 > 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
-> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`
+> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`
 
 本规范定义当前项目正式使用的足球预测工作流。所有流程说明都应与以下口径保持一致：
 
-- 以 `europe_leagues/<league>/teams_2025-26.md` 为单一事实来源
+- 五大联赛以 `europe_leagues/<league>/teams_2025-26.md` 为 SoT；欧战/杯赛走 `MEMORY.md` 与 runtime-only 归档
+- `europa_league`、`champions_league`、`conference_league` 已纳入正式 `competition config`，可直接走 `predict-match` / `harness-run`
 - 先通过赛程或 `collect-data` 定位 `match_id`
 - 再由预测主流程刷新实时快照
+- 预测主流程会自动调用 `HybridRAGService`
 - 大小球优先从 `亚值` 页面内 `大小球` tab 抓取
-- 最终预测检查 `over_under.line`、`line_source`、`over_under.market.final`
+- 最终预测检查 `over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`
 - 正式 CLI 入口优先使用 `prediction_system.py`
+- 历史 RAG 记忆回填使用 `prediction_system.py sync-memory-rag`
 - 赛后批量回填优先使用 `bulk_fetch_and_update.py`
 
 ## 完整工作流总览
@@ -38,17 +41,19 @@ Step 4: 刷新实时快照（欧赔/亚值/大小球/凯利）
         ↓
 Step 4.5: 自动补 EWMA form、缺失大小球，按需注入 team_context
         ↓
-Step 5: 基本面分析
+Step 5: RAG 检索相似比赛、盘口样本与爆冷案例
         ↓
-Step 6: 赔率分析
+Step 6: 基本面分析
         ↓
-Step 7: 综合预测并输出最终结论
+Step 7: 赔率分析
         ↓
-Step 8: 需要落盘时写回 teams_2025-26.md
+Step 8: 综合预测并输出最终结论
         ↓
-Step 9: 比赛结束后单场或批量回填赛果
+Step 9: 需要落盘时按比赛类型写回 teams_2025-26.md 或 MEMORY.md / runtime archive
         ↓
-Step 10: 更新胜负 / 比分 / 大小球准确率与历史学习数据
+Step 10: 比赛结束后单场或批量回填赛果
+        ↓
+Step 11: 更新胜负 / 比分 / 大小球准确率、记忆样本与 RAG 索引
 ```
 
 ## 统一职业身份
@@ -76,11 +81,12 @@ Step 10: 更新胜负 / 比分 / 大小球准确率与历史学习数据
 
 ### 必守规则
 
-- 以 `europe_leagues/<league>/teams_2025-26.md` 作为唯一正式落盘位置
+- 正式写回遵守双路径：五大联赛写 `teams_2025-26.md`，欧战/杯赛写 `MEMORY.md` 与 runtime archive
 - 优先调用 `prediction_system.py` 的非交互子命令，并统一附带 `--json`
 - 除非用户明确要求只读查询，否则涉及预测、回填、统计的任务都应按既定步骤执行，不得跳步
 - 历史目录、示例模板、旧版 `predictions/` 和 `reports/` 只可参考，不可作为主流程输出目标
 - 缺少实时依赖时可以降级，但必须在输出中标注“降级/模拟数据”，不可混淆为真实临场数据
+- 若缺少真实大小球盘口，必须返回 `missing_real_line` 或“待补真实盘口”，不得回退成 `default_2.5`
 - 所有分析都应区分 `模型结论`、`盘口结论`、`综合结论`
 - 对跨联赛、杯赛、样本不足、快照缺失等场景，必须显式标注边界与风险
 - 不允许只看基本面、只看盘口或只看模型概率就直接给出强确定性结论
@@ -103,10 +109,10 @@ Step 10: 更新胜负 / 比分 / 大小球准确率与历史学习数据
 执行规则：
 1. 只读查询：允许仅读文档或读取联赛文件，不写入。
 2. 数据采集：必须优先确认联赛、日期、球队、可选时间，并尽量获取 match_id。
-3. 赛前预测：必须经过“确认比赛 -> 抓赛程/拿 match_id -> 刷新实时快照 -> 分析 -> 生成预测 -> 写回 teams_2025-26.md（如需要）”。
+3. 赛前预测：必须经过“确认比赛 -> 抓赛程/拿 match_id -> 刷新实时快照 -> RAG 检索 -> 分析 -> 生成预测 -> 按比赛类型写回（如需要）”。
 4. 赛果回填：必须经过“确认比赛 -> 校验比分 -> save-result -> 必要时刷新 accuracy”。
-5. 准确率统计：直接读取 teams_2025-26.md 与运行时统计结果，不依赖旧模板文件。
-6. 若准备创建新的预测 markdown、结果 markdown 或临时主流程文件，视为偏航，立即停止并改回 teams_2025-26.md。
+5. 准确率统计：直接读取 `teams_2025-26.md`、`MEMORY.md` 与运行时统计结果，不依赖旧模板文件。
+6. 若准备创建新的预测 markdown、结果 markdown 或临时主流程文件，视为偏航，立即停止并改回 `teams_2025-26.md` 或 `MEMORY.md` 的既有链路。
 7. 若数据不足，先说明缺口，再执行 collect-data 或降级方案，不允许跳过采集直接输出确定性结论。
 8. 若任务需要可审计的阶段化结果，优先使用 `prediction_system.py harness-run --pipeline ... --json`。
 9. 查身份与职责边界时，优先阅读 `agents/football_actuary_persona.md`、`agent.md` 与本文件。
@@ -125,6 +131,8 @@ Step 10: 更新胜负 / 比分 / 大小球准确率与历史学习数据
 | 批量赛果回填 | `python3 bulk_fetch_and_update.py --start ... --end ... --yes` | 是 |
 | 准确率统计 | `python3 prediction_system.py accuracy --refresh --json` | 是 |
 | 待回填赛果查询 | `python3 prediction_system.py pending-results --days-back 14 --json` | 否 |
+| RAG 索引维护 | `python3 prediction_system.py rag-rebuild / rag-diagnose --json` | 是 |
+| 历史 RAG 回填 | `python3 prediction_system.py sync-memory-rag --dry-run --json` | 是 |
 
 ## Step 1: 确认比赛信息
 
@@ -284,6 +292,7 @@ python3 europe_leagues/okooo_save_snapshot.py \
 - `over_under.market.final`
 - `realtime.okooo`
 - `realtime.context_applied`
+- `retrieved_memory_explanation`
 
 当看到：
 
@@ -293,9 +302,10 @@ python3 europe_leagues/okooo_save_snapshot.py \
 
 ## Step 8: 写回正式文件
 
-若任务要求落盘，只写：
+若任务要求落盘，只写既有正式链路：
 
-- `europe_leagues/<league>/teams_2025-26.md`
+- 五大联赛：`europe_leagues/<league>/teams_2025-26.md`
+- 欧战/杯赛：`MEMORY.md`、`prediction_archive.json`、`prediction_memory_odds_samples.json`
 
 禁止作为主流程目标的旧位置：
 
@@ -335,6 +345,7 @@ python3 prediction_system.py harness-run --pipeline result_recording --match-id 
 - 比分 Top 命中率
 - 大小球命中率
 - 历史复盘与学习数据更新
+- 记忆样本与 RAG 索引刷新
 
 运行时产物目录：
 
@@ -389,6 +400,7 @@ python3 prediction_system.py accuracy --refresh --json
 若发现流程试图写入旧目录，应立即停止并改回：
 
 - `europe_leagues/<league>/teams_2025-26.md`
+- `MEMORY.md`
 
 ## 最佳实践
 

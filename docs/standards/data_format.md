@@ -1,33 +1,40 @@
 ---
 document_title: "数据格式规范"
-version: "1.2.0"
-last_updated: "2026-05-04"
+version: "1.4.0"
+last_updated: "2026-05-08"
 ---
 
 # 数据格式规范
 
 > 当前正式流程  
 > 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
-> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测  
-> 3. 结果写回 `europe_leagues/<league>/teams_2025-26.md`  
-> 4. 赛后用 `prediction_system.py save-result` 或 `bulk_fetch_and_update.py` 回填  
+> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层  
+> 3. 五大联赛 SoT 写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写入 `MEMORY.md` 与 runtime-only 归档  
+> 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
 > 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
-> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`
+> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`
 
 本规范定义当前项目正式使用的数据格式，确保以下几类数据在项目内保持一致：
 
 - 联赛主文件 `teams_2025-26.md`
+- 滚动记忆 `MEMORY.md`
 - `collect-data` / Harness 输入输出结构
 - 澳客实时快照 JSON
 - 预测输出结构
 - 赛果回填与准确率统计相关结构
 
-## 当前单一事实来源
+## 当前事实与写回边界
 
-正式主流程只认：
+正式主流程采用双路径：
 
-- `europe_leagues/<league>/teams_2025-26.md`
+- 五大联赛 SoT：`europe_leagues/<league>/teams_2025-26.md`
+- 欧战/杯赛：`/Users/bytedance/trae_projects/MEMORY.md`
+- 运行时归档：`prediction_archive.json`、`prediction_memory_odds_samples.json`、`result_sync_registry.json`
+- RAG 索引：`rag_cases.json`、`rag_index.json`、`rag_registry.json`
+- 欧战正式 competition config：`europa_league`、`champions_league`、`conference_league`
+- 欧战快照目录别名：允许 `欧联 / 欧罗巴 / 欧冠 / 欧协联` 与 canonical `league_code` 双向兼容
+- 历史欧战归档迁移：统一回填 `league_code`、`league_name`、`snapshot_dir`、`snapshot_dir_aliases`、`snapshot_path`、`line_source`
 
 运行时数据允许写入：
 
@@ -93,6 +100,29 @@ docs/
 |------|------|------|------|------|------|
 | 2026-04-28 | 03:00 | 曼联 | - | 布伦特福德 | 预测:主胜；比分:1-0/1-1；大小:小3.0(大12.5%/小87.5%) |
 ```
+
+## 滚动记忆 `MEMORY.md` 格式
+
+### 文件位置
+
+- `/Users/bytedance/trae_projects/MEMORY.md`
+
+### 当前预测滚动区块
+
+```markdown
+<!-- prediction-memory:start -->
+> 滚动预测准确率： 已完赛 2 场 | 胜平负 100.0% (2/2) | 比分 0.0% (0/2) | 大小球 50.0% (1/2)
+
+- [europa_league|阿斯顿维拉|诺丁汉森林] 2026-05-08 欧联半决赛 阿斯顿维拉 vs 诺丁汉森林 -> 主胜 (46.7%) | 比分: 1-0 > 2-0 > 1-1 | 大小球: 小球 2.5 (56.9%) | 盘口: ... | 风险: ... | 赛果: 主胜 4-0 | RAG记忆: ... | 记忆ID: 1324666 | 更新时间: 2026-05-08 11:58:00
+<!-- prediction-memory:end -->
+```
+
+### 关键字段
+
+- `RAG记忆:`：由主预测链原生写入的 `retrieved_memory_explanation`
+- `记忆ID:`：优先使用真实 `match_id` 或 canonical 记忆键
+- `赛果:`：完赛后回填真实结果
+- `更新时间:`：该条记忆最后刷新时间
 
 ## 澳客赛程 JSON 格式
 
@@ -269,7 +299,7 @@ docs/
 
 - `current_odds` 一般由实时快照提取而来
 - 若预测前刷新失败，也可能来自本地已有 snapshot 或采集阶段挂接的数据
-- `EnhancedPredictor` 会在缺少真实大小球时尝试自动补抓
+- 即使使用 `--no-refresh-odds`，若本地已存在同 `match_id` 快照，主链也会优先复用真实盘口
 
 ## 预测输出格式
 
@@ -314,6 +344,30 @@ docs/
       "okooo_totals_fetch": {"attempted": true, "ok": true},
       "team_context": {"attempted": true, "ok": true}
     }
+  },
+  "retrieved_memory": {
+    "summary": "RAG召回5场相似比赛...",
+    "similar_cases": [],
+    "market_cases": [],
+    "upset_cases": []
+  },
+  "retrieved_memory_explanation": "RAG召回5场相似比赛，其中已完赛4场..."
+}
+```
+
+当缺失真实大小球盘口时，正式输出会改为：
+
+```json
+{
+  "over_under": {
+    "available": false,
+    "reason": "missing_real_line",
+    "line": null,
+    "line_source": "missing_real_line",
+    "market": {
+      "initial": null,
+      "final": null
+    }
   }
 }
 ```
@@ -341,14 +395,17 @@ docs/
 | `analysis_context` | 显式由上下文覆盖 |
 | `snapshot_final` | 来自实时快照 `大小球.final.line` |
 | `snapshot_initial` | 来自实时快照 `大小球.initial.line` |
-| `default_2.5` | 未抓到真实盘口，回退默认值 |
+| `missing_real_line` | 未抓到真实盘口，正式链路不再输出默认盘口结论 |
 
 ### 使用规则
 
 - 当 `line_source=snapshot_final` 时，说明真实大小球已成功注入预测
+- 当 `line_source=missing_real_line` 时，允许保留胜平负预测，但正式大小球结论应显示“待补真实盘口”
 - 当 `market.final` 非空时，最终结论中应同步展示大/小水位
 - 不允许把真实 `3.0`、`2.75` 的比赛继续按固定 `2.5` 解释
+- 不允许在正式归档、MEMORY 或准确率统计里把缺真实盘口样本伪装成 `default_2.5`
 - 若 `realtime.okooo.refreshed=false`，应视为旧快照或降级数据，需要在结论中明确标注
+- `retrieved_memory_explanation` 非空时，说明 RAG 记忆层已参与最终解释
 
 ## 可选：球队状态增强（team_context）
 
@@ -516,12 +573,14 @@ docs/
 
 - `final_probabilities` 存在
 - `top_scores` 存在
-- `over_under.line` 存在
+- `over_under.line` 存在，或 `over_under.available=false`
 - `over_under.line_source` 存在
-- `over_under.market.final` 非空或明确说明回退原因
+- `over_under.market.final` 非空，或明确为 `missing_real_line`
+- 欧战/杯赛记录应能看到 canonical `league_code`，必要时包含 `snapshot_dir` / `snapshot_path`
 
 ### 主流程写回验证
 
-- 正式写回只发生在 `teams_2025-26.md`
+- 五大联赛正式写回发生在 `teams_2025-26.md`
+- 欧战/杯赛正式写回发生在 `MEMORY.md` 与 `.okooo-scraper/runtime/`
 - 不把主流程结果写入旧 `predictions/`、`reports/` 目录
-- 批量回填与准确率刷新只更新 `teams_2025-26.md` 与 `.okooo-scraper/runtime/`
+- 批量回填与准确率刷新会更新 `teams_2025-26.md`、`MEMORY.md` 与 `.okooo-scraper/runtime/`

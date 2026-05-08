@@ -19,6 +19,7 @@ from agent_runtime_registry import get_runtime_profile
 from collectors.aliasing import load_team_alias_map
 from runtime.memory_samples import sync_prediction_memory_samples
 from runtime.paths import get_default_paths
+from runtime.rag_store import sync_rag_index
 from storage import AccuracyStatsStore, PredictionArchiveStore, TeamsMarkdownStore
 
 # 配置日志
@@ -34,7 +35,10 @@ LEAGUE_NAMES = {
     'serie_a': '意甲联赛',
     'bundesliga': '德甲联赛',
     'ligue_1': '法甲联赛',
-    'la_liga': '西甲联赛'
+    'la_liga': '西甲联赛',
+    'europa_league': '欧联',
+    'champions_league': '欧冠',
+    'conference_league': '欧协联',
 }
 
 LEAGUE_SHORT_NAMES = {
@@ -43,6 +47,21 @@ LEAGUE_SHORT_NAMES = {
     'bundesliga': '德甲',
     'ligue_1': '法甲',
     'la_liga': '西甲',
+    'europa_league': '欧联',
+    'champions_league': '欧冠',
+    'conference_league': '欧协联',
+}
+
+COMPETITION_ALIASES = {
+    'europa_league': ('europa_league', '欧联', '欧罗巴'),
+    'champions_league': ('champions_league', '欧冠'),
+    'conference_league': ('conference_league', '欧协联'),
+}
+
+SNAPSHOT_DIR_ALIASES = {
+    'europa_league': ('europa_league', '欧联', '欧罗巴'),
+    'champions_league': ('champions_league', '欧冠'),
+    'conference_league': ('conference_league', '欧协联'),
 }
 
 PREDICTED_WINNER_TEXT = {
@@ -53,7 +72,7 @@ PREDICTED_WINNER_TEXT = {
 
 
 class ResultManager:
-    """结果管理器，直接以 teams_2025-26.md 为单一事实来源。"""
+    """结果管理器，维护联赛 SoT、runtime-only 归档与统一准确率统计。"""
 
     def __init__(self, base_dir: Optional[str] = None):
         self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
@@ -86,6 +105,299 @@ class ResultManager:
 
     def _match_id_for_teams_row(self, league_code: str, match_date: str, home_team: str, away_team: str) -> str:
         return f"{league_code}_{match_date.replace('-', '')}_{home_team}_{away_team}"
+
+    def _find_existing_teams_match_id(self, league_code: str, match_date: str, home_team: str, away_team: str) -> str:
+        if league_code not in LEAGUE_NAMES:
+            return ''
+        path = self._teams_md_path(league_code)
+        if not os.path.exists(path):
+            return ''
+        normalized_date = str(match_date or '').strip()
+        normalized_home = self._normalize_team_name(league_code, home_team)
+        normalized_away = self._normalize_team_name(league_code, away_team)
+        if not (normalized_date and normalized_home and normalized_away):
+            return ''
+        try:
+            lines = self.teams_store.read_lines(league_code)
+        except Exception:
+            return ''
+        for line in lines:
+            if not line.strip().startswith('|'):
+                continue
+            cols = [c.strip() for c in line.strip().strip('|').split('|')]
+            if len(cols) != 6:
+                continue
+            row_date, _row_time, row_home, _score_text, row_away, _note = cols
+            if row_date != normalized_date:
+                continue
+            if self._normalize_team_name(league_code, row_home) != normalized_home:
+                continue
+            if self._normalize_team_name(league_code, row_away) != normalized_away:
+                continue
+            return self._match_id_for_teams_row(league_code, row_date, row_home, row_away)
+        return ''
+
+    def _runtime_only_match_id(self, external_match_id: str, league_code: str, match_date: str, home_team: str, away_team: str) -> str:
+        explicit = str(external_match_id or '').strip()
+        if explicit:
+            return explicit
+        return self._match_id_for_teams_row(league_code, match_date, home_team, away_team)
+
+    @staticmethod
+    def _canonical_competition_code(*values: Any) -> str:
+        for value in values:
+            raw = str(value or '').strip()
+            if not raw:
+                continue
+            for code, aliases in COMPETITION_ALIASES.items():
+                if raw == code or raw in aliases:
+                    return code
+        return ''
+
+    @staticmethod
+    def _competition_display_name(league_code: str) -> str:
+        normalized = str(league_code or '').strip()
+        canonical = ResultManager._canonical_competition_code(normalized) or normalized
+        return LEAGUE_SHORT_NAMES.get(canonical, canonical)
+
+    def _snapshot_dirs_for_competition(self, league_code: str) -> List[str]:
+        canonical = self._canonical_competition_code(league_code) or str(league_code or '').strip()
+        aliases = SNAPSHOT_DIR_ALIASES.get(canonical, (canonical,) if canonical else tuple())
+        dirs: List[str] = []
+        for alias in aliases:
+            candidate = os.path.join(self.base_dir, '.okooo-scraper', 'snapshots', alias)
+            if candidate not in dirs:
+                dirs.append(candidate)
+        return dirs
+
+    @staticmethod
+    def _snapshot_context_from_path(snapshot_path: str) -> tuple[str, str]:
+        normalized = os.path.normpath(str(snapshot_path or '').strip())
+        if not normalized:
+            return '', ''
+        parts = normalized.split(os.sep)
+        if 'snapshots' not in parts:
+            return '', ''
+        index = parts.index('snapshots')
+        dir_name = parts[index + 1] if index + 1 < len(parts) else ''
+        return dir_name, ResultManager._canonical_competition_code(dir_name)
+
+    def _find_snapshot_file_by_match_id(self, league_code: str, match_id: str) -> tuple[str, Optional[Dict[str, Any]]]:
+        wanted_id = str(match_id or '').strip()
+        if not wanted_id:
+            return '', None
+        for snap_dir in self._snapshot_dirs_for_competition(league_code):
+            if not os.path.isdir(snap_dir):
+                continue
+            for name in sorted(os.listdir(snap_dir)):
+                if not name.endswith('.json'):
+                    continue
+                file_path = os.path.join(snap_dir, name)
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        payload = json.load(f)
+                except Exception:
+                    continue
+                if str(payload.get('match_id') or '').strip() == wanted_id:
+                    return file_path, payload
+        return '', None
+
+    @staticmethod
+    def _snapshot_totals_line_source(snapshot: Optional[Dict[str, Any]]) -> str:
+        if not isinstance(snapshot, dict):
+            return ''
+        totals = snapshot.get('大小球') if isinstance(snapshot.get('大小球'), dict) else {}
+        for source_name, source_key in (('snapshot_final', 'final'), ('snapshot_initial', 'initial')):
+            block = totals.get(source_key) if isinstance(totals, dict) else None
+            if not isinstance(block, dict):
+                continue
+            value = block.get('line')
+            if value in (None, ''):
+                value = block.get('盘口')
+            try:
+                parsed = float(value)
+            except Exception:
+                continue
+            if 0.5 <= parsed <= 6.5:
+                return source_name
+        return ''
+
+    @staticmethod
+    def _result_text(actual_winner: Optional[str], actual_score: str) -> str:
+        winner_text = PREDICTED_WINNER_TEXT.get(str(actual_winner or '').strip(), '')
+        score_text = str(actual_score or '').strip()
+        if winner_text and score_text:
+            return f'{winner_text} {score_text}'
+        return score_text or winner_text
+
+    def _memory_entry_prefixes_for_prediction(self, prediction_data: Dict[str, Any], archive: Optional[Dict[str, Dict[str, Any]]] = None) -> List[str]:
+        from domain.persistence import PredictionPersistenceService
+
+        prefixes: List[str] = []
+        entry_keys, _ = PredictionPersistenceService._memory_identity_aliases(prediction_data)
+        for entry_key in sorted(entry_keys):
+            prefix = f"- [{entry_key}]"
+            if prefix not in prefixes:
+                prefixes.append(prefix)
+
+        archive_payload = archive if isinstance(archive, dict) else self._load_prediction_archive()
+        external_match_id = str(prediction_data.get('external_match_id') or prediction_data.get('match_id') or '').strip()
+        if not external_match_id:
+            return prefixes
+
+        for archived in archive_payload.values():
+            if not isinstance(archived, dict):
+                continue
+            candidates = {
+                str(archived.get('match_id') or '').strip(),
+                str(archived.get('external_match_id') or '').strip(),
+            }
+            full_prediction = archived.get('full_prediction')
+            if isinstance(full_prediction, dict):
+                candidates.add(str(full_prediction.get('match_id') or '').strip())
+            if external_match_id not in candidates:
+                continue
+            archived_entry_keys, _ = PredictionPersistenceService._memory_identity_aliases(archived)
+            for entry_key in sorted(archived_entry_keys):
+                prefix = f"- [{entry_key}]"
+                if prefix not in prefixes:
+                    prefixes.append(prefix)
+        return prefixes
+
+    def _update_memory_result_entry(self, prediction_data: Dict[str, Any]) -> None:
+        memory_path = self.paths.memory_file
+        if not memory_path.exists():
+            return
+        actual_score = str(prediction_data.get('actual_score') or '').strip()
+        actual_winner = str(prediction_data.get('actual_winner') or '').strip()
+        result_text = self._result_text(actual_winner, actual_score)
+        if not result_text:
+            return
+        archive = self._load_prediction_archive()
+        prefixes = self._memory_entry_prefixes_for_prediction(prediction_data, archive=archive)
+        try:
+            content = memory_path.read_text(encoding='utf-8')
+        except Exception:
+            return
+
+        start_marker = '<!-- prediction-memory:start -->'
+        end_marker = '<!-- prediction-memory:end -->'
+        marker = re.search(
+            rf'{re.escape(start_marker)}\n(?P<body>.*?){re.escape(end_marker)}',
+            content,
+            re.DOTALL,
+        )
+        if not marker:
+            return
+
+        updated = False
+
+        from domain.persistence import PredictionPersistenceService
+
+        entry_blocks = PredictionPersistenceService._extract_memory_entry_lines(marker.group('body'))
+        new_lines = []
+        for entry in entry_blocks:
+            normalized = PredictionPersistenceService._unescape_memory_entry_text(entry)
+            first_line = normalized.splitlines()[0].strip() if normalized.splitlines() else normalized.strip()
+            if not any(first_line.startswith(prefix) for prefix in prefixes):
+                new_lines.append(normalized)
+                continue
+
+            entry_lines = [line.rstrip() for line in normalized.splitlines() if line.strip()]
+            cleaned_lines = [
+                line
+                for line in entry_lines
+                if not (
+                    line.strip().startswith('赛果:')
+                    or line.strip().startswith('■ 赛果:')
+                )
+            ]
+            meta_index = next((idx for idx, line in enumerate(cleaned_lines) if '记忆ID:' in line), -1)
+            meta_line = cleaned_lines[meta_index] if meta_index >= 0 else ''
+            meta_line = re.sub(r'^\s*赛果:\s*[^|]+\s*\|\s*', '', meta_line.strip())
+            meta_line = re.sub(r'\s*\|\s*更新时间:\s*[^|]+', '', meta_line)
+            meta_prefix = f'赛果: {result_text}'
+            meta_body = f'{meta_prefix} | {meta_line}' if meta_line else meta_prefix
+            updated_line = f'  {meta_body} | 更新时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
+            if meta_index >= 0:
+                cleaned_lines[meta_index] = updated_line
+            else:
+                cleaned_lines.append(updated_line)
+            new_lines.append('\n'.join(cleaned_lines))
+            updated = True
+
+        if not updated:
+            return
+
+        entry_lines = PredictionPersistenceService._extract_memory_entry_lines('\n'.join(new_lines))
+        replacement = PredictionPersistenceService.render_prediction_memory_block(
+            entry_lines,
+            start_marker,
+            end_marker,
+        )
+        content = re.sub(
+            rf'{re.escape(start_marker)}\n.*?{re.escape(end_marker)}',
+            replacement,
+            content,
+            count=1,
+            flags=re.DOTALL,
+        )
+        memory_path.write_text(content, encoding='utf-8')
+
+    def save_runtime_only_result(self, prediction_ref: Dict[str, Any], home_score: int, away_score: int) -> Dict[str, Any]:
+        external_match_id = str(
+            prediction_ref.get('external_match_id')
+            or prediction_ref.get('match_id')
+            or ''
+        ).strip()
+        archive = self._load_prediction_archive()
+        matched_key = ''
+        matched_entry: Dict[str, Any] = {}
+        for archive_key, archived in archive.items():
+            if not isinstance(archived, dict):
+                continue
+            candidates = {
+                str(archive_key).strip(),
+                str(archived.get('match_id') or '').strip(),
+                str(archived.get('external_match_id') or '').strip(),
+            }
+            full_prediction = archived.get('full_prediction')
+            if isinstance(full_prediction, dict):
+                candidates.add(str(full_prediction.get('match_id') or '').strip())
+            if external_match_id and external_match_id in candidates:
+                matched_key = str(archive_key).strip()
+                matched_entry = dict(archived)
+                break
+        if not matched_entry:
+            raise ValueError(f'找不到 runtime-only 预测归档: {external_match_id or prediction_ref.get("home_team")}')
+
+        actual_score = f'{int(home_score)}-{int(away_score)}'
+        actual_winner = self._parse_score_to_winner(actual_score)
+        matched_entry['actual_score'] = actual_score
+        matched_entry['actual_winner'] = actual_winner
+        matched_entry['actual_result'] = self._result_text(actual_winner, actual_score).split(' ', 1)[0]
+        matched_entry['saved_at'] = datetime.now().isoformat()
+        if isinstance(matched_entry.get('full_prediction'), dict):
+            matched_entry['full_prediction']['actual_score'] = actual_score
+            matched_entry['full_prediction']['actual_winner'] = actual_winner
+        archive[matched_key] = matched_entry
+        self._save_prediction_archive(archive)
+        self._update_memory_result_entry(matched_entry)
+        sync_prediction_memory_samples(self.base_dir, limit=100)
+        sync_rag_index(self.base_dir, limit=200)
+        return {
+            'match_id': matched_key,
+            'league': matched_entry.get('league'),
+            'league_name': matched_entry.get('league_name'),
+            'match_date': matched_entry.get('match_date'),
+            'match_time': matched_entry.get('match_time'),
+            'home_team': matched_entry.get('home_team'),
+            'away_team': matched_entry.get('away_team'),
+            'actual_winner': actual_winner,
+            'actual_score': actual_score,
+            'saved_at': matched_entry.get('saved_at'),
+            'storage_mode': 'runtime_only',
+        }
 
     def _parse_score_to_winner(self, score_text: str) -> Optional[str]:
         if not isinstance(score_text, str) or '-' not in score_text:
@@ -160,6 +472,428 @@ class ResultManager:
             return None
         return {'side': side, 'line': line}
 
+    @staticmethod
+    def _winner_key_from_text(value: str) -> Optional[str]:
+        mapping = {
+            '主胜': 'home',
+            '平局': 'draw',
+            '客胜': 'away',
+            'home': 'home',
+            'draw': 'draw',
+            'away': 'away',
+        }
+        return mapping.get(str(value or '').strip())
+
+    @staticmethod
+    def _normalize_predicted_ou_value(predicted_ou: Any) -> Optional[Dict[str, object]]:
+        if not isinstance(predicted_ou, dict):
+            return None
+        raw_side = str(predicted_ou.get('side') or '').strip()
+        if raw_side in ('大球', '大', 'over', 'OVER'):
+            side = '大'
+        elif raw_side in ('小球', '小', 'under', 'UNDER'):
+            side = '小'
+        else:
+            return None
+        try:
+            line = float(predicted_ou.get('line'))
+        except Exception:
+            return None
+        return {'side': side, 'line': line}
+
+    @staticmethod
+    def _parse_completed_score(score_text: str) -> Optional[tuple[int, int]]:
+        if not re.match(r'^\d+\s*-\s*\d+$', str(score_text or '').strip()):
+            return None
+        try:
+            home_score, away_score = [int(x.strip()) for x in str(score_text).split('-')]
+        except Exception:
+            return None
+        return home_score, away_score
+
+    @staticmethod
+    def _line_bucket(line: float) -> str:
+        if abs(line - 2.5) < 1e-9:
+            return '2.5'
+        if abs(line - 2.75) < 1e-9:
+            return '2.75'
+        if abs(line - 3.0) < 1e-9:
+            return '3.0'
+        if line >= 3.25:
+            return '3.25+'
+        return f'{line:g}'
+
+    @staticmethod
+    def _within_days(match_date: str, days: int) -> bool:
+        if days <= 0:
+            return True
+        try:
+            match_ts = datetime.fromisoformat(str(match_date or '')).timestamp()
+        except Exception:
+            return True
+        cutoff = datetime.now().timestamp() - (days * 86400)
+        return match_ts >= cutoff
+
+    @staticmethod
+    def _normalize_accuracy_line_source(*candidates: Any) -> str:
+        saw_unknown = False
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                line_source = str(candidate.get('line_source') or '').strip()
+                reason = str(candidate.get('reason') or '').strip()
+                if line_source and line_source != 'unknown':
+                    return line_source
+                if reason == 'missing_real_line':
+                    return 'missing_real_line'
+                if line_source == 'unknown':
+                    saw_unknown = True
+                continue
+            value = str(candidate or '').strip()
+            if value and value != 'unknown':
+                return value
+            if value == 'unknown':
+                saw_unknown = True
+        return 'unknown' if saw_unknown else ''
+
+    def _merge_accuracy_sample(self, sample: Dict[str, Any], incoming: Dict[str, Any]) -> None:
+        for key in (
+            'match_id',
+            'league',
+            'league_name',
+            'match_date',
+            'match_time',
+            'home_team',
+            'away_team',
+            'actual_score',
+            'actual_winner',
+            'predicted_winner',
+            'storage_mode',
+        ):
+            if incoming.get(key) and not sample.get(key):
+                sample[key] = incoming[key]
+
+        if incoming.get('predicted_scores'):
+            existing_scores = list(sample.get('predicted_scores') or [])
+            for score in incoming.get('predicted_scores') or []:
+                if score and score not in existing_scores:
+                    existing_scores.append(score)
+            sample['predicted_scores'] = existing_scores
+
+        incoming_ou = self._normalize_predicted_ou_value(incoming.get('predicted_ou'))
+        current_ou = self._normalize_predicted_ou_value(sample.get('predicted_ou'))
+        if incoming_ou and (not current_ou or str(sample.get('line_source') or 'unknown') == 'unknown'):
+            sample['predicted_ou'] = incoming_ou
+
+        incoming_line_source = self._normalize_accuracy_line_source(incoming.get('line_source'))
+        if incoming_line_source and incoming_line_source != 'unknown':
+            sample['line_source'] = incoming_line_source
+        elif not sample.get('line_source'):
+            sample['line_source'] = 'unknown'
+
+        sources = set(sample.get('source_presence') or [])
+        sources.update(incoming.get('source_presence') or [])
+        sample['source_presence'] = sorted(source for source in sources if source)
+
+    def _archive_lookup(self, archive: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        lookup: Dict[str, Dict[str, Any]] = {}
+        for archive_key, entry in archive.items():
+            if not isinstance(entry, dict):
+                continue
+            candidates = {
+                str(archive_key or '').strip(),
+                str(entry.get('match_id') or '').strip(),
+                str(entry.get('external_match_id') or '').strip(),
+                str(entry.get('internal_match_id') or '').strip(),
+                str(entry.get('teams_match_id') or '').strip(),
+            }
+            full_prediction = entry.get('full_prediction')
+            if isinstance(full_prediction, dict):
+                candidates.add(str(full_prediction.get('match_id') or '').strip())
+                candidates.add(str(full_prediction.get('internal_match_id') or '').strip())
+                candidates.add(str(full_prediction.get('teams_match_id') or '').strip())
+            for candidate in candidates:
+                if candidate:
+                    lookup[candidate] = entry
+        return lookup
+
+    def _sample_from_archive_entry(self, archive_key: str, entry: Dict[str, Any]) -> Dict[str, Any]:
+        full_prediction = entry.get('full_prediction') if isinstance(entry.get('full_prediction'), dict) else {}
+        over_under = entry.get('over_under') if isinstance(entry.get('over_under'), dict) else {}
+        fp_over_under = full_prediction.get('over_under') if isinstance(full_prediction.get('over_under'), dict) else {}
+        predicted_ou = self._normalize_predicted_ou_value(entry.get('predicted_ou'))
+        if not predicted_ou:
+            derived_line = over_under.get('line')
+            if derived_line in (None, ''):
+                derived_line = fp_over_under.get('line')
+            try:
+                if derived_line is not None and derived_line != '':
+                    predicted_ou = {
+                        'side': '大' if float(over_under.get('over', fp_over_under.get('over', 0)) or 0) > float(over_under.get('under', fp_over_under.get('under', 0)) or 0) else '小',
+                        'line': float(derived_line),
+                    }
+            except Exception:
+                predicted_ou = None
+
+        predicted_winner = (
+            self._winner_key_from_text(str(entry.get('predicted_winner') or ''))
+            or self._winner_key_from_text(str(full_prediction.get('predicted_winner') or ''))
+            or self._winner_key_from_text(str(entry.get('prediction') or full_prediction.get('prediction') or ''))
+        )
+
+        return {
+            'match_id': str(
+                entry.get('match_id')
+                or entry.get('external_match_id')
+                or entry.get('teams_match_id')
+                or entry.get('internal_match_id')
+                or archive_key
+            ).strip(),
+            'league': str(entry.get('league') or full_prediction.get('league_code') or '').strip(),
+            'league_name': str(entry.get('league_name') or full_prediction.get('league_name') or '').strip(),
+            'match_date': str(entry.get('match_date') or full_prediction.get('match_date') or '').strip(),
+            'match_time': str(entry.get('match_time') or full_prediction.get('match_time') or '').strip(),
+            'home_team': str(entry.get('home_team') or full_prediction.get('home_team') or '').strip(),
+            'away_team': str(entry.get('away_team') or full_prediction.get('away_team') or '').strip(),
+            'actual_score': str(entry.get('actual_score') or full_prediction.get('actual_score') or '').strip(),
+            'actual_winner': str(entry.get('actual_winner') or full_prediction.get('actual_winner') or '').strip(),
+            'predicted_winner': predicted_winner,
+            'predicted_scores': list(entry.get('predicted_scores') or []),
+            'predicted_ou': predicted_ou,
+            'storage_mode': str(
+                entry.get('storage_mode')
+                or full_prediction.get('storage_mode')
+                or ('league_sot' if entry.get('teams_match_id') else 'runtime_only')
+            ).strip(),
+            'line_source': self._normalize_accuracy_line_source(
+                entry.get('line_source'),
+                full_prediction.get('line_source'),
+                over_under,
+                fp_over_under,
+                over_under.get('line_source'),
+                fp_over_under.get('line_source'),
+            ) or 'unknown',
+            'source_presence': ['archive'],
+        }
+
+    def _iter_memory_prediction_entries(self):
+        memory_path = self.paths.memory_file
+        if not memory_path.exists():
+            return
+        try:
+            text = memory_path.read_text(encoding='utf-8')
+        except Exception:
+            return
+        block_match = re.search(
+            r'<!-- prediction-memory:start -->([\s\S]*?)<!-- prediction-memory:end -->',
+            text,
+        )
+        if not block_match:
+            return
+        for raw_line in block_match.group(1).splitlines():
+            line = raw_line.strip()
+            if not line.startswith('- '):
+                continue
+            header_match = re.match(r'- \[([^\]]+)\]\s+(\d{4}-\d{2}-\d{2})', line)
+            if not header_match:
+                continue
+            raw_identity = str(header_match.group(1) or '').strip()
+            parts = [part.strip() for part in raw_identity.split('|') if part.strip()]
+            if len(parts) < 3:
+                continue
+            league_code = parts[0]
+            if len(parts) >= 4:
+                home_team = parts[-2]
+                away_team = parts[-1]
+            else:
+                home_team = parts[1]
+                away_team = parts[2]
+            predicted_match = re.search(r'->\s*(主胜|平局|客胜)', line)
+            actual_match = re.search(r'\|\s*赛果:\s*(主胜|平局|客胜)\s+(\d+\s*-\s*\d+)', line)
+            if not predicted_match or not actual_match:
+                continue
+            score_match = re.search(r'\|\s*比分:\s*([^|]+?)\s*\|', line)
+            ou_match = re.search(r'\|\s*大小球:\s*(大球|小球)\s+([0-9]+(?:\.[0-9]+)?)', line)
+            memory_id_match = re.search(r'\|\s*记忆ID:\s*([^|]+?)\s*(?=\||$)', line)
+
+            predicted_scores: List[str] = []
+            if score_match:
+                predicted_scores = [
+                    re.sub(r'\s+', '', part.strip())
+                    for part in str(score_match.group(1) or '').split('>')
+                    if re.match(r'^\d+\s*-\s*\d+$', part.strip())
+                ]
+
+            predicted_ou = None
+            if ou_match:
+                try:
+                    predicted_ou = {
+                        'side': '大' if str(ou_match.group(1) or '').strip() == '大球' else '小',
+                        'line': float(ou_match.group(2)),
+                    }
+                except Exception:
+                    predicted_ou = None
+
+            memory_id = str(memory_id_match.group(1) or '').strip() if memory_id_match else ''
+            yield {
+                'match_id': memory_id or raw_identity,
+                'league': league_code,
+                'league_name': LEAGUE_SHORT_NAMES.get(league_code, league_code),
+                'match_date': str(header_match.group(2) or '').strip(),
+                'home_team': home_team,
+                'away_team': away_team,
+                'actual_score': re.sub(r'\s+', '', str(actual_match.group(2) or '').strip()),
+                'actual_winner': self._winner_key_from_text(str(actual_match.group(1) or '').strip()),
+                'predicted_winner': self._winner_key_from_text(str(predicted_match.group(1) or '').strip()),
+                'predicted_scores': predicted_scores,
+                'predicted_ou': predicted_ou,
+                'storage_mode': 'runtime_only',
+                'line_source': 'unknown',
+                'source_presence': ['memory'],
+            }
+
+    def _build_unified_prediction_samples(self, days: int = 30) -> Dict[str, Dict[str, Any]]:
+        samples: Dict[str, Dict[str, Any]] = {}
+        archive = self._load_prediction_archive()
+        archive_lookup = self._archive_lookup(archive)
+
+        for archive_key, entry in archive.items():
+            if not isinstance(entry, dict):
+                continue
+            sample = self._sample_from_archive_entry(archive_key, entry)
+            if not sample.get('match_date') or not self._within_days(str(sample.get('match_date') or ''), days):
+                continue
+            match_id = str(sample.get('match_id') or '').strip()
+            if not match_id:
+                continue
+            current = samples.setdefault(match_id, {'source_presence': []})
+            self._merge_accuracy_sample(current, sample)
+
+        for row in self._iter_teams_rows():
+            if not self._within_days(str(row.get('match_date') or ''), days):
+                continue
+            row_sample = {
+                'match_id': str(row.get('match_id') or '').strip(),
+                'league': row.get('league'),
+                'league_name': row.get('league_name'),
+                'match_date': row.get('match_date'),
+                'match_time': row.get('match_time'),
+                'home_team': row.get('home_team'),
+                'away_team': row.get('away_team'),
+                'actual_score': re.sub(r'\s+', '', str(row.get('score_text') or '').strip()),
+                'actual_winner': self._parse_score_to_winner(str(row.get('score_text') or '')),
+                'predicted_winner': self._parse_predicted_winner(str(row.get('note') or '')),
+                'predicted_scores': self._parse_predicted_scores(str(row.get('note') or '')),
+                'predicted_ou': self._parse_predicted_ou(str(row.get('note') or '')),
+                'storage_mode': 'league_sot',
+                'line_source': 'unknown',
+                'source_presence': ['teams_sot'],
+            }
+            archived = archive_lookup.get(str(row.get('match_id') or '').strip())
+            if archived:
+                self._merge_accuracy_sample(
+                    row_sample,
+                    self._sample_from_archive_entry(str(row.get('match_id') or '').strip(), archived),
+                )
+            match_id = str(row_sample.get('match_id') or '').strip()
+            if not match_id:
+                continue
+            current = samples.setdefault(match_id, {'source_presence': []})
+            self._merge_accuracy_sample(current, row_sample)
+
+        for memory_sample in self._iter_memory_prediction_entries() or []:
+            if not self._within_days(str(memory_sample.get('match_date') or ''), days):
+                continue
+            match_id = str(memory_sample.get('match_id') or '').strip()
+            if not match_id:
+                continue
+            current = samples.setdefault(match_id, {'source_presence': []})
+            self._merge_accuracy_sample(current, memory_sample)
+
+        return samples
+
+    @staticmethod
+    def _summarize_ou_records(records: List[Dict[str, Any]], push_count: int = 0) -> Dict[str, Any]:
+        hit_count = sum(1 for record in records if record.get('hit'))
+        sample_count = len(records)
+        return {
+            'sample_count': sample_count,
+            'hit_count': hit_count,
+            'hit_rate': round(hit_count / sample_count * 100, 2) if sample_count > 0 else 0.0,
+            'push_count': push_count,
+        }
+
+    def calculate_over_under_report(self, days: int = 30, league: Optional[str] = None) -> Dict[str, Any]:
+        samples = self._build_unified_prediction_samples(days=days)
+        records: List[Dict[str, Any]] = []
+        push_count = 0
+
+        for sample in samples.values():
+            if league and str(sample.get('league') or '') != league:
+                continue
+            predicted_ou = self._normalize_predicted_ou_value(sample.get('predicted_ou'))
+            score_pair = self._parse_completed_score(str(sample.get('actual_score') or ''))
+            if not predicted_ou or not score_pair:
+                continue
+            home_score, away_score = score_pair
+            total_goals = home_score + away_score
+            line = float(predicted_ou['line'])
+            if abs(total_goals - line) < 1e-9:
+                push_count += 1
+                continue
+            actual_side = '大' if total_goals > line else '小'
+            source_presence = '+'.join(sorted(sample.get('source_presence') or [])) or 'unknown'
+            records.append({
+                'match_id': str(sample.get('match_id') or '').strip(),
+                'league': str(sample.get('league') or '').strip(),
+                'home_team': str(sample.get('home_team') or '').strip(),
+                'away_team': str(sample.get('away_team') or '').strip(),
+                'actual_score': str(sample.get('actual_score') or '').strip(),
+                'predicted_side': str(predicted_ou['side']),
+                'actual_side': actual_side,
+                'line': line,
+                'line_bucket': self._line_bucket(line),
+                'line_source': str(sample.get('line_source') or 'unknown').strip() or 'unknown',
+                'storage_mode': str(sample.get('storage_mode') or 'unknown').strip() or 'unknown',
+                'source_presence': source_presence,
+                'hit': actual_side == str(predicted_ou['side']),
+            })
+
+        def group_by(field: str) -> Dict[str, Dict[str, Any]]:
+            grouped: Dict[str, List[Dict[str, Any]]] = {}
+            for record in records:
+                key = str(record.get(field) or 'unknown')
+                grouped.setdefault(key, []).append(record)
+            return {
+                key: {
+                    **self._summarize_ou_records(items),
+                    'matches': [
+                        {
+                            'match_id': item['match_id'],
+                            'teams': f"{item['home_team']} vs {item['away_team']}",
+                            'score': item['actual_score'],
+                            'predicted_side': item['predicted_side'],
+                            'actual_side': item['actual_side'],
+                            'line': item['line'],
+                        }
+                        for item in items[:10]
+                    ],
+                }
+                for key, items in sorted(grouped.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+            }
+
+        return {
+            'scope': 'unified_prediction_sources',
+            'league': league,
+            'days': days,
+            'overall': self._summarize_ou_records(records, push_count=push_count),
+            'by_storage_mode': group_by('storage_mode'),
+            'by_line_source': group_by('line_source'),
+            'by_line_bucket': group_by('line_bucket'),
+            'by_league': group_by('league'),
+            'by_source_presence': group_by('source_presence'),
+            'samples_preview': records[:20],
+        }
+
     def _iter_teams_rows(self):
         """Yield match rows derived from all league tables."""
         for league_code in LEAGUE_NAMES.keys():
@@ -233,21 +967,8 @@ class ResultManager:
     def _load_snapshot_by_match_id(self, league_code: str, match_id: str) -> Optional[Dict[str, Any]]:
         if not league_code or not match_id:
             return None
-        snap_dir = os.path.join(self.base_dir, '.okooo-scraper', 'snapshots', league_code)
-        if not os.path.isdir(snap_dir):
-            return None
-        for name in os.listdir(snap_dir):
-            if not name.endswith('.json'):
-                continue
-            file_path = os.path.join(snap_dir, name)
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    payload = json.load(f)
-                if str(payload.get('match_id') or '') == str(match_id):
-                    return payload
-            except Exception:
-                continue
-        return None
+        _path, payload = self._find_snapshot_file_by_match_id(league_code, match_id)
+        return payload
 
     def _get_snapshot_europe_odds(self, snapshot: Optional[Dict[str, Any]]) -> Optional[Dict[str, float]]:
         if not isinstance(snapshot, dict):
@@ -385,6 +1106,9 @@ class ResultManager:
         archive = self._load_prediction_archive()
         total_records = len(archive)
         migrated_count = 0
+        competition_backfilled = 0
+        snapshot_backfilled = 0
+        line_source_backfilled = 0
 
         for match_id, entry in list(archive.items()):
             if not isinstance(entry, dict):
@@ -396,16 +1120,156 @@ class ResultManager:
                 continue
             if self._prediction_archive_entry_needs_migration(entry):
                 entry["runtime_profile"] = self._normalized_prediction_runtime_profile()
-                archive[match_id] = entry
                 migrated_count += 1
 
-        if migrated_count:
+            full_prediction = entry.get('full_prediction') if isinstance(entry.get('full_prediction'), dict) else {}
+            canonical_code = self._canonical_competition_code(
+                entry.get('league'),
+                entry.get('league_code'),
+                entry.get('league_name'),
+                full_prediction.get('league_code'),
+                full_prediction.get('league_name'),
+            )
+            entry_changed = False
+            if canonical_code:
+                display_name = self._competition_display_name(canonical_code)
+                if entry.get('league') != canonical_code:
+                    entry['league'] = canonical_code
+                    entry_changed = True
+                if entry.get('league_code') != canonical_code:
+                    entry['league_code'] = canonical_code
+                    entry_changed = True
+                if entry.get('league_name') != display_name:
+                    entry['league_name'] = display_name
+                    entry_changed = True
+
+                if full_prediction:
+                    if full_prediction.get('league_code') != canonical_code:
+                        full_prediction['league_code'] = canonical_code
+                        entry_changed = True
+                    if full_prediction.get('league_name') != display_name:
+                        full_prediction['league_name'] = display_name
+                        entry_changed = True
+
+                over_under = entry.get('over_under') if isinstance(entry.get('over_under'), dict) else {}
+                fp_over_under = full_prediction.get('over_under') if isinstance(full_prediction.get('over_under'), dict) else {}
+                realtime = full_prediction.get('realtime') if isinstance(full_prediction.get('realtime'), dict) else {}
+                okooo = realtime.get('okooo') if isinstance(realtime.get('okooo'), dict) else {}
+                external_match_id = str(
+                    entry.get('external_match_id')
+                    or entry.get('match_id')
+                    or full_prediction.get('match_id')
+                    or ''
+                ).strip()
+                snapshot_path = str(
+                    entry.get('snapshot_path')
+                    or entry.get('source_snapshot')
+                    or full_prediction.get('snapshot_path')
+                    or realtime.get('source_snapshot')
+                    or okooo.get('source_snapshot')
+                    or okooo.get('snapshot_path')
+                    or ''
+                ).strip()
+                snapshot_dir_alias, snapshot_code_from_path = self._snapshot_context_from_path(snapshot_path)
+                snapshot_payload: Optional[Dict[str, Any]] = None
+                if snapshot_path and os.path.exists(snapshot_path):
+                    try:
+                        with open(snapshot_path, 'r', encoding='utf-8') as f:
+                            snapshot_payload = json.load(f)
+                    except Exception:
+                        snapshot_payload = None
+                if not snapshot_path and external_match_id:
+                    snapshot_path, snapshot_payload = self._find_snapshot_file_by_match_id(canonical_code, external_match_id)
+                    if snapshot_path:
+                        snapshot_backfilled += 1
+                        entry_changed = True
+                        snapshot_dir_alias, snapshot_code_from_path = self._snapshot_context_from_path(snapshot_path)
+
+                snapshot_dir = snapshot_code_from_path or canonical_code
+                alias_list = list(SNAPSHOT_DIR_ALIASES.get(canonical_code, (canonical_code,)))
+                if entry.get('snapshot_dir') != snapshot_dir:
+                    entry['snapshot_dir'] = snapshot_dir
+                    entry_changed = True
+                if entry.get('snapshot_dir_aliases') != alias_list:
+                    entry['snapshot_dir_aliases'] = alias_list
+                    entry_changed = True
+                if snapshot_dir_alias and entry.get('snapshot_dir_alias') != snapshot_dir_alias:
+                    entry['snapshot_dir_alias'] = snapshot_dir_alias
+                    entry_changed = True
+                if full_prediction and full_prediction.get('snapshot_dir') != snapshot_dir:
+                    full_prediction['snapshot_dir'] = snapshot_dir
+                    entry_changed = True
+                if okooo.get('snapshot_dir') != snapshot_dir:
+                    okooo['snapshot_dir'] = snapshot_dir
+                    entry_changed = True
+                if okooo.get('snapshot_dir_aliases') != alias_list:
+                    okooo['snapshot_dir_aliases'] = alias_list
+                    entry_changed = True
+                if snapshot_dir_alias and okooo.get('snapshot_dir_alias') != snapshot_dir_alias:
+                    okooo['snapshot_dir_alias'] = snapshot_dir_alias
+                    entry_changed = True
+                if snapshot_path:
+                    if entry.get('snapshot_path') != snapshot_path:
+                        entry['snapshot_path'] = snapshot_path
+                        entry_changed = True
+                    if entry.get('source_snapshot') != snapshot_path:
+                        entry['source_snapshot'] = snapshot_path
+                        entry_changed = True
+                    if full_prediction:
+                        if full_prediction.get('snapshot_path') != snapshot_path:
+                            full_prediction['snapshot_path'] = snapshot_path
+                            entry_changed = True
+                    if realtime.get('source_snapshot') != snapshot_path:
+                        realtime['source_snapshot'] = snapshot_path
+                        entry_changed = True
+                    if okooo.get('source_snapshot') != snapshot_path:
+                        okooo['source_snapshot'] = snapshot_path
+                        entry_changed = True
+                    if okooo.get('snapshot_path') != snapshot_path:
+                        okooo['snapshot_path'] = snapshot_path
+                        entry_changed = True
+
+                line_source = str(
+                    entry.get('line_source')
+                    or over_under.get('line_source')
+                    or fp_over_under.get('line_source')
+                    or ''
+                ).strip()
+                if not line_source:
+                    line_source = self._snapshot_totals_line_source(snapshot_payload)
+                if line_source:
+                    if entry.get('line_source') != line_source:
+                        entry['line_source'] = line_source
+                        line_source_backfilled += 1
+                        entry_changed = True
+                    if over_under and over_under.get('line_source') != line_source:
+                        over_under['line_source'] = line_source
+                        entry_changed = True
+                    if fp_over_under and fp_over_under.get('line_source') != line_source:
+                        fp_over_under['line_source'] = line_source
+                        entry_changed = True
+
+                if okooo:
+                    realtime['okooo'] = okooo
+                if realtime:
+                    full_prediction['realtime'] = realtime
+                if full_prediction:
+                    entry['full_prediction'] = full_prediction
+                if entry_changed:
+                    competition_backfilled += 1
+
+            archive[match_id] = entry
+
+        if migrated_count or competition_backfilled:
             self._save_prediction_archive(archive)
 
         return {
             "archive_file": self.prediction_archive_file,
             "total_records": total_records,
             "migrated_records": migrated_count,
+            "competition_backfilled_records": competition_backfilled,
+            "snapshot_backfilled_records": snapshot_backfilled,
+            "line_source_backfilled_records": line_source_backfilled,
             "dimension_schema_version": self.prediction_runtime_profile.get("dimension_schema_version"),
             "agent_roles": self.prediction_runtime_profile.get("agent_roles", []),
             "updated_at": datetime.now().isoformat(),
@@ -415,11 +1279,32 @@ class ResultManager:
         self.prediction_archive_store.save(archive)
 
     def _archive_prediction(self, prediction_data: Dict[str, Any]) -> None:
-        match_id = str(prediction_data.get('match_id') or '').strip()
-        if not match_id:
+        archive_key = str(
+            prediction_data.get('teams_match_id')
+            or prediction_data.get('external_match_id')
+            or prediction_data.get('internal_match_id')
+            or prediction_data.get('match_id')
+            or ''
+        ).strip()
+        if not archive_key:
             return
         archive = self._load_prediction_archive()
-        archive[match_id] = prediction_data
+        external_match_id = str(prediction_data.get('external_match_id') or '').strip()
+        if external_match_id and not prediction_data.get('teams_match_id'):
+            for key, archived in list(archive.items()):
+                if not isinstance(archived, dict):
+                    continue
+                candidates = {
+                    str(key).strip(),
+                    str(archived.get('match_id') or '').strip(),
+                    str(archived.get('external_match_id') or '').strip(),
+                }
+                full_prediction = archived.get('full_prediction')
+                if isinstance(full_prediction, dict):
+                    candidates.add(str(full_prediction.get('match_id') or '').strip())
+                if external_match_id in candidates and key != archive_key:
+                    archive.pop(key, None)
+        archive[archive_key] = prediction_data
         self._save_prediction_archive(archive)
 
     def _hydrate_prediction_fields(self, result_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -708,7 +1593,9 @@ class ResultManager:
             result_data['upset_sync'] = self._auto_sync_upset_case(result_data)
             from runtime.result_sync import mark_result_sync_completed
             mark_result_sync_completed(self.base_dir, result_data.get("match_id", ""), result_data.get("actual_score", ""), result_data.get("actual_winner", ""))
+            self._update_memory_result_entry(result_data)
             sync_prediction_memory_samples(self.base_dir, limit=100)
+            sync_rag_index(self.base_dir, limit=200)
             logger.info("保存比赛结果: %s vs %s -> %s", home_candidate, away_candidate, result_data['actual_score'])
             return result_data
         else:
@@ -716,7 +1603,9 @@ class ResultManager:
             result_data['upset_sync'] = self._auto_sync_upset_case(result_data)
             from runtime.result_sync import mark_result_sync_completed
             mark_result_sync_completed(self.base_dir, result_data.get("match_id", ""), result_data.get("actual_score", ""), result_data.get("actual_winner", ""))
+            self._update_memory_result_entry(result_data)
             sync_prediction_memory_samples(self.base_dir, limit=100)
+            sync_rag_index(self.base_dir, limit=200)
             logger.info("保存比赛结果: %s -> %s", identifier, result_data['actual_score'])
             return result_data
 
@@ -920,7 +1809,7 @@ class ResultManager:
 
         return pending
 
-    def calculate_accuracy(self, league: Optional[str] = None, days: int = 30) -> Dict:
+    def calculate_accuracy(self, league: Optional[str] = None, days: int = 30, ou_report: Optional[Dict[str, Any]] = None) -> Dict:
         """计算预测胜负准确率。"""
         total = 0
         correct = 0
@@ -979,6 +1868,11 @@ class ResultManager:
         accuracy = (correct / total * 100) if total > 0 else 0
         score_acc = (correct_score / total_score * 100) if total_score > 0 else 0
         ou_acc = (correct_ou / total_ou * 100) if total_ou > 0 else 0
+        ou_stats = ou_report if isinstance(ou_report, dict) else self.calculate_over_under_report(days=days, league=league)
+        ou_overall = ou_stats.get('overall') if isinstance(ou_stats.get('overall'), dict) else {}
+        total_ou = int(ou_overall.get('sample_count', total_ou) or 0)
+        correct_ou = int(ou_overall.get('hit_count', correct_ou) or 0)
+        ou_acc = float(ou_overall.get('hit_rate', ou_acc) or 0.0)
         return {
             'league': league,
             'total_predictions': total,
@@ -990,6 +1884,8 @@ class ResultManager:
             'total_ou_predictions': total_ou,
             'correct_ou_predictions': correct_ou,
             'ou_accuracy': round(ou_acc, 2),
+            'ou_push_excluded': int(ou_overall.get('push_count', 0) or 0),
+            'ou_scope': 'unified_prediction_sources',
             'model_accuracy': {},
             'calculated_at': datetime.now().isoformat(),
             'days': days
@@ -997,14 +1893,17 @@ class ResultManager:
 
     def update_accuracy_stats(self):
         """更新准确率统计。"""
+        overall_ou_report = self.calculate_over_under_report(days=30)
         stats = {
-            'overall': self.calculate_accuracy(),
+            'overall': self.calculate_accuracy(ou_report=overall_ou_report),
             'by_league': {},
+            'over_under_report': overall_ou_report,
             'last_updated': datetime.now().isoformat()
         }
 
         for league_code in LEAGUE_NAMES.keys():
-            stats['by_league'][league_code] = self.calculate_accuracy(league=league_code)
+            league_ou_report = self.calculate_over_under_report(days=30, league=league_code)
+            stats['by_league'][league_code] = self.calculate_accuracy(league=league_code, ou_report=league_ou_report)
 
         self.accuracy_store.save(stats)
 
@@ -1016,7 +1915,18 @@ class ResultManager:
         match_date = enhanced_pred.get('match_date', datetime.now().strftime('%Y-%m-%d'))
         home_team = enhanced_pred.get('home_team', '')
         away_team = enhanced_pred.get('away_team', '')
-        match_id = self._match_id_for_teams_row(league_code, match_date, home_team, away_team)
+        teams_match_id = self._find_existing_teams_match_id(league_code, match_date, home_team, away_team)
+        external_match_id = str(enhanced_pred.get('match_id') or '').strip()
+        realtime = enhanced_pred.get('realtime')
+        if not external_match_id and isinstance(realtime, dict):
+            okooo = realtime.get('okooo')
+            if isinstance(okooo, dict):
+                external_match_id = str(okooo.get('match_id') or '').strip()
+        match_id = teams_match_id or self._runtime_only_match_id(external_match_id, league_code, match_date, home_team, away_team)
+        storage_mode = 'league_sot' if teams_match_id else 'runtime_only'
+        enhanced_pred['teams_match_id'] = teams_match_id
+        enhanced_pred['internal_match_id'] = match_id
+        enhanced_pred['storage_mode'] = storage_mode
 
         prediction_result = enhanced_pred.get('prediction', '')
         predicted_winner = {'主胜': 'home', '客胜': 'away', '平局': 'draw'}.get(prediction_result)
@@ -1025,7 +1935,12 @@ class ResultManager:
         predicted_score = '/'.join(predicted_scores) if predicted_scores else ''
         predicted_ou = None
         over_under = enhanced_pred.get('over_under', {})
-        if isinstance(over_under, dict) and isinstance(over_under.get('line'), (int, float)):
+        over_under_available = (
+            isinstance(over_under, dict)
+            and bool(over_under.get('available', True))
+            and isinstance(over_under.get('line'), (int, float))
+        )
+        if over_under_available:
             predicted_ou = {
                 'side': '大' if over_under.get('over', 0) > over_under.get('under', 0) else '小',
                 'line': float(over_under.get('line')),
@@ -1033,17 +1948,26 @@ class ResultManager:
 
         prediction_data = {
             'match_id': match_id,
+            'external_match_id': external_match_id,
+            'teams_match_id': teams_match_id,
             'league': league_code,
             'league_name': LEAGUE_NAMES.get(league_code, league_code),
             'home_team': home_team,
             'away_team': away_team,
             'match_date': match_date,
             'match_time': str(enhanced_pred.get('match_time') or ''),
+            'storage_mode': storage_mode,
             'predicted_winner': predicted_winner,
             'predicted_score': predicted_score,
             'predicted_scores': predicted_scores,
             'predicted_probability': str(enhanced_pred.get('confidence', '')),
-            'over_under': '大球' if enhanced_pred.get('over_under', {}).get('over', 0) > 0.5 else '小球',
+            'over_under': (
+                '大球'
+                if over_under_available and enhanced_pred.get('over_under', {}).get('over', 0) > enhanced_pred.get('over_under', {}).get('under', 0)
+                else '小球'
+                if over_under_available
+                else '待补真实盘口'
+            ),
             'predicted_ou': predicted_ou,
             'correct': False,
             'model_predictions': enhanced_pred.get('model_predictions', {}),
@@ -1054,6 +1978,9 @@ class ResultManager:
         self._archive_prediction(
             {
                 'match_id': match_id,
+                'external_match_id': external_match_id,
+                'internal_match_id': match_id,
+                'teams_match_id': teams_match_id,
                 'league': league_code,
                 'league_name': LEAGUE_NAMES.get(league_code, league_code),
                 'match_date': match_date,
@@ -1070,6 +1997,7 @@ class ResultManager:
                 'upset_potential': enhanced_pred.get('upset_potential', {}),
                 'match_intelligence': enhanced_pred.get('match_intelligence', {}),
                 'realtime': enhanced_pred.get('realtime', {}),
+                'storage_mode': storage_mode,
                 'runtime_profile': enhanced_pred.get('runtime_profile', {}),
                 'note': f"预测:{prediction_result} 信心:{float(enhanced_pred.get('confidence') or 0):.2f}".strip(),
                 'full_prediction': enhanced_pred,
@@ -1078,7 +2006,10 @@ class ResultManager:
         )
         from runtime.result_sync import register_prediction_result_sync
         register_prediction_result_sync(self.base_dir, prediction_data)
-        logger.info("预测已写入 teams 文件，兼容返回预测对象: %s", match_id)
+        if teams_match_id:
+            logger.info("预测已关联联赛 SoT 行: %s", teams_match_id)
+        else:
+            logger.info("预测按 runtime-only 归档，不写入联赛 SoT: %s", match_id)
         return prediction_data
 
 

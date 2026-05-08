@@ -57,6 +57,10 @@ def _league_slug(league: str) -> str:
         "西甲": "la_liga",
         "德甲": "bundesliga",
         "法甲": "ligue_1",
+        "欧联": "europa_league",
+        "欧罗巴": "europa_league",
+        "欧冠": "champions_league",
+        "欧协联": "conference_league",
     }
     if name in mapping:
         return mapping[name]
@@ -177,13 +181,25 @@ def _load_alias_table() -> Dict[str, Any]:
 def _team_aliases(alias_table: Dict[str, Any], league: str, team_name: str) -> list[str]:
     if not team_name:
         return []
-    league_key = _league_slug(league)
-    league_map = alias_table.get(league_key, {}) if isinstance(alias_table, dict) else {}
-    aliases = league_map.get(team_name, []) if isinstance(league_map, dict) else []
+    league_keys = [
+        str(league or "").strip(),
+        _league_slug(league),
+    ]
+    if _league_slug(league) == "europa_league":
+        league_keys.extend(["欧联", "欧罗巴"])
+    elif _league_slug(league) == "champions_league":
+        league_keys.extend(["欧冠"])
+    elif _league_slug(league) == "conference_league":
+        league_keys.extend(["欧协联"])
+
     out = [team_name]
-    for a in aliases or []:
-        if a and isinstance(a, str):
-            out.append(a)
+    if isinstance(alias_table, dict):
+        for league_key in league_keys:
+            league_map = alias_table.get(league_key, {})
+            aliases = league_map.get(team_name, []) if isinstance(league_map, dict) else []
+            for a in aliases or []:
+                if a and isinstance(a, str):
+                    out.append(a)
     # De-dup while preserving order.
     seen = set()
     uniq = []
@@ -721,6 +737,8 @@ def _mobile_league_url(league: str) -> str | None:
         "德甲": "https://m.okooo.com/saishi/35/",
         "法甲": "https://m.okooo.com/saishi/34/",
         "欧冠": "https://m.okooo.com/saishi/7/",
+        "欧联": "https://m.okooo.com/saishi/679/",
+        "欧罗巴": "https://m.okooo.com/saishi/679/",
         "中超": "https://m.okooo.com/saishi/649/",
         "英冠": "https://m.okooo.com/saishi/133/",
     }

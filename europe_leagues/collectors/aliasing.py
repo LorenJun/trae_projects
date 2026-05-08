@@ -7,6 +7,12 @@ from typing import Dict, Optional
 
 from runtime.paths import get_default_paths
 
+LEAGUE_ALIAS_KEYS = {
+    'europa_league': ('europa_league', '欧联', '欧罗巴'),
+    'champions_league': ('champions_league', '欧冠'),
+    'conference_league': ('conference_league', '欧协联'),
+}
+
 
 def load_team_alias_map(base_dir: Optional[str] = None) -> Dict[str, Dict[str, str]]:
     path = get_default_paths(base_dir).alias_map_path
@@ -34,7 +40,15 @@ def load_team_alias_map(base_dir: Optional[str] = None) -> Dict[str, Dict[str, s
                     alias_name = str(alias or '').strip()
                     if alias_name:
                         league_map[alias_name] = canonical_name
-        out[str(league).strip()] = league_map
+        league_key = str(league).strip()
+        if not league_key:
+            continue
+        out[league_key] = league_map
+        for canonical_key, aliases in LEAGUE_ALIAS_KEYS.items():
+            if league_key == canonical_key or league_key in aliases:
+                out.setdefault(canonical_key, dict(league_map))
+                for alias in aliases:
+                    out.setdefault(alias, dict(league_map))
     return out
 
 

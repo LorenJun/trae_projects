@@ -17,6 +17,8 @@ __all__ = [
     "build_odds_runtime_options",
     "ensure_analysis_context",
     "load_analysis_context_file",
+    "HybridRAGService",
+    "LightweightRAGService",
 ]
 
 
@@ -47,4 +49,8 @@ def __getattr__(name: str):
     if name in {"ensure_analysis_context", "load_analysis_context_file"}:
         module = import_module(".features", __name__)
         return getattr(module, name)
+    if name == "HybridRAGService":
+        return import_module(".rag", __name__).HybridRAGService
+    if name == "LightweightRAGService":
+        return import_module(".rag", __name__).LightweightRAGService
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -9,6 +9,8 @@ from models import DixonColesModel
 
 
 class InferencePipelineService:
+    REAL_OU_LINE_SOURCES = {'snapshot_final', 'snapshot_initial'}
+
     def __init__(
         self,
         *,
@@ -560,6 +562,198 @@ class InferencePipelineService:
         diag['asian'] = {'handicap_initial': hcp_i, 'handicap_final': hcp_f, 'giver': giver, 'retreat': retreat, 'water_drift': water_drift}
         return {'home_win': p_h, 'draw': p_d, 'away_win': p_a}, diag
 
+    def build_real_market_over_under(
+        self,
+        *,
+        home_lambda: float,
+        away_lambda: float,
+        current_odds: Optional[Dict[str, Any]],
+        analysis_context: Dict[str, Any],
+        match_intelligence: Optional[Dict[str, Any]],
+        realtime_context_applied: Optional[Dict[str, Any]],
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        diag: Dict[str, Any] = {
+            'available': False,
+            'requires_real_market_line': True,
+        }
+        ou_line, ou_line_source = resolve_over_under_line(
+            current_odds=current_odds,
+            analysis_context=analysis_context,
+            to_float=self._to_float,
+        )
+        diag['line_source'] = ou_line_source
+        if ou_line_source not in self.REAL_OU_LINE_SOURCES or not isinstance(ou_line, float):
+            diag['reason'] = 'missing_real_market_line'
+            return {
+                'available': False,
+                'requires_real_market_line': True,
+                'line_source': ou_line_source,
+                'reason': 'missing_real_market_line',
+            }, diag
+
+        over_under = self.poisson_model.predict_over_under(home_lambda, away_lambda, line=ou_line)
+        if not isinstance(over_under, dict):
+            diag['reason'] = 'poisson_predict_over_under_failed'
+            return {
+                'available': False,
+                'requires_real_market_line': True,
+                'line_source': ou_line_source,
+                'reason': 'poisson_predict_over_under_failed',
+            }, diag
+
+        over_under, ou_resonance_diag = self.match_intelligence_engine._apply_market_resonance_to_over_under(
+            over_under=over_under,
+            match_intelligence=match_intelligence,
+        )
+        if isinstance(realtime_context_applied, dict):
+            realtime_context_applied['market_resonance_over_under_adjustment'] = ou_resonance_diag
+            learning_diag = realtime_context_applied.get('league_over_under_learning', {})
+        else:
+            learning_diag = {}
+
+        over_under = self.postprocess_service.attach_over_under_context(
+            over_under=over_under,
+            current_odds=current_odds,
+            learning_diag=learning_diag,
+            ou_line_source=ou_line_source,
+            realtime_context_applied=realtime_context_applied,
+        )
+        over_under['available'] = True
+        over_under['requires_real_market_line'] = True
+        over_under['used_real_market_line'] = True
+        diag.update(
+            {
+                'available': True,
+                'line': round(float(ou_line), 3),
+                'line_source': ou_line_source,
+            }
+        )
+        return over_under, diag
+
+    def apply_real_totals_outcome_adjustment(
+        self,
+        *,
+        final_prob: Dict[str, float],
+        current_odds: Optional[Dict[str, Any]],
+        over_under: Optional[Dict[str, Any]],
+    ) -> Tuple[Dict[str, float], Dict[str, Any]]:
+        diag: Dict[str, Any] = {'applied': False, 'source': 'real_market_over_under'}
+        if not isinstance(final_prob, dict) or not isinstance(over_under, dict):
+            diag['reason'] = 'missing_inputs'
+            return final_prob, diag
+        if not over_under.get('available'):
+            diag['reason'] = str(over_under.get('reason') or 'over_under_unavailable')
+            return final_prob, diag
+        line_source = str(over_under.get('line_source') or '').strip()
+        if line_source not in self.REAL_OU_LINE_SOURCES:
+            diag['reason'] = f'unsupported_line_source:{line_source or "unknown"}'
+            return final_prob, diag
+
+        line = self._to_float(over_under.get('line'))
+        over_prob = self._to_float(over_under.get('over'))
+        under_prob = self._to_float(over_under.get('under'))
+        if line is None or over_prob is None or under_prob is None:
+            diag['reason'] = 'invalid_over_under_payload'
+            return final_prob, diag
+
+        final_totals = {}
+        if isinstance(current_odds, dict):
+            totals = current_odds.get('大小球')
+            if isinstance(totals, dict) and isinstance(totals.get('final'), dict):
+                final_totals = totals.get('final') or {}
+        market_over_odds = self._to_float(final_totals.get('over'))
+        market_under_odds = self._to_float(final_totals.get('under'))
+        market_bias = 0.0
+        if (
+            isinstance(market_over_odds, float)
+            and isinstance(market_under_odds, float)
+            and market_over_odds > 1.01
+            and market_under_odds > 1.01
+        ):
+            implied_over = 1.0 / market_over_odds
+            implied_under = 1.0 / market_under_odds
+            total_implied = implied_over + implied_under
+            if total_implied > 0:
+                market_bias = implied_under / total_implied - implied_over / total_implied
+
+        model_bias = float(under_prob) - float(over_prob)
+        combined_bias = model_bias * 0.65 + market_bias * 0.35
+        if line <= 2.25:
+            combined_bias += 0.025
+        elif line <= 2.5 and combined_bias > 0:
+            combined_bias += 0.01
+        elif line >= 3.25 and combined_bias < 0:
+            combined_bias -= 0.025
+        elif line >= 3.0 and combined_bias < 0:
+            combined_bias -= 0.01
+        combined_bias = max(-0.18, min(0.18, combined_bias))
+
+        draw_delta = max(-0.02, min(0.03, combined_bias * 0.18))
+        if abs(draw_delta) < 0.004:
+            diag['reason'] = 'bias_below_threshold'
+            diag['line'] = round(float(line), 3)
+            diag['combined_bias'] = round(float(combined_bias), 4)
+            return final_prob, diag
+
+        p_h = float(final_prob.get('home_win') or 0.0)
+        p_d = float(final_prob.get('draw') or 0.0)
+        p_a = float(final_prob.get('away_win') or 0.0)
+        total = p_h + p_d + p_a
+        if total <= 0:
+            diag['reason'] = 'invalid_probability_mass'
+            return final_prob, diag
+        p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
+
+        side_mass = max(1e-9, p_h + p_a)
+        home_share = p_h / side_mass
+        away_share = p_a / side_mass
+
+        if draw_delta > 0:
+            available_take = max(0.0, p_h - 0.02) + max(0.0, p_a - 0.02)
+            actual_delta = min(draw_delta, available_take)
+            take_home = min(max(0.0, p_h - 0.02), actual_delta * home_share)
+            take_away = min(max(0.0, p_a - 0.02), actual_delta - take_home)
+            remainder = actual_delta - take_home - take_away
+            if remainder > 1e-9:
+                extra_home = min(max(0.0, p_h - 0.02) - take_home, remainder)
+                take_home += extra_home
+                remainder -= extra_home
+            if remainder > 1e-9:
+                extra_away = min(max(0.0, p_a - 0.02) - take_away, remainder)
+                take_away += extra_away
+            p_h -= take_home
+            p_a -= take_away
+            p_d += take_home + take_away
+        else:
+            actual_delta = min(-draw_delta, max(0.0, p_d - 0.02))
+            p_d -= actual_delta
+            p_h += actual_delta * home_share
+            p_a += actual_delta * away_share
+            actual_delta = -actual_delta
+
+        total2 = p_h + p_d + p_a
+        if total2 > 0:
+            p_h, p_d, p_a = p_h / total2, p_d / total2, p_a / total2
+
+        diag.update(
+            {
+                'applied': True,
+                'line': round(float(line), 3),
+                'line_source': line_source,
+                'model_bias': round(float(model_bias), 4),
+                'market_bias': round(float(market_bias), 4),
+                'combined_bias': round(float(combined_bias), 4),
+                'draw_delta': round(float(actual_delta), 4),
+                'effect': 'under_to_draw' if actual_delta > 0 else 'over_reduce_draw',
+                'adjusted_probabilities': {
+                    'home_win': round(float(p_h), 6),
+                    'draw': round(float(p_d), 6),
+                    'away_win': round(float(p_a), 6),
+                },
+            }
+        )
+        return {'home_win': p_h, 'draw': p_d, 'away_win': p_a}, diag
+
     def run(
         self,
         *,
@@ -715,6 +909,21 @@ class InferencePipelineService:
         final_prob, match_intel_diag = self.match_intelligence_engine._apply_match_intelligence_adjustment(final_prob=final_prob, match_intelligence=match_intelligence)
         if isinstance(match_intel_diag, dict):
             realtime['context_applied']['match_intelligence_adjustment'] = match_intel_diag
+        over_under, over_under_diag = self.build_real_market_over_under(
+            home_lambda=home_lambda,
+            away_lambda=away_lambda,
+            current_odds=current_odds,
+            analysis_context=analysis_context,
+            match_intelligence=match_intelligence,
+            realtime_context_applied=realtime['context_applied'],
+        )
+        realtime['context_applied']['over_under_guard'] = over_under_diag
+        final_prob, real_ou_outcome_diag = self.apply_real_totals_outcome_adjustment(
+            final_prob=final_prob,
+            current_odds=current_odds,
+            over_under=over_under,
+        )
+        realtime['context_applied']['real_market_over_under_outcome_adjustment'] = real_ou_outcome_diag
         ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
         main_prediction = ranked_probabilities[0][0]
         confidence = ranked_probabilities[0][1]
@@ -743,20 +952,6 @@ class InferencePipelineService:
         score_result = dc_model.predict_with_dixon_coles(home_lambda, away_lambda)
         top_scores = sorted(score_result['score_probs'].items(), key=lambda item: item[1], reverse=True)[:3]
         total_goals = self.postprocess_service.compute_total_goals_distribution(score_result.get('score_probs', {}), max_bucket=7)
-
-        ou_line, ou_line_source = resolve_over_under_line(current_odds=current_odds, analysis_context=analysis_context, to_float=self._to_float)
-        over_under = self.poisson_model.predict_over_under(home_lambda, away_lambda, line=ou_line)
-        if isinstance(over_under, dict):
-            over_under, ou_resonance_diag = self.match_intelligence_engine._apply_market_resonance_to_over_under(over_under=over_under, match_intelligence=match_intelligence)
-            realtime['context_applied']['market_resonance_over_under_adjustment'] = ou_resonance_diag
-            learning_diag = realtime['context_applied'].get('league_over_under_learning', {})
-            over_under = self.postprocess_service.attach_over_under_context(
-                over_under=over_under,
-                current_odds=current_odds,
-                learning_diag=learning_diag,
-                ou_line_source=ou_line_source,
-                realtime_context_applied=realtime['context_applied'],
-            )
 
         return {
             'applied_weights': applied_weights,

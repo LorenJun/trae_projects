@@ -233,28 +233,24 @@ python3 prediction_system.py accuracy --refresh --json
 
 ## 分析脚本
 
-### 历史分析脚本
+### 当前正式统计入口
 
 ```bash
-cd /Users/bytedance/trae_projects
+cd /Users/bytedance/trae_projects/europe_leagues
 
-# 运行准确率分析
-python analyze_prediction_accuracy.py
-
-# 查看生成的报告
-cat prediction_accuracy_report.md
+python3 prediction_system.py accuracy --refresh --json
 ```
 
 说明：
 
-- 上述脚本可作为扩展分析工具参考
-- 当前正式统计口径仍以 `prediction_system.py accuracy --refresh --json` 为准
+- 当前正式统计口径以 `prediction_system.py accuracy --refresh --json` 为准
+- 旧版独立统计脚本已从项目中清理，不再作为推荐入口
 
-**脚本功能**:
+**正式统计能力**:
 1. 读取所有预测和结果数据
 2. 计算各项准确率指标
-3. 生成可视化统计报告
-4. 提出优化建议
+3. 生成统一分层报表
+4. 为复盘与优化提供依据
 
 ---
 

@@ -1,7 +1,7 @@
 # 足球预测多Agent系统优化方案
 
-> 当前说明：本文是多 Agent 优化方案稿。当前仓库的正式执行链路已收敛为 `prediction_system.py`、`EnhancedPredictor`、`okooo_*`、`bulk_fetch_and_update.py` 和 `harness/football.py`。  
-> 阅读本文时，请以 `teams_2025-26.md` 为单一事实来源，并以 `collect-data -> predict-match/predict-schedule -> save-result/accuracy` 为正式流程口径。
+> 当前说明：本文是多 Agent 优化方案稿。当前仓库的正式执行链路已收敛为 `prediction_system.py`、`EnhancedPredictor`、`HybridRAGService`、`okooo_*`、`bulk_fetch_and_update.py` 和 `harness/football.py`。  
+> 阅读本文时，请以“联赛 SoT + runtime-only 双路径写回”为正式口径，并以 `collect-data -> predict-match/predict-schedule -> save-result/accuracy` 为正式流程基线。
 
 ## 系统概览
 

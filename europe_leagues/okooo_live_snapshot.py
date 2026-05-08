@@ -13,6 +13,15 @@ LEAGUE_CODE_TO_CN = {
     "serie_a": "意甲",
     "bundesliga": "德甲",
     "ligue_1": "法甲",
+    "europa_league": "欧联",
+    "champions_league": "欧冠",
+    "conference_league": "欧协联",
+}
+
+LEAGUE_SNAPSHOT_DIR_ALIASES = {
+    "europa_league": ["europa_league", "欧联", "欧罗巴"],
+    "champions_league": ["champions_league", "欧冠"],
+    "conference_league": ["conference_league", "欧协联"],
 }
 
 
@@ -22,11 +31,11 @@ def snapshots_root(base_dir: str) -> str:
 
 
 def list_snapshot_dirs(base_dir: str, league_code: str) -> list[str]:
-    # new layout
-    dirs = [os.path.join(snapshots_root(base_dir), league_code)]
+    aliases = LEAGUE_SNAPSHOT_DIR_ALIASES.get(league_code, [league_code] if league_code else [""])
+    dirs = [os.path.join(snapshots_root(base_dir), alias) for alias in aliases if alias]
     # legacy compat
     dirs.append(os.path.join(base_dir, "okooo_snapshots"))
-    dirs.append(os.path.join(base_dir, "okooo_snapshots", league_code))
+    dirs.extend(os.path.join(base_dir, "okooo_snapshots", alias) for alias in aliases if alias)
     # de-dup
     out = []
     seen = set()

@@ -118,7 +118,7 @@ python3 audit_players_completeness.py
 ## 与主流程的衔接
 
 - 这些文件是预测系统的输入，不是正式输出
-- 正式预测写回仍以 `europe_leagues/<league>/teams_2025-26.md` 为准
+- 正式预测写回遵守双路径：五大联赛走 `europe_leagues/<league>/teams_2025-26.md`，欧战/杯赛走 `MEMORY.md` 与 runtime archive
 - 若球员数据更新后需要验证效果，应通过 `prediction_system.py predict-match`、`predict-schedule` 或 `harness-run` 观察结果，而不是直接改预测报告模板
 
 ## 字段约定（落盘结构）

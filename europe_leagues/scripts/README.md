@@ -15,3 +15,6 @@
 - `python3 fill_other_leagues_player_name_cn_from_wikidata.py`：四联赛补 Wikidata 中文名/号码
 - `python3 supplement_rosters_and_numbers_from_sofascore.py`：四联赛用 Sofascore 补齐阵容与号码
 - `python3 audit_players_completeness.py`：四联赛完整性审计报告
+
+## 记忆维护
+- `python3 scripts/sync_memory_rag_explanations.py`：把 `prediction_archive.json` 中已有的 `RAG` 记忆解释回填到 `MEMORY.md` 对应预测记录

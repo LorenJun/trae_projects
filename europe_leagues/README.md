@@ -2,16 +2,17 @@
 
 > 当前说明：本文件已按现行正式链路更新。  
 > 正式入口优先使用 `prediction_system.py collect-data / predict-match / predict-schedule / save-result / accuracy --refresh / harness-run`。  
-> 正式写回只认 `europe_leagues/<league>/teams_2025-26.md`，旧 `analysis/predictions/` 与 `analysis/results/` 不再作为主流程输出。
+> 正式写回遵守“双路径”：五大联赛写 `europe_leagues/<league>/teams_2025-26.md`，欧战/杯赛写 `MEMORY.md` 与 runtime-only 归档；旧 `analysis/predictions/` 与 `analysis/results/` 不再作为主流程输出。
 >
 > 当前正式流程  
 > 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
-> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测  
-> 3. 结果写回 `europe_leagues/<league>/teams_2025-26.md`  
-> 4. 赛后用 `prediction_system.py save-result` 或 `bulk_fetch_and_update.py` 回填  
+> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层  
+> 3. 五大联赛 SoT 写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写入 `MEMORY.md` 与 runtime-only 归档  
+> 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
 > 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
-> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`  
+> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`  
+> 欧战正式 competition config：`europa_league`、`champions_league`、`conference_league` 已进入主链，可直接走 `predict-match` / `harness-run`，但写回仍保持 `runtime_only`  
 > 当前实现说明：`prediction_system.py` 为兼容入口，真实 CLI 路由在 `app/cli.py`
 
 ## 项目结构
@@ -23,10 +24,11 @@ europe_leagues/
 ├── harness/                 # Harness 编排层
 │   ├── core.py
 │   └── football.py
-├── domain/                  # 领域服务与预测外壳
+├── domain/                  # 领域服务、RAG 与预测外壳
 │   ├── predictor.py
 │   ├── features.py
 │   ├── odds.py
+│   ├── rag.py
 │   ├── intelligence.py
 │   ├── upset.py
 │   ├── live.py
@@ -39,12 +41,12 @@ europe_leagues/
 ├── collectors/              # 赛程/快照/上下文采集
 ├── models/                  # Poisson / Dixon-Coles / Fusion
 ├── storage/                 # SoT / 归档 / 准确率
-├── runtime/                 # 缓存与运行时路径
+├── runtime/                 # 缓存、赛果同步、记忆样本与 RAG 索引
 ├── prediction_system.py     # 兼容 CLI 入口
 ├── enhanced_prediction_workflow.py # 预测主编排
 ├── result_manager.py        # 赛果回填与归档兼容管理器
 ├── premier_league/          # 英超联赛
-│   ├── teams_2025-26.md    # 单一事实来源
+│   ├── teams_2025-26.md    # 五大联赛 SoT
 │   └── analysis/           # 分析数据
 ├── la_liga/                 # 西甲联赛
 ├── serie_a/                 # 意甲联赛
@@ -56,23 +58,26 @@ europe_leagues/
 
 - 接口层：`prediction_system.py`、`app/cli.py`
 - 编排层：`harness/*`、`domain/predictor.py`、`enhanced_prediction_workflow.py`
-- 领域层：`domain/features.py`、`odds.py`、`intelligence.py`、`inference.py`、`postprocess.py` 等
+- 领域层：`domain/features.py`、`odds.py`、`rag.py`、`intelligence.py`、`inference.py`、`postprocess.py` 等
 - 采集层：`collectors/*` 与保留的 `okooo_*`、`data_collector.py`
 - 存储层：`storage/*`、`runtime/*`、`result_manager.py`
-- 数据层：各联赛目录下的 `teams_2025-26.md`、`analysis/*`、`players/*.json`
+- 数据层：各联赛目录下的 `teams_2025-26.md`、根目录 `MEMORY.md`、`analysis/*`、`players/*.json`
 
 ## 使用方法
 
 ### 1. 预测写回（赛程表备注列）
 
-当前项目以 `teams_2025-26.md` 为单一事实来源：
-- 赛程表比分列：真实赛果（已完赛为 `x-y`，未完赛为 `-`）
-- 赛程表备注列：预测信息（例如 `预测:主胜；比分:1-0/1-1；大小:小2.5(0.58)`），赛后可追加 `✅/❌`
-- 如需复盘说明，可补充在同一联赛文件中，但正式主流程不依赖单独预测报告
+当前项目采用双路径写回：
+- 五大联赛：`teams_2025-26.md` 负责赛程表比分列、备注列与 SoT 写回
+- 欧战/杯赛：`MEMORY.md`、`prediction_archive.json`、`prediction_memory_odds_samples.json` 负责 runtime-only 记忆与归档
+- 新预测会原生写入 `RAG记忆:`，历史数据可用 `sync-memory-rag` 回填
+- `europa_league`、`champions_league`、`conference_league` 都属于正式可预测 competition config，会优先按 `match_id` 命中欧战快照目录别名并复用真实盘口
+- 历史欧战归档会通过迁移统一回填 `league_code`、`league_name`、`snapshot_dir`、`snapshot_dir_aliases`、`snapshot_path`、`line_source`
+- 缺历史快照的旧记录只补 canonical 字段，不伪造 `line_source`
 
 ### 2. 统计预测准确率
 
-准确率统计直接解析各联赛 `teams_2025-26.md`：
+准确率统计会综合联赛 SoT 与滚动记忆：
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
@@ -106,16 +111,30 @@ python3 prediction_system.py accuracy --refresh --json
 
 1. **赛前**：先执行 `collect-data` 或抓赛程拿到 `match_id`
 2. **预测**：运行 `predict-match` / `predict-schedule`，检查 `line_source` 与 `over_under.market.final`
-3. **写回**：将预测结果写入 `teams_2025-26.md` 备注列
-4. **赛后**：用 `save-result` 或 `bulk_fetch_and_update.py` 回填实际比分
-5. **统计**：运行 `prediction_system.py accuracy --refresh --json`
+3. **RAG**：检查 `retrieved_memory_explanation` 是否生成
+4. **写回**：按比赛类型写入 `teams_2025-26.md` 或 `MEMORY.md` / runtime archive
+5. **赛后**：用 `save-result`、`auto-sync-results` 或 `bulk_fetch_and_update.py` 回填实际比分
+6. **统计**：运行 `prediction_system.py accuracy --refresh --json`
+
+欧战示例：
+
+```bash
+python3 prediction_system.py predict-match \
+  --league champions_league \
+  --home-team 阿森纳 \
+  --away-team 马竞 \
+  --date 2026-05-08 \
+  --match-id 1324472 \
+  --no-refresh-odds \
+  --json
+```
 
 ## 注意事项
 
 1. **数据格式**：保持表格格式一致，确保数据能被脚本正确读取
 2. **数据完整性**：确保需要统计的比赛行同时具备 `比分(x-y)` 与 `备注预测(预测...)`
 3. **正式入口**：优先使用 `prediction_system.py` 的非交互子命令
-4. **及时更新**：比赛结束后及时回填实际结果，保证统计的准确性
+4. **及时更新**：比赛结束后及时回填实际结果，保证统计与 RAG 样本的准确性
 
 ## 扩展功能
 

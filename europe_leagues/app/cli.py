@@ -71,6 +71,9 @@ COMMAND_AGENT_ROLES = {
     "auto-sync-results": ["result_tracker"],
     "result-sync-daemon": ["result_tracker"],
     "accuracy": ["result_tracker"],
+    "rag-rebuild": ["result_tracker"],
+    "rag-diagnose": ["result_tracker"],
+    "sync-memory-rag": ["result_tracker"],
     "health-check": [],
     "setup-openclaw": [],
     "harness-list": [],
@@ -391,6 +394,21 @@ def run_openclaw_predict_match(args):
     print(f"联赛: {result['league_name']}  日期: {result['match_date']}")
     print(f"预测: {result['prediction']}  信心: {result['confidence']:.2%}")
     print(f"主胜/平局/客胜: {result['final_probabilities']}")
+    over_under = result.get("over_under") if isinstance(result.get("over_under"), dict) else {}
+    if over_under.get("available"):
+        line = over_under.get("line")
+        line_label = f"{float(line):g}" if isinstance(line, (int, float)) else "?"
+        print(
+            f"大小球: 大球 {float(over_under.get('over') or 0.0):.2%} / "
+            f"小球 {float(over_under.get('under') or 0.0):.2%} @ {line_label} "
+            f"[{over_under.get('line_source', 'unknown')}]"
+        )
+    else:
+        reason = str(over_under.get("reason") or "missing_real_market_line").strip()
+        print(f"大小球: 待补真实盘口 ({reason})")
+    explanation = str(result.get("retrieved_memory_explanation") or "").strip()
+    if explanation:
+        print(f"RAG记忆: {explanation}")
 
 
 def run_openclaw_predict_schedule(args):
@@ -583,6 +601,93 @@ def run_openclaw_accuracy(args):
     stats = _execute()
     overall = stats["overall"]
     print(f"总体准确率: {overall['win_accuracy']}% ({overall['correct_predictions']}/{overall['total_predictions']})")
+    print(f"统一大小球准确率: {overall.get('ou_accuracy', 0)}% ({overall.get('correct_ou_predictions', 0)}/{overall.get('total_ou_predictions', 0)})")
+    ou_report = stats.get("over_under_report") or {}
+    by_line_source = ou_report.get("by_line_source") or {}
+    if by_line_source:
+        print("大小球分层:")
+        for source_name, payload in list(by_line_source.items())[:5]:
+            print(
+                f"  - {source_name}: {payload.get('hit_rate', 0)}% "
+                f"({payload.get('hit_count', 0)}/{payload.get('sample_count', 0)})"
+            )
+
+
+def run_openclaw_rag_rebuild(args):
+    def _execute():
+        from domain.rag import HybridRAGService
+
+        service = HybridRAGService(EUROPE_LEAGUES_ROOT)
+        result = service.refresh(limit=getattr(args, "limit", 200))
+        return {
+            "rag_mode": result.get("rag_mode"),
+            "case_count": result.get("case_count"),
+            "registry": result.get("registry", {}),
+            "runtime_profile": get_command_runtime_profile("rag-rebuild"),
+        }
+
+    if args.json:
+        result, captured_stdout, captured_stderr = run_quietly(_execute)
+        emit_response(
+            build_json_result("rag-rebuild", result, captured_stdout, captured_stderr),
+            as_json=True,
+        )
+        return
+
+    report = _execute()
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+def run_openclaw_rag_diagnose(args):
+    def _execute():
+        from domain.rag import HybridRAGService
+
+        service = HybridRAGService(EUROPE_LEAGUES_ROOT)
+        result = service.diagnose(limit=getattr(args, "limit", 200))
+        result["runtime_profile"] = get_command_runtime_profile("rag-diagnose")
+        return result
+
+    if args.json:
+        result, captured_stdout, captured_stderr = run_quietly(_execute)
+        emit_response(
+            build_json_result("rag-diagnose", result, captured_stdout, captured_stderr),
+            as_json=True,
+        )
+        return
+
+    report = _execute()
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+def run_openclaw_sync_memory_rag(args):
+    def _execute():
+        from pathlib import Path
+
+        from scripts.sync_memory_rag_explanations import sync_memory_rag_explanations
+
+        result = sync_memory_rag_explanations(
+            base_dir=EUROPE_LEAGUES_ROOT,
+            memory_path=Path(getattr(args, "memory_file", "") or os.path.join(PROJECT_ROOT, "MEMORY.md")).resolve(),
+            dry_run=bool(getattr(args, "dry_run", False)),
+        )
+        result["runtime_profile"] = get_command_runtime_profile("sync-memory-rag")
+        return result
+
+    if args.json:
+        result, captured_stdout, captured_stderr = run_quietly(_execute)
+        emit_response(
+            build_json_result("sync-memory-rag", result, captured_stdout, captured_stderr),
+            as_json=True,
+        )
+        return
+
+    report = _execute()
+    print(f"目标条目: {report['targets_with_explanation']}")
+    print(f"命中记录: {report['matched_entries']}")
+    print(f"更新记录: {report['updated_entries']}")
+    print(f"已变更: {'是' if report['changed'] else '否'}")
+    print(f"MEMORY 文件: {report['memory_file']}")
+    print(f"模式: {'dry-run' if report['dry_run'] else 'write'}")
 
 
 def run_openclaw_health_check(args):
@@ -870,6 +975,19 @@ def build_parser():
     parser_accuracy.add_argument("--refresh", action="store_true", help="重新计算准确率")
     add_json_flag(parser_accuracy)
 
+    parser_rag_rebuild = subparsers.add_parser("rag-rebuild", help="重建完整 RAG 混合检索索引")
+    parser_rag_rebuild.add_argument("--limit", type=int, default=200, help="构建时最多读取的滚动记忆样本数")
+    add_json_flag(parser_rag_rebuild)
+
+    parser_rag_diagnose = subparsers.add_parser("rag-diagnose", help="查看 RAG 索引状态与规模")
+    parser_rag_diagnose.add_argument("--limit", type=int, default=200, help="诊断时缺索引则自动构建的样本数")
+    add_json_flag(parser_rag_diagnose)
+
+    parser_sync_memory_rag = subparsers.add_parser("sync-memory-rag", help="将归档中的 RAG 记忆解释回填到 MEMORY.md")
+    parser_sync_memory_rag.add_argument("--memory-file", default=os.path.join(PROJECT_ROOT, "MEMORY.md"), help="目标 MEMORY.md 路径")
+    parser_sync_memory_rag.add_argument("--dry-run", action="store_true", help="仅检查可更新条目，不写文件")
+    add_json_flag(parser_sync_memory_rag)
+
     parser_health = subparsers.add_parser("health-check", help="检查核心依赖与运行状态")
     add_json_flag(parser_health)
 
@@ -966,6 +1084,12 @@ def main():
         run_openclaw_result_sync_daemon(args)
     elif args.command == "accuracy":
         run_openclaw_accuracy(args)
+    elif args.command == "rag-rebuild":
+        run_openclaw_rag_rebuild(args)
+    elif args.command == "rag-diagnose":
+        run_openclaw_rag_diagnose(args)
+    elif args.command == "sync-memory-rag":
+        run_openclaw_sync_memory_rag(args)
     elif args.command == "health-check":
         run_openclaw_health_check(args)
     elif args.command == "migrate-archive":

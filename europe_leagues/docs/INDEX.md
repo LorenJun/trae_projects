@@ -3,12 +3,13 @@
 
 > 当前正式流程  
 > 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
-> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测  
-> 3. 结果写回 `europe_leagues/<league>/teams_2025-26.md`  
-> 4. 赛后用 `prediction_system.py save-result` 或 `bulk_fetch_and_update.py` 回填  
+> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层  
+> 3. 五大联赛 SoT 写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写入 `MEMORY.md` 与 runtime-only 归档  
+> 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
 > 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
-> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`  
+> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`  
+> 欧战正式 competition config：`europa_league`、`champions_league`、`conference_league` 已进入主链，但写回仍保持 `runtime_only`
 > 当前实现说明：`prediction_system.py` 为兼容入口，真实 CLI 路由在 `app/cli.py`
 
 ## 统一职业身份
@@ -28,12 +29,15 @@
 - 单场回填：`prediction_system.py save-result`
 - 批量回填：`bulk_fetch_and_update.py`
 - 统计刷新：`prediction_system.py accuracy --refresh`
-- 正式写回：`europe_leagues/<league>/teams_2025-26.md`
+- RAG 维护：`prediction_system.py rag-rebuild` / `rag-diagnose` / `sync-memory-rag`
+- 正式写回：五大联赛 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛 `MEMORY.md` + runtime archive
+- 欧战主链：`europa_league`、`champions_league`、`conference_league` 均可直接走 `predict-match` / `harness-run`
 
 ## 核心文档
 
 - `../../agents/football_actuary_persona.md`：统一职业身份、职责边界、输出原则与角色映射
 - `README_使用指南.md`：当前正式使用说明，适合直接按命令执行
+- `../../docs/architecture/europe_leagues_architecture.md`：最新架构分层、RAG、runtime-only 与 CLI/Harness 边界
 - `ODDS_FETCH_GUIDE.md`：澳客赛程、快照、大小球与预测衔接说明
 - `PRD_足球预测系统_2026.md`：产品视角 PRD 与设计背景
 - `workflow.md`：标准工作流与执行约束
@@ -42,7 +46,7 @@
 ## 标准规范
 
 - `workflow.md`：正式流程、任务分类、推荐入口
-- `data_format.md`：`teams_2025-26.md`、赛程 JSON、快照 JSON、预测输出、统计文件格式
+- `data_format.md`：`teams_2025-26.md`、`MEMORY.md`、赛程 JSON、快照 JSON、预测输出、统计文件格式
 
 ## PRD
 - `PRD_足球预测系统_2026.md`：飞书文档排版版 PRD（含目录与表格规范）
@@ -57,4 +61,5 @@
 
 - 真实大小球优先来自澳客 `handicap.php` 页内 `大小球` tab
 - 预测结果重点检查：`over_under.line`、`line_source`、`over_under.market.final`
+- RAG 结果重点检查：`retrieved_memory`、`retrieved_memory_explanation`
 - 若 `line_source=snapshot_final`，说明真实盘口线已成功进入预测流程

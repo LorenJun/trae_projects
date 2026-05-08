@@ -233,9 +233,89 @@ class PredictionPostprocessService:
             pass
         return over_under
 
+    @staticmethod
+    def build_retrieved_memory_explanation(retrieved_memory: Optional[Dict[str, Any]]) -> str:
+        memory = retrieved_memory if isinstance(retrieved_memory, dict) else {}
+        summary = memory.get('summary') if isinstance(memory.get('summary'), dict) else {}
+        similar_cases = memory.get('similar_cases') if isinstance(memory.get('similar_cases'), list) else []
+        market_cases = memory.get('market_cases') if isinstance(memory.get('market_cases'), list) else []
+        upset_cases = memory.get('upset_cases') if isinstance(memory.get('upset_cases'), list) else []
+        if not similar_cases and not market_cases and not upset_cases:
+            return 'RAG记忆暂未召回足够高质量样本，当前结论主要依赖模型推理、实时盘口与球队上下文。'
+
+        def normalize_risk_label(text: str) -> str:
+            risk = str(text or '').strip()
+            if not risk:
+                return ''
+            if risk.startswith('控球倾向 '):
+                return '控球倾向差异'
+            if risk.startswith('资金流向代理偏'):
+                return '资金流向偏移'
+            if risk.startswith('三盘口整体偏'):
+                return '三盘口共振'
+            if risk.startswith('三盘口画像:'):
+                return '三盘口画像共振'
+            if '平局凯利偏低' in risk:
+                return '平局凯利偏低'
+            if '诱盘风险' in risk:
+                return '诱盘风险'
+            if '历史同向反打' in risk:
+                return '历史同向反打'
+            if '历史超级冷门' in risk:
+                return '历史超级冷门'
+            if '伤病严重' in risk:
+                return '伤病风险'
+            if '深让>=' in risk or risk.startswith('深让'):
+                return '深盘风险'
+            return risk
+
+        def summarize_upset_risks(items: List[Dict[str, Any]]) -> List[str]:
+            counts: Dict[str, int] = {}
+            order: List[str] = []
+            for item in items:
+                for raw in item.get('risk_points') or []:
+                    label = normalize_risk_label(str(raw or ''))
+                    if not label:
+                        continue
+                    counts[label] = counts.get(label, 0) + 1
+                    if label not in order:
+                        order.append(label)
+            return sorted(order, key=lambda key: (-counts.get(key, 0), order.index(key)))[:2]
+
+        fragments: List[str] = []
+        completed_count = summary.get('completed_similar_case_count')
+        if similar_cases:
+            fragment = f"RAG召回{len(similar_cases)}场相似比赛"
+            if isinstance(completed_count, int) and completed_count > 0:
+                rates = []
+                for label, key in (('主胜', 'home_win_rate'), ('平局', 'draw_rate'), ('客胜', 'away_win_rate')):
+                    value = summary.get(key)
+                    if isinstance(value, (int, float)):
+                        rates.append(f"{label}{float(value):.0%}")
+                if rates:
+                    fragment += f"，其中已完赛{completed_count}场，结果分布为{'/'.join(rates)}"
+            fragments.append(fragment)
+        if market_cases:
+            avg_total = summary.get('avg_market_total_goals')
+            fragment = f"盘口相似案例{len(market_cases)}场"
+            if isinstance(avg_total, (int, float)):
+                fragment += f"，历史平均总进球约{float(avg_total):.2f}"
+            top_market = market_cases[0]
+            if top_market.get('actual_score'):
+                fragment += f"，最相近盘口样本赛果为{top_market.get('actual_result') or ''} {top_market.get('actual_score')}".strip()
+            fragments.append(fragment)
+        if upset_cases:
+            fragment = f"爆冷风险参考{len(upset_cases)}场"
+            risk_bits = summarize_upset_risks(upset_cases)
+            if risk_bits:
+                fragment += f"，高频风险包括{'、'.join(risk_bits[:2])}"
+            fragments.append(fragment)
+        return '；'.join(fragments) + '。'
+
     def build_prediction_result(
         self,
         *,
+        match_id: str,
         home_team: str,
         away_team: str,
         league_code: str,
@@ -261,10 +341,13 @@ class PredictionPostprocessService:
         realtime: Dict[str, Any],
         analysis_context: Dict[str, Any],
         runtime_profile: Dict[str, Any],
+        retrieved_memory: Optional[Dict[str, Any]] = None,
         current_odds: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         league_name = self.league_config[league_code]['name']
+        memory_explanation = self.build_retrieved_memory_explanation(retrieved_memory)
         return {
+            'match_id': str(match_id or ''),
             'home_team': home_team,
             'away_team': away_team,
             'league_code': league_code,
@@ -295,6 +378,8 @@ class PredictionPostprocessService:
             'applied_model_weights': applied_model_weights,
             'realtime': realtime,
             'analysis_context': analysis_context,
+            'retrieved_memory': retrieved_memory or {},
+            'retrieved_memory_explanation': memory_explanation,
             'market_snapshot': self.build_market_snapshot(current_odds),
             'runtime_profile': runtime_profile,
             'timestamp': datetime.now().isoformat(),
