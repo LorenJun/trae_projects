@@ -539,9 +539,11 @@ class DataCollector:
             print(
                 "browser-use 当前不完整可用"
                 f"（{driver_status['browser-use']['reason']}）；"
-                + ("已检测到 local-chrome，可优先走本地 Chrome 抓取。" if self.local_chrome_available else "当前仅能降级到 mock 数据源。")
+                + ("已检测到 local-chrome，可优先走本地 Chrome 抓取。" if self.local_chrome_available else "未启用 mock，真实源不可用时将返回空结果。")
             )
-        self.scrapers.append(MockScraper())  # 保留兜底数据源
+        allow_mock = os.environ.get("ENABLE_MOCK_SCRAPER", "0").strip() in ("1", "true", "True")
+        if allow_mock:
+            self.scrapers.append(MockScraper())
         self.cache_manager = CacheManager()
         self.validator = DataValidator()
 
@@ -586,7 +588,30 @@ class DataCollector:
 
             payload = json.loads(schedule_path.read_text(encoding="utf-8"))
             matches = payload.get("matches") if isinstance(payload, dict) else None
-            return matches if isinstance(matches, list) else []
+            if not isinstance(matches, list):
+                return []
+
+            cleaned_matches: List[Dict] = []
+            for row in matches:
+                if not isinstance(row, dict):
+                    continue
+                raw_text = str(row.get("raw_text") or "")
+                home_team = str(row.get("home_team") or "").strip()
+                away_team = str(row.get("away_team") or "").strip()
+                score_text = str(row.get("score") or "").strip()
+                kickoff_time = str(row.get("kickoff_time") or row.get("time") or "").strip()
+                if not home_team or not away_team:
+                    continue
+                if home_team in {"盈亏", "亚指", "欧指", "分析", "预测", "AI", "积分", "阵容"}:
+                    continue
+                if away_team in {"盈亏", "亚指", "欧指", "分析", "预测", "AI", "积分", "阵容"}:
+                    continue
+                if score_text and "完" not in raw_text:
+                    continue
+                if not score_text and not kickoff_time and "完" not in raw_text:
+                    continue
+                cleaned_matches.append(row)
+            return cleaned_matches
         except Exception:
             return []
 
@@ -712,7 +737,7 @@ class DataCollector:
         if not self.browser_use_available:
             print(
                 "当前 browser-use 不完整可用；"
-                + ("可继续优先使用 local-chrome 抓取快照/赛程。" if self.local_chrome_available else "本次仅使用 mock 数据源验证流程。")
+                + ("可继续优先使用 local-chrome 抓取快照/赛程。" if self.local_chrome_available else "未启用 mock，若真实源不可用将返回空结果。")
             )
 
         tasks = []

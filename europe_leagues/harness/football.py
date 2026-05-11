@@ -100,10 +100,10 @@ def _stage_accuracy(context: HarnessContext) -> Dict[str, Any]:
     manager = ResultManager()
     if bool(context.get("refresh", False)):
         return manager.update_accuracy_stats()
-    with open(manager.accuracy_file, "r", encoding="utf-8") as f:
-        import json
-
-        return json.load(f)
+    stats = manager.accuracy_store.load()
+    if stats:
+        return stats
+    return manager.update_accuracy_stats()
 
 
 def list_pipelines() -> List[Dict[str, Any]]:

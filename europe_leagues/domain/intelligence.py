@@ -281,7 +281,7 @@ class MatchIntelligenceEngine:
         out: Dict[str, Any] = {
             "available": False,
             "signals": [],
-            "bookmaker_psychology": {"label": "unknown", "reason": ""},
+            "bookmaker_psychology": {"label": "unknown", "reason": "", "trap_side": "none", "strength": 0.0},
             "capital_flow": {"source": "odds_water_kelly_proxy", "home": 0.0, "draw": 0.0, "away": 0.0, "direction": "balanced", "strength": 0.0},
             "market_resonance": {
                 "available": False,
@@ -348,6 +348,8 @@ class MatchIntelligenceEngine:
             away_score += max(-0.05, min(0.05, (avg_k - k_a) * 0.35))
 
         signals: List[str] = []
+        trap_side = "none"
+        trap_strength = 0.0
         if home_score >= 0.05:
             signals.append("主胜赔率/水位走强")
         if away_score >= 0.05:
@@ -356,6 +358,12 @@ class MatchIntelligenceEngine:
             signals.append("平局赔率受压")
         if home_score > 0.03 and h_water_f is not None and h_water_i is not None and h_water_f > h_water_i:
             signals.append("主队赔率下降但主水升高，疑似诱主")
+            trap_side = "home"
+            trap_strength = max(trap_strength, min(0.12, 0.045 + max(0.0, h_water_f - h_water_i) * 0.18))
+        if away_score > 0.03 and a_water_f is not None and a_water_i is not None and a_water_f > a_water_i:
+            signals.append("客队赔率下降但客水升高，疑似诱客")
+            trap_side = "away"
+            trap_strength = max(trap_strength, min(0.12, 0.045 + max(0.0, a_water_f - a_water_i) * 0.18))
         if draw_score > max(home_score, away_score) and draw_score >= 0.04:
             signals.append("庄家有防平倾向")
 
@@ -363,18 +371,6 @@ class MatchIntelligenceEngine:
         direction, strength, _ = direction_from_scores(scores)
         label = "balanced"
         reason = "盘口与水位分歧不大"
-        if "庄家有防平倾向" in signals:
-            label = "guard_draw"
-            reason = "平赔压力和凯利/水位组合显示机构防平"
-        elif "主队赔率下降但主水升高，疑似诱主" in signals:
-            label = "tempt_home"
-            reason = "主胜热度上升但赔付未同步改善，存在诱主可能"
-        elif direction == "home":
-            label = "support_home"
-            reason = "欧赔、亚水和凯利更偏向主队"
-        elif direction == "away":
-            label = "support_away"
-            reason = "欧赔、亚水和凯利更偏向客队"
 
         # 进一步做三盘口共振检测：欧赔(1X2) + 亚值(方向/深度/水位) + 大小球(节奏)
         euro_direction = direction
@@ -428,7 +424,39 @@ class MatchIntelligenceEngine:
                         asian_scores["home"] += 0.04
                     elif hcp_f_raw > 0.06:
                         asian_scores["away"] += 0.04
+                if hcp_f_raw < -0.06 and home_score > 0.04 and delta_hcp >= 0.24:
+                    signals.append("主队热度升高但亚盘退让，疑似诱主")
+                    trap_side = "home"
+                    trap_strength = max(trap_strength, min(0.18, 0.06 + delta_hcp * 0.18))
+                if hcp_f_raw > 0.06 and away_score > 0.04 and delta_hcp >= 0.24:
+                    signals.append("客队热度升高但亚盘退让，疑似诱客")
+                    trap_side = "away"
+                    trap_strength = max(trap_strength, min(0.18, 0.06 + delta_hcp * 0.18))
+            if hcp_f_raw is not None and hcp_f_raw < -0.06 and h_water_i is not None and h_water_f is not None and home_score > 0.04 and (h_water_f - h_water_i) >= 0.05:
+                signals.append("主队热门拉低但主水同步抬升，诱主风险增强")
+                trap_side = "home"
+                trap_strength = max(trap_strength, min(0.16, 0.055 + (h_water_f - h_water_i) * 0.22))
+            if hcp_f_raw is not None and hcp_f_raw > 0.06 and a_water_i is not None and a_water_f is not None and away_score > 0.04 and (a_water_f - a_water_i) >= 0.05:
+                signals.append("客队热门拉低但客水同步抬升，诱客风险增强")
+                trap_side = "away"
+                trap_strength = max(trap_strength, min(0.16, 0.055 + (a_water_f - a_water_i) * 0.22))
             asian_direction, asian_strength, _ = direction_from_scores(asian_scores, min_top=0.03, min_gap=0.018)
+
+        if "庄家有防平倾向" in signals:
+            label = "guard_draw"
+            reason = "平赔压力和凯利/水位组合显示机构防平"
+        elif trap_side == "home" and trap_strength >= 0.05:
+            label = "tempt_home"
+            reason = "主队热度上升与亚盘/水位结构不一致，存在诱主可能"
+        elif trap_side == "away" and trap_strength >= 0.05:
+            label = "tempt_away"
+            reason = "客队热度上升与亚盘/水位结构不一致，存在诱客可能"
+        elif direction == "home":
+            label = "support_home"
+            reason = "欧赔、亚水和凯利更偏向主队"
+        elif direction == "away":
+            label = "support_away"
+            reason = "欧赔、亚水和凯利更偏向客队"
 
         totals_direction = "balanced"
         totals_strength = 0.0
@@ -523,6 +551,10 @@ class MatchIntelligenceEngine:
             resonance_flags.append("home_hot_trap_risk")
             resonance_label = "tempt_home_resonance"
             resonance_summary = "主队方向虽有共振，但赔付结构提示诱主风险"
+        elif label == "tempt_away" and side_direction == "away":
+            resonance_flags.append("away_hot_trap_risk")
+            resonance_label = "tempt_away_resonance"
+            resonance_summary = "客队方向虽有共振，但赔付结构提示诱客风险"
         if label == "guard_draw":
             resonance_flags.append("draw_trap_protection")
         if resonance_label != "balanced":
@@ -532,7 +564,12 @@ class MatchIntelligenceEngine:
             {
                 "available": bool(signals or any(abs(v) > 0.0 for v in scores.values())),
                 "signals": signals,
-                "bookmaker_psychology": {"label": label, "reason": reason},
+                "bookmaker_psychology": {
+                    "label": label,
+                    "reason": reason,
+                    "trap_side": trap_side,
+                    "strength": round(trap_strength, 4),
+                },
                 "capital_flow": {
                     "source": "odds_water_kelly_proxy",
                     "home": scores["home"],
@@ -644,24 +681,47 @@ class MatchIntelligenceEngine:
         capital_flow = market.get("capital_flow", {})
         flow_dir = capital_flow.get("direction")
         flow_strength = float(capital_flow.get("strength") or 0.0)
+        psychology = market.get("bookmaker_psychology", {}) if isinstance(market.get("bookmaker_psychology"), dict) else {}
+        psychology_label = str(psychology.get("label") or "unknown")
+        trap_side = str(psychology.get("trap_side") or "none")
+        trap_strength = float(psychology.get("strength") or 0.0)
+        flow_scale = 1.0
+        if trap_side == flow_dir and trap_strength > 0:
+            flow_scale = max(0.35, 1.0 - trap_strength * 3.2)
         if flow_dir == "home":
-            home_adv += min(0.06, flow_strength * 1.2)
-            away_adv -= min(0.04, flow_strength * 0.8)
-            signals.append("资金流向代理偏主队")
+            home_adv += min(0.06, flow_strength * 1.2 * flow_scale)
+            away_adv -= min(0.04, flow_strength * 0.8 * flow_scale)
+            if flow_scale < 0.95:
+                signals.append("主队资金热度疑似受诱盘放大，已降权处理")
+            else:
+                signals.append("资金流向代理偏主队")
         elif flow_dir == "away":
-            away_adv += min(0.06, flow_strength * 1.2)
-            home_adv -= min(0.04, flow_strength * 0.8)
-            signals.append("资金流向代理偏客队")
+            away_adv += min(0.06, flow_strength * 1.2 * flow_scale)
+            home_adv -= min(0.04, flow_strength * 0.8 * flow_scale)
+            if flow_scale < 0.95:
+                signals.append("客队资金热度疑似受诱盘放大，已降权处理")
+            else:
+                signals.append("资金流向代理偏客队")
         elif flow_dir == "draw":
             signals.append("资金流向代理偏平局")
 
         home_adv = max(-0.12, min(0.12, home_adv))
         away_adv = max(-0.12, min(0.12, away_adv))
         draw_bias = 0.0
-        if market.get("bookmaker_psychology", {}).get("label") == "guard_draw":
+        if psychology_label == "guard_draw":
             draw_bias += 0.018
         if flow_dir == "draw":
             draw_bias += min(0.024, flow_strength * 1.5)
+        if psychology_label == "tempt_home":
+            home_adv -= min(0.03, 0.01 + trap_strength * 0.22)
+            away_adv += min(0.016, 0.004 + trap_strength * 0.10)
+            draw_bias += min(0.02, 0.006 + trap_strength * 0.12)
+            signals.append("庄家心理识别为诱主，抑制主队方向过热")
+        elif psychology_label == "tempt_away":
+            away_adv -= min(0.03, 0.01 + trap_strength * 0.22)
+            home_adv += min(0.016, 0.004 + trap_strength * 0.10)
+            draw_bias += min(0.02, 0.006 + trap_strength * 0.12)
+            signals.append("庄家心理识别为诱客，抑制客队方向过热")
         resonance = market.get("market_resonance") if isinstance(market.get("market_resonance"), dict) else {}
         resonance_label = str(resonance.get("label") or "balanced")
         resonance_score = float(resonance.get("resonance_score") or 0.0)
@@ -722,6 +782,13 @@ class MatchIntelligenceEngine:
             resonance_prob_delta_draw += 0.01
             resonance_ou_delta -= 0.008
             resonance_signals.append("主队方向共振但存在诱盘风险")
+        elif resonance_label == "tempt_away_resonance":
+            away_adv -= 0.012
+            draw_bias += 0.01
+            resonance_prob_delta_away -= 0.008
+            resonance_prob_delta_draw += 0.01
+            resonance_ou_delta -= 0.008
+            resonance_signals.append("客队方向共振但存在诱盘风险")
         elif resonance_label == "home_side_resonance":
             home_adv += 0.01
             away_adv -= 0.004

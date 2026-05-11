@@ -9,7 +9,9 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from collectors.aliasing import load_team_alias_map, normalize_team_name
 from runtime.paths import get_default_paths
+from storage.teams_md import TeamsMarkdownStore
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,140 @@ def _parse_kickoff(match_date: str, match_time: str) -> Tuple[Optional[datetime]
         return kickoff, source
     except Exception:
         return None, "invalid_match_datetime"
+
+
+def _parse_teams_match_id(match_id: str) -> Tuple[str, str, str, str]:
+    raw = str(match_id or "").strip()
+    if not raw:
+        return "", "", "", ""
+    for league_code in LEAGUE_SOT_CODES:
+        prefix = f"{league_code}_"
+        if not raw.startswith(prefix):
+            continue
+        remainder = raw[len(prefix):]
+        parts = remainder.split("_", 2)
+        if len(parts) != 3:
+            return "", "", "", ""
+        date_token, home_team, away_team = parts
+        if not re.match(r"^\d{8}$", date_token):
+            return "", "", "", ""
+        return (
+            league_code,
+            f"{date_token[:4]}-{date_token[4:6]}-{date_token[6:8]}",
+            home_team.strip(),
+            away_team.strip(),
+        )
+    return "", "", "", ""
+
+
+def _normalize_team_token(league_code: str, name: str, alias_map: Optional[Dict[str, Dict[str, str]]] = None) -> str:
+    canonical = normalize_team_name(league_code, name, alias_map=alias_map)
+    return re.sub(r"\s+", "", str(canonical or "").strip())
+
+
+def _teams_names_match(
+    league_code: str,
+    left: str,
+    right: str,
+    *,
+    alias_map: Optional[Dict[str, Dict[str, str]]] = None,
+) -> bool:
+    left_norm = _normalize_team_token(league_code, left, alias_map=alias_map)
+    right_norm = _normalize_team_token(league_code, right, alias_map=alias_map)
+    if not left_norm or not right_norm:
+        return False
+    return (
+        left_norm == right_norm
+        or left_norm.startswith(right_norm)
+        or right_norm.startswith(left_norm)
+    )
+
+
+def _lookup_teams_row(base_dir: Optional[str], teams_match_id: str) -> Optional[Dict[str, str]]:
+    league_code, match_date, home_team, away_team = _parse_teams_match_id(teams_match_id)
+    if not all((league_code, match_date, home_team, away_team)):
+        return None
+    store = TeamsMarkdownStore(base_dir)
+    alias_map = load_team_alias_map(base_dir)
+    try:
+        lines = store.read_lines(league_code)
+    except Exception:
+        return None
+    for line in lines:
+        if not line.strip().startswith("|"):
+            continue
+        cols = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cols) != 6:
+            continue
+        row_date, row_time, row_home, row_score, row_away, row_note = cols
+        if row_date != match_date:
+            continue
+        if not _teams_names_match(league_code, row_home, home_team, alias_map=alias_map):
+            continue
+        if not _teams_names_match(league_code, row_away, away_team, alias_map=alias_map):
+            continue
+        return {
+            "league_code": league_code,
+            "match_date": row_date,
+            "match_time": row_time,
+            "home_team": row_home,
+            "away_team": row_away,
+            "score_text": row_score,
+            "note": row_note,
+        }
+    return None
+
+
+def _apply_schedule_to_entry(entry: Dict[str, Any], match_date: str, match_time: str) -> bool:
+    kickoff_dt, kickoff_source = _parse_kickoff(match_date, match_time)
+    due_at = kickoff_dt + timedelta(hours=MATCH_DURATION_HOURS + RESULT_SYNC_DELAY_HOURS) if kickoff_dt else None
+    changed = False
+    normalized_time = str(match_time or "").strip()
+    if str(entry.get("match_date") or "") != str(match_date or ""):
+        entry["match_date"] = str(match_date or "")
+        changed = True
+    if str(entry.get("match_time") or "") != normalized_time:
+        entry["match_time"] = normalized_time
+        changed = True
+    if str(entry.get("kickoff_source") or "") != kickoff_source:
+        entry["kickoff_source"] = kickoff_source
+        changed = True
+    kickoff_iso = kickoff_dt.isoformat() if kickoff_dt else ""
+    if str(entry.get("kickoff_at") or "") != kickoff_iso:
+        entry["kickoff_at"] = kickoff_iso
+        changed = True
+    due_iso = due_at.isoformat() if due_at else ""
+    if str(entry.get("due_at") or "") != due_iso:
+        entry["due_at"] = due_iso
+        changed = True
+    return changed
+
+
+def _refresh_registry_schedule_from_teams(
+    base_dir: Optional[str],
+    registry: Dict[str, Dict[str, Any]],
+) -> bool:
+    changed = False
+    for key, entry in registry.items():
+        if not isinstance(entry, dict):
+            continue
+        teams_match_id = str(entry.get("teams_match_id") or entry.get("match_id") or "").strip()
+        row = _lookup_teams_row(base_dir, teams_match_id)
+        if not row:
+            continue
+        if str(entry.get("league_code") or "") != row["league_code"]:
+            entry["league_code"] = row["league_code"]
+            changed = True
+        if str(entry.get("home_team") or "") != row["home_team"]:
+            entry["home_team"] = row["home_team"]
+            changed = True
+        if str(entry.get("away_team") or "") != row["away_team"]:
+            entry["away_team"] = row["away_team"]
+            changed = True
+        if _apply_schedule_to_entry(entry, row["match_date"], row["match_time"]):
+            changed = True
+        registry[key] = entry
+    return changed
 
 
 def _get_prediction_field(payload: Dict[str, Any], *field_names: str) -> Any:
@@ -221,6 +357,12 @@ def register_prediction_result_sync(base_dir: Optional[str], prediction: Dict[st
     }
     if prior.get("status") == "completed" and prior.get("result_synced_at"):
         entry["status"] = "completed"
+    teams_row = _lookup_teams_row(base_dir, teams_match_id)
+    if teams_row:
+        entry["league_code"] = teams_row["league_code"]
+        entry["home_team"] = teams_row["home_team"]
+        entry["away_team"] = teams_row["away_team"]
+        _apply_schedule_to_entry(entry, teams_row["match_date"], teams_row["match_time"])
     registry[match_id] = entry
     if teams_match_id and teams_match_id != match_id:
         registry.pop(teams_match_id, None)
@@ -569,13 +711,20 @@ def _fetch_match_by_match_id(
 
 def _match_finished_item(entry: Dict[str, Any], finished: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     wanted_id = str(entry.get("external_match_id") or entry.get("match_id") or "").strip()
+    league_code = str(entry.get("league_code") or "").strip()
+    alias_map = load_team_alias_map(None)
     wanted_home = str(entry.get("home_team") or "").strip()
     wanted_away = str(entry.get("away_team") or "").strip()
     for item in finished:
-        if wanted_id and str(item.get("match_id") or "").strip() == wanted_id:
+        if _teams_names_match(league_code, str(item.get("home_team") or ""), wanted_home, alias_map=alias_map) and _teams_names_match(
+            league_code,
+            str(item.get("away_team") or ""),
+            wanted_away,
+            alias_map=alias_map,
+        ):
             return item
     for item in finished:
-        if str(item.get("home_team") or "").strip() == wanted_home and str(item.get("away_team") or "").strip() == wanted_away:
+        if wanted_id and str(item.get("match_id") or "").strip() == wanted_id:
             return item
     return None
 
@@ -587,6 +736,7 @@ def sync_due_prediction_results(
     limit: int = 20,
 ) -> Dict[str, Any]:
     registry = _load_registry(base_dir)
+    registry_changed = _refresh_registry_schedule_from_teams(base_dir, registry)
     current_time = now or datetime.now()
     due_entries: List[Tuple[str, Dict[str, Any]]] = []
     for match_id, entry in registry.items():
@@ -633,17 +783,17 @@ def sync_due_prediction_results(
             registry[match_id] = entry
             continue
 
-        matched = _fetch_match_by_match_id(
-            base_dir,
-            str(entry.get("league_code") or ""),
-            str(entry.get("match_date") or ""),
-            str(entry.get("external_match_id") or ""),
-        )
+        key = (str(entry.get("league_code") or ""), str(entry.get("match_date") or ""))
+        if key not in fetch_cache:
+            fetch_cache[key] = _fetch_finished_matches(*key)
+        matched = _match_finished_item(entry, fetch_cache[key])
         if not matched:
-            key = (str(entry.get("league_code") or ""), str(entry.get("match_date") or ""))
-            if key not in fetch_cache:
-                fetch_cache[key] = _fetch_finished_matches(*key)
-            matched = _match_finished_item(entry, fetch_cache[key])
+            matched = _fetch_match_by_match_id(
+                base_dir,
+                str(entry.get("league_code") or ""),
+                str(entry.get("match_date") or ""),
+                str(entry.get("external_match_id") or ""),
+            )
         if not matched:
             entry["status"] = "pending"
             entry["last_error"] = "result_not_available_yet"
@@ -695,7 +845,8 @@ def sync_due_prediction_results(
         except Exception as exc:
             logger.warning("自动同步赛果后更新准确率失败: %s", exc)
 
-    _save_registry(base_dir, registry)
+    if registry_changed or due_entries:
+        _save_registry(base_dir, registry)
     updated_count = sum(1 for item in updates if item.get("updated"))
     return {
         "checked_at": current_time.isoformat(),

@@ -7,7 +7,7 @@ import os
 import shutil
 from typing import Dict, List, Optional
 
-from okooo_live_snapshot import extract_current_odds, find_snapshot_by_match_id, refresh_snapshot
+from okooo_live_snapshot import extract_current_odds, find_snapshot_by_match_id, find_snapshot_for_match, refresh_snapshot, snapshot_matches_request
 from runtime.paths import get_default_paths
 
 
@@ -90,6 +90,9 @@ class OkoooSnapshotClient:
     def find_snapshot_by_match_id(self, *args, **kwargs):
         return find_snapshot_by_match_id(*args, **kwargs)
 
+    def find_snapshot_for_match(self, *args, **kwargs):
+        return find_snapshot_for_match(*args, **kwargs)
+
     def snapshot_root(self, league_code: str = '') -> str:
         return str(self.paths.snapshot_dir(league_code))
 
@@ -101,6 +104,8 @@ __all__ = [
     "describe_unavailable_okooo_drivers",
     "extract_current_odds",
     "find_snapshot_by_match_id",
+    "find_snapshot_for_match",
     "get_okooo_driver_status",
     "refresh_snapshot",
+    "snapshot_matches_request",
 ]

@@ -49,16 +49,36 @@ class PoissonModel:
     ) -> Dict[str, float]:
         """预测大小球"""
         total_lambda = home_lambda + away_lambda
+        max_goals = 14
+        goal_probs = {
+            k: self.poisson_probability(total_lambda, k)
+            for k in range(max_goals + 1)
+        }
+        residual = max(0.0, 1.0 - sum(goal_probs.values()))
+        goal_probs[max_goals] += residual
 
-        over_prob = sum(
-            self.poisson_probability(total_lambda, k)
-            for k in range(int(line) + 1, 10)
-        )
-        under_prob = 1 - over_prob
+        integer_line = abs(float(line) - round(float(line))) < 1e-9
+        threshold = math.ceil(float(line))
+        over_raw = sum(prob for goals, prob in goal_probs.items() if goals >= threshold)
+        if integer_line:
+            push_prob = goal_probs.get(int(round(float(line))), 0.0)
+            over_raw = sum(prob for goals, prob in goal_probs.items() if goals > int(round(float(line))))
+            under_raw = sum(prob for goals, prob in goal_probs.items() if goals < int(round(float(line))))
+            effective_mass = max(1e-9, 1.0 - push_prob)
+            over_prob = over_raw / effective_mass
+            under_prob = under_raw / effective_mass
+        else:
+            push_prob = 0.0
+            under_raw = sum(prob for goals, prob in goal_probs.items() if goals < threshold)
+            over_prob = over_raw
+            under_prob = under_raw
 
         return {
             'over': over_prob,
             'under': under_prob,
+            'over_raw': over_raw,
+            'under_raw': under_raw,
+            'push': push_prob,
             'total_lambda': total_lambda,
             'line': line
         }

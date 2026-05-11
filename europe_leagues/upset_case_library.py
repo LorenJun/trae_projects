@@ -145,7 +145,6 @@ class 爆冷案例库:
 
         for existing in self.案例列表:
             if existing.案例ID == 案例.案例ID:
-                print(f"案例已存在: {案例.案例ID}")
                 return False
 
         self.案例列表.append(案例)

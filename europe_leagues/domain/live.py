@@ -9,8 +9,10 @@ from typing import Any, Dict, Optional
 from collectors.okooo import build_okooo_driver_chain
 from collectors.okooo import describe_unavailable_okooo_drivers
 from collectors.okooo import extract_current_odds as extract_okooo_current_odds
-from collectors.okooo import find_snapshot_by_match_id
+from collectors.okooo import find_snapshot_for_match
 from collectors.okooo import refresh_snapshot as refresh_okooo_snapshot
+from collectors.okooo import snapshot_matches_request
+from runtime.debug_events import emit_local_debug_event
 from domain.features import auto_enrich_team_context_if_enabled
 from domain.odds import auto_fetch_okooo_totals_if_needed
 
@@ -67,30 +69,40 @@ class LiveRefreshService:
         current_odds: Optional[Dict[str, Any]],
         realtime: Dict[str, Any],
         match_id: str,
+        home_team: str,
+        away_team: str,
+        match_date: str,
     ) -> Optional[Dict[str, Any]]:
         if self._has_real_totals_line(current_odds):
             return current_odds
         mid = str(match_id or realtime.get('okooo', {}).get('match_id') or '').strip()
-        if not mid:
-            realtime['context_applied']['existing_snapshot_odds'] = {
-                'attempted': False,
-                'ok': False,
-                'reason': 'missing_match_id',
-            }
-            return current_odds
         try:
-            found = find_snapshot_by_match_id(self.base_dir, league_code, mid)
+            found = find_snapshot_for_match(
+                self.base_dir,
+                league_code,
+                match_id=mid,
+                home_team=home_team,
+                away_team=away_team,
+                match_date=match_date,
+            )
             if not found:
+                # #region debug-point A:snapshot-hydrate-miss
+                emit_local_debug_event({"sessionId":"snapshot-routing-chain","runId":"pre-fix","hypothesisId":"A","location":"domain/live.py:82","msg":"[DEBUG] hydrate existing snapshot missed","data":{"league_code":league_code,"match_id":mid,"current_odds_has_totals":self._has_real_totals_line(current_odds),"realtime_match_id":str((realtime or {}).get("okooo", {}).get("match_id") or "")}})
+                # #endregion
                 realtime['context_applied']['existing_snapshot_odds'] = {
-                    'attempted': True,
+                    'attempted': bool(mid or home_team or away_team),
                     'ok': False,
-                    'reason': 'snapshot_not_found',
+                    'reason': 'snapshot_not_found' if (mid or home_team or away_team) else 'missing_match_context',
                     'match_id': mid,
                 }
                 return current_odds
             path, payload = found
             merged = dict(current_odds or {})
             merged.update(extract_okooo_current_odds(payload))
+            merged['snapshot_path'] = str(path or '')
+            # #region debug-point B:snapshot-hydrate-hit
+            emit_local_debug_event({"sessionId":"snapshot-routing-chain","runId":"pre-fix","hypothesisId":"B","location":"domain/live.py:91","msg":"[DEBUG] hydrate existing snapshot hit","data":{"league_code":league_code,"match_id":mid,"snapshot_path":path,"payload_match_id":str(payload.get("match_id") or ""),"payload_home_team":str(payload.get("home_team") or payload.get("team1") or ""),"payload_away_team":str(payload.get("away_team") or payload.get("team2") or ""),"totals_found":bool(isinstance(payload.get("大小球"), dict) and payload.get("大小球", {}).get("found")),"totals_final_line":((payload.get("大小球") or {}).get("final") or {}).get("line"),"merged_totals_final_line":((merged.get("大小球") or {}).get("final") or {}).get("line"),"merged_keys":sorted(list(merged.keys()))[:12]}})
+            # #endregion
             realtime['context_applied']['existing_snapshot_odds'] = {
                 'attempted': True,
                 'ok': True,
@@ -198,7 +210,29 @@ class LiveRefreshService:
                 realtime['okooo']['match_id'] = str(payload.get('match_id') or mid or '')
                 realtime['okooo']['refreshed'] = True
                 realtime['okooo']['driver'] = driver
-                return extract_okooo_current_odds(payload)
+                if not snapshot_matches_request(
+                    payload,
+                    home_team=home_team,
+                    away_team=away_team,
+                    match_date=match_date,
+                ):
+                    realtime['okooo']['errors'].append(
+                        {
+                            'driver': driver,
+                            'error': 'snapshot_payload_mismatch',
+                            'requested_match_id': mid,
+                            'payload_match_id': str(payload.get('match_id') or ''),
+                            'payload_home_team': str(payload.get('home_team') or payload.get('team1') or ''),
+                            'payload_away_team': str(payload.get('away_team') or payload.get('team2') or ''),
+                        }
+                    )
+                    continue
+                # #region debug-point C:live-refresh-hit
+                emit_local_debug_event({"sessionId":"snapshot-routing-chain","runId":"pre-fix","hypothesisId":"C","location":"domain/live.py:196","msg":"[DEBUG] live refresh snapshot hit","data":{"league_code":league_code,"home_team":home_team,"away_team":away_team,"requested_match_id":mid,"driver":driver,"snapshot_path":path,"payload_match_id":str(payload.get("match_id") or ""),"payload_home_team":str(payload.get("home_team") or payload.get("team1") or ""),"payload_away_team":str(payload.get("away_team") or payload.get("team2") or ""),"totals_found":bool(isinstance(payload.get("大小球"), dict) and payload.get("大小球", {}).get("found")),"totals_final_line":((payload.get("大小球") or {}).get("final") or {}).get("line")}})
+                # #endregion
+                merged = extract_okooo_current_odds(payload)
+                merged['snapshot_path'] = str(path or '')
+                return merged
             except Exception as exc:
                 realtime['okooo']['errors'].append({'driver': driver, 'error': str(exc)})
         return current_odds
@@ -241,6 +275,9 @@ class LiveRefreshService:
                 match_time=match_time or '',
                 match_id=realtime['okooo']['match_id'],
             )
+            # #region debug-point D:totals-fetch-result
+            emit_local_debug_event({"sessionId":"snapshot-routing-chain","runId":"pre-fix","hypothesisId":"D","location":"domain/live.py:230","msg":"[DEBUG] totals fetch result","data":{"league_code":league_code,"home_team":home_team,"away_team":away_team,"match_date":match_date,"match_id":str((realtime or {}).get("okooo", {}).get("match_id") or ""),"diag":diag,"current_odds_totals_final_line":((current_odds or {}).get("大小球") or {}).get("final", {}).get("line"),"current_odds_match_id":str((current_odds or {}).get("match_id") or "") if isinstance(current_odds, dict) else ""}})
+            # #endregion
             realtime['context_applied'][diag_key] = diag
             return current_odds
         except Exception as exc:
@@ -279,6 +316,9 @@ class LiveRefreshService:
             current_odds=current_odds,
             realtime=realtime,
             match_id=match_id,
+            home_team=home_team,
+            away_team=away_team,
+            match_date=effective_match_date,
         )
         current_odds = self.refresh_live_snapshot(
             league_code=league_code,
@@ -344,9 +384,16 @@ class LiveRefreshService:
         home_team: str,
         away_team: str,
         current_odds: Optional[Dict[str, Any]],
+        prefer_existing: bool = False,
     ) -> Optional[Dict[str, Any]]:
         if os.environ.get('OKOOO_REFRESH_LIVE', '1') == '0' or not home_team or not away_team:
             return current_odds
+        if prefer_existing and isinstance(current_odds, dict):
+            if any(
+                current_odds.get(key)
+                for key in ('胜平负赔率', '欧赔', '亚值', '大小球', '凯利', '离散率')
+            ):
+                return current_odds
         try:
             match_id = ''
             if isinstance(current_odds, dict):

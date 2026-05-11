@@ -12,7 +12,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from collectors.okooo import build_okooo_driver_chain
 from collectors.okooo import describe_unavailable_okooo_drivers
+from collectors.okooo import snapshot_matches_request
 from runtime.cache import PredictionCache
+from runtime.debug_events import emit_local_debug_event
 from runtime.memory_samples import load_prediction_memory_samples
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,9 @@ def resolve_over_under_line(
                         value = final.get('盘口')
                     parsed = to_float(value)
                     if isinstance(parsed, float) and 0.5 <= parsed <= 6.5:
+                        # #region debug-point E:resolve-ou-final
+                        emit_local_debug_event({"sessionId":"snapshot-routing-chain","runId":"pre-fix","hypothesisId":"C","location":"domain/odds.py:64","msg":"[DEBUG] resolved over under from snapshot final","data":{"current_odds_match_id":str(current_odds.get("match_id") or ""),"final_line_raw":value,"parsed":parsed,"has_companies":bool(((totals or {}).get("companies") or [])),"analysis_context_keys":sorted(list((analysis_context or {}).keys()))[:10] if isinstance(analysis_context, dict) else []}})
+                        # #endregion
                         return float(parsed), 'snapshot_final'
                 initial = totals.get('initial')
                 if isinstance(initial, dict):
@@ -74,10 +79,16 @@ def resolve_over_under_line(
                         value = initial.get('盘口')
                     parsed = to_float(value)
                     if isinstance(parsed, float) and 0.5 <= parsed <= 6.5:
+                        # #region debug-point F:resolve-ou-initial
+                        emit_local_debug_event({"sessionId":"snapshot-routing-chain","runId":"pre-fix","hypothesisId":"C","location":"domain/odds.py:75","msg":"[DEBUG] resolved over under from snapshot initial","data":{"current_odds_match_id":str(current_odds.get("match_id") or ""),"initial_line_raw":value,"parsed":parsed,"has_companies":bool(((totals or {}).get("companies") or []))}})
+                        # #endregion
                         return float(parsed), 'snapshot_initial'
     except Exception:
         pass
 
+    # #region debug-point G:resolve-ou-miss
+    emit_local_debug_event({"sessionId":"snapshot-routing-chain","runId":"pre-fix","hypothesisId":"C","location":"domain/odds.py:81","msg":"[DEBUG] failed to resolve over under line","data":{"current_odds_available":bool(isinstance(current_odds, dict) and current_odds),"current_odds_match_id":str((current_odds or {}).get("match_id") or "") if isinstance(current_odds, dict) else "","totals_block_type":type((current_odds or {}).get("大小球")).__name__ if isinstance(current_odds, dict) else "none","totals_final":((current_odds or {}).get("大小球") or {}).get("final") if isinstance(current_odds, dict) else None,"totals_initial":((current_odds or {}).get("大小球") or {}).get("initial") if isinstance(current_odds, dict) else None}})
+    # #endregion
     return None, 'missing_real_line'
 
 
@@ -164,6 +175,26 @@ def auto_fetch_okooo_totals_if_needed(
                 continue
 
             payload = json.loads(open(out_path, 'r', encoding='utf-8').read())
+            if match_id and not snapshot_matches_request(
+                payload,
+                home_team=home_team,
+                away_team=away_team,
+                match_date=match_date,
+            ):
+                retry_cmd = [item for item in cmd]
+                if '--match-id' in retry_cmd:
+                    idx = retry_cmd.index('--match-id')
+                    del retry_cmd[idx:idx + 2]
+                proc = subprocess.run(retry_cmd, cwd=os.path.dirname(script), capture_output=True, text=True, timeout=240)
+                diag['retry_without_match_id'] = True
+                diag['retry_returncode'] = proc.returncode
+                if proc.stdout:
+                    diag['retry_stdout_tail'] = proc.stdout.strip().splitlines()[-1][-200:]
+                if proc.returncode == 0:
+                    retry_path = (proc.stdout or '').strip().splitlines()[-1].strip()
+                    if retry_path and os.path.exists(retry_path):
+                        out_path = retry_path
+                        payload = json.loads(open(out_path, 'r', encoding='utf-8').read())
             totals = payload.get('大小球') if isinstance(payload, dict) else None
             if not isinstance(totals, dict) or not totals.get('found'):
                 last_error = 'totals not found in snapshot'
@@ -174,12 +205,16 @@ def auto_fetch_okooo_totals_if_needed(
                 'initial': totals.get('initial') or {},
                 'final': totals.get('final') or {},
             }
+            merged['match_id'] = str(payload.get('match_id') or match_id or merged.get('match_id') or '')
             if isinstance(totals.get('consensus'), dict):
                 merged['大小球']['consensus'] = totals.get('consensus') or {}
             if isinstance(totals.get('companies'), list):
                 merged['大小球']['companies'] = totals.get('companies') or []
             if totals.get('company_mode'):
                 merged['大小球']['company_mode'] = totals.get('company_mode')
+            # #region debug-point H:auto-fetch-merged
+            emit_local_debug_event({"sessionId":"snapshot-routing-chain","runId":"pre-fix","hypothesisId":"D","location":"domain/odds.py:172","msg":"[DEBUG] auto fetched totals merged into current odds","data":{"league_name":league_name,"home_team":home_team,"away_team":away_team,"requested_match_id":match_id,"source_snapshot":out_path,"payload_match_id":str(payload.get("match_id") or ""),"totals_final_line":((merged.get("大小球") or {}).get("final") or {}).get("line"),"totals_initial_line":((merged.get("大小球") or {}).get("initial") or {}).get("line"),"merged_match_id":str(merged.get("match_id") or "")}})
+            # #endregion
             diag['ok'] = True
             diag['source_snapshot'] = out_path
             return merged, diag

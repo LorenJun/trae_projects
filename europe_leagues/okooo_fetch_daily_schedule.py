@@ -47,8 +47,8 @@ def _parse_row_text(text: str) -> Dict[str, Any]:
     
     # Check if status is "完"
     has_finish_marker = "完" in s
-    # Try to find score first: digits-digits or digits:digits with possible space
-    score_match = re.search(r"(\d{1,2})\s*[-:]\s*(\d{1,2})", s)
+    # 只有明确带"完"的行才尝试解析比分，避免把 20:00 / 21:30 / 22:15 误当成赛果。
+    score_match = re.search(r"(\d{1,2})\s*[-:]\s*(\d{1,2})", s) if has_finish_marker else None
     if score_match:
         home_score = int(score_match.group(1))
         away_score = int(score_match.group(2))

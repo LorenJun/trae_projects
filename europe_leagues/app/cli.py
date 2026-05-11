@@ -11,9 +11,11 @@ import io
 import importlib.util
 import json
 import os
+import re
 import shutil
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # 添加项目路径
 EUROPE_LEAGUES_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -64,6 +66,7 @@ def run_quietly(func):
 COMMAND_AGENT_ROLES = {
     "list-leagues": [],
     "predict-match": ["data_collector", "match_analyzer", "odds_analyzer"],
+    "predict-match-lite": ["data_collector", "odds_analyzer"],
     "predict-schedule": ["data_collector", "match_analyzer", "odds_analyzer"],
     "collect-data": ["data_collector"],
     "pending-results": ["result_tracker"],
@@ -71,6 +74,9 @@ COMMAND_AGENT_ROLES = {
     "auto-sync-results": ["result_tracker"],
     "result-sync-daemon": ["result_tracker"],
     "accuracy": ["result_tracker"],
+    "sync-pending-results-review": ["result_tracker"],
+    "build-season-master-review": ["result_tracker"],
+    "purge-nonreal-data": ["result_tracker"],
     "rag-rebuild": ["result_tracker"],
     "rag-diagnose": ["result_tracker"],
     "sync-memory-rag": ["result_tracker"],
@@ -122,6 +128,360 @@ def serialize_match_data(match):
         "sources": match.sources or [],
         "update_time": match.update_time,
     }
+
+
+def _parse_winner_from_score(score_text):
+    match = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", str(score_text or ""))
+    if not match:
+        return None
+    home_score = int(match.group(1))
+    away_score = int(match.group(2))
+    if home_score > away_score:
+        return "主胜"
+    if home_score < away_score:
+        return "客胜"
+    return "平局"
+
+
+def _split_predicted_scores(raw_text):
+    raw = str(raw_text or "").strip()
+    if not raw:
+        return []
+    parts = re.split(r"\s*>\s*|\s*/\s*", raw)
+    return [re.sub(r"\s+", "", item) for item in parts if item.strip()]
+
+
+def _parse_over_under_pick(raw_text):
+    raw = str(raw_text or "").strip()
+    if not raw:
+        return None
+    match = re.search(r"([大小])球?\s*([0-9.]+)", raw)
+    if not match:
+        return None
+    return {"side": match.group(1), "line": float(match.group(2))}
+
+
+def _extract_prediction_memory_completed_entries(memory_text):
+    start_marker = "<!-- prediction-memory:start -->"
+    end_marker = "<!-- prediction-memory:end -->"
+    start_index = memory_text.find(start_marker)
+    end_index = memory_text.find(end_marker)
+    if start_index == -1 or end_index == -1 or end_index <= start_index:
+        return []
+
+    block = memory_text[start_index:end_index]
+    lines = block.splitlines()
+    in_completed = False
+    entries = []
+    current = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "#### 已完赛":
+            in_completed = True
+            current = []
+            continue
+        if not in_completed:
+            continue
+        if stripped.startswith("#### ") and stripped != "#### 已完赛":
+            break
+        if line.startswith("- ["):
+            if current:
+                entries.append("\n".join(current).rstrip())
+            current = [line]
+            continue
+        if current:
+            current.append(line)
+
+    if current:
+        entries.append("\n".join(current).rstrip())
+    return [item for item in entries if item.strip()]
+
+
+def _parse_memory_completed_entry(entry_text):
+    lines = [line.rstrip() for line in entry_text.splitlines() if line.strip()]
+    if not lines:
+        return None
+
+    headline = lines[0].strip()
+    pred_line = next((line.strip() for line in lines if "预测:" in line), "")
+    result_line = next((line.strip() for line in lines if "赛果:" in line), headline)
+    meta_line = next((line.strip() for line in lines if "记忆ID:" in line), "")
+
+    memory_key = ""
+    memory_key_match = re.match(r"- \[(?P<key>[^\]]+)\]", headline)
+    if memory_key_match:
+        memory_key = memory_key_match.group("key").strip()
+    memory_id_match = re.search(r"记忆ID:\s*(.+?)(?:\s*\|\s*更新时间:|$)", meta_line)
+    memory_id = memory_id_match.group(1).strip() if memory_id_match else ""
+
+    after_bracket = headline.split("] ", 1)[1] if "] " in headline else headline.lstrip("- ").strip()
+    headline_tokens = after_bracket.split()
+    match_date = headline_tokens[0] if headline_tokens and re.match(r"\d{4}-\d{2}-\d{2}", headline_tokens[0]) else ""
+    if " vs " in after_bracket:
+        left, right = after_bracket.split(" vs ", 1)
+        away_team = re.split(r"\s+\|", right, maxsplit=1)[0].strip()
+        left_tokens = left.split()
+        home_team = " ".join(left_tokens[2:]).strip() if len(left_tokens) >= 3 else left.strip()
+    else:
+        home_team = ""
+        away_team = ""
+
+    predicted_winner_match = re.search(r"预测:\s*(主胜|客胜|平局)", pred_line)
+    predicted_winner = predicted_winner_match.group(1) if predicted_winner_match else None
+    confidence_match = re.search(r"预测:\s*(?:主胜|客胜|平局)\s*\(([\d.]+)%\)", pred_line)
+    confidence_pct = float(confidence_match.group(1)) if confidence_match else None
+
+    score_match = re.search(r"比分:\s*([^|；]+)", pred_line)
+    predicted_scores = _split_predicted_scores(score_match.group(1) if score_match else "")
+
+    ou_match = re.search(r"大小球:\s*([^|；]+)", pred_line)
+    predicted_ou = _parse_over_under_pick(ou_match.group(1) if ou_match else "")
+
+    actual_result_match = re.search(r"赛果:\s*(主胜|客胜|平局)\s+(\d+\s*-\s*\d+)", result_line)
+    actual_winner = None
+    actual_score = ""
+    if actual_result_match:
+        actual_winner = actual_result_match.group(1)
+        actual_score = re.sub(r"\s+", "", actual_result_match.group(2))
+
+    if not actual_winner and actual_score:
+        actual_winner = _parse_winner_from_score(actual_score)
+
+    win_hit = bool(predicted_winner and actual_winner and predicted_winner == actual_winner)
+    score_hit = bool(actual_score and predicted_scores and actual_score in predicted_scores)
+
+    ou_status = "缺失"
+    if predicted_ou and actual_score:
+        home_score, away_score = [int(item) for item in actual_score.split("-")]
+        total_goals = home_score + away_score
+        line = float(predicted_ou["line"])
+        if abs(total_goals - line) < 1e-9:
+            ou_status = "走水"
+        else:
+            actual_side = "大" if total_goals > line else "小"
+            ou_status = "命中" if actual_side == predicted_ou["side"] else "未中"
+
+    return {
+        "headline": headline,
+        "memory_key": memory_key,
+        "memory_id": memory_id,
+        "match_id": memory_id or memory_key,
+        "league": memory_key.split("|", 1)[0].strip() if "|" in memory_key else "",
+        "match_date": match_date,
+        "home_team": home_team,
+        "away_team": away_team,
+        "predicted_winner": predicted_winner,
+        "confidence_pct": confidence_pct,
+        "predicted_scores": predicted_scores,
+        "predicted_scores_display": " / ".join(predicted_scores) if predicted_scores else "缺失",
+        "predicted_ou": predicted_ou,
+        "predicted_ou_display": ou_match.group(1).strip() if ou_match else "缺失",
+        "actual_winner": actual_winner,
+        "actual_score": actual_score,
+        "win_hit": win_hit,
+        "score_hit": score_hit,
+        "ou_status": ou_status,
+    }
+
+
+def _build_memory_review_summary(entries, sample_limit=8):
+    parsed = []
+    for item in entries[: max(0, int(sample_limit or 0)) or 8]:
+        parsed_entry = _parse_memory_completed_entry(item)
+        if parsed_entry and parsed_entry.get("actual_score"):
+            parsed.append(parsed_entry)
+
+    sample_count = len(parsed)
+    if sample_count == 0:
+        return {
+            "sample_count": 0,
+            "markdown": "### 滚动记忆复盘总结（最近 0 场已完赛）\n\n> 当前滚动记忆区块中暂无可用于复盘的已完赛样本。\n",
+        }
+
+    win_hits = sum(1 for item in parsed if item["win_hit"])
+    score_candidates = sum(1 for item in parsed if item["predicted_scores"])
+    score_hits = sum(1 for item in parsed if item["score_hit"])
+    ou_candidates = sum(1 for item in parsed if item["ou_status"] in ("命中", "未中"))
+    ou_hits = sum(1 for item in parsed if item["ou_status"] == "命中")
+
+    win_rate = round(win_hits / sample_count * 100, 1) if sample_count else 0.0
+    score_rate = round(score_hits / score_candidates * 100, 1) if score_candidates else 0.0
+    ou_rate = round(ou_hits / ou_candidates * 100, 1) if ou_candidates else 0.0
+
+    actual_distribution = {"主胜": 0, "平局": 0, "客胜": 0}
+    for item in parsed:
+        if item["actual_winner"] in actual_distribution:
+            actual_distribution[item["actual_winner"]] += 1
+
+    non_zero_distribution = [f"{key}{value}场" for key, value in actual_distribution.items() if value > 0]
+    if len(non_zero_distribution) == 1:
+        sample_distribution_summary = f"样本结果单侧集中，当前仅出现{non_zero_distribution[0]}，平衡性仍不足。"
+    else:
+        sample_distribution_summary = f"结果分布为{' / '.join(non_zero_distribution)}，样本结构较前更均衡。"
+
+    if win_rate >= 80 and score_rate < 30 and ou_rate < 50:
+        overall_summary = "胜平负方向稳定，但比分与大小球仍偏弱，尤其对进球放大场景的刻画不足。"
+    elif win_rate >= 80 and score_rate < 30:
+        overall_summary = "胜平负方向稳定，但比分排序仍偏保守。"
+    elif win_rate >= 60:
+        overall_summary = "胜平负方向整体可用，但近期样本出现回撤，比分与大小球仍需继续优化。"
+    else:
+        overall_summary = "近期样本回撤明显，需要同时复查方向判断、比分排序和总进球弹性。"
+
+    win_summary = "主方向判断较稳，可继续保持当前主链结构。" if win_rate >= 80 else "主方向判断有回撤，需要回看盘口与临场信号的权重。"
+    score_summary = "Top 比分排序仍偏保守，常低估强队兑现和比赛后段放大。" if score_rate < 30 else "比分排序已有一定可用性，但仍需优化高比分落点。"
+    ou_summary = "总进球弹性判断仍偏弱，需减少系统性偏小。" if ou_rate < 50 else "大小球方向基本可用，但还要继续提升稳定性。"
+
+    win_action = "保持当前主链方向判断权重，优先避免因少量异常样本过度调参。" if win_rate >= 80 else "回看近期未命中样本中的盘口退让、平赔下修和临场结构，修正主方向判断。"
+    score_action = "增强 `2-0`、`3-0`、`3-1` 一类强队兑现型比分的排序权重，降低过度保守的 `1-0/1-1` 默认占位。"
+    ou_action = "提高开放局、强队主场和高节奏联赛场景的总进球弹性，减少系统性偏小。"
+    risk_action = "当胜平负方向成立但总进球预期偏保守时，明确提示大小球存在上修风险。"
+
+    review_lines = []
+    for item in parsed:
+        actual_label = f"{item['home_team']} {item['actual_score']} {item['away_team']}".strip()
+        status_bits = [
+            "胜平负命中" if item["win_hit"] else "胜平负未中",
+            "比分命中" if item["score_hit"] else "比分未中",
+            f"大小球{item['ou_status']}",
+        ]
+        if item["win_hit"] and item["score_hit"]:
+            conclusion = "方向和比分都落在有效区间，说明当前主链对这类比赛的刻画较为充分。"
+        elif item["win_hit"] and item["ou_status"] == "命中":
+            conclusion = "方向与节奏判断基本正确，但比分排序仍有前移空间。"
+        elif item["win_hit"]:
+            conclusion = "主方向判断正确，但比分与总进球弹性仍偏保守。"
+        else:
+            conclusion = "主方向判断失真，需要回看盘口变化、临场信号和样本相似性。"
+        review_lines.append(f"- `{actual_label}`")
+        review_lines.append(
+            f"  赛前预测为 `{item['predicted_winner'] or '缺失'}`，Top 比分为 `{item['predicted_scores_display']}`，大小球倾向为 `{item['predicted_ou_display']}`；最终赛果为 `{item['actual_winner']} {item['actual_score']}`。复盘结论：{' '.join(status_bits)}；{conclusion}"
+        )
+
+    markdown_lines = [
+        f"### 滚动记忆复盘总结（最近 {sample_count} 场已完赛）",
+        "",
+        f"> 基于滚动记忆区块中的 {sample_count} 场已完赛样本生成。当前结论：{overall_summary}",
+        "",
+        "#### 总体复盘",
+        "",
+        f"- 已完赛 `{sample_count}` 场，胜平负命中 `{win_hits}/{sample_count}`，命中率 `{win_rate}%`；核心结论：{win_summary}",
+        f"- 比分命中 `{score_hits}/{score_candidates}`，命中率 `{score_rate}%`；核心结论：{score_summary}",
+        f"- 大小球命中 `{ou_hits}/{ou_candidates}`，命中率 `{ou_rate}%`；核心结论：{ou_summary}",
+        f"- 样本分布：{sample_distribution_summary}",
+        "",
+        "#### 单场复盘",
+        "",
+        *review_lines,
+        "",
+        "#### 优化方向",
+        "",
+        f"- 胜平负：{win_action}",
+        f"- 比分：{score_action}",
+        f"- 大小球：{ou_action}",
+        f"- 风险提示：{risk_action}",
+    ]
+    return {
+        "sample_count": sample_count,
+        "win_hits": win_hits,
+        "score_hits": score_hits,
+        "score_candidates": score_candidates,
+        "ou_hits": ou_hits,
+        "ou_candidates": ou_candidates,
+        "parsed_entries": parsed,
+        "markdown": "\n".join(markdown_lines).rstrip() + "\n",
+    }
+
+
+def _update_memory_review_section(memory_file, review_markdown):
+    with open(memory_file, "r", encoding="utf-8") as handle:
+        original = handle.read()
+
+    review_header = "### 滚动记忆复盘总结（最近 "
+    template_header = "### 标准化复盘模板"
+    existing_start = original.find(review_header)
+    template_start = original.find(template_header, existing_start if existing_start != -1 else 0)
+
+    if existing_start != -1 and template_start != -1 and template_start > existing_start:
+        updated = original[:existing_start].rstrip() + "\n\n" + review_markdown.rstrip() + "\n\n" + original[template_start:]
+    else:
+        memory_end_marker = "<!-- prediction-memory:end -->"
+        marker_index = original.find(memory_end_marker)
+        if marker_index == -1:
+            raise ValueError(f"找不到滚动记忆结束标记: {memory_file}")
+        insert_at = marker_index + len(memory_end_marker)
+        updated = original[:insert_at] + "\n\n" + review_markdown.rstrip() + "\n\n" + original[insert_at:].lstrip("\n")
+
+    with open(memory_file, "w", encoding="utf-8") as handle:
+        handle.write(updated)
+
+
+def run_openclaw_sync_pending_results_review(args):
+    def _execute():
+        from result_manager import ResultManager
+        from runtime.result_sync import sync_due_prediction_results
+
+        manager = ResultManager()
+        pending_before = manager.get_pending_matches(days_back=args.days_back)
+        sync_report = sync_due_prediction_results(limit=args.limit)
+        pending_after = manager.get_pending_matches(days_back=args.days_back)
+        accuracy_stats = manager.update_accuracy_stats()
+        memory_reconcile = manager.reconcile_memory_pending_entries(days_back=args.days_back)
+
+        memory_file = args.memory_file or os.path.join(PROJECT_ROOT, "MEMORY.md")
+        with open(memory_file, "r", encoding="utf-8") as handle:
+            memory_text = handle.read()
+        completed_entries = _extract_prediction_memory_completed_entries(memory_text)
+        review_summary = _build_memory_review_summary(completed_entries, sample_limit=args.review_sample_limit)
+        upset_sync = manager.sync_upset_cases_from_review_entries(review_summary.get("parsed_entries", []))
+        if not args.no_write_review:
+            _update_memory_review_section(memory_file, review_summary["markdown"])
+
+        return {
+            "pending_before_count": len(pending_before),
+            "pending_after_count": len(pending_after),
+            "updated_count": max(0, len(pending_before) - len(pending_after)),
+            "remaining_pending": pending_after,
+            "auto_sync": sync_report,
+            "accuracy": accuracy_stats.get("overall", {}),
+            "review": {
+                "memory_file": memory_file,
+                "written": not args.no_write_review,
+                "sample_count": review_summary["sample_count"],
+                "win_hits": review_summary.get("win_hits", 0),
+                "score_hits": review_summary.get("score_hits", 0),
+                "score_candidates": review_summary.get("score_candidates", 0),
+                "ou_hits": review_summary.get("ou_hits", 0),
+                "ou_candidates": review_summary.get("ou_candidates", 0),
+            },
+            "upset_sync": upset_sync,
+            "memory_reconcile": memory_reconcile,
+            "runtime_profile": get_command_runtime_profile("sync-pending-results-review"),
+        }
+
+    if args.json:
+        result, captured_stdout, captured_stderr = run_quietly(_execute)
+        emit_response(
+            build_json_result("sync-pending-results-review", result, captured_stdout, captured_stderr),
+            as_json=True,
+        )
+        return
+
+    result = _execute()
+    print(f"待回填: {result['pending_before_count']} -> {result['pending_after_count']}")
+    print(f"自动/统一处理后减少: {result['updated_count']} 场")
+    print(f"复盘样本: {result['review']['sample_count']} 场")
+    overall = result.get("accuracy") or {}
+    if overall:
+        print(
+            f"准确率: 胜平负 {overall.get('win_accuracy', 0)}% "
+            f"({overall.get('correct_predictions', 0)}/{overall.get('total_predictions', 0)})"
+        )
+    if result["remaining_pending"]:
+        print("仍待回填比赛:")
+        for item in result["remaining_pending"][:10]:
+            print(f"- {item['match_date']} {item['home_team']} vs {item['away_team']}")
 
 
 def get_openclaw_dependency_report():
@@ -362,6 +722,8 @@ def run_openclaw_list_leagues(json_output):
 def run_openclaw_predict_match(args):
     def _execute():
         from domain.predictor import DomainPredictor
+        from domain.persistence import PredictionPersistenceService
+        from result_manager import ResultManager
 
         predictor = DomainPredictor()
         ctx = load_analysis_context_file(getattr(args, "context_file", ""))
@@ -378,6 +740,19 @@ def run_openclaw_predict_match(args):
             league_hint=getattr(args, "league_hint", None),
             analysis_context=ctx,
         )
+        # Persist single-match prediction into archive + rolling MEMORY.md by default.
+        # Use --no-write when you only want the JSON output without side effects.
+        persisted = {"enabled": not bool(getattr(args, "no_write", False)), "archived": False, "memory_updated": False}
+        if persisted["enabled"] and not result.get("prediction_blocked"):
+            try:
+                manager = ResultManager(EUROPE_LEAGUES_ROOT)
+                manager.save_prediction_from_enhanced(result, args.league)
+                persisted["archived"] = True
+                PredictionPersistenceService(EUROPE_LEAGUES_ROOT, cache=None, result_manager=manager).update_prediction_memory(result)
+                persisted["memory_updated"] = True
+            except Exception as exc:
+                persisted["error"] = str(exc)
+        result["persisted"] = persisted
         result.setdefault("runtime_profile", get_command_runtime_profile("predict-match"))
         return result
 
@@ -392,6 +767,11 @@ def run_openclaw_predict_match(args):
     result = _execute()
     print(f"比赛: {result['home_team']} vs {result['away_team']}")
     print(f"联赛: {result['league_name']}  日期: {result['match_date']}")
+    if result.get("prediction_blocked"):
+        reason = str(result.get("blocked_reason") or "missing_real_market_line").strip()
+        print(f"预测: 数据不完整  原因: {reason}")
+        print(f"主胜/平局/客胜(预估): {result['final_probabilities']}")
+        return
     print(f"预测: {result['prediction']}  信心: {result['confidence']:.2%}")
     print(f"主胜/平局/客胜: {result['final_probabilities']}")
     over_under = result.get("over_under") if isinstance(result.get("over_under"), dict) else {}
@@ -409,6 +789,63 @@ def run_openclaw_predict_match(args):
     explanation = str(result.get("retrieved_memory_explanation") or "").strip()
     if explanation:
         print(f"RAG记忆: {explanation}")
+
+
+def run_openclaw_predict_match_lite(args):
+    def _execute():
+        from domain.lightweight_prediction import predict_lightweight_match
+        from domain.persistence import PredictionPersistenceService
+        from result_manager import ResultManager
+
+        result = predict_lightweight_match(
+            base_dir=EUROPE_LEAGUES_ROOT,
+            league_name=args.league_name,
+            league_code=getattr(args, "league", "") or "",
+            home_team=args.home_team,
+            away_team=args.away_team,
+            match_date=args.date,
+            match_time=getattr(args, "match_time", "") or "",
+            match_id=getattr(args, "match_id", "") or "",
+            okooo_driver=getattr(args, "okooo_driver", "local-chrome"),
+            okooo_headed=bool(getattr(args, "okooo_headed", False)),
+        )
+        persisted = {"enabled": not bool(getattr(args, "no_write", False)), "archived": False, "memory_updated": False}
+        if persisted["enabled"]:
+            try:
+                manager = ResultManager(EUROPE_LEAGUES_ROOT)
+                PredictionPersistenceService(EUROPE_LEAGUES_ROOT, cache=None, result_manager=manager).update_prediction_memory(result)
+                persisted["memory_updated"] = True
+            except Exception as exc:
+                persisted["error"] = str(exc)
+        result["persisted"] = persisted
+        result.setdefault("runtime_profile", get_command_runtime_profile("predict-match-lite"))
+        return result
+
+    if args.json:
+        result, captured_stdout, captured_stderr = run_quietly(_execute)
+        emit_response(
+            build_json_result("predict-match-lite", result, captured_stdout, captured_stderr),
+            as_json=True,
+        )
+        return
+
+    result = _execute()
+    print(f"比赛: {result['home_team']} vs {result['away_team']}")
+    print(f"联赛: {result['league_name']}  日期: {result['match_date']}")
+    print(f"预测: {result['prediction']}  信心: {result['confidence']:.2%}")
+    print(f"主胜/平局/客胜: {result['all_probabilities']}")
+    over_under = result.get("over_under") if isinstance(result.get("over_under"), dict) else {}
+    if over_under.get("available"):
+        line = over_under.get("line")
+        line_label = f"{float(line):g}" if isinstance(line, (int, float)) else "?"
+        print(
+            f"大小球: 大球 {float(over_under.get('over') or 0.0):.2%} / "
+            f"小球 {float(over_under.get('under') or 0.0):.2%} @ {line_label} "
+            f"[{over_under.get('line_source', 'unknown')}]"
+        )
+    else:
+        reason = str(over_under.get("reason") or "missing_real_market_line").strip()
+        print(f"大小球: 待补真实盘口 ({reason})")
 
 
 def run_openclaw_predict_schedule(args):
@@ -510,7 +947,12 @@ def run_openclaw_save_result(args):
         from result_manager import ResultManager
 
         manager = ResultManager()
-        result = manager.save_result(args.match_id, args.home_score, args.away_score)
+        result = manager.save_result(
+            args.match_id,
+            args.home_score,
+            args.away_score,
+            force=bool(getattr(args, "force", False)),
+        )
         if isinstance(result, dict):
             result.setdefault("runtime_profile", get_command_runtime_profile("save-result"))
         return result
@@ -584,8 +1026,9 @@ def run_openclaw_accuracy(args):
         if args.refresh:
             result = manager.update_accuracy_stats()
         else:
-            with open(manager.accuracy_file, "r", encoding="utf-8") as f:
-                result = json.load(f)
+            result = manager.accuracy_store.load()
+            if not result:
+                result = manager.update_accuracy_stats()
         if isinstance(result, dict):
             result.setdefault("runtime_profile", get_command_runtime_profile("accuracy"))
         return result
@@ -636,6 +1079,112 @@ def run_openclaw_rag_rebuild(args):
 
     report = _execute()
     print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+def run_openclaw_build_season_master_review(args):
+    def _execute():
+        result = {
+            "sync": None,
+            "rag": None,
+        }
+
+        if not getattr(args, "skip_sync", False):
+            from result_manager import ResultManager
+            from runtime.result_sync import sync_due_prediction_results
+
+            manager = ResultManager()
+            pending_before = manager.get_pending_matches(days_back=args.days_back)
+            sync_report = sync_due_prediction_results(limit=args.limit)
+            pending_after = manager.get_pending_matches(days_back=args.days_back)
+            accuracy_stats = manager.update_accuracy_stats()
+            memory_reconcile = manager.reconcile_memory_pending_entries(days_back=args.days_back)
+
+            memory_file = args.memory_file or os.path.join(PROJECT_ROOT, "MEMORY.md")
+            with open(memory_file, "r", encoding="utf-8") as handle:
+                memory_text = handle.read()
+            completed_entries = _extract_prediction_memory_completed_entries(memory_text)
+            review_summary = _build_memory_review_summary(completed_entries, sample_limit=args.review_sample_limit)
+            upset_sync = manager.sync_upset_cases_from_review_entries(review_summary.get("parsed_entries", []))
+            if not args.no_write_review:
+                _update_memory_review_section(memory_file, review_summary["markdown"])
+
+            result["sync"] = {
+                "pending_before_count": len(pending_before),
+                "pending_after_count": len(pending_after),
+                "updated_count": max(0, len(pending_before) - len(pending_after)),
+                "remaining_pending": pending_after,
+                "auto_sync": sync_report,
+                "accuracy": accuracy_stats.get("overall", {}),
+                "review": {
+                    "memory_file": memory_file,
+                    "written": not args.no_write_review,
+                    "sample_count": review_summary["sample_count"],
+                    "win_hits": review_summary.get("win_hits", 0),
+                    "score_hits": review_summary.get("score_hits", 0),
+                    "score_candidates": review_summary.get("score_candidates", 0),
+                    "ou_hits": review_summary.get("ou_hits", 0),
+                    "ou_candidates": review_summary.get("ou_candidates", 0),
+                },
+                "upset_sync": upset_sync,
+                "memory_reconcile": memory_reconcile,
+            }
+
+        if not getattr(args, "skip_rag", False):
+            from domain.rag import HybridRAGService
+
+            service = HybridRAGService(EUROPE_LEAGUES_ROOT)
+            rag_result = service.refresh(limit=getattr(args, "rag_limit", 300))
+            result["rag"] = {
+                "rag_mode": rag_result.get("rag_mode"),
+                "case_count": rag_result.get("case_count"),
+                "registry": rag_result.get("registry", {}),
+            }
+
+        from scripts.build_recent_five_leagues_review import build_recent_five_leagues_review
+        from scripts.build_season_master_review import build_season_master_review
+
+        recent_review = build_recent_five_leagues_review(
+            base_dir=EUROPE_LEAGUES_ROOT,
+            recent_days=args.recent_days,
+            output_path=getattr(args, "recent_review_output", "") or None,
+        )
+        season_review = build_season_master_review(
+            base_dir=EUROPE_LEAGUES_ROOT,
+            season=args.season,
+            recent_days=args.recent_days,
+            batch_label=getattr(args, "batch_label", "") or None,
+            master_output_path=getattr(args, "master_output_path", "") or None,
+            recent_review_path=recent_review["output_path"],
+        )
+        return {
+            **result,
+            "recent_review": {
+                "output_path": recent_review["output_path"],
+                "window_start": recent_review["window_start"],
+                "window_end": recent_review["window_end"],
+                "completed_match_count": recent_review["completed_match_count"],
+                "prediction_count": recent_review["prediction_count"],
+                "league_sections": recent_review["league_sections"],
+            },
+            "season_review": season_review,
+            "runtime_profile": get_command_runtime_profile("build-season-master-review"),
+        }
+
+    if args.json:
+        result, captured_stdout, captured_stderr = run_quietly(_execute)
+        emit_response(
+            build_json_result("build-season-master-review", result, captured_stdout, captured_stderr),
+            as_json=True,
+        )
+        return
+
+    report = _execute()
+    season_review = report["season_review"]
+    print(f"赛季主文档: {season_review['output_path']}")
+    print(f"窗口: {season_review['window_start']} -> {season_review['window_end']}")
+    print(f"批次: {season_review['batch_heading']} ({season_review['action']})")
+    print(f"已完赛样本: {season_review['completed_match_count']} 场")
+    print(f"可复盘预测样本: {season_review['prediction_count']} 场")
 
 
 def run_openclaw_rag_diagnose(args):
@@ -690,6 +1239,52 @@ def run_openclaw_sync_memory_rag(args):
     print(f"模式: {'dry-run' if report['dry_run'] else 'write'}")
 
 
+def run_openclaw_purge_nonreal_data(args):
+    def _execute():
+        from pathlib import Path
+
+        from scripts.purge_nonreal_data import purge_nonreal_data
+
+        result = purge_nonreal_data(
+            base_dir=Path(EUROPE_LEAGUES_ROOT).resolve(),
+            memory_path=Path(getattr(args, "memory_file", "") or os.path.join(PROJECT_ROOT, "MEMORY.md")).resolve(),
+            confirm=bool(getattr(args, "yes", False)),
+            sample_limit=int(getattr(args, "sample_limit", 100)),
+            rag_limit=int(getattr(args, "rag_limit", 200)),
+            refresh_accuracy=not bool(getattr(args, "no_refresh_accuracy", False)),
+        )
+        result["runtime_profile"] = get_command_runtime_profile("purge-nonreal-data")
+        return result
+
+    if args.json:
+        result, captured_stdout, captured_stderr = run_quietly(_execute)
+        emit_response(
+            build_json_result("purge-nonreal-data", result, captured_stdout, captured_stderr),
+            as_json=True,
+        )
+        return
+
+    report = _execute()
+    summary = report.get("scan", {}).get("summary", {})
+    print(f"扫描结果: MEMORY {summary.get('memory_blocks', 0)} 条 | archive {summary.get('archive_records', 0)} 条 | "
+          f"registry {summary.get('registry_records', 0)} 条 | snapshots {summary.get('snapshot_files', 0)} 个 | "
+          f"schedules {summary.get('schedule_files', 0)} 个")
+    if not report.get("confirmed"):
+        print(report.get("message") or "当前为预览模式。")
+        return
+    removed = report.get("removed", {})
+    print(f"已清理: MEMORY {removed.get('memory_blocks', 0)} 条 | archive {removed.get('archive_records', 0)} 条 | "
+          f"registry {removed.get('registry_records', 0)} 条 | snapshots {removed.get('snapshot_files', 0)} 个 | "
+          f"schedules {removed.get('schedule_files', 0)} 个")
+    rebuild = report.get("rebuild") or {}
+    rag_rebuild = rebuild.get("rag_rebuild") or {}
+    print(
+        f"已重建: memory_samples={((rebuild.get('memory_samples') or {}).get('completed_samples', 0))} | "
+        f"rag_cases={rag_rebuild.get('case_count', 0)} | "
+        f"accuracy_refreshed={'是' if rebuild.get('accuracy_refresh') is not None else '否'}"
+    )
+
+
 def run_openclaw_health_check(args):
     def _execute():
         report = {
@@ -729,6 +1324,33 @@ def run_openclaw_health_check(args):
         result, captured_stdout, captured_stderr = run_quietly(_execute)
         emit_response(
             build_json_result("health-check", result, captured_stdout, captured_stderr),
+            as_json=True,
+        )
+        return
+
+    report = _execute()
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+def run_openclaw_refresh_repo_docs(args):
+    def _execute():
+        from scripts.refresh_repo_docs import refresh_repo_docs
+
+        payload = refresh_repo_docs(
+            repo_root=Path(EUROPE_LEAGUES_ROOT).resolve(),
+            season=getattr(args, "season", "2025-26"),
+            recent_days=int(getattr(args, "recent_days", 7)),
+            full=bool(getattr(args, "full", False)),
+            update_skill_docs=not bool(getattr(args, "skip_skill_docs", False)),
+            run_tests=not bool(getattr(args, "skip_tests", False)),
+        )
+        payload["runtime_profile"] = get_command_runtime_profile("refresh-repo-docs")
+        return payload
+
+    if args.json:
+        result, captured_stdout, captured_stderr = run_quietly(_execute)
+        emit_response(
+            build_json_result("refresh-repo-docs", result, captured_stdout, captured_stderr),
             as_json=True,
         )
         return
@@ -907,6 +1529,8 @@ def build_parser():
   %(prog)s pending-results --days-back 14 --json
   %(prog)s save-result --match-id la_liga_20260511_巴塞罗那_皇家马德里 --home-score 2 --away-score 1 --json
   %(prog)s accuracy --refresh --json
+  %(prog)s sync-pending-results-review --days-back 30 --limit 20 --json
+  %(prog)s purge-nonreal-data --yes --json
   %(prog)s setup-openclaw --json
         """,
     )
@@ -938,7 +1562,21 @@ def build_parser():
     parser_predict_match.add_argument("--time", dest="match_time", default="", help="比赛时间 HH:MM（用于赛程精准定位）")
     parser_predict_match.add_argument("--no-refresh-odds", action="store_true", help="不刷新澳客实时赔率（仅使用本地/空赔率）")
     parser_predict_match.add_argument("--context-file", default="", help="补充信息 JSON 文件（战术/战意/首发/临场等）")
+    parser_predict_match.add_argument("--no-write", action="store_true", help="只输出预测结果，不写入 MEMORY.md/归档")
     add_json_flag(parser_predict_match)
+
+    parser_predict_match_lite = subparsers.add_parser("predict-match-lite", help="轻量预测单场比赛并写入滚动记忆（适合非正式支持联赛）")
+    parser_predict_match_lite.add_argument("--league-name", required=True, help="联赛中文名，例如 葡超/英冠")
+    parser_predict_match_lite.add_argument("--league", default="", help="联赛代码（可选；仅用于滚动记忆标识）")
+    parser_predict_match_lite.add_argument("--home-team", required=True, help="主队名称")
+    parser_predict_match_lite.add_argument("--away-team", required=True, help="客队名称")
+    parser_predict_match_lite.add_argument("--date", required=True, help="比赛日期 YYYY-MM-DD")
+    parser_predict_match_lite.add_argument("--match-id", default="", help="澳客 MatchID（可选；不传则由快照脚本自行定位）")
+    parser_predict_match_lite.add_argument("--okooo-driver", default="local-chrome", help="抓取澳客快照的 driver（默认 local-chrome）")
+    parser_predict_match_lite.add_argument("--okooo-headed", action="store_true", help="browser-use 以有头模式运行（更稳但更慢）")
+    parser_predict_match_lite.add_argument("--time", dest="match_time", default="", help="比赛时间 HH:MM（用于赛程精准定位）")
+    parser_predict_match_lite.add_argument("--no-write", action="store_true", help="只输出预测结果，不写入 MEMORY.md")
+    add_json_flag(parser_predict_match_lite)
 
     parser_predict_schedule = subparsers.add_parser("predict-schedule", help="按日期批量生成预测并写回")
     parser_predict_schedule.add_argument("--league", help="联赛代码；留空表示全部联赛")
@@ -960,6 +1598,7 @@ def build_parser():
     parser_save.add_argument("--match-id", required=True, help="比赛 ID")
     parser_save.add_argument("--home-score", required=True, type=int, help="主队进球")
     parser_save.add_argument("--away-score", required=True, type=int, help="客队进球")
+    parser_save.add_argument("--force", action="store_true", help="覆盖已存在的比分并重建复盘备注")
     add_json_flag(parser_save)
 
     parser_auto_sync = subparsers.add_parser("auto-sync-results", help="自动同步到期的比赛结果")
@@ -975,6 +1614,38 @@ def build_parser():
     parser_accuracy.add_argument("--refresh", action="store_true", help="重新计算准确率")
     add_json_flag(parser_accuracy)
 
+    parser_sync_review = subparsers.add_parser("sync-pending-results-review", help="一键执行待回填检查、结果刷新与复盘总结更新")
+    parser_sync_review.add_argument("--days-back", type=int, default=30, help="向前查询的天数")
+    parser_sync_review.add_argument("--limit", type=int, default=20, help="单次最多处理的到期比赛数")
+    parser_sync_review.add_argument("--memory-file", default=os.path.join(PROJECT_ROOT, "MEMORY.md"), help="目标 MEMORY.md 路径")
+    parser_sync_review.add_argument("--review-sample-limit", type=int, default=8, help="复盘总结纳入的最近已完赛样本数")
+    parser_sync_review.add_argument("--no-write-review", action="store_true", help="只生成复盘数据，不写回 MEMORY.md")
+    add_json_flag(parser_sync_review)
+
+    parser_season_review = subparsers.add_parser("build-season-master-review", help="同步赛果、重建 RAG 并更新五大联赛赛季主复盘文档")
+    parser_season_review.add_argument("--season", default="2025-26", help="赛季标识")
+    parser_season_review.add_argument("--recent-days", type=int, default=7, help="赛季主文档批次使用的统计窗口天数")
+    parser_season_review.add_argument("--days-back", type=int, default=30, help="同步赛果时向前查询的天数")
+    parser_season_review.add_argument("--limit", type=int, default=50, help="单次最多处理的到期比赛数")
+    parser_season_review.add_argument("--review-sample-limit", type=int, default=8, help="MEMORY 复盘总结纳入的最近样本数")
+    parser_season_review.add_argument("--batch-label", default="", help="可选批次标题，如“第 2 轮”")
+    parser_season_review.add_argument("--recent-review-output", default="", help="最近窗口复盘 markdown 输出路径")
+    parser_season_review.add_argument("--master-output-path", default="", help="赛季总文档输出路径")
+    parser_season_review.add_argument("--rag-limit", type=int, default=300, help="重建 RAG 时最多读取的样本数")
+    parser_season_review.add_argument("--memory-file", default=os.path.join(PROJECT_ROOT, "MEMORY.md"), help="目标 MEMORY.md 路径")
+    parser_season_review.add_argument("--no-write-review", action="store_true", help="只生成复盘数据，不写回 MEMORY.md")
+    parser_season_review.add_argument("--skip-sync", action="store_true", help="跳过赛果同步与 MEMORY 复盘写回")
+    parser_season_review.add_argument("--skip-rag", action="store_true", help="跳过 RAG 重建")
+    add_json_flag(parser_season_review)
+
+    parser_refresh_docs = subparsers.add_parser("refresh-repo-docs", help="一键刷新仓库关键生成文档与相关 skill 文档（默认 quick 模式）")
+    parser_refresh_docs.add_argument("--season", default="2025-26", help="赛季标识")
+    parser_refresh_docs.add_argument("--recent-days", type=int, default=7, help="统计窗口天数")
+    parser_refresh_docs.add_argument("--full", action="store_true", help="全量刷新：包含赛果同步与 RAG 重建（较慢）")
+    parser_refresh_docs.add_argument("--skip-skill-docs", action="store_true", help="跳过 skill 文档同步")
+    parser_refresh_docs.add_argument("--skip-tests", action="store_true", help="跳过最小回归测试")
+    add_json_flag(parser_refresh_docs)
+
     parser_rag_rebuild = subparsers.add_parser("rag-rebuild", help="重建完整 RAG 混合检索索引")
     parser_rag_rebuild.add_argument("--limit", type=int, default=200, help="构建时最多读取的滚动记忆样本数")
     add_json_flag(parser_rag_rebuild)
@@ -987,6 +1658,14 @@ def build_parser():
     parser_sync_memory_rag.add_argument("--memory-file", default=os.path.join(PROJECT_ROOT, "MEMORY.md"), help="目标 MEMORY.md 路径")
     parser_sync_memory_rag.add_argument("--dry-run", action="store_true", help="仅检查可更新条目，不写文件")
     add_json_flag(parser_sync_memory_rag)
+
+    parser_purge_nonreal = subparsers.add_parser("purge-nonreal-data", help="全盘扫描并清理非真实赛程/缓存/归档数据")
+    parser_purge_nonreal.add_argument("--memory-file", default=os.path.join(PROJECT_ROOT, "MEMORY.md"), help="目标 MEMORY.md 路径")
+    parser_purge_nonreal.add_argument("--sample-limit", type=int, default=100, help="重建滚动样本时最多读取的样本数")
+    parser_purge_nonreal.add_argument("--rag-limit", type=int, default=200, help="重建 RAG 时最多读取的样本数")
+    parser_purge_nonreal.add_argument("--no-refresh-accuracy", action="store_true", help="清理后不刷新准确率")
+    parser_purge_nonreal.add_argument("--yes", action="store_true", help="确认执行删除与重建；不传时仅预览扫描结果")
+    add_json_flag(parser_purge_nonreal)
 
     parser_health = subparsers.add_parser("health-check", help="检查核心依赖与运行状态")
     add_json_flag(parser_health)
@@ -1070,6 +1749,8 @@ def main():
         run_openclaw_list_leagues(args.json)
     elif args.command == "predict-match":
         run_openclaw_predict_match(args)
+    elif args.command == "predict-match-lite":
+        run_openclaw_predict_match_lite(args)
     elif args.command == "predict-schedule":
         run_openclaw_predict_schedule(args)
     elif args.command == "collect-data":
@@ -1084,12 +1765,20 @@ def main():
         run_openclaw_result_sync_daemon(args)
     elif args.command == "accuracy":
         run_openclaw_accuracy(args)
+    elif args.command == "sync-pending-results-review":
+        run_openclaw_sync_pending_results_review(args)
+    elif args.command == "build-season-master-review":
+        run_openclaw_build_season_master_review(args)
+    elif args.command == "refresh-repo-docs":
+        run_openclaw_refresh_repo_docs(args)
     elif args.command == "rag-rebuild":
         run_openclaw_rag_rebuild(args)
     elif args.command == "rag-diagnose":
         run_openclaw_rag_diagnose(args)
     elif args.command == "sync-memory-rag":
         run_openclaw_sync_memory_rag(args)
+    elif args.command == "purge-nonreal-data":
+        run_openclaw_purge_nonreal_data(args)
     elif args.command == "health-check":
         run_openclaw_health_check(args)
     elif args.command == "migrate-archive":
