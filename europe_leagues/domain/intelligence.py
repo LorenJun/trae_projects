@@ -7,6 +7,7 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from domain.odds import parse_handicap_value
 from domain.writeback import TeamsWritebackGateway
 from runtime.cache import PredictionCache
 
@@ -32,56 +33,7 @@ class MatchIntelligenceEngine:
 
     @staticmethod
     def _parse_handicap_value(value: Any) -> Optional[float]:
-        if value is None:
-            return None
-        if isinstance(value, (int, float)):
-            v = float(value)
-            return v if abs(v) > 1e-9 else 0.0
-
-        s = str(value).strip()
-        if not s:
-            return None
-        try:
-            if '/' in s and not any(ch in s for ch in '球平受让'):
-                parts = [float(x) for x in s.split('/') if x]
-                if parts:
-                    return sum(parts) / len(parts)
-            return float(s)
-        except Exception:
-            pass
-
-        mapping = {
-            '平手': 0.0,
-            '平手/半球': -0.25,
-            '平/半': -0.25,
-            '半球': -0.5,
-            '半球/一球': -0.75,
-            '半/一': -0.75,
-            '一球': -1.0,
-            '一球/球半': -1.25,
-            '一/球半': -1.25,
-            '球半': -1.5,
-            '球半/两球': -1.75,
-            '两球': -2.0,
-            '两球/两球半': -2.25,
-            '两球半': -2.5,
-            '受让平手': 0.0,
-            '受让平手/半球': 0.25,
-            '受让平/半': 0.25,
-            '受让半球': 0.5,
-            '受让半球/一球': 0.75,
-            '受让半/一': 0.75,
-            '受让一球': 1.0,
-            '受让一球/球半': 1.25,
-            '受让一/球半': 1.25,
-            '受让球半': 1.5,
-            '受让球半/两球': 1.75,
-            '受让两球': 2.0,
-            '受让两球/两球半': 2.25,
-            '受让两球半': 2.5,
-        }
-        s = s.replace(' ', '')
-        return mapping.get(s)
+        return parse_handicap_value(value)
 
     def _safe_match_date(self, date_str: str) -> Optional[datetime]:
         try:

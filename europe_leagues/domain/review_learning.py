@@ -548,17 +548,14 @@ class PredictionReviewLearningService:
     def _preview_items(items: List[Dict[str, Any]], limit: int = 6) -> List[Dict[str, Any]]:
         return items[: max(0, int(limit))]
 
-    def build_summary(self, *, days: int = 30, sample_limit: int = 12) -> Dict[str, Any]:
-        completed = self._load_completed_samples(days=days)
-        reviewed = completed[: max(1, int(sample_limit or 12))]
-
+    def _build_learning_context_bundle(self, reviewed: List[Dict[str, Any]]) -> Dict[str, Any]:
         score_candidates = [item for item in reviewed if item.get("predicted_scores")]
         score_hits = [item for item in score_candidates if str(item.get("actual_score") or "") in list(item.get("predicted_scores") or [])]
         score_misses = [item for item in (self._classify_score_miss(sample) for sample in reviewed) if item]
 
-        ou_candidates = []
+        ou_candidates: List[Dict[str, Any]] = []
         ou_hits = 0
-        ou_misses = []
+        ou_misses: List[Dict[str, Any]] = []
         for sample in reviewed:
             predicted_ou = sample.get("predicted_ou") if isinstance(sample.get("predicted_ou"), dict) else None
             actual_pair = self._parse_score(str(sample.get("actual_score") or ""))
@@ -582,7 +579,6 @@ class PredictionReviewLearningService:
 
         score_reason_counts = self._count_tags(score_misses)
         ou_reason_counts = self._count_tags(ou_misses)
-
         score_miss_count = len(score_misses)
         ou_miss_count = len(ou_misses)
         score_sample_count = len(score_candidates)
@@ -603,7 +599,6 @@ class PredictionReviewLearningService:
             "recommended_home_goal_boost": round(min(0.08, 0.01 + score_reason_counts.get("主队进球上沿低估", 0) * 0.01), 4) if score_miss_count else 0.0,
             "recommended_low_total_penalty": round(min(0.05, 0.01 + score_reason_counts.get("总进球低估", 0) * 0.005), 4) if score_miss_count else 0.0,
         }
-
         ou_bias = {
             "available": ou_miss_count > 0,
             "sample_count": ou_sample_count,
@@ -627,6 +622,36 @@ class PredictionReviewLearningService:
             recommendations.append("大小球对 2.5/3.5 附近盘口减少机械压小，强势主队场景增加向上偏置。")
         if ou_bias["over_to_under_rate"] >= 0.25:
             recommendations.append("对杯赛或单边哑火风险场景保留 1-0/0-0/0-1 等低转化分支。")
+
+        return {
+            "score_bias": score_bias,
+            "over_under_bias": ou_bias,
+            "recommendations": recommendations,
+            "score_review": {
+                "sample_count": score_sample_count,
+                "hit_count": len(score_hits),
+                "miss_count": score_miss_count,
+                "miss_rate": round(score_miss_count / score_sample_count, 4) if score_sample_count else 0.0,
+                "reason_counts": score_reason_counts,
+                "miss_examples": self._preview_items(score_misses),
+            },
+            "over_under_review": {
+                "sample_count": ou_sample_count,
+                "hit_count": ou_hits,
+                "miss_count": ou_miss_count,
+                "miss_rate": round(ou_miss_count / ou_sample_count, 4) if ou_sample_count else 0.0,
+                "reason_counts": ou_reason_counts,
+                "miss_examples": self._preview_items(ou_misses),
+            },
+        }
+
+    def build_summary(self, *, days: int = 30, sample_limit: int = 12) -> Dict[str, Any]:
+        completed = self._load_completed_samples(days=days)
+        reviewed = completed[: max(1, int(sample_limit or 12))]
+        learning_bundle = self._build_learning_context_bundle(reviewed)
+        score_bias = learning_bundle["score_bias"]
+        ou_bias = learning_bundle["over_under_bias"]
+        recommendations = list(learning_bundle["recommendations"])
 
         outcome_stratified_review = self._build_outcome_stratified_review(completed)
         three_layer_outcome_review = self._build_three_layer_outcome_review(completed)
@@ -674,6 +699,17 @@ class PredictionReviewLearningService:
                         if actual_side != side:
                             bucket["ou_miss_count"] += 1
 
+        learning_context_by_league: Dict[str, Dict[str, Any]] = {}
+        for league_code in sorted({str(sample.get("league") or "").strip() for sample in reviewed if str(sample.get("league") or "").strip()}):
+            league_reviewed = [sample for sample in reviewed if str(sample.get("league") or "").strip() == league_code]
+            league_bundle = self._build_learning_context_bundle(league_reviewed)
+            learning_context_by_league[league_code] = {
+                "reviewed_sample_count": len(league_reviewed),
+                "score_bias": league_bundle["score_bias"],
+                "over_under_bias": league_bundle["over_under_bias"],
+                "recommendations": list(league_bundle["recommendations"]),
+            }
+
         reviewed_preview = [
             {
                 "match_id": sample.get("match_id"),
@@ -696,26 +732,13 @@ class PredictionReviewLearningService:
             "completed_sample_count": len(completed),
             "reviewed_sample_count": len(reviewed),
             "reviewed_matches": reviewed_preview,
-            "score_review": {
-                "sample_count": score_sample_count,
-                "hit_count": len(score_hits),
-                "miss_count": score_miss_count,
-                "miss_rate": round(score_miss_count / score_sample_count, 4) if score_sample_count else 0.0,
-                "reason_counts": score_reason_counts,
-                "miss_examples": self._preview_items(score_misses),
-            },
-            "over_under_review": {
-                "sample_count": ou_sample_count,
-                "hit_count": ou_hits,
-                "miss_count": ou_miss_count,
-                "miss_rate": round(ou_miss_count / ou_sample_count, 4) if ou_sample_count else 0.0,
-                "reason_counts": ou_reason_counts,
-                "miss_examples": self._preview_items(ou_misses),
-            },
+            "score_review": learning_bundle["score_review"],
+            "over_under_review": learning_bundle["over_under_review"],
             "learning_context": {
                 "score_bias": score_bias,
                 "over_under_bias": ou_bias,
                 "recommendations": recommendations,
+                "by_league": learning_context_by_league,
             },
             "league_overview": league_overview,
             "outcome_stratified_review": {
@@ -766,9 +789,17 @@ class PredictionReviewLearningService:
         three_layer_league = three_layer_by_league.get(league_code) if isinstance(three_layer_by_league.get(league_code), dict) else {}
         three_layer_overall = three_layer_outcome_review.get("overall") if isinstance(three_layer_outcome_review.get("overall"), dict) else {}
         selected_three_layer_review = three_layer_league or three_layer_overall
-        recommendations = list(learning_context.get("recommendations") or [])
-        score_bias = learning_context.get("score_bias") if isinstance(learning_context.get("score_bias"), dict) else {}
-        ou_bias = learning_context.get("over_under_bias") if isinstance(learning_context.get("over_under_bias"), dict) else {}
+        learning_by_league = learning_context.get("by_league") if isinstance(learning_context.get("by_league"), dict) else {}
+        league_learning_bundle = learning_by_league.get(league_code) if isinstance(learning_by_league.get(league_code), dict) else {}
+        recommendations = list(league_learning_bundle.get("recommendations") or []) + list(learning_context.get("recommendations") or [])
+        overall_score_bias = learning_context.get("score_bias") if isinstance(learning_context.get("score_bias"), dict) else {}
+        overall_ou_bias = learning_context.get("over_under_bias") if isinstance(learning_context.get("over_under_bias"), dict) else {}
+        league_score_bias = league_learning_bundle.get("score_bias") if isinstance(league_learning_bundle.get("score_bias"), dict) else {}
+        league_ou_bias = league_learning_bundle.get("over_under_bias") if isinstance(league_learning_bundle.get("over_under_bias"), dict) else {}
+        use_league_score_bias = bool(league_score_bias.get("available"))
+        use_league_ou_bias = bool(league_ou_bias.get("available"))
+        score_bias = league_score_bias if use_league_score_bias else overall_score_bias
+        ou_bias = league_ou_bias if use_league_ou_bias else overall_ou_bias
         completed_count = int(league_review_bucket.get("completed_count") or 0)
         prediction_count = int(league_review_bucket.get("prediction_count") or 0)
         unpredicted_completed_count = int(league_review_bucket.get("unpredicted_completed_count") or 0)
@@ -837,5 +868,7 @@ class PredictionReviewLearningService:
             "three_layer_outcome_review": selected_three_layer_review,
             "score_bias": score_bias,
             "over_under_bias": ou_bias,
+            "score_bias_scope": "league" if use_league_score_bias else "overall",
+            "over_under_bias_scope": "league" if use_league_ou_bias else "overall",
             "recommendations": deduped_recommendations[:5],
         }

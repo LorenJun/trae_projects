@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from domain.odds import resolve_over_under_line
 from models import DixonColesModel
-from runtime.debug_events import emit_local_debug_event
 
 
 class InferencePipelineService:
@@ -48,6 +47,70 @@ class InferencePipelineService:
             return float(s)
         except Exception:
             return None
+
+    @staticmethod
+    def _rerank_scores_for_under_three(
+        score_probs: Optional[Dict[str, Any]],
+        over_under: Optional[Dict[str, Any]],
+    ) -> Tuple[List[Tuple[str, float]], Dict[str, Any]]:
+        ranked = sorted(
+            ((str(score), float(prob or 0.0)) for score, prob in (score_probs or {}).items()),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        diag: Dict[str, Any] = {
+            'applied': False,
+            'reason': 'guard_not_triggered',
+            'line': None,
+            'over': None,
+            'under': None,
+            'penalties': {},
+        }
+        if not ranked or not isinstance(over_under, dict):
+            diag['reason'] = 'missing_score_probs_or_over_under'
+            return ranked[:3], diag
+
+        line = InferencePipelineService._to_float(over_under.get('line'))
+        over_prob = InferencePipelineService._to_float(over_under.get('over'))
+        under_prob = InferencePipelineService._to_float(over_under.get('under'))
+        diag['line'] = line
+        diag['over'] = over_prob
+        diag['under'] = under_prob
+        if line is None or over_prob is None or under_prob is None:
+            diag['reason'] = 'invalid_over_under_payload'
+            return ranked[:3], diag
+        if line > 3.0 or under_prob <= over_prob:
+            diag['reason'] = 'not_under_three'
+            return ranked[:3], diag
+
+        if line <= 2.5:
+            factors = {'3-1': 0.64, '2-2': 0.74}
+            diag['line_bucket'] = '<=2.5'
+        elif line <= 2.75:
+            factors = {'3-1': 0.72, '2-2': 0.8}
+            diag['line_bucket'] = '<=2.75'
+        else:
+            factors = {'3-1': 0.72, '2-2': 0.86}
+            diag['line_bucket'] = '<=3.0'
+        adjusted = dict(ranked)
+        penalties: Dict[str, float] = {}
+        diag['factors'] = factors
+        for score, factor in factors.items():
+            if score not in adjusted:
+                continue
+            original = float(adjusted[score])
+            adjusted[score] = original * factor
+            penalties[score] = round(original - adjusted[score], 6)
+
+        reranked = sorted(adjusted.items(), key=lambda item: item[1], reverse=True)
+        if penalties:
+            diag['applied'] = True
+            diag['reason'] = 'under_three_score_penalty'
+            diag['signals'] = ['under3-score-consistency-guard']
+            diag['penalties'] = penalties
+        else:
+            diag['reason'] = 'target_scores_missing'
+        return reranked[:3], diag
 
     @staticmethod
     def _parse_handicap_value(value: Any) -> Optional[float]:
@@ -414,120 +477,6 @@ class InferencePipelineService:
         })
         return new_home_lambda, new_away_lambda, diag
 
-    def apply_market_ou_calibration(
-        self,
-        *,
-        home_lambda: float,
-        away_lambda: float,
-        current_odds: Optional[Dict[str, Any]],
-    ) -> Tuple[float, float, Dict[str, Any]]:
-        diag: Dict[str, Any] = {'applied': False, 'source': 'market_ou_line'}
-        if not isinstance(current_odds, dict):
-            diag['reason'] = 'missing_current_odds'
-            return home_lambda, away_lambda, diag
-        totals = current_odds.get('大小球')
-        if not isinstance(totals, dict):
-            diag['reason'] = 'missing_totals_block'
-            return home_lambda, away_lambda, diag
-        final = totals.get('final') if isinstance(totals.get('final'), dict) else {}
-        initial = totals.get('initial') if isinstance(totals.get('initial'), dict) else {}
-        final_line = self._to_float(final.get('line') if final.get('line') is not None else final.get('盘口'))
-        initial_line = self._to_float(initial.get('line') if initial.get('line') is not None else initial.get('盘口'))
-        if not isinstance(final_line, float):
-            diag['reason'] = 'missing_final_line'
-            return home_lambda, away_lambda, diag
-
-        def _market_probs(block: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
-            over_odds = self._to_float(block.get('over'))
-            under_odds = self._to_float(block.get('under'))
-            if (
-                not isinstance(over_odds, float)
-                or not isinstance(under_odds, float)
-                or over_odds <= 1.01
-                or under_odds <= 1.01
-            ):
-                return None, None
-            implied_over = 1.0 / over_odds
-            implied_under = 1.0 / under_odds
-            implied_total = implied_over + implied_under
-            if implied_total <= 0:
-                return None, None
-            return implied_over / implied_total, implied_under / implied_total
-
-        final_over_prob, final_under_prob = _market_probs(final)
-        initial_over_prob, initial_under_prob = _market_probs(initial)
-
-        bias_final = 0.0
-        if isinstance(final_over_prob, float) and isinstance(final_under_prob, float):
-            bias_final = final_over_prob - final_under_prob
-        bias_move = 0.0
-        if (
-            isinstance(final_over_prob, float)
-            and isinstance(initial_over_prob, float)
-            and isinstance(final_under_prob, float)
-            and isinstance(initial_under_prob, float)
-        ):
-            bias_move = (final_over_prob - final_under_prob) - (initial_over_prob - initial_under_prob)
-        line_move = 0.0
-        if isinstance(initial_line, float):
-            line_move = final_line - initial_line
-
-        target_total = float(final_line)
-        target_total += max(-0.22, min(0.22, bias_final * 0.45))
-        target_total += max(-0.16, min(0.16, line_move * 0.55))
-        target_total += max(-0.10, min(0.10, bias_move * 0.30))
-        target_total = max(final_line - 0.45, min(final_line + 0.45, target_total))
-
-        blend_weight = 0.34
-        if isinstance(final_over_prob, float) and isinstance(final_under_prob, float):
-            blend_weight += 0.12
-        if isinstance(initial_line, float):
-            blend_weight += min(0.08, abs(line_move) * 0.20)
-        if abs(bias_move) >= 0.08:
-            blend_weight += 0.06
-        blend_weight = max(0.22, min(0.58, blend_weight))
-
-        min_lambda = 0.15
-        base_total = max(0.6, float(home_lambda) + float(away_lambda))
-        share = float(home_lambda) / base_total if base_total > 0 else 0.5
-        share = max(0.0, min(1.0, share))
-        adjusted_total = base_total * (1.0 - blend_weight) + target_total * blend_weight
-        adjusted_total = max(0.8, min(4.4, adjusted_total))
-        if adjusted_total <= min_lambda * 2:
-            new_home_lambda = adjusted_total * share
-            new_away_lambda = adjusted_total - new_home_lambda
-        else:
-            bounded_share_min = min_lambda / adjusted_total
-            bounded_share = max(bounded_share_min, min(1.0 - bounded_share_min, share))
-            new_home_lambda = adjusted_total * bounded_share
-            new_away_lambda = adjusted_total - new_home_lambda
-
-        diag.update({
-            'applied': True,
-            'line_final': round(float(final_line), 3),
-            'line_initial': round(float(initial_line), 3) if isinstance(initial_line, float) else None,
-            'line_move': round(float(line_move), 3),
-            'market_bias_final': round(float(bias_final), 4),
-            'market_bias_move': round(float(bias_move), 4),
-            'target_total': round(float(target_total), 3),
-            'blend_weight': round(float(blend_weight), 4),
-            'base_lambda': {
-                'home': round(float(home_lambda), 3),
-                'away': round(float(away_lambda), 3),
-                'total': round(float(base_total), 3),
-            },
-            'adjusted_lambda': {
-                'home': round(float(new_home_lambda), 3),
-                'away': round(float(new_away_lambda), 3),
-                'total': round(float(new_home_lambda + new_away_lambda), 3),
-            },
-            'final_market_probs': {
-                'over': round(float(final_over_prob), 4) if isinstance(final_over_prob, float) else None,
-                'under': round(float(final_under_prob), 4) if isinstance(final_under_prob, float) else None,
-            },
-        })
-        return new_home_lambda, new_away_lambda, diag
-
     def apply_live_outcome_adjustment(
         self,
         league_code: str,
@@ -538,6 +487,33 @@ class InferencePipelineService:
         diag: Dict[str, Any] = {'applied': False, 'signals': [], 'delta': {}}
         if not isinstance(final_prob, dict) or not isinstance(current_odds, dict):
             return final_prob, diag
+
+        def _boost_side(
+            home_prob: float,
+            draw_prob: float,
+            away_prob: float,
+            *,
+            side: str,
+            amount: float,
+        ) -> Tuple[float, float, float, float]:
+            if amount <= 0:
+                return home_prob, draw_prob, away_prob, 0.0
+            pools = {
+                'home': max(0.0, home_prob - 0.05),
+                'draw': max(0.0, draw_prob - 0.05),
+                'away': max(0.0, away_prob - 0.05),
+            }
+            donors = [name for name in ('home', 'draw', 'away') if name != side and pools[name] > 0]
+            available = sum(pools[name] for name in donors)
+            take = min(amount, available)
+            if take <= 0:
+                return home_prob, draw_prob, away_prob, 0.0
+            probs = {'home': home_prob, 'draw': draw_prob, 'away': away_prob}
+            for donor in donors:
+                share = take * (pools[donor] / available) if available > 0 else 0.0
+                probs[donor] -= share
+            probs[side] += take
+            return probs['home'], probs['draw'], probs['away'], take
 
         def _pick(d: Dict[str, Any], *keys: str) -> Any:
             current: Any = d
@@ -580,6 +556,7 @@ class InferencePipelineService:
         if total <= 0:
             return final_prob, diag
         p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
+        original_probs = {'home_win': p_h, 'draw': p_d, 'away_win': p_a}
 
         euro = current_odds.get('欧赔')
         asian = current_odds.get('亚值')
@@ -614,14 +591,20 @@ class InferencePipelineService:
             water_drift = True
 
         draw_boost = 0.0
-        if isinstance(fav_odds, float) and fav_odds <= 1.60 and deep_handicap and giver == fav_side:
-            draw_boost += 0.01
-            diag['signals'].append('低赔深让强侧')
+        if isinstance(fav_odds, float) and fav_odds <= 1.60:
+            draw_boost += 0.04
+            diag['signals'].append('低赔强侧(<=1.60)')
+        if deep_handicap and giver == fav_side:
+            draw_boost += 0.03
+            diag['signals'].append('深让>=0.75')
+        if very_deep_handicap and giver == fav_side:
+            draw_boost += 0.03
+            diag['signals'].append('强让>=1.0')
         if retreat and giver == fav_side and very_deep_handicap:
-            draw_boost += 0.02
+            draw_boost += 0.03
             diag['signals'].append('强让退盘')
         if water_drift and giver == fav_side and very_deep_handicap:
-            draw_boost += 0.015
+            draw_boost += 0.02
             diag['signals'].append('强侧水位走高')
         if isinstance(kd, float) and kd <= 0.95:
             draw_boost += 0.01
@@ -637,8 +620,70 @@ class InferencePipelineService:
         except Exception:
             pass
 
-        draw_boost = min(0.05, max(0.0, draw_boost))
+        market_alignment_diag: Dict[str, Any] = {}
+        try:
+            if isinstance(historical_odds_reference, dict):
+                market_alignment = historical_odds_reference.get('market_alignment') or {}
+                aligned_count = int(market_alignment.get('aligned_count') or 0)
+                avg_alignment_score = float(market_alignment.get('avg_alignment_score') or 0.0)
+                dominant_direction = str(market_alignment.get('dominant_direction') or 'balanced')
+                same_psychology_count = int(market_alignment.get('same_psychology_count') or 0)
+                same_capital_flow_count = int(market_alignment.get('same_capital_flow_count') or 0)
+                same_totals_direction_count = int(market_alignment.get('same_totals_direction_count') or 0)
+                side_boost = 0.0
+                if dominant_direction in ('home', 'draw', 'away') and aligned_count >= 2 and avg_alignment_score >= 0.45:
+                    side_boost += min(0.024, 0.008 + avg_alignment_score * 0.02)
+                    if same_psychology_count >= 2:
+                        side_boost += 0.006
+                        diag['signals'].append('历史盘口操盘手法一致')
+                    if same_capital_flow_count >= 2:
+                        side_boost += 0.008
+                        diag['signals'].append('历史盘口资金走向一致')
+                    if same_totals_direction_count >= 2:
+                        side_boost += 0.004
+                        diag['signals'].append('历史盘口节奏方向一致')
+                    if aligned_count >= 3:
+                        side_boost += 0.004
+                    side_boost = min(0.05, side_boost)
+                    p_h, p_d, p_a, applied_take = _boost_side(
+                        p_h,
+                        p_d,
+                        p_a,
+                        side=dominant_direction,
+                        amount=side_boost,
+                    )
+                    if applied_take > 0:
+                        diag['signals'].append('历史盘口轨迹同向加权')
+                        market_alignment_diag = {
+                            'applied': True,
+                            'dominant_direction': dominant_direction,
+                            'aligned_count': aligned_count,
+                            'avg_alignment_score': round(avg_alignment_score, 4),
+                            'same_psychology_count': same_psychology_count,
+                            'same_capital_flow_count': same_capital_flow_count,
+                            'same_totals_direction_count': same_totals_direction_count,
+                            'applied_boost': round(applied_take, 6),
+                            'aligned_match_ids': market_alignment.get('aligned_match_ids') or [],
+                        }
+        except Exception:
+            market_alignment_diag = {}
+
+        draw_boost = min(0.10, max(0.0, draw_boost))
         if draw_boost <= 0:
+            if market_alignment_diag.get('applied'):
+                total2 = p_h + p_d + p_a
+                if total2 > 0:
+                    p_h, p_d, p_a = p_h / total2, p_d / total2, p_a / total2
+                diag['applied'] = True
+                diag['delta'] = {
+                    'home_win': round(p_h - original_probs['home_win'], 6),
+                    'draw': round(p_d - original_probs['draw'], 6),
+                    'away_win': round(p_a - original_probs['away_win'], 6),
+                }
+                diag['fav'] = {'side': fav_side, 'odds': fav_odds}
+                diag['asian'] = {'handicap_initial': hcp_i, 'handicap_final': hcp_f, 'giver': giver, 'retreat': retreat, 'water_drift': water_drift}
+                diag['historical_market_alignment'] = market_alignment_diag
+                return {'home_win': p_h, 'draw': p_d, 'away_win': p_a}, diag
             return final_prob, diag
         if fav_side == 'home':
             take = min(draw_boost, max(0.0, p_h - 0.05))
@@ -663,12 +708,14 @@ class InferencePipelineService:
 
         diag['applied'] = True
         diag['delta'] = {
-            'home_win': round(p_h - float(final_prob.get('home_win') or 0.0), 6),
-            'draw': round(p_d - float(final_prob.get('draw') or 0.0), 6),
-            'away_win': round(p_a - float(final_prob.get('away_win') or 0.0), 6),
+            'home_win': round(p_h - original_probs['home_win'], 6),
+            'draw': round(p_d - original_probs['draw'], 6),
+            'away_win': round(p_a - original_probs['away_win'], 6),
         }
         diag['fav'] = {'side': fav_side, 'odds': fav_odds}
         diag['asian'] = {'handicap_initial': hcp_i, 'handicap_final': hcp_f, 'giver': giver, 'retreat': retreat, 'water_drift': water_drift}
+        if market_alignment_diag.get('applied'):
+            diag['historical_market_alignment'] = market_alignment_diag
         return {'home_win': p_h, 'draw': p_d, 'away_win': p_a}, diag
 
     def build_real_market_over_under(
@@ -676,8 +723,6 @@ class InferencePipelineService:
         *,
         home_lambda: float,
         away_lambda: float,
-        predicted_outcome: str,
-        strength_diff: float,
         current_odds: Optional[Dict[str, Any]],
         analysis_context: Dict[str, Any],
         match_intelligence: Optional[Dict[str, Any]],
@@ -739,133 +784,6 @@ class InferencePipelineService:
                 'line_source': ou_line_source,
             }
         )
-        try:
-            refined = dict(over_under)
-            total_lambda = max(0.3, float(home_lambda) + float(away_lambda))
-            over_prob = self._to_float(refined.get('over'))
-            under_prob = self._to_float(refined.get('under'))
-            review_learning = analysis_context.get('review_learning') if isinstance(analysis_context, dict) else {}
-            review_ou_bias = review_learning.get('over_under_bias') if isinstance(review_learning, dict) and isinstance(review_learning.get('over_under_bias'), dict) else {}
-            three_layer_context = self.postprocess_service.build_three_layer_runtime_context(
-                predicted_outcome_label=predicted_outcome,
-                strength_diff=strength_diff,
-                current_odds=current_odds,
-                review_learning=review_learning if isinstance(review_learning, dict) else None,
-            )
-            market_over = None
-            market_under = None
-            totals_block = current_odds.get('大小球') if isinstance(current_odds, dict) else None
-            final_totals = totals_block.get('final') if isinstance(totals_block, dict) and isinstance(totals_block.get('final'), dict) else {}
-            if isinstance(final_totals, dict):
-                market_over_odds = self._to_float(final_totals.get('over'))
-                market_under_odds = self._to_float(final_totals.get('under'))
-                if (
-                    isinstance(market_over_odds, float)
-                    and isinstance(market_under_odds, float)
-                    and market_over_odds > 1.01
-                    and market_under_odds > 1.01
-                ):
-                    implied_over = 1.0 / market_over_odds
-                    implied_under = 1.0 / market_under_odds
-                    implied_total = implied_over + implied_under
-                    if implied_total > 0:
-                        market_over = implied_over / implied_total
-                        market_under = implied_under / implied_total
-
-            if isinstance(over_prob, float) and isinstance(under_prob, float):
-                blended_over = over_prob
-                blended_under = under_prob
-                if isinstance(market_over, float) and isinstance(market_under, float):
-                    blended_over = over_prob * 0.76 + market_over * 0.24
-                    blended_under = under_prob * 0.76 + market_under * 0.24
-
-                lambda_gap = total_lambda - float(ou_line)
-                structure_bias = max(-0.10, min(0.10, lambda_gap * 0.16))
-                structure_strength_hint = float((match_intelligence or {}).get('strength_diff_hint') or 0.0)
-                if abs(structure_strength_hint) >= 18 and max(home_lambda, away_lambda) >= 1.9:
-                    structure_bias += 0.02
-                if min(home_lambda, away_lambda) >= 0.95 and total_lambda >= max(2.7, float(ou_line)):
-                    structure_bias += 0.015
-                learning_diag = realtime_context_applied.get('league_over_under_learning', {}) if isinstance(realtime_context_applied, dict) else {}
-                if isinstance(learning_diag, dict) and learning_diag.get('applied'):
-                    if float(learning_diag.get('over25_rate') or 0.0) >= 0.60:
-                        structure_bias += 0.015
-                    if float(learning_diag.get('over35_rate') or 0.0) >= 0.28:
-                        structure_bias += 0.01
-                    if float(learning_diag.get('clean_sheet_rate') or 0.0) >= 0.55 and total_lambda <= float(ou_line):
-                        structure_bias -= 0.01
-
-                review_shift = 0.0
-                if isinstance(review_ou_bias, dict) and review_ou_bias.get('available'):
-                    under_to_over_rate = float(review_ou_bias.get('under_to_over_rate') or 0.0)
-                    over_to_under_rate = float(review_ou_bias.get('over_to_under_rate') or 0.0)
-                    home_win_under_to_over_rate = float(review_ou_bias.get('home_win_under_to_over_rate') or 0.0)
-                    low_conversion_overheat_rate = float(review_ou_bias.get('low_conversion_overheat_rate') or 0.0)
-                    if under_to_over_rate >= 0.5 and total_lambda >= float(ou_line) - 0.45:
-                        review_shift += float(review_ou_bias.get('recommended_over_shift') or 0.0)
-                        if home_win_under_to_over_rate >= 0.4 and max(home_lambda, away_lambda) >= 1.6:
-                            review_shift += 0.006
-                    if over_to_under_rate >= 0.25 and total_lambda <= float(ou_line) + 0.25:
-                        review_shift -= min(float(review_ou_bias.get('recommended_under_shift') or 0.0), 0.018)
-                        if low_conversion_overheat_rate >= 0.25 and min(home_lambda, away_lambda) <= 0.95:
-                            review_shift -= 0.004
-                    structure_bias += review_shift
-
-                three_layer_shift = 0.0
-                scenario_name = str(three_layer_context.get('scenario_name') or '')
-                history_available = bool(three_layer_context.get('history_available'))
-                euro_support_bucket = str(three_layer_context.get('euro_support_bucket') or '')
-                base_draw_signal = float(three_layer_context.get('base_draw_signal') or 0.0)
-                base_upset_signal = float(three_layer_context.get('base_upset_signal') or 0.0)
-                if scenario_name == 'strong_home_shallow_line':
-                    three_layer_shift -= 0.008 if history_available else 0.004
-                    if euro_support_bucket in {'draw_guarded', 'market_opposes'}:
-                        three_layer_shift -= 0.004
-                    if total_lambda >= float(ou_line) + 0.35 and euro_support_bucket in {'strong_support', 'support'}:
-                        three_layer_shift += 0.004
-                    three_layer_shift -= min(0.006, base_draw_signal * 0.5)
-                elif scenario_name == 'away_shallow_market_doubt':
-                    three_layer_shift -= 0.01 if history_available else 0.006
-                    if euro_support_bucket == 'market_opposes':
-                        three_layer_shift -= 0.004
-                    three_layer_shift -= min(0.006, base_upset_signal * 0.4)
-                elif scenario_name in {'balanced_draw_guard', 'draw_market_balance'}:
-                    three_layer_shift -= 0.012 if history_available else 0.007
-                    if euro_support_bucket in {'draw_supported', 'draw_live'}:
-                        three_layer_shift -= 0.003
-                    if total_lambda >= float(ou_line) + 0.55:
-                        three_layer_shift += 0.003
-                structure_bias += three_layer_shift
-
-                blended_over = max(0.05, min(0.95, blended_over + structure_bias))
-                blended_under = max(0.05, min(0.95, blended_under - structure_bias))
-                norm = blended_over + blended_under
-                if norm > 0:
-                    refined['over'] = blended_over / norm
-                    refined['under'] = blended_under / norm
-                    refined['total_lambda'] = total_lambda
-                    refined['pre_rebalance'] = {'over': round(over_prob, 6), 'under': round(under_prob, 6)}
-                    refined['push'] = float(refined.get('push') or 0.0)
-                    diag['refined'] = {
-                        'market_blended': isinstance(market_over, float) and isinstance(market_under, float),
-                        'lambda_gap': round(lambda_gap, 4),
-                        'structure_bias': round(structure_bias, 4),
-                        'review_shift': round(review_shift, 4),
-                        'three_layer_shift': round(three_layer_shift, 4),
-                        'three_layer_context': {
-                            'scenario_name': scenario_name,
-                            'history_available': history_available,
-                            'euro_support_bucket': euro_support_bucket,
-                            'handicap_depth_bucket': three_layer_context.get('handicap_depth_bucket'),
-                            'strength_gap_bucket': three_layer_context.get('strength_gap_bucket'),
-                        },
-                        'over': round(float(refined['over']), 6),
-                        'under': round(float(refined['under']), 6),
-                        'push': round(float(refined.get('push') or 0.0), 6),
-                    }
-                    over_under = refined
-        except Exception as exc:
-            diag['refine_error'] = str(exc)
         return over_under, diag
 
     def apply_real_totals_outcome_adjustment(
@@ -926,6 +844,13 @@ class InferencePipelineService:
             combined_bias -= 0.01
         combined_bias = max(-0.18, min(0.18, combined_bias))
 
+        draw_delta = max(-0.02, min(0.03, combined_bias * 0.18))
+        if abs(draw_delta) < 0.004:
+            diag['reason'] = 'bias_below_threshold'
+            diag['line'] = round(float(line), 3)
+            diag['combined_bias'] = round(float(combined_bias), 4)
+            return final_prob, diag
+
         p_h = float(final_prob.get('home_win') or 0.0)
         p_d = float(final_prob.get('draw') or 0.0)
         p_a = float(final_prob.get('away_win') or 0.0)
@@ -934,17 +859,6 @@ class InferencePipelineService:
             diag['reason'] = 'invalid_probability_mass'
             return final_prob, diag
         p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
-
-        side_gap = abs(p_h - p_a)
-        closeness = max(0.0, min(1.0, 1.0 - (side_gap / 0.22)))
-        draw_delta = max(-0.012, min(0.015, combined_bias * 0.10 * closeness))
-        if abs(draw_delta) < 0.005 or closeness <= 0.18:
-            diag['reason'] = 'bias_below_threshold'
-            diag['line'] = round(float(line), 3)
-            diag['combined_bias'] = round(float(combined_bias), 4)
-            diag['side_gap'] = round(float(side_gap), 4)
-            diag['closeness'] = round(float(closeness), 4)
-            return final_prob, diag
 
         side_mass = max(1e-9, p_h + p_a)
         home_share = p_h / side_mass
@@ -985,8 +899,6 @@ class InferencePipelineService:
                 'model_bias': round(float(model_bias), 4),
                 'market_bias': round(float(market_bias), 4),
                 'combined_bias': round(float(combined_bias), 4),
-                'side_gap': round(float(side_gap), 4),
-                'closeness': round(float(closeness), 4),
                 'draw_delta': round(float(actual_delta), 4),
                 'effect': 'under_to_draw' if actual_delta > 0 else 'over_reduce_draw',
                 'adjusted_probabilities': {
@@ -1082,15 +994,6 @@ class InferencePipelineService:
         except Exception as exc:
             realtime['context_applied']['league_over_under_learning'] = {'applied': False, 'error': str(exc)}
         try:
-            home_lambda, away_lambda, market_ou_diag = self.apply_market_ou_calibration(
-                home_lambda=home_lambda,
-                away_lambda=away_lambda,
-                current_odds=current_odds,
-            )
-            realtime['context_applied']['market_ou_lambda_calibration'] = market_ou_diag
-        except Exception as exc:
-            realtime['context_applied']['market_ou_lambda_calibration'] = {'applied': False, 'error': str(exc)}
-        try:
             quant_adjustment = match_intelligence.get('quant_adjustment') if isinstance(match_intelligence, dict) else {}
             if isinstance(quant_adjustment, dict):
                 home_scale = float(quant_adjustment.get('home_lambda_scale') or 1.0)
@@ -1155,9 +1058,6 @@ class InferencePipelineService:
             current_odds=current_odds,
             historical_odds_reference=historical_odds_reference,
         )
-        # #region debug-point B:live-and-ou-adjustment
-        emit_local_debug_event({"sessionId":"uniform-prediction-bias","runId":"pre-fix","hypothesisId":"B","location":"domain/inference.py:986","msg":"[DEBUG] before/after market adjustments","data":{"league_code":league_code,"home_team":home_team,"away_team":away_team,"pre_live_final_prob":final_prob,"live_adj_diag":live_adj_diag,"historical_odds_available":bool(isinstance(historical_odds_reference, dict) and historical_odds_reference.get("available")),"historical_sample_size":((historical_odds_reference or {}).get("summary") or {}).get("sample_size"),"has_current_odds":bool(current_odds),"ou_line_pre":((current_odds or {}).get("大小球") or {}).get("final", {}).get("line"),"asian_final":((current_odds or {}).get("亚值") or {}).get("final", {})}})
-        # #endregion
         if isinstance(live_adj_diag, dict) and live_adj_diag.get('applied'):
             final_prob = adjusted_prob
             ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
@@ -1165,69 +1065,20 @@ class InferencePipelineService:
         final_prob, match_intel_diag = self.match_intelligence_engine._apply_match_intelligence_adjustment(final_prob=final_prob, match_intelligence=match_intelligence)
         if isinstance(match_intel_diag, dict):
             realtime['context_applied']['match_intelligence_adjustment'] = match_intel_diag
-        review_learning = analysis_context.get('review_learning') if isinstance(analysis_context, dict) else {}
-        final_prob, review_outcome_diag = self.postprocess_service.apply_review_outcome_adjustment(
-            final_probabilities=final_prob,
-            strength_diff=strength_diff,
-            asian_handicap=asian_handicap,
-            current_odds=current_odds,
-            review_learning=review_learning if isinstance(review_learning, dict) else None,
-        )
-        realtime['context_applied']['review_outcome_adjustment'] = review_outcome_diag
-        if isinstance(review_outcome_diag, dict) and review_outcome_diag.get('applied'):
-            ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
-        # Ensure we always have a predicted_outcome label before building real-market O/U guards.
-        # Some branches only compute `main_prediction` later, but we need it here.
-        ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
-        main_prediction = ranked_probabilities[0][0] if ranked_probabilities else ""
-        confidence = ranked_probabilities[0][1] if ranked_probabilities else 0.0
         over_under, over_under_diag = self.build_real_market_over_under(
             home_lambda=home_lambda,
             away_lambda=away_lambda,
-            predicted_outcome=main_prediction,
-            strength_diff=strength_diff,
             current_odds=current_odds,
             analysis_context=analysis_context,
             match_intelligence=match_intelligence,
             realtime_context_applied=realtime['context_applied'],
         )
         realtime['context_applied']['over_under_guard'] = over_under_diag
-        if not isinstance(over_under, dict) or not over_under.get('available'):
-            blocked_reason = 'missing_real_market_line'
-            if isinstance(over_under, dict):
-                blocked_reason = str(over_under.get('reason') or blocked_reason)
-            realtime['context_applied']['prediction_gate'] = {
-                'blocked': True,
-                'reason': blocked_reason,
-                'stage': 'real_market_over_under_required',
-            }
-            return {
-                'prediction_blocked': True,
-                'blocked_reason': blocked_reason,
-                'blocked_stage': 'real_market_over_under_required',
-                'applied_weights': applied_weights,
-                'home_strength': home_strength,
-                'away_strength': away_strength,
-                'match_intelligence': match_intelligence,
-                'strength_diff': strength_diff,
-                'asian_handicap': asian_handicap,
-                'european_odds': european_odds,
-                'fusion_result': fusion_result,
-                'final_probabilities': final_prob,
-                'ranked_probabilities': ranked_probabilities,
-                'historical_odds_reference': historical_odds_reference,
-                'home_lambda': home_lambda,
-                'away_lambda': away_lambda,
-                'over_under': over_under,
-            }
         final_prob, real_ou_outcome_diag = self.apply_real_totals_outcome_adjustment(
             final_prob=final_prob,
             current_odds=current_odds,
             over_under=over_under,
         )
-        # #region debug-point A:post-market-adjustment
-        emit_local_debug_event({"sessionId":"uniform-prediction-bias","runId":"pre-fix","hypothesisId":"A","location":"domain/inference.py:1008","msg":"[DEBUG] final probabilities after market adjustments","data":{"league_code":league_code,"home_team":home_team,"away_team":away_team,"post_market_final_prob":final_prob,"real_ou_outcome_diag":real_ou_outcome_diag,"over_under":over_under,"match_intel_diag":match_intel_diag}})
-        # #endregion
         realtime['context_applied']['real_market_over_under_outcome_adjustment'] = real_ou_outcome_diag
         ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
         main_prediction = ranked_probabilities[0][0]
@@ -1255,7 +1106,11 @@ class InferencePipelineService:
         rho_map = {'premier_league': -0.08, 'la_liga': -0.10, 'serie_a': -0.12, 'bundesliga': -0.06, 'ligue_1': -0.10}
         dc_model = DixonColesModel(rho=rho_map.get(league_code, -0.10))
         score_result = dc_model.predict_with_dixon_coles(home_lambda, away_lambda)
-        top_scores = sorted(score_result['score_probs'].items(), key=lambda item: item[1], reverse=True)[:10]
+        top_scores, score_guard_diag = self._rerank_scores_for_under_three(
+            score_result.get('score_probs'),
+            over_under,
+        )
+        realtime['context_applied']['score_rerank_guard'] = score_guard_diag
         total_goals = self.postprocess_service.compute_total_goals_distribution(score_result.get('score_probs', {}), max_bucket=7)
 
         return {

@@ -152,10 +152,18 @@ def build_prediction_note(prediction: Dict[str, Any]) -> str:
     score_ou_note = format_score_ou_note(prediction)
     upset_note = format_upset_note(prediction.get('upset_potential'))
     applied_weights = prediction.get('applied_model_weights')
+    match_id = str(
+        prediction.get('match_id')
+        or prediction.get('external_match_id')
+        or prediction.get('internal_match_id')
+        or prediction.get('teams_match_id')
+        or ''
+    ).strip()
+    match_id_note = f'MatchID:{match_id}' if match_id else ''
     dyn = ''
     if isinstance(applied_weights, dict) and 'has_enough_samples' in applied_weights:
         dyn = '动态调权:已生效' if applied_weights.get('has_enough_samples') else '动态调权:样本不足'
-    return f"预测:{prediction_text} 信心:{confidence:.2f} {score_ou_note} {upset_note}{(' ' + dyn) if dyn else ''}".strip()
+    return f"预测:{prediction_text} 信心:{confidence:.2f} {score_ou_note} {upset_note}{(' ' + dyn) if dyn else ''}{(' ' + match_id_note) if match_id_note else ''}".strip()
 
 
 def update_teams_md_prediction_notes(

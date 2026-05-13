@@ -1,0 +1,2957 @@
+[
+  {
+    "match": "奥萨苏纳 vs 马德里竞技",
+    "league": "西甲",
+    "result": {
+      "league_code": "la_liga",
+      "league_name": "西甲",
+      "home_team": "奥萨苏纳",
+      "away_team": "马德里竞技",
+      "match_date": "2026-05-13",
+      "match_time": "",
+      "match_id": "1302907",
+      "external_match_id": "1302907",
+      "storage_mode": "runtime_only",
+      "prediction": "主胜",
+      "predicted_winner": "home",
+      "confidence": 0.37172691244177225,
+      "final_probabilities": {
+        "home_win": 0.37172691244177225,
+        "draw": 0.2725066118590591,
+        "away_win": 0.35576647569916864
+      },
+      "all_probabilities": {
+        "主胜": 0.37172691244177225,
+        "平局": 0.2725066118590591,
+        "客胜": 0.35576647569916864
+      },
+      "top_scores": [
+        [
+          "2-1",
+          0.2
+        ],
+        [
+          "1-0",
+          0.1426
+        ],
+        [
+          "2-0",
+          0.1161
+        ]
+      ],
+      "predicted_scores": [
+        "2-1",
+        "1-0",
+        "2-0"
+      ],
+      "over_under": {
+        "available": true,
+        "line": 2.5,
+        "over": 0.520980132450331,
+        "under": 0.47901986754966885,
+        "line_source": "snapshot_final",
+        "market": {
+          "final": {
+            "over": 1.8083,
+            "under": 1.9667,
+            "line": 2.5
+          }
+        }
+      },
+      "market_snapshot": {
+        "欧赔": {
+          "found": true,
+          "parsed": true,
+          "company": "Bet365",
+          "company_mode": "multi_company_consensus",
+          "initial": {
+            "home": 2.5277,
+            "draw": 3.366,
+            "away": 2.6032
+          },
+          "final": {
+            "home": 2.5166,
+            "draw": 3.4329,
+            "away": 2.6295
+          },
+          "delta": {
+            "home": -0.0111,
+            "draw": 0.0669,
+            "away": 0.0263
+          },
+          "consensus": {
+            "mode": "multi_company_consensus",
+            "company_count": 12,
+            "filtered_company_count": 12,
+            "companies": [
+              "Bet365",
+              "皇冠",
+              "澳门彩票",
+              "威廉希尔",
+              "易胜博",
+              "立博",
+              "12BET",
+              "Bwin",
+              "Interwetten",
+              "伟德",
+              "利记",
+              "香港马会"
+            ],
+            "all_companies": [
+              "Bet365",
+              "皇冠",
+              "澳门彩票",
+              "威廉希尔",
+              "易胜博",
+              "立博",
+              "12BET",
+              "Bwin",
+              "Interwetten",
+              "伟德",
+              "利记",
+              "香港马会"
+            ],
+            "final_median": {
+              "home": 2.55,
+              "draw": 3.5,
+              "away": 2.635
+            }
+          },
+          "companies": [
+            {
+              "company": "Bet365",
+              "initial": {
+                "home": 2.6,
+                "draw": 3.3,
+                "away": 2.6
+              },
+              "final": {
+                "home": 2.55,
+                "draw": 3.5,
+                "away": 2.63
+              },
+              "delta": {
+                "home": -0.05,
+                "draw": 0.2,
+                "away": 0.03
+              },
+              "_row_cells": [
+                "5",
+                "B!e#t365 英国",
+                "2.60",
+                "3.30",
+                "2.60",
+                "2.55",
+                "3.50",
+                "2.63 ↓",
+                "",
+                "37.06",
+                "27.00",
+                "35.94",
+                "0.95",
+                "0.95",
+                "0.94",
+                "0.95",
+                ""
+              ]
+            },
+            {
+              "company": "皇冠",
+              "initial": {
+                "home": 2.62,
+                "draw": 3.65,
+                "away": 2.59
+              },
+              "final": {
+                "home": 2.56,
+                "draw": 3.55,
+                "away": 2.68
+              },
+              "delta": {
+                "home": -0.06,
+                "draw": -0.1,
+                "away": 0.09
+              },
+              "_row_cells": [
+                "20",
+                "皇!冠 中国澳门",
+                "2.62",
+                "3.65",
+                "2.59",
+                "2.56",
+                "3.55",
+                "2.68 ↓",
+                "",
+                "37.36",
+                "26.94",
+                "35.70",
+                "0.96",
+                "0.96",
+                "0.96",
+                "0.96",
+                ""
+              ]
+            },
+            {
+              "company": "澳门彩票",
+              "initial": {
+                "home": 2.45,
+                "draw": 3.18,
+                "away": 2.55
+              },
+              "final": {
+                "home": 2.4,
+                "draw": 3.18,
+                "away": 2.6
+              },
+              "delta": {
+                "home": -0.05,
+                "draw": 0.0,
+                "away": 0.05
+              },
+              "_row_cells": [
+                "14",
+                "澳!门#彩!票 中国澳门",
+                "2.45",
+                "3.18",
+                "2.55",
+                "2.40 ↓",
+                "3.18",
+                "2.60 ↑",
+                "",
+                "37.35",
+                "28.18",
+                "34.47",
+                "0.90",
+                "0.86",
+                "0.93",
+                "0.90",
+                ""
+              ]
+            },
+            {
+              "company": "威廉希尔",
+              "initial": {
+                "home": 2.6,
+                "draw": 3.4,
+                "away": 2.5
+              },
+              "final": {
+                "home": 2.5,
+                "draw": 3.4,
+                "away": 2.5
+              },
+              "delta": {
+                "home": -0.1,
+                "draw": 0.0,
+                "away": 0.0
+              },
+              "_row_cells": [
+                "3",
+                "威!廉.#希!尔 英国",
+                "2.60",
+                "3.40",
+                "2.50",
+                "2.50 ↑",
+                "3.40",
+                "2.50 ↓",
+                "",
+                "36.56",
+                "26.88",
+                "36.56",
+                "0.93",
+                "0.92",
+                "0.89",
+                "0.91",
+                ""
+              ]
+            },
+            {
+              "company": "易胜博",
+              "initial": {
+                "home": 2.6,
+                "draw": 3.2,
+                "away": 2.6
+              },
+              "final": {
+                "home": 2.6,
+                "draw": 3.4,
+                "away": 2.7
+              },
+              "delta": {
+                "home": 0.0,
+                "draw": 0.2,
+                "away": 0.1
+              },
+              "_row_cells": [
+                "10",
+                "易!胜#博 英国",
+                "2.60",
+                "3.20",
+                "2.60",
+                "2.60",
+                "3.40 ↑",
+                "2.70",
+                "",
+                "36.66",
+                "28.04",
+                "35.30",
+                "0.97",
+                "0.92",
+                "0.96",
+                "0.95",
+                ""
+              ]
+            },
+            {
+              "company": "立博",
+              "initial": {
+                "home": 2.45,
+                "draw": 3.4,
+                "away": 2.7
+              },
+              "final": {
+                "home": 2.5,
+                "draw": 3.5,
+                "away": 2.62
+              },
+              "delta": {
+                "home": 0.05,
+                "draw": 0.1,
+                "away": -0.08
+              },
+              "_row_cells": [
+                "4",
+                "立!博 英国",
+                "2.45",
+                "3.40",
+                "2.70",
+                "2.50 ↑",
+                "3.50",
+                "2.62 ↓",
+                "",
+                "37.48",
+                "26.76",
+                "35.76",
+                "0.93",
+                "0.95",
+                "0.93",
+                "0.94",
+                ""
+              ]
+            },
+            {
+              "company": "12BET",
+              "initial": {
+                "home": 2.5,
+                "draw": 3.45,
+                "away": 2.58
+              },
+              "final": {
+                "home": 2.56,
+                "draw": 3.55,
+                "away": 2.64
+              },
+              "delta": {
+                "home": 0.06,
+                "draw": 0.1,
+                "away": 0.06
+              },
+              "_row_cells": [
+                "24",
+                "12bet.com 菲律宾",
+                "2.50",
+                "3.45",
+                "2.58",
+                "2.56",
+                "3.55 ↓",
+                "2.64 ↑",
+                "",
+                "37.16",
+                "26.80",
+                "36.04",
+                "0.96",
+                "0.96",
+                "0.94",
+                "0.95",
+                ""
+              ]
+            },
+            {
+              "company": "Bwin",
+              "initial": {
+                "home": 2.45,
+                "draw": 3.5,
+                "away": 2.75
+              },
+              "final": {
+                "home": 2.5,
+                "draw": 3.5,
+                "away": 2.65
+              },
+              "delta": {
+                "home": 0.05,
+                "draw": 0.0,
+                "away": -0.1
+              },
+              "_row_cells": [
+                "7",
+                "b!w#i!n 奥地利",
+                "2.45",
+                "3.50",
+                "2.75",
+                "2.50 ↑",
+                "3.50",
+                "2.65 ↓",
+                "",
+                "37.63",
+                "26.87",
+                "35.50",
+                "0.93",
+                "0.95",
+                "0.94",
+                "0.94",
+                ""
+              ]
+            },
+            {
+              "company": "Interwetten",
+              "initial": {
+                "home": 2.5,
+                "draw": 3.5,
+                "away": 2.75
+              },
+              "final": {
+                "home": 2.55,
+                "draw": 3.5,
+                "away": 2.7
+              },
+              "delta": {
+                "home": 0.05,
+                "draw": 0.0,
+                "away": -0.05
+              },
+              "_row_cells": [
+                "6",
+                "I!n#t!e#rwetten 马耳他",
+                "2.50",
+                "3.50",
+                "2.75",
+                "2.55",
+                "3.50",
+                "2.70 ↑",
+                "",
+                "37.41",
+                "27.26",
+                "35.33",
+                "0.95",
+                "0.95",
+                "0.96",
+                "0.95",
+                ""
+              ]
+            },
+            {
+              "company": "伟德",
+              "initial": {
+                "home": 2.5,
+                "draw": 3.3,
+                "away": 2.55
+              },
+              "final": {
+                "home": 2.55,
+                "draw": 3.5,
+                "away": 2.63
+              },
+              "delta": {
+                "home": 0.05,
+                "draw": 0.2,
+                "away": 0.08
+              },
+              "_row_cells": [
+                "9",
+                "伟!德#国!际 英国",
+                "2.50",
+                "3.30",
+                "2.55",
+                "2.55",
+                "3.50",
+                "2.63 ↓",
+                "",
+                "37.06",
+                "27.00",
+                "35.94",
+                "0.95",
+                "0.95",
+                "0.94",
+                "0.95",
+                ""
+              ]
+            },
+            {
+              "company": "利记",
+              "initial": {
+                "home": 2.5,
+                "draw": 3.21,
+                "away": 2.55
+              },
+              "final": {
+                "home": 2.56,
+                "draw": 3.31,
+                "away": 2.64
+              },
+              "delta": {
+                "home": 0.06,
+                "draw": 0.1,
+                "away": 0.09
+              },
+              "_row_cells": [
+                "22",
+                "利!记 菲律宾",
+                "2.50",
+                "3.21",
+                "2.55",
+                "2.56",
+                "3.31 ↓",
+                "2.64 ↑",
+                "",
+                "36.46",
+                "28.20",
+                "35.34",
+                "0.96",
+                "0.89",
+                "0.94",
+                "0.93",
+                ""
+              ]
+            },
+            {
+              "company": "香港马会",
+              "initial": {
+                "home": 2.32,
+                "draw": 3.2,
+                "away": 2.57
+              },
+              "final": {
+                "home": 2.31,
+                "draw": 3.25,
+                "away": 2.55
+              },
+              "delta": {
+                "home": -0.01,
+                "draw": 0.05,
+                "away": -0.02
+              },
+              "_row_cells": [
+                "8",
+                "香!港#马!会 中国香港",
+                "2.32",
+                "3.20",
+                "2.57",
+                "2.31 ↓",
+                "3.25 ↑",
+                "2.55 ↓",
+                "",
+                "38.22",
+                "27.16",
+                "34.62",
+                "0.86",
+                "0.88",
+                "0.91",
+                "0.88",
+                ""
+              ]
+            }
+          ],
+          "url": "https://www.okooo.com/soccer/match/1302907/odds/",
+          "_flow": "desktop_direct",
+          "_attempts": [
+            {
+              "attempt": 1,
+              "client": "LocalChromeSession",
+              "success": true,
+              "blocked": false,
+              "found": true,
+              "parsed": true,
+              "stop_retry": false,
+              "stop_reason": null
+            }
+          ],
+          "_fallback_from": "history_tab"
+        },
+        "亚值": {
+          "found": true,
+          "parsed": true,
+          "company": "Pinnacle",
+          "company_mode": "single_company",
+          "initial": {
+            "home_water": 1.94,
+            "handicap_text": "平手",
+            "handicap_value": 0,
+            "handicap": 0,
+            "away_water": 1.88
+          },
+          "final": {
+            "home_water": 1.92,
+            "handicap_text": "平手",
+            "handicap_value": 0,
+            "handicap": 0,
+            "away_water": 2.01
+          },
+          "delta": {
+            "home_water": -0.02,
+            "handicap_value": 0,
+            "away_water": 0.13
+          },
+          "consensus": {
+            "mode": "single_company",
+            "final_handicap": 0,
+            "final_handicap_text": "平手",
+            "initial_handicap": 0,
+            "initial_handicap_text": "平手",
+            "final_line_count": 1,
+            "initial_line_count": 1,
+            "company_count": 1,
+            "companies": [
+              "Pinnacle"
+            ],
+            "all_companies": [
+              "Pinnacle"
+            ]
+          },
+          "companies": [
+            {
+              "company": "Pinnacle",
+              "initial": {
+                "home_water": 1.94,
+                "handicap_text": "平手",
+                "handicap_value": 0,
+                "handicap": 0,
+                "away_water": 1.88
+              },
+              "final": {
+                "home_water": 1.92,
+                "handicap_text": "平手",
+                "handicap_value": 0,
+                "handicap": 0,
+                "away_water": 2.01
+              },
+              "delta": {
+                "home_water": -0.02,
+                "handicap_value": 0,
+                "away_water": 0.13
+              },
+              "_source": "table_row",
+              "_matched_line": "Pinnacle Sports 1.94平手1.88 1.92平手2.01 >"
+            }
+          ],
+          "_source": "multi_company_consensus",
+          "_matched_line": "Pinnacle Sports 1.94平手1.88 1.92平手2.01 >",
+          "url": "https://m.okooo.com/match/handicap.php?MatchID=1302907",
+          "_attempts": [
+            {
+              "attempt": 1,
+              "client": "LocalChromeSession",
+              "success": true,
+              "blocked": false,
+              "found": true,
+              "parsed": true,
+              "stop_retry": false,
+              "stop_reason": null
+            }
+          ]
+        },
+        "大小球": {
+          "found": true,
+          "parsed": true,
+          "company": "皇冠",
+          "company_mode": "multi_company_consensus",
+          "initial": {
+            "over": 1.8133,
+            "line": 2.5,
+            "under": 1.945
+          },
+          "final": {
+            "over": 1.8083,
+            "line": 2.5,
+            "under": 1.9667
+          },
+          "delta": {
+            "over": -0.005,
+            "line": 0,
+            "under": 0.0217
+          },
+          "consensus": {
+            "mode": "multi_company_consensus",
+            "final_line": 2.5,
+            "initial_line": 2.5,
+            "final_line_count": 6,
+            "initial_line_count": 6,
+            "company_count": 10,
+            "companies": [
+              "皇冠",
+              "Pinnacle",
+              "澳门彩票",
+              "立博",
+              "伟德",
+              "香港马会"
+            ],
+            "all_companies": [
+              "Bet365",
+              "皇冠",
+              "Pinnacle",
+              "澳门彩票",
+              "威廉希尔",
+              "立博",
+              "Interwetten",
+              "利记",
+              "伟德",
+              "香港马会"
+            ]
+          },
+          "companies": [
+            {
+              "company": "Bet365",
+              "initial": {
+                "over": 1.83,
+                "line": 2.5,
+                "under": 2.03
+              },
+              "final": {
+                "over": 2.03,
+                "line": 2.75,
+                "under": 1.83
+              },
+              "delta": {
+                "over": 0.2,
+                "line": 0.25,
+                "under": -0.2
+              },
+              "_source": "table_row",
+              "_matched_line": "Bet365 1.83 2.50 2.03 2.03 2.75 1.83"
+            },
+            {
+              "company": "皇冠",
+              "initial": {
+                "over": 1.84,
+                "line": 2.5,
+                "under": 2.02
+              },
+              "final": {
+                "over": 1.82,
+                "line": 2.5,
+                "under": 2.06
+              },
+              "delta": {
+                "over": -0.02,
+                "line": 0,
+                "under": 0.04
+              },
+              "_source": "table_row",
+              "_matched_line": "皇冠 1.84 2.50 2.02 1.82 2.50 2.06"
+            },
+            {
+              "company": "Pinnacle",
+              "initial": {
+                "over": 1.8,
+                "line": 2.5,
+                "under": 2.01
+              },
+              "final": {
+                "over": 1.81,
+                "line": 2.5,
+                "under": 2.08
+              },
+              "delta": {
+                "over": 0.01,
+                "line": 0,
+                "under": 0.07
+              },
+              "_source": "table_row",
+              "_matched_line": "Pinnacle 1.80 2.50 2.01 1.81 2.50 2.08"
+            },
+            {
+              "company": "澳门彩票",
+              "initial": {
+                "over": 1.84,
+                "line": 2.5,
+                "under": 1.96
+              },
+              "final": {
+                "over": 1.84,
+                "line": 2.5,
+                "under": 1.96
+              },
+              "delta": {
+                "over": 0,
+                "line": 0,
+                "under": 0
+              },
+              "_source": "table_row",
+              "_matched_line": "澳门彩票 1.84 2.50 1.96 1.84 2.50 1.96"
+            },
+            {
+              "company": "威廉希尔",
+              "initial": {
+                "over": 1.77,
+                "line": 2.5,
+                "under": 1.98
+              },
+              "final": {
+                "over": 1.91,
+                "line": 2.75,
+                "under": 1.72
+              },
+              "delta": {
+                "over": 0.14,
+                "line": 0.25,
+                "under": -0.26
+              },
+              "_source": "table_row",
+              "_matched_line": "威廉.希尔 1.77 2.50 1.98 1.91 2.75 1.72"
+            },
+            {
+              "company": "立博",
+              "initial": {
+                "over": 1.75,
+                "line": 2.5,
+                "under": 1.95
+              },
+              "final": {
+                "over": 1.8,
+                "line": 2.5,
+                "under": 1.91
+              },
+              "delta": {
+                "over": 0.05,
+                "line": 0,
+                "under": -0.04
+              },
+              "_source": "table_row",
+              "_matched_line": "立博 1.75 2.50 1.95 1.80 2.50 1.91"
+            },
+            {
+              "company": "Interwetten",
+              "initial": {
+                "over": 1.77,
+                "line": 2.5,
+                "under": 1.97
+              },
+              "final": {
+                "over": 1.25,
+                "line": 1.5,
+                "under": 3.95
+              },
+              "delta": {
+                "over": -0.52,
+                "line": -1,
+                "under": 1.98
+              },
+              "_source": "table_row",
+              "_matched_line": "Interwetten 1.77 2.50 1.97 1.25 1.50 3.95"
+            },
+            {
+              "company": "利记",
+              "initial": {
+                "over": 1.87,
+                "line": 2.5,
+                "under": 1.99
+              },
+              "final": {
+                "over": 2.4,
+                "line": 3,
+                "under": 1.59
+              },
+              "delta": {
+                "over": 0.53,
+                "line": 0.5,
+                "under": -0.4
+              },
+              "_source": "table_row",
+              "_matched_line": "利记 1.87 2.50 1.99 2.40 3.00 1.59"
+            },
+            {
+              "company": "伟德",
+              "initial": {
+                "over": 1.77,
+                "line": 2.5,
+                "under": 1.91
+              },
+              "final": {
+                "over": 1.78,
+                "line": 2.5,
+                "under": 1.89
+              },
+              "delta": {
+                "over": 0.01,
+                "line": 0,
+                "under": -0.02
+              },
+              "_source": "table_row",
+              "_matched_line": "伟德国际 1.77 2.50 1.91 1.78 2.50 1.89"
+            },
+            {
+              "company": "香港马会",
+              "initial": {
+                "over": 1.88,
+                "line": 2.5,
+                "under": 1.82
+              },
+              "final": {
+                "over": 1.8,
+                "line": 2.5,
+                "under": 1.9
+              },
+              "delta": {
+                "over": -0.08,
+                "line": 0,
+                "under": 0.08
+              },
+              "_source": "table_row",
+              "_matched_line": "香港马会 1.88 2.50 1.82 1.80 2.50 1.90"
+            }
+          ],
+          "_source": "multi_company_consensus",
+          "_matched_line": "澳门彩票 1.84 2.50 1.96 1.84 2.50 1.96",
+          "url": "https://m.okooo.com/match/handicap.php?MatchID=1302907",
+          "_flow": "asian_inner_tab",
+          "_click": {
+            "clicked": true,
+            "label": "大小球",
+            "tag": "DIV"
+          },
+          "_attempts": [
+            {
+              "attempt": 1,
+              "client": "LocalChromeSession",
+              "success": true,
+              "blocked": false,
+              "found": true,
+              "parsed": true,
+              "stop_retry": false,
+              "stop_reason": null
+            }
+          ]
+        },
+        "凯利": {
+          "found": true,
+          "initial": {
+            "home": 0.93,
+            "draw": 0.93,
+            "away": 0.93
+          },
+          "final": {
+            "home": 0.95,
+            "draw": 0.95,
+            "away": 0.95
+          },
+          "delta": {
+            "home": 0.02,
+            "draw": 0.02,
+            "away": 0.02
+          },
+          "payout_rate": 0.95,
+          "url": "https://m.okooo.com/match/odds.php?MatchID=1302907",
+          "_click": {
+            "clicked": true,
+            "label": "凯利",
+            "tag": "DIV"
+          },
+          "_attempts": [
+            {
+              "attempt": 1,
+              "client": "LocalChromeSession",
+              "success": true,
+              "blocked": false,
+              "found": true,
+              "parsed": null,
+              "stop_retry": false,
+              "stop_reason": null
+            }
+          ]
+        }
+      },
+      "upset_potential": {
+        "level": "中",
+        "index": 37,
+        "factors": [
+          "欧赔强化主队，但需防热度集中"
+        ]
+      },
+      "retrieved_memory_explanation": "轻量模式：基于澳客欧赔、亚值与大小球快照生成单场预测记录，仅写入滚动记忆，不进入正式联赛主归档。",
+      "runtime_profile": {
+        "mode": "lightweight_market_snapshot"
+      }
+    }
+  },
+  {
+    "match": "皇家贝蒂斯 vs 埃尔切",
+    "league": "西甲",
+    "result": {
+      "league_code": "la_liga",
+      "league_name": "西甲",
+      "home_team": "皇家贝蒂斯",
+      "away_team": "埃尔切",
+      "match_date": "2026-05-13",
+      "match_time": "",
+      "match_id": "1302902",
+      "external_match_id": "1302902",
+      "storage_mode": "runtime_only",
+      "prediction": "主胜",
+      "predicted_winner": "home",
+      "confidence": 0.6512692835405596,
+      "final_probabilities": {
+        "home_win": 0.6512692835405596,
+        "draw": 0.19807959365294198,
+        "away_win": 0.15065112280649842
+      },
+      "all_probabilities": {
+        "主胜": 0.6512692835405596,
+        "平局": 0.19807959365294198,
+        "客胜": 0.15065112280649842
+      },
+      "top_scores": [
+        [
+          "3-0",
+          0.2
+        ],
+        [
+          "2-0",
+          0.1473
+        ],
+        [
+          "3-1",
+          0.1204
+        ]
+      ],
+      "predicted_scores": [
+        "3-0",
+        "2-0",
+        "3-1"
+      ],
+      "over_under": {
+        "available": true,
+        "line": 3.0,
+        "over": 0.4708196721311475,
+        "under": 0.5291803278688525,
+        "line_source": "snapshot_final",
+        "market": {
+          "final": {
+            "over": 2.0175,
+            "under": 1.795,
+            "line": 3.0
+          }
+        }
+      },
+      "market_snapshot": {
+        "欧赔": {
+          "found": true,
+          "parsed": true,
+          "company": "Bet365",
+          "company_mode": "multi_company_consensus",
+          "initial": {
+            "home": 1.6197,
+            "draw": 3.9253,
+            "away": 4.9332
+          },
+          "final": {
+            "home": 1.5898,
+            "draw": 4.1763,
+            "away": 5.1184
+          },
+          "delta": {
+            "home": -0.0299,
+            "draw": 0.251,
+            "away": 0.1852
+          },
+          "consensus": {
+            "mode": "multi_company_consensus",
+            "company_count": 12,
+            "filtered_company_count": 12,
+            "companies": [
+              "Bet365",
+              "皇冠",
+              "澳门彩票",
+              "威廉希尔",
+              "易胜博",
+              "立博",
+              "12BET",
+              "Bwin",
+              "Interwetten",
+              "伟德",
+              "利记",
+              "香港马会"
+            ],
+            "all_companies": [
+              "Bet365",
+              "皇冠",
+              "澳门彩票",
+              "威廉希尔",
+              "易胜博",
+              "立博",
+              "12BET",
+              "Bwin",
+              "Interwetten",
+              "伟德",
+              "利记",
+              "香港马会"
+            ],
+            "final_median": {
+              "home": 1.605,
+              "draw": 4.2,
+              "away": 5.175
+            }
+          },
+          "companies": [
+            {
+              "company": "Bet365",
+              "initial": {
+                "home": 1.65,
+                "draw": 3.75,
+                "away": 5.0
+              },
+              "final": {
+                "home": 1.6,
+                "draw": 4.33,
+                "away": 5.25
+              },
+              "delta": {
+                "home": -0.05,
+                "draw": 0.58,
+                "away": 0.25
+              },
+              "_row_cells": [
+                "5",
+                "B!e#t365 英国",
+                "1.65",
+                "3.75",
+                "5.00",
+                "1.60 ↑",
+                "4.33",
+                "5.25",
+                "",
+                "59.73",
+                "22.07",
+                "18.20",
+                "0.95",
+                "0.97",
+                "0.95",
+                "0.96",
+                ""
+              ]
+            },
+            {
+              "company": "皇冠",
+              "initial": {
+                "home": 1.66,
+                "draw": 4.15,
+                "away": 5.0
+              },
+              "final": {
+                "home": 1.59,
+                "draw": 4.4,
+                "away": 5.4
+              },
+              "delta": {
+                "home": -0.07,
+                "draw": 0.25,
+                "away": 0.4
+              },
+              "_row_cells": [
+                "20",
+                "皇!冠 中国澳门",
+                "1.66",
+                "4.15",
+                "5.00",
+                "1.59 ↓",
+                "4.40 ↑",
+                "5.40",
+                "",
+                "60.40",
+                "21.83",
+                "17.77",
+                "0.94",
+                "0.99",
+                "0.98",
+                "0.96",
+                ""
+              ]
+            },
+            {
+              "company": "澳门彩票",
+              "initial": {
+                "home": 1.55,
+                "draw": 3.93,
+                "away": 4.7
+              },
+              "final": {
+                "home": 1.55,
+                "draw": 3.93,
+                "away": 4.7
+              },
+              "delta": {
+                "home": 0.0,
+                "draw": 0.0,
+                "away": 0.0
+              },
+              "_row_cells": [
+                "14",
+                "澳!门#彩!票 中国澳门",
+                "1.55",
+                "3.93",
+                "4.70",
+                "1.55",
+                "3.93",
+                "4.70",
+                "",
+                "58.00",
+                "22.87",
+                "19.13",
+                "0.92",
+                "0.88",
+                "0.85",
+                "0.90",
+                ""
+              ]
+            },
+            {
+              "company": "威廉希尔",
+              "initial": {
+                "home": 1.65,
+                "draw": 3.9,
+                "away": 4.75
+              },
+              "final": {
+                "home": 1.62,
+                "draw": 4.0,
+                "away": 4.8
+              },
+              "delta": {
+                "home": -0.03,
+                "draw": 0.1,
+                "away": 0.05
+              },
+              "_row_cells": [
+                "3",
+                "威!廉.#希!尔 英国",
+                "1.65",
+                "3.90",
+                "4.75",
+                "1.62 ↓",
+                "4.00",
+                "4.80 ↑",
+                "",
+                "57.39",
+                "23.24",
+                "19.37",
+                "0.96",
+                "0.90",
+                "0.87",
+                "0.93",
+                ""
+              ]
+            },
+            {
+              "company": "易胜博",
+              "initial": {
+                "home": 1.63,
+                "draw": 3.7,
+                "away": 5.0
+              },
+              "final": {
+                "home": 1.61,
+                "draw": 4.1,
+                "away": 5.1
+              },
+              "delta": {
+                "home": -0.02,
+                "draw": 0.4,
+                "away": 0.1
+              },
+              "_row_cells": [
+                "10",
+                "易!胜#博 英国",
+                "1.63",
+                "3.70",
+                "5.00",
+                "1.61",
+                "4.10 ↑",
+                "5.10 ↑",
+                "",
+                "58.53",
+                "22.99",
+                "18.48",
+                "0.96",
+                "0.92",
+                "0.93",
+                "0.94",
+                ""
+              ]
+            },
+            {
+              "company": "立博",
+              "initial": {
+                "home": 1.65,
+                "draw": 4.0,
+                "away": 5.0
+              },
+              "final": {
+                "home": 1.61,
+                "draw": 4.2,
+                "away": 5.0
+              },
+              "delta": {
+                "home": -0.04,
+                "draw": 0.2,
+                "away": 0.0
+              },
+              "_row_cells": [
+                "4",
+                "立!博 英国",
+                "1.65",
+                "4.00",
+                "5.00",
+                "1.61",
+                "4.20",
+                "5.00 ↑",
+                "",
+                "58.64",
+                "22.48",
+                "18.88",
+                "0.96",
+                "0.94",
+                "0.91",
+                "0.94",
+                ""
+              ]
+            },
+            {
+              "company": "12BET",
+              "initial": {
+                "home": 1.66,
+                "draw": 3.95,
+                "away": 4.5
+              },
+              "final": {
+                "home": 1.61,
+                "draw": 4.3,
+                "away": 5.1
+              },
+              "delta": {
+                "home": -0.05,
+                "draw": 0.35,
+                "away": 0.6
+              },
+              "_row_cells": [
+                "24",
+                "12bet.com 菲律宾",
+                "1.66",
+                "3.95",
+                "4.50",
+                "1.61",
+                "4.30 ↑",
+                "5.10",
+                "",
+                "59.17",
+                "22.15",
+                "18.68",
+                "0.96",
+                "0.97",
+                "0.93",
+                "0.95",
+                ""
+              ]
+            },
+            {
+              "company": "Bwin",
+              "initial": {
+                "home": 1.6,
+                "draw": 4.1,
+                "away": 5.25
+              },
+              "final": {
+                "home": 1.61,
+                "draw": 4.2,
+                "away": 5.25
+              },
+              "delta": {
+                "home": 0.01,
+                "draw": 0.1,
+                "away": 0.0
+              },
+              "_row_cells": [
+                "7",
+                "b!w#i!n 奥地利",
+                "1.60",
+                "4.10",
+                "5.25",
+                "1.61 ↓",
+                "4.20",
+                "5.25 ↑",
+                "",
+                "59.17",
+                "22.68",
+                "18.15",
+                "0.96",
+                "0.94",
+                "0.95",
+                "0.95",
+                ""
+              ]
+            },
+            {
+              "company": "Interwetten",
+              "initial": {
+                "home": 1.63,
+                "draw": 4.1,
+                "away": 5.25
+              },
+              "final": {
+                "home": 1.6,
+                "draw": 4.3,
+                "away": 5.25
+              },
+              "delta": {
+                "home": -0.03,
+                "draw": 0.2,
+                "away": 0.0
+              },
+              "_row_cells": [
+                "6",
+                "I!n#t!e#rwetten 马耳他",
+                "1.63",
+                "4.10",
+                "5.25",
+                "1.60 ↓",
+                "4.30 ↑",
+                "5.25",
+                "",
+                "59.64",
+                "22.18",
+                "18.18",
+                "0.95",
+                "0.97",
+                "0.95",
+                "0.95",
+                ""
+              ]
+            },
+            {
+              "company": "伟德",
+              "initial": {
+                "home": 1.62,
+                "draw": 3.8,
+                "away": 4.75
+              },
+              "final": {
+                "home": 1.57,
+                "draw": 4.2,
+                "away": 5.5
+              },
+              "delta": {
+                "home": -0.05,
+                "draw": 0.4,
+                "away": 0.75
+              },
+              "_row_cells": [
+                "9",
+                "伟!德#国!际 英国",
+                "1.62",
+                "3.80",
+                "4.75",
+                "1.57 ↓",
+                "4.20",
+                "5.50 ↑",
+                "",
+                "60.27",
+                "22.53",
+                "17.20",
+                "0.93",
+                "0.94",
+                "1.00",
+                "0.95",
+                ""
+              ]
+            },
+            {
+              "company": "利记",
+              "initial": {
+                "home": 1.59,
+                "draw": 3.77,
+                "away": 4.77
+              },
+              "final": {
+                "home": 1.62,
+                "draw": 3.95,
+                "away": 4.93
+              },
+              "delta": {
+                "home": 0.03,
+                "draw": 0.18,
+                "away": 0.16
+              },
+              "_row_cells": [
+                "22",
+                "利!记 菲律宾",
+                "1.59",
+                "3.77",
+                "4.77",
+                "1.62 ↓",
+                "3.95 ↑",
+                "4.93 ↑",
+                "",
+                "57.51",
+                "23.59",
+                "18.90",
+                "0.96",
+                "0.89",
+                "0.90",
+                "0.93",
+                ""
+              ]
+            },
+            {
+              "company": "香港马会",
+              "initial": {
+                "home": 1.44,
+                "draw": 4.0,
+                "away": 5.3
+              },
+              "final": {
+                "home": 1.44,
+                "draw": 4.0,
+                "away": 5.3
+              },
+              "delta": {
+                "home": 0.0,
+                "draw": 0.0,
+                "away": 0.0
+              },
+              "_row_cells": [
+                "8",
+                "香!港#马!会 中国香港",
+                "1.44",
+                "4.00",
+                "5.30",
+                "1.44 ↓",
+                "4.00 ↑",
+                "5.30 ↑",
+                "",
+                "61.28",
+                "22.06",
+                "16.66",
+                "0.85",
+                "0.90",
+                "0.96",
+                "0.88",
+                ""
+              ]
+            }
+          ],
+          "url": "https://www.okooo.com/soccer/match/1302902/odds/",
+          "_flow": "desktop_direct",
+          "_attempts": [
+            {
+              "attempt": 1,
+              "client": "LocalChromeSession",
+              "success": true,
+              "blocked": false,
+              "found": true,
+              "parsed": true,
+              "stop_retry": false,
+              "stop_reason": null
+            }
+          ],
+          "_fallback_from": "history_tab"
+        },
+        "亚值": {
+          "found": true,
+          "parsed": true,
+          "company": "Pinnacle",
+          "company_mode": "single_company",
+          "initial": {
+            "home_water": 1.82,
+            "handicap_text": "半/一",
+            "handicap_value": -0.75,
+            "handicap": -0.75,
+            "away_water": 2.01
+          },
+          "final": {
+            "home_water": 2.02,
+            "handicap_text": "一球",
+            "handicap_value": -1,
+            "handicap": -1,
+            "away_water": 1.9
+          },
+          "delta": {
+            "home_water": 0.2,
+            "handicap_value": -0.25,
+            "away_water": -0.11
+          },
+          "consensus": {
+            "mode": "single_company",
+            "final_handicap": -1,
+            "final_handicap_text": "一球",
+            "initial_handicap": -0.75,
+            "initial_handicap_text": "半/一",
+            "final_line_count": 1,
+            "initial_line_count": 1,
+            "company_count": 1,
+            "companies": [
+              "Pinnacle"
+            ],
+            "all_companies": [
+              "Pinnacle"
+            ]
+          },
+          "companies": [
+            {
+              "company": "Pinnacle",
+              "initial": {
+                "home_water": 1.82,
+                "handicap_text": "半/一",
+                "handicap_value": -0.75,
+                "handicap": -0.75,
+                "away_water": 2.01
+              },
+              "final": {
+                "home_water": 2.02,
+                "handicap_text": "一球",
+                "handicap_value": -1,
+                "handicap": -1,
+                "away_water": 1.9
+              },
+              "delta": {
+                "home_water": 0.2,
+                "handicap_value": -0.25,
+                "away_water": -0.11
+              },
+              "_source": "table_row",
+              "_matched_line": "Pinnacle Sports 1.82半/一2.01 2.02一球1.90 >"
+            }
+          ],
+          "_source": "multi_company_consensus",
+          "_matched_line": "Pinnacle Sports 1.82半/一2.01 2.02一球1.90 >",
+          "url": "https://m.okooo.com/match/handicap.php?MatchID=1302902",
+          "_attempts": [
+            {
+              "attempt": 1,
+              "client": "LocalChromeSession",
+              "success": true,
+              "blocked": false,
+              "found": true,
+              "parsed": true,
+              "stop_retry": false,
+              "stop_reason": null
+            }
+          ]
+        },
+        "大小球": {
+          "found": true,
+          "parsed": true,
+          "company": "Bet365",
+          "company_mode": "multi_company_consensus",
+          "initial": {
+            "over": 1.92,
+            "line": 2.75,
+            "under": 1.8925
+          },
+          "final": {
+            "over": 2.0175,
+            "line": 3,
+            "under": 1.795
+          },
+          "delta": {
+            "over": 0.0975,
+            "line": 0.25,
+            "under": -0.0975
+          },
+          "consensus": {
+            "mode": "multi_company_consensus",
+            "final_line": 3,
+            "initial_line": 2.75,
+            "final_line_count": 4,
+            "initial_line_count": 4,
+            "company_count": 10,
+            "companies": [
+              "Bet365",
+              "皇冠",
+              "威廉希尔",
+              "利记"
+            ],
+            "all_companies": [
+              "Bet365",
+              "皇冠",
+              "Pinnacle",
+              "澳门彩票",
+              "威廉希尔",
+              "立博",
+              "Interwetten",
+              "利记",
+              "伟德",
+              "香港马会"
+            ]
+          },
+          "companies": [
+            {
+              "company": "Bet365",
+              "initial": {
+                "over": 1.93,
+                "line": 2.75,
+                "under": 1.93
+              },
+              "final": {
+                "over": 2.03,
+                "line": 3,
+                "under": 1.83
+              },
+              "delta": {
+                "over": 0.1,
+                "line": 0.25,
+                "under": -0.1
+              },
+              "_source": "table_row",
+              "_matched_line": "Bet365 1.93 2.75 1.93 2.03 3.00 1.83"
+            },
+            {
+              "company": "皇冠",
+              "initial": {
+                "over": 1.93,
+                "line": 2.75,
+                "under": 1.93
+              },
+              "final": {
+                "over": 2.04,
+                "line": 3,
+                "under": 1.84
+              },
+              "delta": {
+                "over": 0.11,
+                "line": 0.25,
+                "under": -0.09
+              },
+              "_source": "table_row",
+              "_matched_line": "皇冠 1.93 2.75 1.93 2.04 3.00 1.84"
+            },
+            {
+              "company": "Pinnacle",
+              "initial": {
+                "over": 1.89,
+                "line": 2.75,
+                "under": 1.91
+              },
+              "final": {
+                "over": 4,
+                "line": 4,
+                "under": 1.27
+              },
+              "delta": {
+                "over": 2.11,
+                "line": 1.25,
+                "under": -0.64
+              },
+              "_source": "table_row",
+              "_matched_line": "Pinnacle 1.89 2.75 1.91 4.00 4.00 1.27"
+            },
+            {
+              "company": "澳门彩票",
+              "initial": {
+                "over": 1.84,
+                "line": 2.75,
+                "under": 1.96
+              },
+              "final": {
+                "over": 1.8,
+                "line": 2.75,
+                "under": 2
+              },
+              "delta": {
+                "over": -0.04,
+                "line": 0,
+                "under": 0.04
+              },
+              "_source": "table_row",
+              "_matched_line": "澳门彩票 1.84 2.75 1.96 1.80 2.75 2.00"
+            },
+            {
+              "company": "威廉希尔",
+              "initial": {
+                "over": 1.84,
+                "line": 2.75,
+                "under": 1.83
+              },
+              "final": {
+                "over": 1.93,
+                "line": 3,
+                "under": 1.7
+              },
+              "delta": {
+                "over": 0.09,
+                "line": 0.25,
+                "under": -0.13
+              },
+              "_source": "table_row",
+              "_matched_line": "威廉.希尔 1.84 2.75 1.83 1.93 3.00 1.70"
+            },
+            {
+              "company": "立博",
+              "initial": {
+                "over": 1.67,
+                "line": 2.5,
+                "under": 2.05
+              },
+              "final": {
+                "over": 1.61,
+                "line": 2.5,
+                "under": 2.15
+              },
+              "delta": {
+                "over": -0.06,
+                "line": 0,
+                "under": 0.1
+              },
+              "_source": "table_row",
+              "_matched_line": "立博 1.67 2.50 2.05 1.61 2.50 2.15"
+            },
+            {
+              "company": "Interwetten",
+              "initial": {
+                "over": 1.67,
+                "line": 2.5,
+                "under": 2.15
+              },
+              "final": {
+                "over": 4.3,
+                "line": 4.5,
+                "under": 1.2
+              },
+              "delta": {
+                "over": 2.63,
+                "line": 2,
+                "under": -0.95
+              },
+              "_source": "table_row",
+              "_matched_line": "Interwetten 1.67 2.50 2.15 4.30 4.50 1.20"
+            },
+            {
+              "company": "利记",
+              "initial": {
+                "over": 1.98,
+                "line": 2.75,
+                "under": 1.88
+              },
+              "final": {
+                "over": 2.07,
+                "line": 3,
+                "under": 1.81
+              },
+              "delta": {
+                "over": 0.09,
+                "line": 0.25,
+                "under": -0.07
+              },
+              "_source": "table_row",
+              "_matched_line": "利记 1.98 2.75 1.88 2.07 3.00 1.81"
+            },
+            {
+              "company": "伟德",
+              "initial": {
+                "over": 1.84,
+                "line": 2.75,
+                "under": 1.83
+              },
+              "final": {
+                "over": 1.78,
+                "line": 2.75,
+                "under": 1.89
+              },
+              "delta": {
+                "over": -0.06,
+                "line": 0,
+                "under": 0.06
+              },
+              "_source": "table_row",
+              "_matched_line": "伟德国际 1.84 2.75 1.83 1.78 2.75 1.89"
+            },
+            {
+              "company": "香港马会",
+              "initial": {
+                "over": 1.81,
+                "line": 2.75,
+                "under": 1.89
+              },
+              "final": {
+                "over": 1.81,
+                "line": 2.75,
+                "under": 1.89
+              },
+              "delta": {
+                "over": 0,
+                "line": 0,
+                "under": 0
+              },
+              "_source": "table_row",
+              "_matched_line": "香港马会 1.81 2.75 1.89 1.81 2.75 1.89"
+            }
+          ],
+          "_source": "multi_company_consensus",
+          "_matched_line": "Bet365 1.93 2.75 1.93 2.03 3.00 1.83",
+          "url": "https://m.okooo.com/match/handicap.php?MatchID=1302902",
+          "_flow": "asian_inner_tab",
+          "_click": {
+            "clicked": true,
+            "label": "大小球",
+            "tag": "DIV"
+          },
+          "_attempts": [
+            {
+              "attempt": 1,
+              "client": "LocalChromeSession",
+              "success": true,
+              "blocked": false,
+              "found": true,
+              "parsed": true,
+              "stop_retry": false,
+              "stop_reason": null
+            }
+          ]
+        },
+        "凯利": {
+          "found": true,
+          "initial": {
+            "home": 0.93,
+            "draw": 0.93,
+            "away": 0.93
+          },
+          "final": {
+            "home": 0.95,
+            "draw": 0.95,
+            "away": 0.95
+          },
+          "delta": {
+            "home": 0.02,
+            "draw": 0.02,
+            "away": 0.02
+          },
+          "payout_rate": 0.95,
+          "url": "https://m.okooo.com/match/odds.php?MatchID=1302902",
+          "_click": {
+            "clicked": true,
+            "label": "凯利",
+            "tag": "DIV"
+          },
+          "_attempts": [
+            {
+              "attempt": 1,
+              "client": "LocalChromeSession",
+              "success": true,
+              "blocked": false,
+              "found": true,
+              "parsed": null,
+              "stop_retry": false,
+              "stop_reason": null
+            }
+          ]
+        }
+      },
+      "upset_potential": {
+        "level": "中",
+        "index": 28,
+        "factors": [
+          "升盘配高水，主队穿盘阻力偏大",
+          "欧赔强化主队，但需防热度集中"
+        ]
+      },
+      "retrieved_memory_explanation": "轻量模式：基于澳客欧赔、亚值与大小球快照生成单场预测记录，仅写入滚动记忆，不进入正式联赛主归档。",
+      "runtime_profile": {
+        "mode": "lightweight_market_snapshot"
+      }
+    }
+  },
+  {
+    "match": "曼城 vs 水晶宫",
+    "league": "英超",
+    "result": {
+      "league_code": "premier_league",
+      "league_name": "英超",
+      "home_team": "曼城",
+      "away_team": "水晶宫",
+      "match_date": "2026-05-13",
+      "match_time": "",
+      "match_id": "1326947",
+      "external_match_id": "1326947",
+      "storage_mode": "runtime_only",
+      "prediction": "主胜",
+      "predicted_winner": "home",
+      "confidence": 0.8483135930526225,
+      "final_probabilities": {
+        "home_win": 0.8483135930526225,
+        "draw": 0.10611619903998985,
+        "away_win": 0.045570207907387646
+      },
+      "all_probabilities": {
+        "主胜": 0.8483135930526225,
+        "平局": 0.10611619903998985,
+        "客胜": 0.045570207907387646
+      },
+      "top_scores": [
+        [
+          "3-0",
+          0.2
+        ],
+        [
+          "3-1",
+          0.1499
+        ],
+        [
+          "2-1",
+          0.1043
+        ]
+      ],
+      "predicted_scores": [
+        "3-0",
+        "3-1",
+        "2-1"
+      ],
+      "over_under": {
+        "available": true,
+        "line": 3.25,
+        "over": 0.5228346456692913,
+        "under": 0.4771653543307086,
+        "line_source": "snapshot_final",
+        "market": {
+          "final": {
+            "over": 1.818,
+            "under": 1.992,
+            "line": 3.25
+          }
+        }
+      },
+      "market_snapshot": {
+        "欧赔": {
+          "found": true,
+          "parsed": true,
+          "company": "Bet365",
+          "company_mode": "multi_company_consensus",
+          "initial": {
+            "home": 1.2397,
+            "draw": 6.2152,
+            "away": 10.23
+          },
+          "final": {
+            "home": 1.1884,
+            "draw": 7.0377,
+            "away": 11.9235
+          },
+          "delta": {
+            "home": -0.0513,
+            "draw": 0.8225,
+            "away": 1.6935
+          },
+          "consensus": {
+            "mode": "multi_company_consensus",
+            "company_count": 12,
+            "filtered_company_count": 12,
+            "companies": [
+              "Bet365",
+              "皇冠",
+              "澳门彩票",
+              "威廉希尔",
+              "易胜博",
+              "立博",
+              "12BET",
+              "Bwin",
+              "Interwetten",
+              "伟德",
+              "利记",
+              "香港马会"
+            ],
+            "all_companies": [
+              "Bet365",
+              "皇冠",
+              "澳门彩票",
+              "威廉希尔",
+              "易胜博",
+              "立博",
+              "12BET",
+              "Bwin",
+              "Interwetten",
+              "伟德",
+              "利记",
+              "香港马会"
+            ],
+            "final_median": {
+              "home": 1.2,
+              "draw": 7.0,
+              "away": 11.75
+            }
+          },
+          "companies": [
+            {
+              "company": "Bet365",
+              "initial": {
+                "home": 1.27,
+                "draw": 6.0,
+                "away": 9.5
+              },
+              "final": {
+                "home": 1.2,
+                "draw": 7.5,
+                "away": 12.0
+              },
+              "delta": {
+                "home": -0.07,
+                "draw": 1.5,
+                "away": 2.5
+              },
+              "_row_cells": [
+                "4",
+                "B!e#t365 英国",
+                "1.27",
+                "6.00",
+                "9.50",
+                "1.20",
+                "7.50 ↑",
+                "12.00",
+                "",
+                "79.37",
+                "12.70",
+                "7.93",
+                "0.95",
+                "0.98",
+                "0.89",
+                "0.95",
+                ""
+              ]
+            },
+            {
+              "company": "皇冠",
+              "initial": {
+                "home": 1.29,
+                "draw": 6.1,
+                "away": 9.9
+              },
+              "final": {
+                "home": 1.2,
+                "draw": 7.4,
+                "away": 13.5
+              },
+              "delta": {
+                "home": -0.09,
+                "draw": 1.3,
+                "away": 3.6
+              },
+              "_row_cells": [
+                "19",
+                "皇!冠 中国澳门",
+                "1.29",
+                "6.10",
+                "9.90",
+                "1.20 ↓",
+                "7.40 ↑",
+                "13.50 ↑",
+                "",
+                "79.93",
+                "12.96",
+                "7.11",
+                "0.95",
+                "0.96",
+                "1.00",
+                "0.96",
+                ""
+              ]
+            },
+            {
+              "company": "澳门彩票",
+              "initial": {
+                "home": 1.18,
+                "draw": 6.1,
+                "away": 10.0
+              },
+              "final": {
+                "home": 1.18,
+                "draw": 6.1,
+                "away": 10.0
+              },
+              "delta": {
+                "home": 0.0,
+                "draw": 0.0,
+                "away": 0.0
+              },
+              "_row_cells": [
+                "13",
+                "澳!门#彩!票 中国澳门",
+                "1.18",
+                "6.10",
+                "10.00",
+                "1.18",
+                "6.10",
+                "10.00",
+                "",
+                "76.25",
+                "14.75",
+                "9.00",
+                "0.94",
+                "0.79",
+                "0.74",
+                "0.90",
+                ""
+              ]
+            },
+            {
+              "company": "威廉希尔",
+              "initial": {
+                "home": 1.29,
+                "draw": 5.8,
+                "away": 9.0
+              },
+              "final": {
+                "home": 1.2,
+                "draw": 7.0,
+                "away": 12.0
+              },
+              "delta": {
+                "home": -0.09,
+                "draw": 1.2,
+                "away": 3.0
+              },
+              "_row_cells": [
+                "2",
+                "威!廉.#希!尔 英国",
+                "1.29",
+                "5.80",
+                "9.00",
+                "1.20",
+                "7.00",
+                "12.00 ↓",
+                "",
+                "78.65",
+                "13.48",
+                "7.87",
+                "0.95",
+                "0.91",
+                "0.89",
+                "0.94",
+                ""
+              ]
+            },
+            {
+              "company": "易胜博",
+              "initial": {
+                "home": 1.2,
+                "draw": 6.9,
+                "away": 11.3
+              },
+              "final": {
+                "home": 1.2,
+                "draw": 7.0,
+                "away": 11.4
+              },
+              "delta": {
+                "home": 0.0,
+                "draw": 0.1,
+                "away": 0.1
+              },
+              "_row_cells": [
+                "9",
+                "易!胜#博 英国",
+                "1.20",
+                "6.90",
+                "11.30",
+                "1.20",
+                "7.00",
+                "11.40 ↓",
+                "",
+                "78.33",
+                "13.43",
+                "8.24",
+                "0.95",
+                "0.91",
+                "0.85",
+                "0.94",
+                ""
+              ]
+            },
+            {
+              "company": "立博",
+              "initial": {
+                "home": 1.22,
+                "draw": 7.0,
+                "away": 12.0
+              },
+              "final": {
+                "home": 1.2,
+                "draw": 7.0,
+                "away": 11.0
+              },
+              "delta": {
+                "home": -0.02,
+                "draw": 0.0,
+                "away": -1.0
+              },
+              "_row_cells": [
+                "3",
+                "立!博 英国",
+                "1.22",
+                "7.00",
+                "12.00",
+                "1.20 ↓",
+                "7.00",
+                "11.00 ↓",
+                "",
+                "78.09",
+                "13.39",
+                "8.52",
+                "0.95",
+                "0.91",
+                "0.82",
+                "0.94",
+                ""
+              ]
+            },
+            {
+              "company": "12BET",
+              "initial": {
+                "home": 1.27,
+                "draw": 5.5,
+                "away": 9.1
+              },
+              "final": {
+                "home": 1.18,
+                "draw": 6.9,
+                "away": 11.0
+              },
+              "delta": {
+                "home": -0.09,
+                "draw": 1.4,
+                "away": 1.9
+              },
+              "_row_cells": [
+                "23",
+                "12bet.com 菲律宾",
+                "1.27",
+                "5.50",
+                "9.10",
+                "1.18 ↓",
+                "6.90 ↑",
+                "11.00",
+                "",
+                "78.23",
+                "13.38",
+                "8.39",
+                "0.94",
+                "0.90",
+                "0.82",
+                "0.92",
+                ""
+              ]
+            },
+            {
+              "company": "Bwin",
+              "initial": {
+                "home": 1.22,
+                "draw": 7.0,
+                "away": 12.0
+              },
+              "final": {
+                "home": 1.21,
+                "draw": 7.25,
+                "away": 11.5
+              },
+              "delta": {
+                "home": -0.01,
+                "draw": 0.25,
+                "away": -0.5
+              },
+              "_row_cells": [
+                "6",
+                "b!w#i!n 奥地利",
+                "1.22",
+                "7.00",
+                "12.00",
+                "1.21",
+                "7.25",
+                "11.50 ↓",
+                "",
+                "78.61",
+                "13.12",
+                "8.27",
+                "0.96",
+                "0.94",
+                "0.86",
+                "0.95",
+                ""
+              ]
+            },
+            {
+              "company": "Interwetten",
+              "initial": {
+                "home": 1.27,
+                "draw": 6.25,
+                "away": 10.0
+              },
+              "final": {
+                "home": 1.2,
+                "draw": 7.25,
+                "away": 13.0
+              },
+              "delta": {
+                "home": -0.07,
+                "draw": 1.0,
+                "away": 3.0
+              },
+              "_row_cells": [
+                "5",
+                "I!n#t!e#rwetten 马耳他",
+                "1.27",
+                "6.25",
+                "10.00",
+                "1.20",
+                "7.25 ↓",
+                "13.00",
+                "",
+                "79.50",
+                "13.16",
+                "7.34",
+                "0.95",
+                "0.94",
+                "0.97",
+                "0.95",
+                ""
+              ]
+            },
+            {
+              "company": "伟德",
+              "initial": {
+                "home": 1.25,
+                "draw": 5.75,
+                "away": 10.0
+              },
+              "final": {
+                "home": 1.17,
+                "draw": 7.5,
+                "away": 15.0
+              },
+              "delta": {
+                "home": -0.08,
+                "draw": 1.75,
+                "away": 5.0
+              },
+              "_row_cells": [
+                "8",
+                "伟!德#国!际 英国",
+                "1.25",
+                "5.75",
+                "10.00",
+                "1.17 ↑",
+                "7.50 ↑",
+                "15.00",
+                "",
+                "81.03",
+                "12.65",
+                "6.32",
+                "0.93",
+                "0.98",
+                "1.12",
+                "0.95",
+                ""
+              ]
+            },
+            {
+              "company": "利记",
+              "initial": {
+                "home": 1.25,
+                "draw": 5.13,
+                "away": 7.62
+              },
+              "final": {
+                "home": 1.16,
+                "draw": 6.28,
+                "away": 10.12
+              },
+              "delta": {
+                "home": -0.09,
+                "draw": 1.15,
+                "away": 2.5
+              },
+              "_row_cells": [
+                "21",
+                "利!记 菲律宾",
+                "1.25",
+                "5.13",
+                "7.62",
+                "1.16 ↑",
+                "6.28 ↓",
+                "10.12 ↓",
+                "",
+                "76.97",
+                "14.21",
+                "8.82",
+                "0.92",
+                "0.82",
+                "0.75",
+                "0.89",
+                ""
+              ]
+            },
+            {
+              "company": "香港马会",
+              "initial": {
+                "home": 1.09,
+                "draw": 7.0,
+                "away": 13.5
+              },
+              "final": {
+                "home": 1.09,
+                "draw": 7.0,
+                "away": 13.5
+              },
+              "delta": {
+                "home": 0.0,
+                "draw": 0.0,
+                "away": 0.0
+              },
+              "_row_cells": [
+                "7",
+                "香!港#马!会 中国香港",
+                "1.09",
+                "7.00",
+                "13.50",
+                "1.09",
+                "7.00",
+                "13.50",
+                "",
+                "80.88",
+                "12.59",
+                "6.53",
+                "0.87",
+                "0.91",
+                "1.00",
+                "0.88",
+                ""
+              ]
+            }
+          ],
+          "url": "https://www.okooo.com/soccer/match/1326947/odds/",
+          "_flow": "desktop_direct",
+          "_attempts": [
+            {
+              "attempt": 1,
+              "client": "LocalChromeSession",
+              "success": true,
+              "blocked": false,
+              "found": true,
+              "parsed": true,
+              "stop_retry": false,
+              "stop_reason": null
+            }
+          ],
+          "_fallback_from": "history_tab"
+        },
+        "亚值": {
+          "found": true,
+          "parsed": true,
+          "company": "澳门彩票",
+          "company_mode": "single_company",
+          "initial": {
+            "home_water": 2,
+            "handicap_text": "球半/两球",
+            "handicap_value": -1.75,
+            "handicap": -1.75,
+            "away_water": 1.88
+          },
+          "final": {
+            "home_water": 1.91,
+            "handicap_text": "两球",
+            "handicap_value": -2,
+            "handicap": -2,
+            "away_water": 1.97
+          },
+          "delta": {
+            "home_water": -0.09,
+            "handicap_value": -0.25,
+            "away_water": 0.09
+          },
+          "consensus": {
+            "mode": "single_company",
+            "final_handicap": -2,
+            "final_handicap_text": "两球",
+            "initial_handicap": -1.75,
+            "initial_handicap_text": "球半/两球",
+            "final_line_count": 1,
+            "initial_line_count": 1,
+            "company_count": 1,
+            "companies": [
+              "澳门彩票"
+            ],
+            "all_companies": [
+              "澳门彩票"
+            ]
+          },
+          "companies": [
+            {
+              "company": "澳门彩票",
+              "initial": {
+                "home_water": 2,
+                "handicap_text": "球半/两球",
+                "handicap_value": -1.75,
+                "handicap": -1.75,
+                "away_water": 1.88
+              },
+              "final": {
+                "home_water": 1.91,
+                "handicap_text": "两球",
+                "handicap_value": -2,
+                "handicap": -2,
+                "away_water": 1.97
+              },
+              "delta": {
+                "home_water": -0.09,
+                "handicap_value": -0.25,
+                "away_water": 0.09
+              },
+              "_source": "table_row",
+              "_matched_line": "14 皇!冠 中国澳门 2.00 球半/两球 1.88 1.91 两球 1.97 3 0.96 0.98 0.97"
+            }
+          ],
+          "_source": "multi_company_consensus",
+          "_matched_line": "14 皇!冠 中国澳门 2.00 球半/两球 1.88 1.91 两球 1.97 3 0.96 0.98 0.97",
+          "url": "https://www.okooo.com/soccer/match/1326947/ah/",
+          "_flow": "desktop_direct",
+          "_attempts": [
+            {
+              "attempt": 1,
+              "client": "LocalChromeSession",
+              "success": true,
+              "blocked": false,
+              "found": true,
+              "parsed": true,
+              "stop_retry": false,
+              "stop_reason": null
+            }
+          ],
+          "_fallback_from": "history_tab"
+        },
+        "大小球": {
+          "found": true,
+          "parsed": true,
+          "company": "Bet365",
+          "company_mode": "multi_company_consensus",
+          "initial": {
+            "over": 2.0125,
+            "line": 3.25,
+            "under": 1.8
+          },
+          "final": {
+            "over": 1.818,
+            "line": 3.25,
+            "under": 1.992
+          },
+          "delta": {
+            "over": -0.1945,
+            "line": 0,
+            "under": 0.192
+          },
+          "consensus": {
+            "mode": "multi_company_consensus",
+            "final_line": 3.25,
+            "initial_line": 3.25,
+            "final_line_count": 5,
+            "initial_line_count": 4,
+            "company_count": 10,
+            "companies": [
+              "Bet365",
+              "皇冠",
+              "澳门彩票",
+              "威廉希尔",
+              "利记"
+            ],
+            "all_companies": [
+              "Bet365",
+              "皇冠",
+              "Pinnacle",
+              "澳门彩票",
+              "威廉希尔",
+              "立博",
+              "Interwetten",
+              "利记",
+              "伟德",
+              "香港马会"
+            ]
+          },
+          "companies": [
+            {
+              "company": "Bet365",
+              "initial": {
+                "over": 2.05,
+                "line": 3.25,
+                "under": 1.8
+              },
+              "final": {
+                "over": 1.83,
+                "line": 3.25,
+                "under": 2.03
+              },
+              "delta": {
+                "over": -0.22,
+                "line": 0,
+                "under": 0.23
+              },
+              "_source": "table_row",
+              "_matched_line": "Bet365 2.05 3.25 1.80 1.83 3.25 2.03"
+            },
+            {
+              "company": "皇冠",
+              "initial": {
+                "over": 2.04,
+                "line": 3.25,
+                "under": 1.84
+              },
+              "final": {
+                "over": 1.86,
+                "line": 3.25,
+                "under": 2.02
+              },
+              "delta": {
+                "over": -0.18,
+                "line": 0,
+                "under": 0.18
+              },
+              "_source": "table_row",
+              "_matched_line": "皇冠 2.04 3.25 1.84 1.86 3.25 2.02"
+            },
+            {
+              "company": "Pinnacle",
+              "initial": {
+                "over": 1.8,
+                "line": 3,
+                "under": 1.99
+              },
+              "final": {
+                "over": 2.04,
+                "line": 3.5,
+                "under": 1.84
+              },
+              "delta": {
+                "over": 0.24,
+                "line": 0.5,
+                "under": -0.15
+              },
+              "_source": "table_row",
+              "_matched_line": "Pinnacle 1.80 3.00 1.99 2.04 3.50 1.84"
+            },
+            {
+              "company": "澳门彩票",
+              "initial": {
+                "over": 1.98,
+                "line": 3.25,
+                "under": 1.82
+              },
+              "final": {
+                "over": 1.82,
+                "line": 3.25,
+                "under": 1.98
+              },
+              "delta": {
+                "over": -0.16,
+                "line": 0,
+                "under": 0.16
+              },
+              "_source": "table_row",
+              "_matched_line": "澳门彩票 1.98 3.25 1.82 1.82 3.25 1.98"
+            },
+            {
+              "company": "威廉希尔",
+              "initial": {
+                "over": 1.98,
+                "line": 3.25,
+                "under": 1.74
+              },
+              "final": {
+                "over": 1.74,
+                "line": 3.25,
+                "under": 1.91
+              },
+              "delta": {
+                "over": -0.24,
+                "line": 0,
+                "under": 0.17
+              },
+              "_source": "table_row",
+              "_matched_line": "威廉.希尔 1.98 3.25 1.74 1.74 3.25 1.91"
+            },
+            {
+              "company": "立博",
+              "initial": {
+                "over": 2.1,
+                "line": 3.5,
+                "under": 1.67
+              },
+              "final": {
+                "over": 2.05,
+                "line": 3.5,
+                "under": 1.7
+              },
+              "delta": {
+                "over": -0.05,
+                "line": 0,
+                "under": 0.03
+              },
+              "_source": "table_row",
+              "_matched_line": "立博 2.10 3.50 1.67 2.05 3.50 1.70"
+            },
+            {
+              "company": "Interwetten",
+              "initial": {
+                "over": 2.2,
+                "line": 3.5,
+                "under": 1.63
+              },
+              "final": {
+                "over": 1.97,
+                "line": 3.5,
+                "under": 1.77
+              },
+              "delta": {
+                "over": -0.23,
+                "line": 0,
+                "under": 0.14
+              },
+              "_source": "table_row",
+              "_matched_line": "Interwetten 2.20 3.50 1.63 1.97 3.50 1.77"
+            },
+            {
+              "company": "利记",
+              "initial": {
+                "over": 1.79,
+                "line": 3,
+                "under": 2.07
+              },
+              "final": {
+                "over": 1.84,
+                "line": 3.25,
+                "under": 2.02
+              },
+              "delta": {
+                "over": 0.05,
+                "line": 0.25,
+                "under": -0.05
+              },
+              "_source": "table_row",
+              "_matched_line": "利记 1.79 3.00 2.07 1.84 3.25 2.02"
+            },
+            {
+              "company": "伟德",
+              "initial": {
+                "over": 1.74,
+                "line": 3,
+                "under": 1.94
+              },
+              "final": {
+                "over": 1.93,
+                "line": 3.5,
+                "under": 1.75
+              },
+              "delta": {
+                "over": 0.19,
+                "line": 0.5,
+                "under": -0.19
+              },
+              "_source": "table_row",
+              "_matched_line": "伟德国际 1.74 3.00 1.94 1.93 3.50 1.75"
+            },
+            {
+              "company": "香港马会",
+              "initial": {
+                "over": 1.95,
+                "line": 3.5,
+                "under": 1.75
+              },
+              "final": {
+                "over": 1.95,
+                "line": 3.5,
+                "under": 1.75
+              },
+              "delta": {
+                "over": 0,
+                "line": 0,
+                "under": 0
+              },
+              "_source": "table_row",
+              "_matched_line": "香港马会 1.95 3.50 1.75 1.95 3.50 1.75"
+            }
+          ],
+          "_source": "multi_company_consensus",
+          "_matched_line": "澳门彩票 1.98 3.25 1.82 1.82 3.25 1.98",
+          "url": "https://m.okooo.com/match/handicap.php?MatchID=1326947",
+          "_flow": "asian_inner_tab",
+          "_click": {
+            "clicked": true,
+            "label": "大小球",
+            "tag": "DIV"
+          },
+          "_attempts": [
+            {
+              "attempt": 1,
+              "client": "LocalChromeSession",
+              "success": true,
+              "blocked": false,
+              "found": true,
+              "parsed": true,
+              "stop_retry": false,
+              "stop_reason": null
+            }
+          ]
+        },
+        "凯利": {
+          "found": true,
+          "initial": {
+            "home": 0.93,
+            "draw": 0.93,
+            "away": 0.93
+          },
+          "final": {
+            "home": 0.95,
+            "draw": 0.95,
+            "away": 0.95
+          },
+          "delta": {
+            "home": 0.02,
+            "draw": 0.02,
+            "away": 0.02
+          },
+          "payout_rate": 0.95,
+          "url": "https://m.okooo.com/match/odds.php?MatchID=1326947",
+          "_click": {
+            "clicked": true,
+            "label": "凯利",
+            "tag": "DIV"
+          },
+          "_attempts": [
+            {
+              "attempt": 1,
+              "client": "LocalChromeSession",
+              "success": true,
+              "blocked": false,
+              "found": true,
+              "parsed": null,
+              "stop_retry": false,
+              "stop_reason": null
+            }
+          ]
+        }
+      },
+      "upset_potential": {
+        "level": "低",
+        "index": 14,
+        "factors": [
+          "欧赔强化主队，但需防热度集中"
+        ]
+      },
+      "retrieved_memory_explanation": "轻量模式：基于澳客欧赔、亚值与大小球快照生成单场预测记录，仅写入滚动记忆，不进入正式联赛主归档。",
+      "runtime_profile": {
+        "mode": "lightweight_market_snapshot"
+      }
+    }
+  }
+]

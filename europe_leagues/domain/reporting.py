@@ -91,9 +91,12 @@ class PredictionReportService:
                     )
 
             rag_explanation = str(pred.get('retrieved_memory_explanation') or '').strip()
+            live_betting_advice = str(pred.get('live_betting_advice') or '').strip()
             rag_memory = pred.get('retrieved_memory', {}) if isinstance(pred.get('retrieved_memory'), dict) else {}
             if rag_explanation:
                 report += f"\n**RAG记忆解释**:\n  {rag_explanation}\n"
+            if live_betting_advice:
+                report += f"  临场建议: {live_betting_advice}\n"
             if rag_memory.get('similar_cases'):
                 report += "  相似记忆样本:\n"
                 for similar in rag_memory.get('similar_cases', [])[:3]:

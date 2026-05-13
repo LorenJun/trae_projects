@@ -12,9 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from collectors.okooo import build_okooo_driver_chain
 from collectors.okooo import describe_unavailable_okooo_drivers
-from collectors.okooo import snapshot_matches_request
 from runtime.cache import PredictionCache
-from runtime.debug_events import emit_local_debug_event
 from runtime.memory_samples import load_prediction_memory_samples
 
 logger = logging.getLogger(__name__)
@@ -24,6 +22,120 @@ EXTERNAL_SNAPSHOT_DIR_ALIASES = {
     'champions_league': ['champions_league', '欧冠'],
     'conference_league': ['conference_league', '欧协联'],
 }
+
+
+def parse_handicap_value(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+        return numeric if abs(numeric) > 1e-9 else 0.0
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        if '/' in raw and not any(ch in raw for ch in '球平受让'):
+            parts = [float(item) for item in raw.split('/') if item]
+            if parts:
+                return sum(parts) / len(parts)
+        return float(raw)
+    except Exception:
+        pass
+    mapping = {
+        '平手': 0.0,
+        '平手/半球': -0.25,
+        '平/半': -0.25,
+        '半球': -0.5,
+        '半球/一球': -0.75,
+        '半/一': -0.75,
+        '一球': -1.0,
+        '一球/球半': -1.25,
+        '一/球半': -1.25,
+        '球半': -1.5,
+        '球半/两球': -1.75,
+        '两球': -2.0,
+        '两球/两球半': -2.25,
+        '两球半': -2.5,
+        '受让平手': 0.0,
+        '受让平手/半球': 0.25,
+        '受让平/半': 0.25,
+        '受让半球': 0.5,
+        '受让半球/一球': 0.75,
+        '受让半/一': 0.75,
+        '受让一球': 1.0,
+        '受让一球/球半': 1.25,
+        '受让一/球半': 1.25,
+        '受让球半': 1.5,
+        '受让球半/两球': 1.75,
+        '受让两球': 2.0,
+        '受让两球/两球半': 2.25,
+        '受让两球半': 2.5,
+    }
+    return mapping.get(raw.replace(' ', ''))
+
+
+def build_market_context(
+    *,
+    current_odds: Optional[Dict[str, Any]],
+    analysis_context: Optional[Dict[str, Any]],
+    to_float,
+    postprocess_service: Any = None,
+    cache: Any = None,
+) -> Dict[str, Any]:
+    analysis_context = analysis_context if isinstance(analysis_context, dict) else {}
+    cached = analysis_context.get('market_context')
+    if isinstance(cached, dict):
+        return cached
+
+    euro_odds: Dict[str, Any] = {'values': None, 'source': 'missing'}
+    for market_key in ('欧赔', '胜平负赔率'):
+        market_block = current_odds.get(market_key) if isinstance(current_odds, dict) else None
+        if not isinstance(market_block, dict):
+            continue
+        final = market_block.get('final')
+        if isinstance(final, dict):
+            euro_odds = {'values': final, 'source': f'{market_key}.final'}
+            break
+        initial = market_block.get('initial')
+        if isinstance(initial, dict):
+            euro_odds = {'values': initial, 'source': f'{market_key}.initial'}
+            break
+
+    asian_block = current_odds.get('亚值') if isinstance(current_odds, dict) else None
+    asian_final = asian_block.get('final') if isinstance(asian_block, dict) and isinstance(asian_block.get('final'), dict) else {}
+    asian_initial = asian_block.get('initial') if isinstance(asian_block, dict) and isinstance(asian_block.get('initial'), dict) else {}
+    asian_raw = (
+        asian_final.get('handicap')
+        if 'handicap' in asian_final
+        else asian_final.get('handicap_value')
+        if 'handicap_value' in asian_final
+        else asian_final.get('盘口值')
+        if '盘口值' in asian_final
+        else asian_final.get('handicap_text')
+        if 'handicap_text' in asian_final
+        else asian_initial.get('handicap')
+        if 'handicap' in asian_initial
+        else asian_initial.get('handicap_value')
+        if 'handicap_value' in asian_initial
+        else asian_initial.get('盘口值')
+        if '盘口值' in asian_initial
+        else asian_initial.get('handicap_text')
+    )
+
+    over_under_line, over_under_line_source = resolve_over_under_line(
+        current_odds=current_odds,
+        analysis_context=analysis_context,
+        to_float=to_float,
+    )
+    context = {
+        'euro_odds': euro_odds,
+        'asian_line': parse_handicap_value(asian_raw),
+        'asian_line_raw': asian_raw,
+        'over_under_line': over_under_line,
+        'over_under_line_source': over_under_line_source,
+    }
+    analysis_context['market_context'] = context
+    return context
 
 
 def build_odds_runtime_options(driver: str = 'local-chrome', headed: bool = False, no_refresh_odds: bool = False) -> Dict[str, Any]:
@@ -68,9 +180,6 @@ def resolve_over_under_line(
                         value = final.get('盘口')
                     parsed = to_float(value)
                     if isinstance(parsed, float) and 0.5 <= parsed <= 6.5:
-                        # #region debug-point E:resolve-ou-final
-                        emit_local_debug_event({"sessionId":"snapshot-routing-chain","runId":"pre-fix","hypothesisId":"C","location":"domain/odds.py:64","msg":"[DEBUG] resolved over under from snapshot final","data":{"current_odds_match_id":str(current_odds.get("match_id") or ""),"final_line_raw":value,"parsed":parsed,"has_companies":bool(((totals or {}).get("companies") or [])),"analysis_context_keys":sorted(list((analysis_context or {}).keys()))[:10] if isinstance(analysis_context, dict) else []}})
-                        # #endregion
                         return float(parsed), 'snapshot_final'
                 initial = totals.get('initial')
                 if isinstance(initial, dict):
@@ -79,16 +188,10 @@ def resolve_over_under_line(
                         value = initial.get('盘口')
                     parsed = to_float(value)
                     if isinstance(parsed, float) and 0.5 <= parsed <= 6.5:
-                        # #region debug-point F:resolve-ou-initial
-                        emit_local_debug_event({"sessionId":"snapshot-routing-chain","runId":"pre-fix","hypothesisId":"C","location":"domain/odds.py:75","msg":"[DEBUG] resolved over under from snapshot initial","data":{"current_odds_match_id":str(current_odds.get("match_id") or ""),"initial_line_raw":value,"parsed":parsed,"has_companies":bool(((totals or {}).get("companies") or []))}})
-                        # #endregion
                         return float(parsed), 'snapshot_initial'
     except Exception:
         pass
 
-    # #region debug-point G:resolve-ou-miss
-    emit_local_debug_event({"sessionId":"snapshot-routing-chain","runId":"pre-fix","hypothesisId":"C","location":"domain/odds.py:81","msg":"[DEBUG] failed to resolve over under line","data":{"current_odds_available":bool(isinstance(current_odds, dict) and current_odds),"current_odds_match_id":str((current_odds or {}).get("match_id") or "") if isinstance(current_odds, dict) else "","totals_block_type":type((current_odds or {}).get("大小球")).__name__ if isinstance(current_odds, dict) else "none","totals_final":((current_odds or {}).get("大小球") or {}).get("final") if isinstance(current_odds, dict) else None,"totals_initial":((current_odds or {}).get("大小球") or {}).get("initial") if isinstance(current_odds, dict) else None}})
-    # #endregion
     return None, 'missing_real_line'
 
 
@@ -175,26 +278,6 @@ def auto_fetch_okooo_totals_if_needed(
                 continue
 
             payload = json.loads(open(out_path, 'r', encoding='utf-8').read())
-            if match_id and not snapshot_matches_request(
-                payload,
-                home_team=home_team,
-                away_team=away_team,
-                match_date=match_date,
-            ):
-                retry_cmd = [item for item in cmd]
-                if '--match-id' in retry_cmd:
-                    idx = retry_cmd.index('--match-id')
-                    del retry_cmd[idx:idx + 2]
-                proc = subprocess.run(retry_cmd, cwd=os.path.dirname(script), capture_output=True, text=True, timeout=240)
-                diag['retry_without_match_id'] = True
-                diag['retry_returncode'] = proc.returncode
-                if proc.stdout:
-                    diag['retry_stdout_tail'] = proc.stdout.strip().splitlines()[-1][-200:]
-                if proc.returncode == 0:
-                    retry_path = (proc.stdout or '').strip().splitlines()[-1].strip()
-                    if retry_path and os.path.exists(retry_path):
-                        out_path = retry_path
-                        payload = json.loads(open(out_path, 'r', encoding='utf-8').read())
             totals = payload.get('大小球') if isinstance(payload, dict) else None
             if not isinstance(totals, dict) or not totals.get('found'):
                 last_error = 'totals not found in snapshot'
@@ -205,16 +288,12 @@ def auto_fetch_okooo_totals_if_needed(
                 'initial': totals.get('initial') or {},
                 'final': totals.get('final') or {},
             }
-            merged['match_id'] = str(payload.get('match_id') or match_id or merged.get('match_id') or '')
             if isinstance(totals.get('consensus'), dict):
                 merged['大小球']['consensus'] = totals.get('consensus') or {}
             if isinstance(totals.get('companies'), list):
                 merged['大小球']['companies'] = totals.get('companies') or []
             if totals.get('company_mode'):
                 merged['大小球']['company_mode'] = totals.get('company_mode')
-            # #region debug-point H:auto-fetch-merged
-            emit_local_debug_event({"sessionId":"snapshot-routing-chain","runId":"pre-fix","hypothesisId":"D","location":"domain/odds.py:172","msg":"[DEBUG] auto fetched totals merged into current odds","data":{"league_name":league_name,"home_team":home_team,"away_team":away_team,"requested_match_id":match_id,"source_snapshot":out_path,"payload_match_id":str(payload.get("match_id") or ""),"totals_final_line":((merged.get("大小球") or {}).get("final") or {}).get("line"),"totals_initial_line":((merged.get("大小球") or {}).get("initial") or {}).get("line"),"merged_match_id":str(merged.get("match_id") or "")}})
-            # #endregion
             diag['ok'] = True
             diag['source_snapshot'] = out_path
             return merged, diag
@@ -353,6 +432,229 @@ class HistoricalOddsReference:
                 vector[f'{group}.{phase}.{key}'] = numeric
         return vector
 
+    @staticmethod
+    def _pick_market_value(block: Any, phase: str, key: str) -> Optional[float]:
+        if not isinstance(block, dict):
+            return None
+        phase_block = block.get(phase)
+        if not isinstance(phase_block, dict):
+            return None
+        return HistoricalOddsReference._safe_float(phase_block.get(key))
+
+    @staticmethod
+    def _movement_ratio(initial: Optional[float], final: Optional[float]) -> float:
+        if initial is None or final is None or initial <= 0:
+            return 0.0
+        return max(-0.18, min(0.18, (initial - final) / initial))
+
+    @staticmethod
+    def _direction_from_scores(score_map: Dict[str, float], *, min_top: float = 0.015, min_gap: float = 0.012) -> Tuple[str, float]:
+        ranked = sorted(score_map.items(), key=lambda item: item[1], reverse=True)
+        if len(ranked) < 2:
+            return "balanced", 0.0
+        top_name, top_value = ranked[0]
+        second_value = ranked[1][1]
+        if top_value > min_top and (top_value - second_value) > min_gap:
+            return top_name, round(max(0.0, top_value - second_value), 4)
+        return "balanced", 0.0
+
+    @classmethod
+    def _extract_market_movement_profile(cls, odds_snapshot: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not isinstance(odds_snapshot, dict):
+            return {
+                'available': False,
+                'side_direction': 'balanced',
+                'side_strength': 0.0,
+                'bookmaker_psychology': {'label': 'unknown', 'strength': 0.0},
+                'capital_flow': {'direction': 'balanced', 'strength': 0.0},
+                'totals_direction': 'balanced',
+                'totals_strength': 0.0,
+            }
+
+        euro = odds_snapshot.get('欧赔')
+        if not isinstance(euro, dict):
+            euro = odds_snapshot.get('胜平负赔率') if isinstance(odds_snapshot.get('胜平负赔率'), dict) else {}
+        asian = odds_snapshot.get('亚值') if isinstance(odds_snapshot.get('亚值'), dict) else {}
+        kelly = odds_snapshot.get('凯利') if isinstance(odds_snapshot.get('凯利'), dict) else {}
+        totals = odds_snapshot.get('大小球') if isinstance(odds_snapshot.get('大小球'), dict) else {}
+
+        home_score = cls._movement_ratio(
+            cls._pick_market_value(euro, 'initial', 'home'),
+            cls._pick_market_value(euro, 'final', 'home'),
+        )
+        draw_score = cls._movement_ratio(
+            cls._pick_market_value(euro, 'initial', 'draw'),
+            cls._pick_market_value(euro, 'final', 'draw'),
+        )
+        away_score = cls._movement_ratio(
+            cls._pick_market_value(euro, 'initial', 'away'),
+            cls._pick_market_value(euro, 'final', 'away'),
+        )
+
+        h_water_i = cls._pick_market_value(asian, 'initial', 'home_water')
+        h_water_f = cls._pick_market_value(asian, 'final', 'home_water')
+        a_water_i = cls._pick_market_value(asian, 'initial', 'away_water')
+        a_water_f = cls._pick_market_value(asian, 'final', 'away_water')
+        if h_water_i is not None and h_water_f is not None:
+            home_score += max(-0.08, min(0.08, (h_water_i - h_water_f) * 0.25))
+        if a_water_i is not None and a_water_f is not None:
+            away_score += max(-0.08, min(0.08, (a_water_i - a_water_f) * 0.25))
+
+        k_h = cls._pick_market_value(kelly, 'final', 'home')
+        k_d = cls._pick_market_value(kelly, 'final', 'draw')
+        k_a = cls._pick_market_value(kelly, 'final', 'away')
+        kelly_vals = [item for item in (k_h, k_d, k_a) if isinstance(item, float)]
+        if len(kelly_vals) == 3:
+            avg_k = sum(kelly_vals) / 3.0
+            home_score += max(-0.05, min(0.05, (avg_k - k_h) * 0.35))
+            draw_score += max(-0.05, min(0.05, (avg_k - k_d) * 0.35))
+            away_score += max(-0.05, min(0.05, (avg_k - k_a) * 0.35))
+
+        side_scores = {
+            'home': round(home_score, 4),
+            'draw': round(draw_score, 4),
+            'away': round(away_score, 4),
+        }
+        side_direction, side_strength = cls._direction_from_scores(side_scores)
+
+        hcp_i = None
+        hcp_f = None
+        if isinstance(asian.get('initial'), dict):
+            ini = asian.get('initial') or {}
+            hcp_i = parse_handicap_value(
+                ini.get('handicap')
+                if 'handicap' in ini
+                else ini.get('handicap_value')
+                if 'handicap_value' in ini
+                else ini.get('盘口值')
+                if '盘口值' in ini
+                else ini.get('handicap_text')
+            )
+        if isinstance(asian.get('final'), dict):
+            fin = asian.get('final') or {}
+            hcp_f = parse_handicap_value(
+                fin.get('handicap')
+                if 'handicap' in fin
+                else fin.get('handicap_value')
+                if 'handicap_value' in fin
+                else fin.get('盘口值')
+                if '盘口值' in fin
+                else fin.get('handicap_text')
+            )
+        giver = 'none'
+        if isinstance(hcp_f, float):
+            if hcp_f < -0.06:
+                giver = 'home'
+            elif hcp_f > 0.06:
+                giver = 'away'
+        retreat = isinstance(hcp_i, float) and isinstance(hcp_f, float) and abs(hcp_f) + 0.12 < abs(hcp_i)
+
+        psychology_label = 'balanced'
+        psychology_strength = 0.0
+        if draw_score > max(home_score, away_score) and draw_score >= 0.04:
+            psychology_label = 'guard_draw'
+            psychology_strength = round(draw_score, 4)
+        elif giver == 'home' and home_score > 0.03 and retreat and h_water_i is not None and h_water_f is not None and (h_water_f - h_water_i) >= 0.04:
+            psychology_label = 'tempt_home'
+            psychology_strength = round(min(0.18, 0.05 + max(0.0, h_water_f - h_water_i) * 0.2), 4)
+        elif giver == 'away' and away_score > 0.03 and retreat and a_water_i is not None and a_water_f is not None and (a_water_f - a_water_i) >= 0.04:
+            psychology_label = 'tempt_away'
+            psychology_strength = round(min(0.18, 0.05 + max(0.0, a_water_f - a_water_i) * 0.2), 4)
+        elif side_direction == 'home':
+            psychology_label = 'support_home'
+            psychology_strength = round(side_strength, 4)
+        elif side_direction == 'away':
+            psychology_label = 'support_away'
+            psychology_strength = round(side_strength, 4)
+
+        over_i = cls._pick_market_value(totals, 'initial', 'over')
+        over_f = cls._pick_market_value(totals, 'final', 'over')
+        under_i = cls._pick_market_value(totals, 'initial', 'under')
+        under_f = cls._pick_market_value(totals, 'final', 'under')
+        ou_i = cls._pick_market_value(totals, 'initial', 'line')
+        ou_f = cls._pick_market_value(totals, 'final', 'line')
+        totals_scores = {'over': 0.0, 'under': 0.0}
+        if ou_i is not None and ou_f is not None:
+            if ou_f - ou_i >= 0.24:
+                totals_scores['over'] += 0.14
+            elif ou_i - ou_f >= 0.24:
+                totals_scores['under'] += 0.14
+        if over_i is not None and over_f is not None:
+            totals_scores['over'] += max(-0.08, min(0.08, (over_i - over_f) * 0.30))
+        if under_i is not None and under_f is not None:
+            totals_scores['under'] += max(-0.08, min(0.08, (under_i - under_f) * 0.30))
+        totals_direction, totals_strength = cls._direction_from_scores(totals_scores, min_top=0.02, min_gap=0.015)
+
+        capital_direction = side_direction
+        capital_strength = side_strength
+        return {
+            'available': True,
+            'side_direction': side_direction,
+            'side_strength': round(side_strength, 4),
+            'side_scores': side_scores,
+            'bookmaker_psychology': {
+                'label': psychology_label,
+                'strength': round(psychology_strength, 4),
+                'giver': giver,
+                'retreat': retreat,
+            },
+            'capital_flow': {
+                'direction': capital_direction,
+                'strength': round(capital_strength, 4),
+            },
+            'totals_direction': totals_direction,
+            'totals_strength': round(totals_strength, 4),
+        }
+
+    @classmethod
+    def _compare_market_movement_profiles(cls, current_profile: Dict[str, Any], historical_profile: Dict[str, Any]) -> Dict[str, Any]:
+        current_direction = str(current_profile.get('side_direction') or 'balanced')
+        historical_direction = str(historical_profile.get('side_direction') or 'balanced')
+        current_psychology = (current_profile.get('bookmaker_psychology') or {}) if isinstance(current_profile.get('bookmaker_psychology'), dict) else {}
+        historical_psychology = (historical_profile.get('bookmaker_psychology') or {}) if isinstance(historical_profile.get('bookmaker_psychology'), dict) else {}
+        current_flow = (current_profile.get('capital_flow') or {}) if isinstance(current_profile.get('capital_flow'), dict) else {}
+        historical_flow = (historical_profile.get('capital_flow') or {}) if isinstance(historical_profile.get('capital_flow'), dict) else {}
+
+        same_direction = current_direction not in ('', 'balanced') and current_direction == historical_direction
+        current_psychology_label = str(current_psychology.get('label') or 'unknown')
+        historical_psychology_label = str(historical_psychology.get('label') or 'unknown')
+        same_psychology = current_psychology_label not in ('', 'unknown', 'balanced') and current_psychology_label == historical_psychology_label
+        current_flow_direction = str(current_flow.get('direction') or 'balanced')
+        historical_flow_direction = str(historical_flow.get('direction') or 'balanced')
+        same_capital_flow = current_flow_direction not in ('', 'balanced') and current_flow_direction == historical_flow_direction
+        same_totals_direction = (
+            str(current_profile.get('totals_direction') or 'balanced') not in ('', 'balanced')
+            and str(current_profile.get('totals_direction') or 'balanced') == str(historical_profile.get('totals_direction') or 'balanced')
+        )
+
+        score = 0.0
+        if same_direction:
+            score += 0.45
+        if same_psychology:
+            score += 0.2
+        if same_capital_flow:
+            score += 0.2
+        if same_totals_direction:
+            score += 0.1
+        current_strength = cls._safe_float((current_flow or {}).get('strength')) or 0.0
+        historical_strength = cls._safe_float((historical_flow or {}).get('strength')) or 0.0
+        strength_gap = abs(current_strength - historical_strength)
+        if same_direction:
+            score += max(0.0, 0.05 - min(0.05, strength_gap * 0.6))
+        score = round(min(1.0, score), 4)
+        return {
+            'same_direction': same_direction,
+            'same_psychology': same_psychology,
+            'same_capital_flow': same_capital_flow,
+            'same_totals_direction': same_totals_direction,
+            'score': score,
+            'matched_direction': current_direction if same_direction else 'balanced',
+            'current_psychology': current_psychology_label,
+            'historical_psychology': historical_psychology_label,
+            'current_capital_flow_direction': current_flow_direction,
+            'historical_capital_flow_direction': historical_flow_direction,
+        }
+
     def _build_result_summary(self, matches: List[Dict[str, Any]]) -> Dict[str, Any]:
         summary = {'主胜': 0, '平局': 0, '客胜': 0}
         for match in matches:
@@ -382,6 +684,50 @@ class HistoricalOddsReference:
             'cold_result_rate': (cold_count / total if total else 0.0),
         }
 
+    @classmethod
+    def _build_market_alignment_summary(cls, matches: List[Dict[str, Any]], current_profile: Dict[str, Any]) -> Dict[str, Any]:
+        aligned_matches = []
+        direction_counts = {'home': 0, 'draw': 0, 'away': 0}
+        same_psychology_count = 0
+        same_capital_flow_count = 0
+        same_totals_direction_count = 0
+        total_score = 0.0
+        for item in matches:
+            alignment = item.get('market_movement_alignment') if isinstance(item.get('market_movement_alignment'), dict) else {}
+            if not alignment:
+                continue
+            score = float(alignment.get('score') or 0.0)
+            if score < 0.45:
+                continue
+            aligned_matches.append(item)
+            total_score += score
+            matched_direction = str(alignment.get('matched_direction') or 'balanced')
+            if matched_direction in direction_counts:
+                direction_counts[matched_direction] += 1
+            if alignment.get('same_psychology'):
+                same_psychology_count += 1
+            if alignment.get('same_capital_flow'):
+                same_capital_flow_count += 1
+            if alignment.get('same_totals_direction'):
+                same_totals_direction_count += 1
+        dominant_direction = 'balanced'
+        if any(direction_counts.values()):
+            dominant_direction = max(direction_counts.items(), key=lambda item: item[1])[0]
+            if direction_counts.get(dominant_direction, 0) <= 0:
+                dominant_direction = 'balanced'
+        aligned_count = len(aligned_matches)
+        return {
+            'current_market_profile': current_profile,
+            'aligned_count': aligned_count,
+            'avg_alignment_score': round(total_score / aligned_count, 4) if aligned_count else 0.0,
+            'same_psychology_count': same_psychology_count,
+            'same_capital_flow_count': same_capital_flow_count,
+            'same_totals_direction_count': same_totals_direction_count,
+            'dominant_direction': dominant_direction,
+            'direction_counts': direction_counts,
+            'aligned_match_ids': [str(item.get('match_id') or '') for item in aligned_matches if str(item.get('match_id') or '').strip()],
+        }
+
     def find_similar_matches(
         self,
         league_code: str,
@@ -401,6 +747,7 @@ class HistoricalOddsReference:
             return cached
 
         current_vector = self._extract_feature_vector(current_odds)
+        current_profile = self._extract_market_movement_profile(current_odds)
         history = self.records_by_league.get(league_code, [])
         memory_count = self.memory_history_counts.get(league_code, 0)
         if not current_vector or not history:
@@ -411,6 +758,7 @@ class HistoricalOddsReference:
                 'matched_feature_count': 0,
                 'similar_matches': [],
                 'summary': self._build_result_summary([]),
+                'market_alignment': self._build_market_alignment_summary([], current_profile),
                 'insights': [],
             }
             self.cache.set('find_similar_odds_matches', cache_params, result)
@@ -444,6 +792,9 @@ class HistoricalOddsReference:
             similarity = max(0.0, 1.0 / (1.0 + avg_distance))
             if match.get('source') == 'prediction_memory':
                 similarity = min(1.0, similarity * 1.08)
+            historical_profile = self._extract_market_movement_profile(match)
+            market_alignment = self._compare_market_movement_profiles(current_profile, historical_profile)
+            similarity = min(1.0, similarity + float(market_alignment.get('score') or 0.0) * 0.06)
             scored_matches.append({
                 'match_id': match.get('match_id'),
                 'match_date': match.get('match_date'),
@@ -459,12 +810,16 @@ class HistoricalOddsReference:
                 '胜平负赔率': match.get('胜平负赔率', {}),
                 '欧赔': match.get('欧赔', {}),
                 '亚值': match.get('亚值', {}),
+                '大小球': match.get('大小球', {}),
                 '凯利': match.get('凯利', {}),
                 '离散率': match.get('离散率', {}),
+                'market_movement_profile': historical_profile,
+                'market_movement_alignment': market_alignment,
             })
         scored_matches.sort(key=lambda item: (-item['similarity'], item['distance']))
         top_matches = scored_matches[:top_k]
         summary = self._build_result_summary(top_matches)
+        market_alignment = self._build_market_alignment_summary(top_matches, current_profile)
         insights = []
         if summary['sample_size'] >= 3:
             if summary['cold_result_rate'] >= 0.4:
@@ -475,6 +830,16 @@ class HistoricalOddsReference:
         memory_hits = sum(1 for item in top_matches if item.get('source') == 'prediction_memory')
         if memory_hits:
             insights.append(f'近期滚动记忆命中{memory_hits}场已完赛相似盘口样本')
+        if market_alignment.get('aligned_count', 0) >= 2:
+            dominant_direction = market_alignment.get('dominant_direction')
+            avg_alignment_score = float(market_alignment.get('avg_alignment_score') or 0.0)
+            if dominant_direction in ('home', 'draw', 'away'):
+                mapped = {'home': '主胜', 'draw': '平局', 'away': '客胜'}[dominant_direction]
+                insights.append(f'相似赔率轨迹与当前盘口同向，历史走势更支持{mapped}(一致性{avg_alignment_score:.0%})')
+            if int(market_alignment.get('same_psychology_count') or 0) >= 2:
+                insights.append('历史样本与当前盘口操盘手法相近')
+            if int(market_alignment.get('same_capital_flow_count') or 0) >= 2:
+                insights.append('历史样本与当前资金流向代理一致')
         result = {
             'available': bool(top_matches),
             'league_history_count': len(history),
@@ -482,6 +847,7 @@ class HistoricalOddsReference:
             'matched_feature_count': max((item['matched_feature_count'] for item in top_matches), default=0),
             'similar_matches': top_matches,
             'summary': summary,
+            'market_alignment': market_alignment,
             'insights': insights,
         }
         self.cache.set('find_similar_odds_matches', cache_params, result)

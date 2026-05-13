@@ -2,12 +2,12 @@
 
 > 当前正式流程  
 > 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
-> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层  
+> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层、历史盘口一致性与临场建议层  
 > 3. 五大联赛 SoT 写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写入 `MEMORY.md` 与 runtime-only 归档  
 > 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
 > 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
-> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`  
+> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`、`realtime.context_applied.live_outcome_adjustment.historical_market_alignment`、`retrieved_memory.summary.live_market_followup`、`live_betting_advice`  
 > 欧战正式 competition config：`europa_league`、`champions_league`、`conference_league` 已进入主链，但写回仍保持 `runtime_only`
 > 当前实现说明：`prediction_system.py` 为兼容入口，真实 CLI 路由在 `app/cli.py`
 
@@ -53,6 +53,8 @@
 - 五大联赛 SoT + 欧战/杯赛 runtime-only 双路径写回
 - `europa_league`、`champions_league`、`conference_league` 均可直接按正式 competition config 走 `predict-match` / `harness-run`
 - 主链自动检索 RAG 相似记忆，并在新预测中原生写入 `RAG记忆:`
+- RAG 会优先按赛果方向筛选，再按大小球方向/变化接近筛选，并在命中时生成 `live_betting_advice`
+- `MatchID` 会同步写入预测备注和 `MEMORY.md`，用于回溯实时盘口与历史赔率轨迹
 - 支持 `bulk_fetch_and_update.py` 批量赛果回填
 - 支持 `harness-run` 阶段化编排
 
@@ -105,6 +107,7 @@ python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026
    - 回填 EWMA 近况
    - 按需注入 `team_context`
    - 检索 RAG 相似比赛、盘口样本与爆冷案例
+   - 在 `1X2` 赔率接近且大小球变化接近时，抓取历史 `match_id` 的盘口轨迹做临场增强
 6. 输出终版结论时，优先检查：
    - `final_probabilities`
    - `top_scores`
@@ -114,6 +117,9 @@ python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026
    - `over_under.market.final`
    - `realtime.okooo`
    - `retrieved_memory_explanation`
+   - `realtime.context_applied.live_outcome_adjustment.historical_market_alignment`
+   - `retrieved_memory.summary.live_market_followup`
+   - `live_betting_advice`
 7. 若任务要求落盘，只走正式双路径：
    - 五大联赛：`teams_2025-26.md`
    - 欧战/杯赛：`MEMORY.md`、`prediction_archive.json`、`prediction_memory_odds_samples.json`
@@ -137,7 +143,7 @@ python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026
 
 1. `analysis_context['ou_line']`
 2. `current_odds['大小球']['final']['line']`
-3. 默认 `2.5`
+3. 若缺失真实盘口，返回 `missing_real_line` / “待补真实盘口”，不再回退默认 `2.5`
 
 ### 最终输出检查
 

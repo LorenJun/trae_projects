@@ -149,6 +149,117 @@ class ResultManagerTest(unittest.TestCase):
         self.assertIn("■ 赛果: 主胜 2-1", memory_text)
         self.assertIn("- [la_liga|2026-05-11|巴塞罗那|皇家马德里] 2026-05-11 西甲联赛 巴塞罗那 vs 皇家马德里", memory_text)
 
+    def test_save_prediction_from_enhanced_archives_review_and_market_fields(self):
+        enhanced_pred = {
+            "match_id": "external-123",
+            "match_date": "2026-05-11",
+            "match_time": "03:00",
+            "home_team": "巴塞罗那",
+            "away_team": "皇家马德里",
+            "prediction": "主胜",
+            "confidence": 0.61,
+            "final_probabilities": {"home_win": 0.52, "draw": 0.27, "away_win": 0.21},
+            "top_scores": [("2-1", 0.2), ("1-0", 0.1)],
+            "over_under": {"available": True, "line": 2.75, "over": 0.44, "under": 0.56},
+            "market_snapshot": {
+                "欧赔": {
+                    "initial": {"home": 2.12, "draw": 3.3, "away": 3.45},
+                    "final": {"home": 2.25, "draw": 3.12, "away": 3.18},
+                },
+                "亚值": {
+                    "initial": {"handicap_value": -0.5},
+                    "final": {"handicap_value": -0.25},
+                },
+                "大小球": {
+                    "initial": {"line": 2.5},
+                    "final": {"line": 2.75},
+                },
+            },
+            "strength_diff": 14.5,
+            "rag_decision": {
+                "available": True,
+                "risk_bonus": 7,
+                "confidence_penalty": 0.018,
+                "scenario_tags": ["upset_case_cluster", "market_case_opposes_pick"],
+            },
+            "runtime_profile": {"mode": "unit-test"},
+            "realtime": {
+                "context_applied": {
+                    "posterior_outcome_pipeline": {
+                        "baseline": {"home_win": 0.55, "draw": 0.24, "away_win": 0.21},
+                        "final": {"home_win": 0.52, "draw": 0.27, "away_win": 0.21},
+                        "stages_applied": ["review_outcome_adjustment"],
+                    },
+                    "posterior_outcome_guard": {"applied": False, "reason": "within_limit"},
+                    "review_outcome_adjustment": {
+                        "applied": True,
+                        "stratified_review": {"bucket_key": "home:level_shallow"},
+                        "three_layer_review": {"bucket_key": "home:level_shallow:draw_guarded"},
+                    },
+                }
+            },
+        }
+        with patch.object(self.manager.teams_writeback, "write_prediction", return_value=None):
+            with quiet_test_output():
+                self.manager.save_prediction_from_enhanced(enhanced_pred, "la_liga")
+
+        archive = self.manager.prediction_archive_store.load()
+        archived = archive["la_liga_20260511_巴塞罗那_皇家马德里"]
+        self.assertEqual(archived["strength_diff"], 14.5)
+        self.assertEqual(archived["asian_line"], -0.25)
+        self.assertEqual(archived["asian_line_initial"], -0.5)
+        self.assertEqual(archived["ou_line"], 2.75)
+        self.assertEqual(archived["euro_home"], 2.25)
+        self.assertEqual(archived["euro_home_initial"], 2.12)
+        self.assertEqual(archived["review_bucket_key"], "home:level_shallow")
+        self.assertEqual(archived["three_layer_bucket_key"], "home:level_shallow:draw_guarded")
+        self.assertEqual(archived["rag_risk_bonus"], 7)
+        self.assertEqual(archived["rag_confidence_penalty"], 0.018)
+        self.assertEqual(archived["rag_scenario_tags"], ["upset_case_cluster", "market_case_opposes_pick"])
+        self.assertEqual(archived["posterior_outcome_pipeline"]["stages_applied"], ["review_outcome_adjustment"])
+
+    def test_save_prediction_from_enhanced_preserves_zero_final_market_values(self):
+        enhanced_pred = {
+            "match_id": "external-456",
+            "match_date": "2026-05-12",
+            "match_time": "03:00",
+            "home_team": "奥萨苏纳",
+            "away_team": "马德里竞技",
+            "prediction": "平局",
+            "confidence": 0.52,
+            "final_probabilities": {"home_win": 0.3, "draw": 0.4, "away_win": 0.3},
+            "top_scores": [("1-1", 0.18), ("0-0", 0.12)],
+            "over_under": {"available": True, "line": 0.0, "over": 0.48, "under": 0.52},
+            "market_snapshot": {
+                "欧赔": {
+                    "initial": {"home": 2.35, "draw": 3.1, "away": 2.88},
+                    "final": {"home": 0.0, "draw": 3.0, "away": 2.9},
+                },
+                "亚值": {
+                    "initial": {"handicap_value": -0.25},
+                    "final": {"handicap_value": 0.0},
+                },
+                "大小球": {
+                    "initial": {"line": 2.5},
+                    "final": {"line": 0.0},
+                },
+            },
+            "runtime_profile": {"mode": "unit-test"},
+            "realtime": {"context_applied": {}},
+        }
+        with patch.object(self.manager.teams_writeback, "write_prediction", return_value=None):
+            with quiet_test_output():
+                self.manager.save_prediction_from_enhanced(enhanced_pred, "la_liga")
+
+        archive = self.manager.prediction_archive_store.load()
+        archived = next(item for item in archive.values() if item.get("external_match_id") == "external-456")
+        self.assertEqual(archived["asian_line"], 0.0)
+        self.assertEqual(archived["asian_line_initial"], -0.25)
+        self.assertEqual(archived["ou_line"], 0.0)
+        self.assertEqual(archived["ou_line_initial"], 2.5)
+        self.assertEqual(archived["euro_home"], 0.0)
+        self.assertEqual(archived["euro_home_initial"], 2.35)
+
     def test_review_entry_upset_sync_uses_review_sample_fields(self):
         entry_text = "\n".join(
             [

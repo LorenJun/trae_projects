@@ -346,12 +346,27 @@ docs/
     }
   },
   "retrieved_memory": {
-    "summary": "RAG召回5场相似比赛...",
+    "summary": {
+      "retrieved_count": 8,
+      "market_case_count": 5,
+      "live_market_followup": {
+        "applied": true,
+        "eligible_count": 2,
+        "eligible_match_ids": ["1326947", "1302909"],
+        "avg_path_score": 0.72,
+        "avg_weight_bonus": 0.05,
+        "supported_outcome_rate": 0.5,
+        "dominant_historical_outcome": "主胜",
+        "recommended_action": "observe",
+        "advice": "临场建议: 历史盘口轨迹样本已命中，但支持方向仍不够集中，建议继续观察实时盘口变化。"
+      }
+    },
     "similar_cases": [],
     "market_cases": [],
     "upset_cases": []
   },
-  "retrieved_memory_explanation": "RAG召回5场相似比赛，其中已完赛4场..."
+  "retrieved_memory_explanation": "RAG召回5场相似比赛，其中已完赛4场...",
+  "live_betting_advice": "临场建议: 历史盘口轨迹样本已命中，但支持方向仍不够集中，建议继续观察实时盘口变化。"
 }
 ```
 
@@ -406,6 +421,19 @@ docs/
 - 不允许在正式归档、MEMORY 或准确率统计里把缺真实盘口样本伪装成 `default_2.5`
 - 若 `realtime.okooo.refreshed=false`，应视为旧快照或降级数据，需要在结论中明确标注
 - `retrieved_memory_explanation` 非空时，说明 RAG 记忆层已参与最终解释
+- `retrieved_memory.summary.live_market_followup` 非空时，说明历史盘口轨迹门槛已参与 RAG 增强与临场建议生成
+- `live_betting_advice` 非空时，说明当前比赛已命中“`1X2` 赔率接近 + 大小球变化接近”的历史轨迹门槛
+
+### 历史盘口一致性与临场建议字段
+
+| 字段 | 类型 | 示例 | 说明 |
+|------|------|------|------|
+| `realtime.context_applied.live_outcome_adjustment.historical_market_alignment.applied` | Bool | `true` | 历史盘口一致性是否已参与第 8 步赛果修正 |
+| `historical_market_alignment.aligned_match_ids` | List[String] | `["1326947"]` | 命中的历史盘口一致性样本 `match_id` |
+| `retrieved_memory.summary.live_market_followup.eligible_match_ids` | List[String] | `["1326947","1302909"]` | 满足 `1X2` 赔率接近且大小球变化接近的历史盘口轨迹样本 |
+| `retrieved_memory.summary.live_market_followup.avg_path_score` | Float | `0.72` | 历史盘口轨迹接近度均值 |
+| `retrieved_memory.summary.live_market_followup.recommended_action` | String | `follow` / `hedge` / `observe` | 临场操作建议类别 |
+| `live_betting_advice` | String | `临场建议: ...` | 面向最终输出的人类可读建议 |
 
 ## 可选：球队状态增强（team_context）
 

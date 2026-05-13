@@ -20,13 +20,6 @@ WINNER_TEXT_TO_CODE = {"主胜": "home", "平局": "draw", "客胜": "away"}
 WINNER_CODE_TO_TEXT = {"home": "主胜", "draw": "平局", "away": "客胜"}
 EURO_COMPETITION_CODES = {"europa_league", "champions_league", "conference_league", "uefa_super_cup"}
 DOMESTIC_LEAGUE_CODES = {"premier_league", "la_liga", "serie_a", "bundesliga", "ligue_1"}
-LEAGUE_CN_NAMES = {
-    "premier_league": "英超",
-    "la_liga": "西甲",
-    "serie_a": "意甲",
-    "bundesliga": "德甲",
-    "ligue_1": "法甲",
-}
 SNAPSHOT_LEAGUE_ALIASES = {
     "欧联": "europa_league",
     "欧罗巴": "europa_league",
@@ -80,191 +73,6 @@ def _parse_actual_total_goals(actual_score: str) -> Optional[int]:
     if not match:
         return None
     return int(match.group(1)) + int(match.group(2))
-
-
-def _winner_code_from_score(score_text: str) -> str:
-    match = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", str(score_text or ""))
-    if not match:
-        return ""
-    home_score = int(match.group(1))
-    away_score = int(match.group(2))
-    if home_score > away_score:
-        return "home"
-    if home_score < away_score:
-        return "away"
-    return "draw"
-
-
-def _winner_code_from_text(result_text: str) -> str:
-    value = str(result_text or "").strip()
-    if value in WINNER_TEXT_TO_CODE:
-        return WINNER_TEXT_TO_CODE[value]
-    if value in WINNER_CODE_TO_TEXT:
-        return value
-    return ""
-
-
-def _normalize_score_text(score_text: str) -> str:
-    return re.sub(r"\s+", "", str(score_text or "").strip())
-
-
-def _within_recent_days(match_date: str, days: int = 7) -> bool:
-    try:
-        cutoff = datetime.now().date().toordinal() - days
-        return datetime.fromisoformat(str(match_date or "")).date().toordinal() >= cutoff
-    except Exception:
-        return False
-
-
-def _derive_review_tags(base: Dict[str, Any]) -> List[str]:
-    tags: List[str] = []
-    predicted_code = _winner_code_from_text(str(base.get("prediction") or ""))
-    actual_code = _winner_code_from_text(str(base.get("actual_result") or "")) or _winner_code_from_score(str(base.get("actual_score") or ""))
-    confidence = _safe_float(base.get("confidence"))
-    actual_score = _normalize_score_text(str(base.get("actual_score") or ""))
-    actual_total_goals = _parse_actual_total_goals(actual_score)
-    predicted_scores = [_normalize_score_text(str(item)) for item in (base.get("predicted_scores") or []) if _normalize_score_text(str(item))]
-    ou_line = _safe_float(base.get("ou_line"))
-    predicted_ou_direction = str(base.get("predicted_ou_direction") or "").strip()
-
-    if predicted_code and actual_code and predicted_code != actual_code:
-        if predicted_code == "home":
-            tags.append("主胜高估")
-            if actual_code == "draw":
-                tags.append("平局低估")
-            elif actual_code == "away":
-                tags.append("客胜冷门漏判")
-        elif predicted_code == "draw":
-            tags.append("平局高估")
-            if actual_code == "away":
-                tags.append("客胜冷门漏判")
-            elif actual_code == "home":
-                tags.append("主胜兑现漏判")
-        elif predicted_code == "away":
-            tags.append("客胜高估")
-            if actual_code == "draw":
-                tags.append("平局低估")
-            elif actual_code == "home":
-                tags.append("主胜兑现漏判")
-
-    if confidence is not None and confidence >= 0.6 and predicted_code and actual_code and predicted_code != actual_code:
-        tags.append("高信心误判")
-
-    if predicted_scores:
-        if actual_score and actual_score not in predicted_scores:
-            tags.append("比分未命中")
-        score_winners = {code for code in (_winner_code_from_score(score) for score in predicted_scores) if code}
-        if score_winners == {"home"} and actual_code and actual_code != "home":
-            tags.append("比分模板偏主胜")
-        elif score_winners == {"draw"} and actual_code and actual_code != "draw":
-            tags.append("比分模板偏平局")
-        elif score_winners == {"away"} and actual_code and actual_code != "away":
-            tags.append("比分模板偏客胜")
-        predicted_totals = [value for value in (_parse_actual_total_goals(score) for score in predicted_scores) if isinstance(value, int)]
-        if predicted_totals and isinstance(actual_total_goals, int):
-            if max(predicted_totals) <= 2 and actual_total_goals >= 4:
-                tags.append("进球弹性低估")
-            elif min(predicted_totals) >= 3 and actual_total_goals <= 1:
-                tags.append("进球弹性高估")
-    elif predicted_code:
-        tags.append("比分覆盖不足")
-
-    if predicted_code and (ou_line is None or not predicted_ou_direction):
-        tags.append("大小球盘口线缺失")
-    elif predicted_ou_direction and ou_line is not None and isinstance(actual_total_goals, int) and abs(actual_total_goals - ou_line) >= 1e-9:
-        actual_ou_direction = "大球" if actual_total_goals > ou_line else "小球"
-        if actual_ou_direction != predicted_ou_direction:
-            tags.append("大小球方向错误")
-
-    deduped: List[str] = []
-    for tag in tags:
-        if tag and tag not in deduped:
-            deduped.append(tag)
-    return deduped
-
-
-def _retokenize_document(doc: Dict[str, Any]) -> None:
-    terms = _tokenize_text(str(doc.get("text") or ""))
-    term_counts = Counter(terms)
-    doc["terms"] = list(term_counts.keys())
-    doc["term_counts"] = dict(term_counts)
-    doc["doc_length"] = int(sum(term_counts.values()))
-
-
-def _derive_league_review_tags(documents: List[Dict[str, Any]], recent_days: int = 7) -> Dict[str, List[str]]:
-    prediction_docs_by_league: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    completed_match_keys_by_league: Dict[str, set[Tuple[str, str, str, str]]] = defaultdict(set)
-    predicted_match_keys_by_league: Dict[str, set[Tuple[str, str, str, str]]] = defaultdict(set)
-
-    for doc in documents:
-        league_code = str(doc.get("league_code") or "").strip()
-        if league_code not in DOMESTIC_LEAGUE_CODES or not bool(doc.get("completed")):
-            continue
-        if not _within_recent_days(str(doc.get("match_date") or ""), days=recent_days):
-            continue
-        match_key = (
-            league_code,
-            str(doc.get("match_date") or "").strip(),
-            str(doc.get("home_team") or "").strip(),
-            str(doc.get("away_team") or "").strip(),
-        )
-        completed_match_keys_by_league[league_code].add(match_key)
-        if str(doc.get("case_type") or "") == "prediction_case" and str(doc.get("prediction") or "").strip():
-            prediction_docs_by_league[league_code].append(doc)
-            predicted_match_keys_by_league[league_code].add(match_key)
-
-    league_tags: Dict[str, List[str]] = {}
-    for league_code in DOMESTIC_LEAGUE_CODES:
-        league_cn = LEAGUE_CN_NAMES.get(league_code, league_code)
-        docs = prediction_docs_by_league.get(league_code, [])
-        completed_count = len(completed_match_keys_by_league.get(league_code, set()))
-        predicted_count = len(predicted_match_keys_by_league.get(league_code, set()))
-        total = len(docs)
-        tag_counter: Counter[str] = Counter()
-        for doc in docs:
-            tag_counter.update(doc.get("review_tags") or [])
-
-        tags: List[str] = []
-        if completed_count > 0 and predicted_count / completed_count < 0.5:
-            tags.append(f"{league_cn}-预测归档覆盖不足")
-        if total > 0:
-            if tag_counter.get("主胜高估", 0) >= max(2, math.ceil(total * 0.25)):
-                tags.append(f"{league_cn}-主胜偏置")
-            if tag_counter.get("平局低估", 0) >= max(1, math.ceil(total * 0.18)):
-                tags.append(f"{league_cn}-平局防守不足")
-            if tag_counter.get("客胜冷门漏判", 0) >= max(1, math.ceil(total * 0.18)):
-                tags.append(f"{league_cn}-客胜冷门敏感度不足")
-            if tag_counter.get("比分模板偏主胜", 0) >= max(1, math.ceil(total * 0.18)):
-                tags.append(f"{league_cn}-比分模板偏主胜")
-            if tag_counter.get("大小球盘口线缺失", 0) >= max(1, math.ceil(total * 0.25)):
-                tags.append(f"{league_cn}-大小球盘口线缺失")
-            if tag_counter.get("大小球方向错误", 0) >= max(1, math.ceil(total * 0.2)):
-                tags.append(f"{league_cn}-大小球方向偏差")
-            if tag_counter.get("高信心误判", 0) >= max(1, math.ceil(total * 0.15)):
-                tags.append(f"{league_cn}-高信心误判偏多")
-        league_tags[league_code] = tags
-    return league_tags
-
-
-def _annotate_review_dimensions(documents: List[Dict[str, Any]], recent_days: int = 7) -> None:
-    for doc in documents:
-        doc["review_tags"] = _derive_review_tags(doc)
-        doc["league_review_tags"] = []
-
-    league_tags = _derive_league_review_tags(documents, recent_days=recent_days)
-    for doc in documents:
-        league_code = str(doc.get("league_code") or "").strip()
-        if bool(doc.get("completed")) and _within_recent_days(str(doc.get("match_date") or ""), days=recent_days):
-            doc["league_review_tags"] = list(league_tags.get(league_code) or [])
-        extra_parts: List[str] = []
-        if doc.get("review_tags"):
-            extra_parts.append("错因标签:" + " ".join(doc.get("review_tags") or []))
-        if doc.get("league_review_tags"):
-            extra_parts.append("联赛复盘:" + " ".join(doc.get("league_review_tags") or []))
-        if extra_parts:
-            text = str(doc.get("text") or "")
-            doc["text"] = " | ".join([item for item in [text, *extra_parts] if str(item).strip()])
-        _retokenize_document(doc)
 
 
 def _predict_ou_direction(over_under: Dict[str, Any]) -> str:
@@ -564,114 +372,6 @@ def _case_text_upset(base: Dict[str, Any]) -> str:
     return " | ".join([item for item in parts if str(item).strip()])
 
 
-def _teams_row_prediction_text(base: Dict[str, Any]) -> str:
-    parts = [
-        str(base.get("league_name") or base.get("league_code") or ""),
-        f"{base.get('home_team', '')} vs {base.get('away_team', '')}",
-        f"预测:{base.get('prediction', '')}",
-        f"信心:{base.get('confidence', '')}",
-        f"候选比分:{'/'.join(base.get('predicted_scores') or [])}",
-        f"大小球:{base.get('predicted_ou_direction', '')} {base.get('ou_line', '')}",
-        f"赛果:{base.get('actual_result', '')} {base.get('actual_score', '')}".strip(),
-        f"备注:{base.get('review_note', '')}",
-    ]
-    return " | ".join([item for item in parts if str(item).strip()])
-
-
-def _teams_row_market_text(base: Dict[str, Any]) -> str:
-    parts = [
-        str(base.get("league_name") or base.get("league_code") or ""),
-        f"{base.get('home_team', '')} vs {base.get('away_team', '')}",
-        f"结果备注:{base.get('review_note', '')}",
-        f"赛果:{base.get('actual_result', '')} {base.get('actual_score', '')}".strip(),
-    ]
-    return " | ".join([item for item in parts if str(item).strip()])
-
-
-def _teams_row_upset_text(base: Dict[str, Any]) -> str:
-    parts = [
-        str(base.get("league_name") or base.get("league_code") or ""),
-        f"{base.get('home_team', '')} vs {base.get('away_team', '')}",
-        f"预测:{base.get('prediction', '')}",
-        f"赛果:{base.get('actual_result', '')} {base.get('actual_score', '')}".strip(),
-        f"复盘:{base.get('review_note', '')}",
-    ]
-    return " | ".join([item for item in parts if str(item).strip()])
-
-
-def _completed_teams_row_documents(base_dir: Optional[str], represented_matches: set[tuple[str, str, str, str]]) -> List[Dict[str, Any]]:
-    from result_manager import ResultManager
-
-    manager = ResultManager(base_dir)
-    documents: List[Dict[str, Any]] = []
-    seen_matches = set(represented_matches)
-
-    for row in manager._iter_teams_rows():
-        if str(row.get("league") or "").strip() not in DOMESTIC_LEAGUE_CODES:
-            continue
-        score_text = str(row.get("score_text") or "").strip()
-        actual_result = WINNER_CODE_TO_TEXT.get(str(manager._parse_score_to_winner(score_text) or "").strip(), "")
-        if not actual_result or not score_text:
-            continue
-
-        match_key = (
-            str(row.get("league") or "").strip(),
-            str(row.get("match_date") or "").strip(),
-            str(row.get("home_team") or "").strip(),
-            str(row.get("away_team") or "").strip(),
-        )
-        if match_key in seen_matches:
-            continue
-        seen_matches.add(match_key)
-
-        note = str(row.get("note") or "").strip()
-        predicted_winner = str(manager._parse_predicted_winner(note) or "").strip()
-        predicted_scores = manager._parse_predicted_scores(note)
-        predicted_ou = manager._parse_predicted_ou(note) or {}
-        confidence = manager._parse_prediction_confidence(note)
-        ou_direction = ""
-        if isinstance(predicted_ou, dict):
-            side = str(predicted_ou.get("side") or "").strip()
-            ou_direction = "大球" if side == "大" else "小球" if side == "小" else ""
-
-        base = {
-            "match_id": str(row.get("match_id") or "").strip(),
-            "archive_key": str(row.get("match_id") or "").strip(),
-            "league_code": str(row.get("league") or "").strip(),
-            "league_name": str(row.get("league_name") or row.get("league") or "").strip(),
-            "competition_stage_name": "",
-            "competition_bucket": _competition_bucket(str(row.get("league") or "").strip(), ""),
-            "home_team": str(row.get("home_team") or "").strip(),
-            "away_team": str(row.get("away_team") or "").strip(),
-            "match_date": str(row.get("match_date") or "").strip(),
-            "prediction": WINNER_CODE_TO_TEXT.get(predicted_winner, ""),
-            "confidence": confidence,
-            "actual_score": score_text,
-            "actual_result": actual_result,
-            "storage_mode": "teams_results",
-            "risk_points": [],
-            "market_snapshot": {},
-            "market_summary": "",
-            "ou_line": _safe_float(predicted_ou.get("line")) if isinstance(predicted_ou, dict) else None,
-            "predicted_ou_direction": ou_direction,
-            "asian_line": None,
-            "euro_home": None,
-            "euro_draw": None,
-            "euro_away": None,
-            "actual_total_goals": _parse_actual_total_goals(score_text),
-            "predicted_scores": predicted_scores,
-            "completed": True,
-            "archived_at": str(row.get("match_date") or "").strip(),
-            "review_note": note,
-        }
-        if base.get("prediction"):
-            documents.append(_build_case_document(base, "prediction_case", _teams_row_prediction_text(base)))
-        documents.append(_build_case_document(base, "market_case", _teams_row_market_text(base)))
-        if base.get("prediction") and base.get("actual_result") and base.get("prediction") != base.get("actual_result"):
-            documents.append(_build_case_document(base, "upset_case", _teams_row_upset_text(base)))
-    return documents
-
-
 def _market_case_from_odds_history(match: Dict[str, Any], index: int) -> Optional[Dict[str, Any]]:
     league_code = str(match.get("_league_code") or match.get("league_code") or "").strip()
     if not league_code:
@@ -867,17 +567,6 @@ def build_hybrid_rag_index(base_dir: Optional[str] = None, limit: int = 200) -> 
                     sample_index[str(record.get("match_id"))] = record
 
     documents = _iter_case_documents(archive, sample_index)
-    represented_matches = {
-        (
-            str(doc.get("league_code") or "").strip(),
-            str(doc.get("match_date") or "").strip(),
-            str(doc.get("home_team") or "").strip(),
-            str(doc.get("away_team") or "").strip(),
-        )
-        for doc in documents
-        if isinstance(doc, dict) and bool(doc.get("completed"))
-    }
-    documents.extend(_completed_teams_row_documents(base_dir, represented_matches))
     for index, record in enumerate(_odds_history_records(base_dir), start=1):
         doc = _market_case_from_odds_history(record, index=index)
         if doc:
@@ -886,7 +575,6 @@ def build_hybrid_rag_index(base_dir: Optional[str] = None, limit: int = 200) -> 
         doc = _market_case_from_snapshot(record, index=index)
         if doc:
             documents.append(doc)
-    _annotate_review_dimensions(documents, recent_days=7)
     index_stats = _build_index_statistics(documents)
     cases_payload = {
         "updated_at": datetime.now().isoformat(),
@@ -1105,10 +793,9 @@ def _format_doc_result(doc: Dict[str, Any], score: float, bm25: float, market_bo
         "actual_result": doc.get("actual_result"),
         "storage_mode": doc.get("storage_mode"),
         "risk_points": doc.get("risk_points"),
-        "review_tags": doc.get("review_tags"),
-        "league_review_tags": doc.get("league_review_tags"),
         "predicted_ou_direction": doc.get("predicted_ou_direction"),
         "ou_line": doc.get("ou_line"),
+        "predicted_scores": doc.get("predicted_scores"),
         "case_type": doc.get("case_type"),
         "similarity_score": round(float(score), 4),
         "bm25_score": round(float(bm25), 4),

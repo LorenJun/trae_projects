@@ -300,6 +300,57 @@ def _score_candidate(score: str, prediction: str, context: Dict[str, float]) -> 
     return score_value
 
 
+def _apply_under_three_score_penalty(
+    ranked_scores: List[tuple[str, float]],
+    line: float,
+    over_prob: Optional[float],
+    under_prob: Optional[float],
+) -> tuple[List[tuple[str, float]], Dict[str, Any]]:
+    diag: Dict[str, Any] = {
+        "applied": False,
+        "reason": "guard_not_triggered",
+        "line": round(float(line), 4),
+        "over": _safe_float(over_prob),
+        "under": _safe_float(under_prob),
+        "penalties": {},
+    }
+    over = _safe_float(over_prob)
+    under = _safe_float(under_prob)
+    if float(line) > 3.0 or over is None or under is None or under <= over:
+        diag["reason"] = "not_under_three"
+        return ranked_scores, diag
+
+    if float(line) <= 2.5:
+        factors = {"3-1": 0.64, "2-2": 0.74}
+        diag["line_bucket"] = "<=2.5"
+    elif float(line) <= 2.75:
+        factors = {"3-1": 0.72, "2-2": 0.8}
+        diag["line_bucket"] = "<=2.75"
+    else:
+        factors = {"3-1": 0.72, "2-2": 0.86}
+        diag["line_bucket"] = "<=3.0"
+    adjusted = dict(ranked_scores)
+    penalties: Dict[str, float] = {}
+    diag["factors"] = factors
+    for score, factor in factors.items():
+        if score not in adjusted:
+            continue
+        original = float(adjusted[score])
+        if original <= 0:
+            continue
+        adjusted[score] = original * factor
+        penalties[score] = round(original - adjusted[score], 6)
+    reranked = sorted(adjusted.items(), key=lambda item: item[1], reverse=True)
+    if penalties:
+        diag["applied"] = True
+        diag["reason"] = "under_three_score_penalty"
+        diag["signals"] = ["under3-score-consistency-guard"]
+        diag["penalties"] = penalties
+    else:
+        diag["reason"] = "target_scores_missing"
+    return reranked, diag
+
+
 def _pick_top_scores(
     prediction: str,
     *,
@@ -329,13 +380,20 @@ def _pick_top_scores(
         ),
         key=lambda item: item[1],
         reverse=True,
-    )[:3]
+    )
+    ranked_scores, score_guard_diag = _apply_under_three_score_penalty(
+        ranked_scores,
+        line,
+        over_prob,
+        under_prob,
+    )
+    ranked_scores = ranked_scores[:3]
     top_score = ranked_scores[0][1] if ranked_scores else 1.0
     results: List[List[Any]] = []
     for index, (score, value) in enumerate(ranked_scores):
         confidence = 0.2 - index * 0.025 - max(0.0, top_score - value) * 0.03
         results.append([score, round(_clamp(confidence, 0.08, 0.24), 4)])
-    return results
+    return results, score_guard_diag
 
 
 def _favorite_from_probs(probabilities: Dict[str, float]) -> str:
@@ -454,7 +512,7 @@ def build_lightweight_prediction_result(
     handicap_value = _safe_float(asian_final.get("handicap_value"))
     home_water = _safe_float(asian_final.get("home_water"))
     away_water = _safe_float(asian_final.get("away_water"))
-    top_scores = _pick_top_scores(
+    top_scores, score_rerank_guard = _pick_top_scores(
         prediction,
         probabilities=probabilities,
         handicap_value=handicap_value,
@@ -485,6 +543,7 @@ def build_lightweight_prediction_result(
         "top_scores": top_scores,
         "predicted_scores": [item[0] for item in top_scores],
         "over_under": over_under,
+        "score_rerank_guard": score_rerank_guard,
         "market_snapshot": {
             "欧赔": snapshot.get("欧赔") or {},
             "亚值": snapshot.get("亚值") or {},

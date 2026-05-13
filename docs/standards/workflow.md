@@ -1,19 +1,19 @@
 ---
 document_title: "工作流程规范"
-version: "1.3.0"
-last_updated: "2026-05-08"
+version: "1.4.0"
+last_updated: "2026-05-13"
 ---
 
 # 工作流程规范
 
 > 当前正式流程  
 > 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
-> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层  
+> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层、历史盘口一致性与临场建议层  
 > 3. 五大联赛 SoT 写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写入 `MEMORY.md` 与 runtime-only 归档  
 > 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
 > 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
-> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`
+> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`、`realtime.context_applied.live_outcome_adjustment.historical_market_alignment`、`retrieved_memory.summary.live_market_followup`、`live_betting_advice`
 
 本规范定义当前项目正式使用的足球预测工作流。所有流程说明都应与以下口径保持一致：
 
@@ -23,7 +23,7 @@ last_updated: "2026-05-08"
 - 再由预测主流程刷新实时快照
 - 预测主流程会自动调用 `HybridRAGService`
 - 大小球优先从 `亚值` 页面内 `大小球` tab 抓取
-- 最终预测检查 `over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`
+- 最终预测检查 `over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`、`historical_market_alignment`、`live_market_followup`、`live_betting_advice`
 - 正式 CLI 入口优先使用 `prediction_system.py`
 - 历史 RAG 记忆回填使用 `prediction_system.py sync-memory-rag`
 - 赛后批量回填优先使用 `bulk_fetch_and_update.py`
@@ -42,6 +42,8 @@ Step 4: 刷新实时快照（欧赔/亚值/大小球/凯利）
 Step 4.5: 自动补 EWMA form、缺失大小球，按需注入 team_context
         ↓
 Step 5: RAG 检索相似比赛、盘口样本与爆冷案例
+        ↓
+Step 5.5: 历史盘口一致性校正与临场建议生成
         ↓
 Step 6: 基本面分析
         ↓
@@ -87,6 +89,9 @@ Step 11: 更新胜负 / 比分 / 大小球准确率、记忆样本与 RAG 索引
 - 历史目录、示例模板、旧版 `predictions/` 和 `reports/` 只可参考，不可作为主流程输出目标
 - 缺少实时依赖时可以降级，但必须在输出中标注“降级/模拟数据”，不可混淆为真实临场数据
 - 若缺少真实大小球盘口，必须返回 `missing_real_line` 或“待补真实盘口”，不得回退成 `default_2.5`
+- `MatchID` 是当前预测、MEMORY、SoT 备注与历史盘口轨迹回溯的统一主键；新预测记录必须显式保留
+- RAG 不是泛召回解释层，而是“赛果方向优先 -> 大小球方向/变化二次筛选 -> 高频比分与临场建议”
+- 只有当 `1X2` 赔率接近且大小球变化接近时，才允许使用历史 `match_id` 盘口轨迹增强权重或输出临场投注建议
 - 所有分析都应区分 `模型结论`、`盘口结论`、`综合结论`
 - 对跨联赛、杯赛、样本不足、快照缺失等场景，必须显式标注边界与风险
 - 不允许只看基本面、只看盘口或只看模型概率就直接给出强确定性结论

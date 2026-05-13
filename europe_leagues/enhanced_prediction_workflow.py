@@ -4,7 +4,6 @@
 增强版预测比赛流程
 整合多模型融合、智能缓存、动态权重调整的完整预测系统"""
 
-import asyncio
 import os
 import sys
 import json
@@ -21,7 +20,6 @@ from domain.persistence import PredictionPersistenceService
 from domain.postprocess import PredictionPostprocessService
 from domain.rag import LightweightRAGService
 from domain.reporting import PredictionReportService
-from domain.review_learning import PredictionReviewLearningService
 from domain.team_strength import TeamStrengthService
 from domain.upset import UpsetAnalyzer
 from domain.writeback import TeamsWritebackGateway
@@ -43,7 +41,6 @@ from models import MultiModelFusion, PoissonModel
 from result_manager import ResultManager
 from agent_runtime_registry import get_runtime_profile
 from runtime.cache import PredictionCache
-from runtime.debug_events import emit_local_debug_event
 
 # 配置日志
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -309,8 +306,6 @@ class EnhancedPredictor:
         self.result_manager = ResultManager(base_dir=self.base_dir)
         self.postprocess_service = PredictionPostprocessService(LEAGUE_CONFIG)
         self.rag_service = LightweightRAGService(self.base_dir)
-        self.review_learning_service = PredictionReviewLearningService(self.base_dir)
-        self._review_learning_cache: Dict[tuple[str, int, int], Dict[str, Any]] = {}
         self.persistence_service = PredictionPersistenceService(self.base_dir, self.cache, self.result_manager)
         # 初始化多模型融合
         self.model_fusion = MultiModelFusion()
@@ -531,62 +526,6 @@ class EnhancedPredictor:
     def _get_matches_from_odds_snapshots(self, league_code: str, match_date: str) -> List[Dict]:
         return self.snapshot_repository.get_matches_from_odds_snapshots(league_code, match_date)
 
-    def _get_matches_from_real_schedule(self, league_code: str, match_date: str) -> List[Dict]:
-        """Fallback to the formal collector when local odds snapshots are not ready yet."""
-        try:
-            from data_collector import DataCollector
-
-            collector = DataCollector()
-            collected = asyncio.run(
-                collector.collect_league_data(league_code, match_date, use_cache=True)
-            )
-        except Exception as exc:
-            logger.warning(
-                "真实赛程兜底采集失败，停止回退到 DataCollector: %s %s (%s)",
-                league_code,
-                match_date,
-                exc,
-            )
-            return []
-
-        matches: List[Dict[str, Any]] = []
-        for match in collected or []:
-            home = getattr(match, 'home_team', None)
-            away = getattr(match, 'away_team', None)
-            if not home or not away:
-                continue
-            matches.append(
-                {
-                    'match_id': getattr(match, 'match_id', '') or '',
-                    'home_team': home,
-                    'away_team': away,
-                    'match_time': getattr(match, 'match_time', '') or '',
-                    'current_odds': getattr(match, 'odds_data', None),
-                    'sources': list(getattr(match, 'sources', []) or []),
-                }
-            )
-        return self.snapshot_repository.fill_missing_current_odds(league_code, match_date, matches)
-
-    def _get_review_learning_context(
-        self,
-        league_code: str,
-        *,
-        days: int = 30,
-        sample_limit: int = 12,
-    ) -> Optional[Dict[str, Any]]:
-        cache_key = (league_code, days, sample_limit)
-        if cache_key in self._review_learning_cache:
-            return self._review_learning_cache[cache_key]
-        review_learning = self.review_learning_service.build_prediction_context(
-            league_code=league_code,
-            days=days,
-            sample_limit=sample_limit,
-        )
-        if isinstance(review_learning, dict):
-            self._review_learning_cache[cache_key] = review_learning
-            return review_learning
-        return None
-
     @staticmethod
     def _to_float(value: Any) -> Optional[float]:
         return LiveRefreshService.to_float(value)
@@ -633,26 +572,6 @@ class EnhancedPredictor:
         current_odds = prep["current_odds"]
         realtime = prep["realtime"]
         cache_params = prep["cache_params"]
-        try:
-            review_learning = self._get_review_learning_context(
-                league_code=league_code,
-                days=30,
-                sample_limit=12,
-            )
-            if isinstance(review_learning, dict) and review_learning.get("available"):
-                analysis_context["review_learning"] = review_learning
-                realtime["context_applied"]["review_learning"] = {
-                    "source": review_learning.get("source"),
-                    "updated_at": review_learning.get("updated_at"),
-                    "reviewed_sample_count": review_learning.get("reviewed_sample_count"),
-                    "league_focus": review_learning.get("league_focus"),
-                    "league_review": review_learning.get("league_review"),
-                    "outcome_stratified_review": review_learning.get("outcome_stratified_review"),
-                    "three_layer_outcome_review": review_learning.get("three_layer_outcome_review"),
-                    "recommendations": review_learning.get("recommendations", []),
-                }
-        except Exception as exc:
-            realtime["context_applied"]["review_learning"] = {"available": False, "error": str(exc)}
         cached = self.cache.get('predict_match', cache_params)
         if cached:
             logger.info(f"使用缓存预测: {home_team} vs {away_team}")
@@ -690,73 +609,16 @@ class EnhancedPredictor:
         strength_diff = core["strength_diff"]
         final_prob = core["final_probabilities"]
         probs = core["ranked_probabilities"]
-        home_lambda = core["home_lambda"]
-        away_lambda = core["away_lambda"]
-        over_under = core["over_under"]
-        historical_odds_reference = core["historical_odds_reference"]
-        fusion_result = core["fusion_result"]
-        if core.get("prediction_blocked"):
-            blocked_reason = str(core.get("blocked_reason") or "missing_real_market_line").strip()
-            blocked_stage = str(core.get("blocked_stage") or "real_market_over_under_required").strip()
-            realtime["context_applied"]["prediction_gate"] = {
-                "blocked": True,
-                "reason": blocked_reason,
-                "stage": blocked_stage,
-            }
-            result = {
-                "match_id": str(match_id or ""),
-                "home_team": home_team,
-                "away_team": away_team,
-                "league_code": league_code,
-                "league_name": self.league_config[league_code]["name"],
-                "match_date": match_date,
-                "match_time": match_time,
-                "prediction": "数据不完整",
-                "prediction_blocked": True,
-                "prediction_status": "blocked",
-                "blocked_reason": blocked_reason,
-                "blocked_stage": blocked_stage,
-                "confidence": 0.0,
-                "all_probabilities": dict(probs) if isinstance(probs, list) else {},
-                "top_scores": [],
-                "total_goals": {},
-                "expected_goals": {
-                    "home": home_lambda,
-                    "away": away_lambda,
-                    "total": home_lambda + away_lambda,
-                },
-                "over_under": over_under,
-                "staking": {"kelly": {"available": False, "reason": "prediction_blocked"}, "recommended": {}},
-                "league_over_under_learning": realtime.get("context_applied", {}).get("league_over_under_learning"),
-                "strength_diff": strength_diff,
-                "home_strength": home_strength,
-                "away_strength": away_strength,
-                "upset_potential": {},
-                "match_intelligence": match_intelligence,
-                "historical_odds_reference": historical_odds_reference,
-                "model_predictions": (fusion_result or {}).get("all_models", {}),
-                "final_probabilities": final_prob,
-                "applied_model_weights": applied_weights,
-                "realtime": realtime,
-                "analysis_context": analysis_context,
-                "retrieved_memory": {},
-                "retrieved_memory_explanation": "",
-                "market_snapshot": self.postprocess_service.build_market_snapshot(current_odds),
-                "runtime_profile": self.runtime_profile,
-                "timestamp": datetime.now().isoformat(),
-            }
-            logger.warning(
-                "预测拦截: %s vs %s 缺少真实大小球数据 (%s)",
-                home_team,
-                away_team,
-                blocked_reason,
-            )
-            return result
         main_prediction = core["main_prediction"]
         confidence = core["confidence"]
+        historical_odds_reference = core["historical_odds_reference"]
         upset_potential = core["upset_potential"]
         top_scores = core["top_scores"]
         total_goals = core["total_goals"]
+        home_lambda = core["home_lambda"]
+        away_lambda = core["away_lambda"]
+        over_under = core["over_under"]
+        fusion_result = core["fusion_result"]
 
         # 5.5 凯利仓位建议（基于模型概率 + 欧赔/竞彩赔率；输出半凯利封顶5% + 1/4凯利封顶3%）
         staking = {}
@@ -780,16 +642,15 @@ class EnhancedPredictor:
             league_code=league_code,
             home_team=home_team,
             away_team=away_team,
-            match_date=match_date,
             market_snapshot=self.postprocess_service.build_market_snapshot(current_odds),
             match_id=match_id,
             analysis_context=analysis_context,
             historical_odds_reference=historical_odds_reference,
+            predicted_outcome=main_prediction,
+            current_over_under=over_under,
+            top_scores=top_scores,
             top_k=5,
         )
-        # #region debug-point C:rag-impact
-        emit_local_debug_event({"sessionId":"uniform-prediction-bias","runId":"pre-fix","hypothesisId":"C","location":"enhanced_prediction_workflow.py:718","msg":"[DEBUG] rag retrieval summary","data":{"league_code":league_code,"home_team":home_team,"away_team":away_team,"match_date":match_date,"match_id":match_id,"final_probabilities":final_prob,"top_scores":top_scores[:5] if isinstance(top_scores, list) else top_scores,"retrieved_memory_available":bool(retrieved_memory),"retrieved_memory_similar_cases":len((retrieved_memory or {}).get("similar_cases") or []) if isinstance(retrieved_memory, dict) else 0,"retrieved_memory_market_cases":len((retrieved_memory or {}).get("market_cases") or []) if isinstance(retrieved_memory, dict) else 0,"historical_odds_sample_size":((historical_odds_reference or {}).get("summary") or {}).get("sample_size") if isinstance(historical_odds_reference, dict) else None}})
-        # #endregion
         result = self.postprocess_service.build_prediction_result(
             match_id=match_id,
             home_team=home_team,
@@ -834,12 +695,12 @@ class EnhancedPredictor:
             if not matches:
                 matches = self.snapshot_repository.get_matches_from_odds_history(league_code, match_date)
             if not matches:
-                matches = self._get_matches_from_real_schedule(league_code, match_date)
+                matches = self.reporting_service.get_sample_matches(league_code)
         else:
             matches = self.snapshot_repository.fill_missing_current_odds(league_code, match_date, matches)
         
         if not matches:
-            logger.warning(f"没有真实比赛数据，停止生成预测写回: {league_code} {match_date}")
+            logger.warning(f"没有比赛数据: {league_code} {match_date}")
             return None
         
         # 预测所有比赛
@@ -854,7 +715,6 @@ class EnhancedPredictor:
                 home_team=home,
                 away_team=away,
                 current_odds=current_odds,
-                prefer_existing=True,
             )
 
             pred = self.predict_match(
@@ -866,20 +726,8 @@ class EnhancedPredictor:
                 # We already attempted a live refresh above in this loop; avoid double refreshing.
                 force_refresh_odds=False,
             )
-            if pred.get("prediction_blocked"):
-                logger.warning(
-                    "跳过写回: %s vs %s 缺少真实大小球数据 (%s)",
-                    home,
-                    away,
-                    pred.get("blocked_reason"),
-                )
-                continue
             predictions.append(pred)
         
-        if not predictions:
-            logger.warning(f"没有满足真实大小球硬门槛的可写回预测: {league_code} {match_date}")
-            return None
-
         # Write back to league teams_2025-26.md schedule table notes.
         teams_path = self.writeback.teams_file_path(league_code)
         if os.path.exists(teams_path):
@@ -888,7 +736,8 @@ class EnhancedPredictor:
         else:
             logger.warning(f"未找到 teams 文件: {teams_path}")
         
-        logger.info("预测已在单场预测阶段保存到历史数据库")
+        self.persistence_service.persist_prediction_batch(predictions, league_code)
+        logger.info(f"预测已保存到历史数据库")
         
         return teams_path if os.path.exists(teams_path) else None
     
