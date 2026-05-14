@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from domain.inference import InferencePipelineService
+from domain.intelligence import MatchIntelligenceEngine
 from domain.odds import HistoricalOddsReference, build_market_context
 from domain.postprocess import PredictionPostprocessService
 from domain.rag import HybridRAGService
@@ -767,6 +768,72 @@ class InferenceScoreRerankGuardTest(unittest.TestCase):
         self.assertEqual(diag["factors"]["2-2"], 0.8)
         self.assertEqual(top_scores[0][0], "2-0")
         self.assertEqual(top_scores[1][0], "1-0")
+
+
+class MatchIntelligenceScenarioRuleTest(unittest.TestCase):
+    def test_contextual_rules_compress_la_liga_mid_table_home_bias(self):
+        rules = MatchIntelligenceEngine._derive_contextual_rule_adjustments(
+            league_code="la_liga",
+            home_motivation={"score": 71.0, "tags": ["中游战意一般"], "table_row": {"rank": 10}},
+            away_motivation={"score": 74.0, "tags": ["上半区竞争"], "table_row": {"rank": 8}},
+            home_volatility={"available": True, "score": 0.28, "label": "low"},
+            away_volatility={"available": True, "score": 0.31, "label": "low"},
+            total_teams=20,
+        )
+        self.assertLess(rules["home_delta"], 0.0)
+        self.assertGreater(rules["draw_delta"], 0.0)
+        self.assertIn("la_liga_mid_table_home_flat", rules["scenario_tags"])
+
+    def test_contextual_rules_boost_premier_league_relegation_home_motivation(self):
+        rules = MatchIntelligenceEngine._derive_contextual_rule_adjustments(
+            league_code="premier_league",
+            home_motivation={"score": 86.0, "tags": ["保级压力"], "table_row": {"rank": 18}},
+            away_motivation={"score": 72.0, "tags": ["中游战意一般"], "table_row": {"rank": 12}},
+            home_volatility={"available": True, "score": 0.24, "label": "low"},
+            away_volatility={"available": True, "score": 0.22, "label": "low"},
+            total_teams=20,
+        )
+        self.assertGreater(rules["home_delta"], 0.0)
+        self.assertIn("premier_league_relegation_home_motivation_bonus", rules["scenario_tags"])
+
+    def test_recent_form_volatility_penalizes_single_side_and_raises_draw(self):
+        rules = MatchIntelligenceEngine._derive_contextual_rule_adjustments(
+            league_code="ligue_1",
+            home_motivation={"score": 78.0, "tags": ["上半区竞争"], "table_row": {"rank": 7}},
+            away_motivation={"score": 74.0, "tags": ["中游战意一般"], "table_row": {"rank": 11}},
+            home_volatility={"available": True, "score": 0.63, "label": "high"},
+            away_volatility={"available": True, "score": 0.18, "label": "low"},
+            total_teams=18,
+        )
+        self.assertLess(rules["home_delta"], 0.0)
+        self.assertGreater(rules["draw_delta"], 0.0)
+        self.assertIn("recent_form_home_volatility_high", rules["scenario_tags"])
+
+
+class DrawConfirmationGuardTest(unittest.TestCase):
+    def test_draw_confirmation_guard_shifts_unconfirmed_draw_to_home(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.34, "draw": 0.355, "away_win": 0.305},
+            current_odds={"欧赔": {"final": {"home": 2.18, "draw": 3.48, "away": 3.42}}},
+            over_under={"line": 2.75, "over": 0.56, "under": 0.44},
+            match_intelligence={"scenario_tags": ["premier_league_relegation_home_motivation_bonus"]},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["favored_side"], "home_win")
+        self.assertLess(adjusted["draw"], 0.355)
+        self.assertGreater(adjusted["home_win"], 0.34)
+
+    def test_draw_confirmation_guard_keeps_market_confirmed_draw(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.31, "draw": 0.36, "away_win": 0.33},
+            current_odds={"欧赔": {"final": {"home": 2.72, "draw": 2.86, "away": 2.84}}},
+            over_under={"line": 2.25, "over": 0.44, "under": 0.56},
+            match_intelligence={"scenario_tags": ["la_liga_mid_table_home_flat"]},
+        )
+        self.assertFalse(diag["applied"])
+        self.assertTrue(diag["qualified"])
+        self.assertEqual(diag["reason"], "draw_confirmation_passed")
+        self.assertEqual(adjusted["draw"], 0.36)
 
 
 if __name__ == "__main__":

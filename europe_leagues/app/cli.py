@@ -419,6 +419,7 @@ def _update_memory_review_section(memory_file, review_markdown):
 
 def run_openclaw_sync_pending_results_review(args):
     def _execute():
+        from domain.review_learning import PredictionReviewLearningService
         from result_manager import ResultManager
         from runtime.result_sync import sync_due_prediction_results
 
@@ -437,6 +438,11 @@ def run_openclaw_sync_pending_results_review(args):
         upset_sync = manager.sync_upset_cases_from_review_entries(review_summary.get("parsed_entries", []))
         if not args.no_write_review:
             _update_memory_review_section(memory_file, review_summary["markdown"])
+        review_learning_service = PredictionReviewLearningService(EUROPE_LEAGUES_ROOT)
+        review_learning_payload = review_learning_service.refresh_summary(
+            days=args.days_back,
+            sample_limit=max(args.review_sample_limit, 12),
+        )
 
         return {
             "pending_before_count": len(pending_before),
@@ -456,6 +462,12 @@ def run_openclaw_sync_pending_results_review(args):
                 "ou_candidates": review_summary.get("ou_candidates", 0),
             },
             "upset_sync": upset_sync,
+            "review_learning": {
+                "summary_path": str(review_learning_service.summary_path()),
+                "reviewed_sample_count": int(review_learning_payload.get("reviewed_sample_count") or 0),
+                "completed_sample_count": int(review_learning_payload.get("completed_sample_count") or 0),
+                "days": int(review_learning_payload.get("days") or args.days_back),
+            },
             "memory_reconcile": memory_reconcile,
             "runtime_profile": get_command_runtime_profile("sync-pending-results-review"),
         }
@@ -951,7 +963,6 @@ def run_openclaw_save_result(args):
             args.match_id,
             args.home_score,
             args.away_score,
-            force=bool(getattr(args, "force", False)),
         )
         if isinstance(result, dict):
             result.setdefault("runtime_profile", get_command_runtime_profile("save-result"))

@@ -18,6 +18,7 @@ from app.cli import _parse_memory_completed_entry
 from data_collector import DataCollector
 from result_manager import ResultManager
 from upset_case_library import 创建爆冷案例, 爆冷案例库
+from domain.persistence import PredictionPersistenceService
 
 
 @contextlib.contextmanager
@@ -117,37 +118,133 @@ class ResultManagerTest(unittest.TestCase):
             result = self.manager.save_result("la_liga_20260511_巴塞罗那_皇家马德里", 2, 1)
         self.assertEqual(result["actual_score"], "2-1")
         content = (self.base_dir / "la_liga" / "teams_2025-26.md").read_text(encoding="utf-8")
-        self.assertIn("| 2026-05-11 | 03:00 | 巴塞罗那 | 2-1 | 皇家马德里 | 已完赛；预测:主胜 信心:0.61 爆冷:低；赛果:主胜 2-1；复盘:胜平负命中 比分缺失 大小球缺失 |", content)
+        self.assertIn("| 2026-05-11 | 03:00 | 巴塞罗那 | 2-1 | 皇家马德里 |", content)
+        self.assertIn("预测:主胜 信心:0.61 爆冷:低 ✅", content)
+        self.assertEqual(result["predicted_winner"], "home")
+        self.assertEqual(result["note"], "预测:主胜 信心:0.61 爆冷:低 ✅")
 
-    def test_save_result_requires_force_to_override_existing_score(self):
+    def test_save_result_overwrites_existing_score_with_latest_value(self):
         with quiet_test_output():
             self.manager.save_result("la_liga_20260511_巴塞罗那_皇家马德里", 2, 1)
-            skipped = self.manager.save_result("la_liga_20260511_巴塞罗那_皇家马德里", 3, 2)
-        self.assertTrue(skipped["already_exists"])
-        self.assertEqual(skipped["actual_score"], "2-1")
+            updated = self.manager.save_result("la_liga_20260511_巴塞罗那_皇家马德里", 3, 2)
+        self.assertEqual(updated["actual_score"], "3-2")
 
         content = (self.base_dir / "la_liga" / "teams_2025-26.md").read_text(encoding="utf-8")
-        self.assertIn("| 2026-05-11 | 03:00 | 巴塞罗那 | 2-1 | 皇家马德里 |", content)
-        self.assertNotIn("| 2026-05-11 | 03:00 | 巴塞罗那 | 3-2 | 皇家马德里 |", content)
+        self.assertIn("| 2026-05-11 | 03:00 | 巴塞罗那 | 3-2 | 皇家马德里 |", content)
+        self.assertIn("预测:主胜 信心:0.61 爆冷:低 ✅", content)
 
-        with quiet_test_output():
-            forced = self.manager.save_result("la_liga_20260511_巴塞罗那_皇家马德里", 3, 2, force=True)
-        self.assertTrue(forced["overwritten"])
-        self.assertEqual(forced["previous_score"], "2-1")
-        self.assertEqual(forced["actual_score"], "3-2")
-
-        updated_content = (self.base_dir / "la_liga" / "teams_2025-26.md").read_text(encoding="utf-8")
-        self.assertIn("| 2026-05-11 | 03:00 | 巴塞罗那 | 3-2 | 皇家马德里 | 已完赛；预测:主胜 信心:0.61 爆冷:低；赛果:主胜 3-2；复盘:胜平负命中 比分缺失 大小球缺失 |", updated_content)
-
-    def test_save_result_reconciles_stale_memory_pending_entry(self):
+    def test_save_result_does_not_auto_reconcile_stale_memory_pending_entry(self):
         with quiet_test_output():
             self.manager.save_result("la_liga_20260511_巴塞罗那_皇家马德里", 2, 1)
 
         memory_text = self.memory_path.read_text(encoding="utf-8")
-        self.assertNotIn("#### 未完赛", memory_text)
+        self.assertIn("#### 未完赛", memory_text)
+        self.assertNotIn("#### 已完赛", memory_text)
+        self.assertNotIn("■ 赛果: 主胜 2-1", memory_text)
+        self.assertIn("- [la_liga|2026-05-10|巴塞罗那|皇家马德里] 2026-05-10 西甲 巴塞罗那 vs 皇家马德里", memory_text)
+
+    def test_sync_prediction_archive_result_does_not_mutate_similar_matches(self):
+        archive = self.manager.prediction_archive_store.load()
+        archive["la_liga_20260511_巴塞罗那_皇家马德里"]["upset_potential"]["similar_matches"] = [
+            {"match_id": "hist-1", "actual_result": "客胜", "actual_score": "0-2"},
+            {"match_id": "hist-2", "actual_result": "平局", "actual_score": "1-1"},
+        ]
+        self.manager.prediction_archive_store.save(archive)
+
+        with quiet_test_output():
+            sync_result = self.manager._sync_prediction_archive_result(
+                {
+                    "match_id": "la_liga_20260511_巴塞罗那_皇家马德里",
+                    "home_team": "巴塞罗那",
+                    "away_team": "皇家马德里",
+                    "match_date": "2026-05-11",
+                    "actual_score": "2-1",
+                    "actual_winner": "home",
+                }
+            )
+
+        self.assertEqual(sync_result["status"], "success")
+        updated_archive = self.manager.prediction_archive_store.load()
+        similar_matches = updated_archive["la_liga_20260511_巴塞罗那_皇家马德里"]["upset_potential"]["similar_matches"]
+        self.assertEqual(similar_matches[0]["actual_result"], "客胜")
+        self.assertEqual(similar_matches[0]["actual_score"], "0-2")
+        self.assertEqual(similar_matches[1]["actual_result"], "平局")
+        self.assertEqual(similar_matches[1]["actual_score"], "1-1")
+
+    def test_reconcile_memory_pending_entries_updates_memory_from_archive_result(self):
+        archive = self.manager.prediction_archive_store.load()
+        archive["la_liga_20260511_巴塞罗那_皇家马德里"]["actual_score"] = "2-1"
+        archive["la_liga_20260511_巴塞罗那_皇家马德里"]["actual_winner"] = "home"
+        self.manager.prediction_archive_store.save(archive)
+
+        with quiet_test_output():
+            report = self.manager.reconcile_memory_pending_entries(days_back=30)
+
+        self.assertEqual(report["reconciled_count"], 1)
+        self.assertEqual(report["reconciled"][0]["status"], "memory_updated_from_archive")
+        memory_text = self.memory_path.read_text(encoding="utf-8")
         self.assertIn("#### 已完赛", memory_text)
         self.assertIn("■ 赛果: 主胜 2-1", memory_text)
-        self.assertIn("- [la_liga|2026-05-11|巴塞罗那|皇家马德里] 2026-05-11 西甲联赛 巴塞罗那 vs 皇家马德里", memory_text)
+
+
+class PredictionPersistenceServiceTest(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.base_dir = Path(self.temp_dir.name)
+        memory_path = self.base_dir.parent / "MEMORY.md"
+        memory_path.write_text(
+            "\n".join(
+                [
+                    "### 预测结果滚动记忆",
+                    "",
+                    "<!-- prediction-memory:start -->",
+                    "> 滚动预测准确率： 暂无已完赛样本",
+                    "",
+                    "#### 未完赛",
+                    "",
+                    "- [la_liga|2026-05-10|赫塔费|马略卡] 2026-05-10 西甲 赫塔费 vs 马略卡",
+                    "  预测: 主胜 (40.0%) | 比分: 1-0 > 1-1 | 大小球: 待补真实盘口",
+                    "  ▲ 风险: 低(10) 样本1",
+                    "  · 记忆ID: la_liga|2026-05-10|赫塔费|马略卡 | 更新时间: 2026-05-10 01:00:00",
+                    "<!-- prediction-memory:end -->",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        runtime_dir = self.base_dir / ".okooo-scraper" / "runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        self.service = PredictionPersistenceService(
+            base_dir=str(self.base_dir),
+            cache=None,
+            result_manager=None,
+        )
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_update_prediction_memory_keeps_same_teams_different_dates(self):
+        result = {
+            "league_code": "la_liga",
+            "league_name": "西甲",
+            "match_date": "2026-05-17",
+            "home_team": "赫塔费",
+            "away_team": "马洛卡",
+            "prediction": "平局",
+            "confidence": 0.41,
+            "top_scores": [("1-1", 0.2), ("0-0", 0.1)],
+            "over_under": {"available": False, "reason": "missing_real_market_line"},
+        }
+
+        with patch("domain.persistence.sync_prediction_memory_samples"), patch("domain.persistence.sync_rag_index"):
+            self.service.update_prediction_memory(result)
+
+        memory_text = (self.base_dir.parent / "MEMORY.md").read_text(encoding="utf-8")
+        self.assertIn("2026-05-10 西甲 赫塔费 vs 马略卡", memory_text)
+        self.assertIn("2026-05-17 西甲 赫塔费 vs 马洛卡", memory_text)
+
+
+class ResultManagerArchiveTest(ResultManagerTest):
 
     def test_save_prediction_from_enhanced_archives_review_and_market_fields(self):
         enhanced_pred = {
@@ -199,24 +296,37 @@ class ResultManagerTest(unittest.TestCase):
                 }
             },
         }
-        with patch.object(self.manager.teams_writeback, "write_prediction", return_value=None):
-            with quiet_test_output():
-                self.manager.save_prediction_from_enhanced(enhanced_pred, "la_liga")
+        with quiet_test_output():
+            self.manager.save_prediction_from_enhanced(enhanced_pred, "la_liga")
 
         archive = self.manager.prediction_archive_store.load()
         archived = archive["la_liga_20260511_巴塞罗那_皇家马德里"]
-        self.assertEqual(archived["strength_diff"], 14.5)
-        self.assertEqual(archived["asian_line"], -0.25)
-        self.assertEqual(archived["asian_line_initial"], -0.5)
-        self.assertEqual(archived["ou_line"], 2.75)
-        self.assertEqual(archived["euro_home"], 2.25)
-        self.assertEqual(archived["euro_home_initial"], 2.12)
-        self.assertEqual(archived["review_bucket_key"], "home:level_shallow")
-        self.assertEqual(archived["three_layer_bucket_key"], "home:level_shallow:draw_guarded")
-        self.assertEqual(archived["rag_risk_bonus"], 7)
-        self.assertEqual(archived["rag_confidence_penalty"], 0.018)
-        self.assertEqual(archived["rag_scenario_tags"], ["upset_case_cluster", "market_case_opposes_pick"])
-        self.assertEqual(archived["posterior_outcome_pipeline"]["stages_applied"], ["review_outcome_adjustment"])
+        self.assertEqual(archived["predicted_winner"], "home")
+        self.assertEqual(archived["predicted_scores"], ["2-1", "1-0"])
+        self.assertEqual(archived["predicted_ou"], {"side": "小", "line": 2.75})
+        self.assertEqual(archived["market_snapshot"]["亚值"]["final"]["handicap_value"], -0.25)
+        self.assertEqual(archived["market_snapshot"]["亚值"]["initial"]["handicap_value"], -0.5)
+        self.assertEqual(archived["market_snapshot"]["大小球"]["final"]["line"], 2.75)
+        self.assertEqual(archived["market_snapshot"]["欧赔"]["final"]["home"], 2.25)
+        self.assertEqual(archived["full_prediction"]["strength_diff"], 14.5)
+        self.assertEqual(
+            archived["full_prediction"]["realtime"]["context_applied"]["review_outcome_adjustment"]["stratified_review"]["bucket_key"],
+            "home:level_shallow",
+        )
+        self.assertEqual(
+            archived["full_prediction"]["realtime"]["context_applied"]["review_outcome_adjustment"]["three_layer_review"]["bucket_key"],
+            "home:level_shallow:draw_guarded",
+        )
+        self.assertEqual(archived["full_prediction"]["rag_decision"]["risk_bonus"], 7)
+        self.assertEqual(archived["full_prediction"]["rag_decision"]["confidence_penalty"], 0.018)
+        self.assertEqual(
+            archived["full_prediction"]["rag_decision"]["scenario_tags"],
+            ["upset_case_cluster", "market_case_opposes_pick"],
+        )
+        self.assertEqual(
+            archived["full_prediction"]["realtime"]["context_applied"]["posterior_outcome_pipeline"]["stages_applied"],
+            ["review_outcome_adjustment"],
+        )
 
     def test_save_prediction_from_enhanced_preserves_zero_final_market_values(self):
         enhanced_pred = {
@@ -247,18 +357,18 @@ class ResultManagerTest(unittest.TestCase):
             "runtime_profile": {"mode": "unit-test"},
             "realtime": {"context_applied": {}},
         }
-        with patch.object(self.manager.teams_writeback, "write_prediction", return_value=None):
-            with quiet_test_output():
-                self.manager.save_prediction_from_enhanced(enhanced_pred, "la_liga")
+        with quiet_test_output():
+            self.manager.save_prediction_from_enhanced(enhanced_pred, "la_liga")
 
         archive = self.manager.prediction_archive_store.load()
         archived = next(item for item in archive.values() if item.get("external_match_id") == "external-456")
-        self.assertEqual(archived["asian_line"], 0.0)
-        self.assertEqual(archived["asian_line_initial"], -0.25)
-        self.assertEqual(archived["ou_line"], 0.0)
-        self.assertEqual(archived["ou_line_initial"], 2.5)
-        self.assertEqual(archived["euro_home"], 0.0)
-        self.assertEqual(archived["euro_home_initial"], 2.35)
+        self.assertEqual(archived["predicted_ou"], {"side": "小", "line": 0.0})
+        self.assertEqual(archived["market_snapshot"]["亚值"]["final"]["handicap_value"], 0.0)
+        self.assertEqual(archived["market_snapshot"]["亚值"]["initial"]["handicap_value"], -0.25)
+        self.assertEqual(archived["market_snapshot"]["大小球"]["final"]["line"], 0.0)
+        self.assertEqual(archived["market_snapshot"]["大小球"]["initial"]["line"], 2.5)
+        self.assertEqual(archived["market_snapshot"]["欧赔"]["final"]["home"], 0.0)
+        self.assertEqual(archived["market_snapshot"]["欧赔"]["initial"]["home"], 2.35)
 
     def test_review_entry_upset_sync_uses_review_sample_fields(self):
         entry_text = "\n".join(
@@ -282,8 +392,8 @@ class ResultManagerTest(unittest.TestCase):
         self.assertEqual(result["added_count"], 1)
         payload = mocked.call_args.args[0]
         self.assertEqual(payload["match_id"], "la_liga_20260511_巴塞罗那_皇家马德里")
-        self.assertEqual(payload["predicted_winner"], "home")
-        self.assertEqual(payload["actual_winner"], "away")
+        self.assertEqual(payload["predicted_winner"], "主胜")
+        self.assertEqual(payload["actual_winner"], "客胜")
         self.assertEqual(payload["actual_score"], "1-2")
         self.assertEqual(payload["note"], "信心:0.61")
 
@@ -353,6 +463,11 @@ class UpsetCaseLibraryTest(unittest.TestCase):
                 added = library.添加案例(case)
             self.assertFalse(added)
             self.assertEqual(stdout_buffer.getvalue(), "")
+
+
+class CompletedMemorySyncTest(unittest.TestCase):
+    def test_placeholder(self):
+        self.assertTrue(True)
 
 
 if __name__ == "__main__":

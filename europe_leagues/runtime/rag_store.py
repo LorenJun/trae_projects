@@ -20,6 +20,16 @@ WINNER_TEXT_TO_CODE = {"主胜": "home", "平局": "draw", "客胜": "away"}
 WINNER_CODE_TO_TEXT = {"home": "主胜", "draw": "平局", "away": "客胜"}
 EURO_COMPETITION_CODES = {"europa_league", "champions_league", "conference_league", "uefa_super_cup"}
 DOMESTIC_LEAGUE_CODES = {"premier_league", "la_liga", "serie_a", "bundesliga", "ligue_1"}
+LEAGUE_CN_NAMES = {
+    "premier_league": "英超",
+    "la_liga": "西甲",
+    "serie_a": "意甲",
+    "bundesliga": "德甲",
+    "ligue_1": "法甲",
+    "champions_league": "欧冠",
+    "europa_league": "欧联",
+    "conference_league": "欧协联",
+}
 SNAPSHOT_LEAGUE_ALIASES = {
     "欧联": "europa_league",
     "欧罗巴": "europa_league",

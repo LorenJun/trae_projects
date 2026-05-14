@@ -135,6 +135,147 @@ class MatchIntelligenceEngine:
             "table_row": row,
         }
 
+    @staticmethod
+    def _derive_recent_form_volatility(ewma_features: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        rows = ewma_features.get("recent_matches") if isinstance(ewma_features, dict) else None
+        if not isinstance(rows, list) or len(rows) < 3:
+            return {"available": False, "score": 0.0, "label": "unknown", "reason": "insufficient_recent_matches"}
+
+        points: List[float] = []
+        goal_diffs: List[float] = []
+        results: List[str] = []
+        for row in rows[:5]:
+            if not isinstance(row, dict):
+                continue
+            team_goals = float(row.get("team_goals") or 0.0)
+            opp_goals = float(row.get("opp_goals") or 0.0)
+            point = float(row.get("points") or 0.0)
+            points.append(point)
+            goal_diffs.append(team_goals - opp_goals)
+            if point >= 2.99:
+                results.append("W")
+            elif point <= 0.01:
+                results.append("L")
+            else:
+                results.append("D")
+        if len(points) < 3:
+            return {"available": False, "score": 0.0, "label": "unknown", "reason": "invalid_recent_matches"}
+
+        point_swings = [abs(points[idx] - points[idx + 1]) for idx in range(len(points) - 1)]
+        goal_swings = [abs(goal_diffs[idx] - goal_diffs[idx + 1]) for idx in range(len(goal_diffs) - 1)]
+        result_changes = sum(1 for idx in range(len(results) - 1) if results[idx] != results[idx + 1])
+        point_swing = (sum(point_swings) / len(point_swings)) / 3.0 if point_swings else 0.0
+        goal_swing = (sum(goal_swings) / len(goal_swings)) / 3.0 if goal_swings else 0.0
+        result_change_rate = result_changes / max(1, len(results) - 1)
+        score = max(0.0, min(1.0, point_swing * 0.48 + goal_swing * 0.27 + result_change_rate * 0.25))
+        if score >= 0.52:
+            label = "high"
+        elif score >= 0.32:
+            label = "medium"
+        else:
+            label = "low"
+        return {
+            "available": True,
+            "score": round(score, 4),
+            "label": label,
+            "point_swing": round(point_swing, 4),
+            "goal_swing": round(goal_swing, 4),
+            "result_change_rate": round(result_change_rate, 4),
+        }
+
+    @staticmethod
+    def _derive_contextual_rule_adjustments(
+        league_code: str,
+        home_motivation: Dict[str, Any],
+        away_motivation: Dict[str, Any],
+        home_volatility: Dict[str, Any],
+        away_volatility: Dict[str, Any],
+        total_teams: int,
+    ) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "home_delta": 0.0,
+            "away_delta": 0.0,
+            "draw_delta": 0.0,
+            "signals": [],
+            "scenario_tags": [],
+        }
+        total_teams = max(18, int(total_teams or 20))
+        home_row = home_motivation.get("table_row") if isinstance(home_motivation.get("table_row"), dict) else {}
+        away_row = away_motivation.get("table_row") if isinstance(away_motivation.get("table_row"), dict) else {}
+        home_rank = int(home_row.get("rank") or total_teams)
+        away_rank = int(away_row.get("rank") or total_teams)
+        home_score = float(home_motivation.get("score") or 75.0)
+        away_score = float(away_motivation.get("score") or 75.0)
+        motivation_edge = home_score - away_score
+        home_tags = set(home_motivation.get("tags") or [])
+        away_tags = set(away_motivation.get("tags") or [])
+
+        if league_code == "la_liga" and 8 <= home_rank <= 14 and 7 <= away_rank <= 15 and abs(motivation_edge) <= 8.0:
+            out["home_delta"] -= 0.028
+            out["draw_delta"] += 0.012
+            out["scenario_tags"].append("la_liga_mid_table_home_flat")
+            out["signals"].append("西甲中游球队主场优势不明显，压缩主场偏置")
+
+        if league_code == "ligue_1" and home_rank >= max(12, total_teams - 8) and away_rank <= 6:
+            out["scenario_tags"].append("ligue_1_home_vs_strong_motivation_check")
+            if motivation_edge >= 6.0 or "保级压力" in home_tags or "降级区求分" in home_tags:
+                out["home_delta"] += 0.01
+                out["draw_delta"] += 0.008
+                out["signals"].append("法甲中下游主场对强队需结合战意，保留主队抢分弹性")
+            else:
+                out["home_delta"] -= 0.018
+                out["away_delta"] += 0.006
+                out["draw_delta"] += 0.01
+                out["signals"].append("法甲中下游主场对强队战意不足，压缩主场偏置")
+
+        if league_code == "premier_league" and (
+            home_rank >= max(18, total_teams - 2)
+            or "保级压力" in home_tags
+            or "降级区求分" in home_tags
+        ) and 9 <= away_rank <= 15:
+            out["home_delta"] += 0.024
+            out["draw_delta"] -= 0.006
+            out["scenario_tags"].append("premier_league_relegation_home_motivation_bonus")
+            out["signals"].append("英超保级队主场战意优势加权")
+
+        if league_code in {"la_liga", "ligue_1"} and motivation_edge <= 4.0 and away_rank < home_rank:
+            out["home_delta"] -= 0.01
+            out["draw_delta"] += 0.004
+            out["signals"].append("主场优势统一先验偏高，按联赛层级收缩")
+
+        for side, volatility, current_score in (
+            ("home", home_volatility, home_score),
+            ("away", away_volatility, away_score),
+        ):
+            if not isinstance(volatility, dict) or not volatility.get("available"):
+                continue
+            if float(volatility.get("score") or 0.0) < 0.52:
+                continue
+            penalty = min(0.018, 0.01 + (float(volatility.get("score") or 0.0) - 0.52) * 0.04)
+            key = f"{side}_delta"
+            out[key] -= penalty
+            out["draw_delta"] += min(0.01, penalty * 0.55)
+            out["scenario_tags"].append(f"recent_form_{side}_volatility_high")
+            if current_score >= 73.0:
+                out["signals"].append(f"{'主队' if side == 'home' else '客队'}近期状态波动较大，削弱单边兑现预期")
+
+        if (
+            isinstance(home_volatility, dict)
+            and isinstance(away_volatility, dict)
+            and home_volatility.get("available")
+            and away_volatility.get("available")
+            and float(home_volatility.get("score") or 0.0) >= 0.45
+            and float(away_volatility.get("score") or 0.0) >= 0.45
+        ):
+            out["draw_delta"] += 0.006
+            out["scenario_tags"].append("recent_form_volatility_high")
+            out["signals"].append("双方近期状态波动较大，提升平局与冷门容错")
+
+        out["home_delta"] = round(max(-0.06, min(0.04, out["home_delta"])), 4)
+        out["away_delta"] = round(max(-0.04, min(0.04, out["away_delta"])), 4)
+        out["draw_delta"] = round(max(-0.02, min(0.03, out["draw_delta"])), 4)
+        return out
+
     def _derive_h2h_context(self, league_code: str, home_team: str, away_team: str, match_date: str, limit: int = 6) -> Dict[str, Any]:
         cache_params = {
             "league_code": league_code,
@@ -573,6 +714,7 @@ class MatchIntelligenceEngine:
         home_strength: Dict[str, Any],
         away_strength: Dict[str, Any],
     ) -> Dict[str, Any]:
+        league_table = self._load_league_table(league_code)
         team_ctx = analysis_context.get("team_context") if isinstance(analysis_context.get("team_context"), dict) else {}
         home_ctx = team_ctx.get("home") if isinstance(team_ctx.get("home"), dict) else {}
         away_ctx = team_ctx.get("away") if isinstance(team_ctx.get("away"), dict) else {}
@@ -599,7 +741,21 @@ class MatchIntelligenceEngine:
 
         home_adv = 0.0
         away_adv = 0.0
+        draw_bias = 0.0
         signals: List[str] = []
+        home_volatility = self._derive_recent_form_volatility(home_ewma)
+        away_volatility = self._derive_recent_form_volatility(away_ewma)
+        contextual_rules = self._derive_contextual_rule_adjustments(
+            league_code=league_code,
+            home_motivation=home_mot,
+            away_motivation=away_mot,
+            home_volatility=home_volatility,
+            away_volatility=away_volatility,
+            total_teams=len(league_table) or 20,
+        )
+        scenario_tags = list(contextual_rules.get("scenario_tags") or [])
+        if contextual_rules.get("signals"):
+            signals.extend(contextual_rules["signals"])
         if home_poss is not None and away_poss is not None:
             poss_edge = (home_poss - away_poss) / 100.0
             home_adv += poss_edge * 0.30
@@ -620,6 +776,9 @@ class MatchIntelligenceEngine:
         mot_edge = (home_mot.get("score", 75.0) - away_mot.get("score", 75.0)) / 100.0
         home_adv += mot_edge * 0.20
         away_adv -= mot_edge * 0.20
+        home_adv += float(contextual_rules.get("home_delta") or 0.0)
+        away_adv += float(contextual_rules.get("away_delta") or 0.0)
+        draw_bias += float(contextual_rules.get("draw_delta") or 0.0)
         if h2h.get("available"):
             total_h2h = max(1, int(h2h.get("home_wins", 0)) + int(h2h.get("away_wins", 0)) + int(h2h.get("draws", 0)))
             h2h_edge = (int(h2h.get("home_wins", 0)) - int(h2h.get("away_wins", 0))) / total_h2h
@@ -659,7 +818,6 @@ class MatchIntelligenceEngine:
 
         home_adv = max(-0.12, min(0.12, home_adv))
         away_adv = max(-0.12, min(0.12, away_adv))
-        draw_bias = 0.0
         if psychology_label == "guard_draw":
             draw_bias += 0.018
         if flow_dir == "draw":
@@ -793,12 +951,21 @@ class MatchIntelligenceEngine:
             },
             "head_to_head": h2h,
             "signals": signals,
+            "scenario_tags": scenario_tags,
+            "contextual_rules": {
+                "signals": contextual_rules.get("signals", []),
+                "scenario_tags": scenario_tags,
+                "volatility": {"home": home_volatility, "away": away_volatility},
+            },
             "quant_adjustment": {
                 "home_delta": round(home_adv, 4),
                 "away_delta": round(away_adv, 4),
                 "draw_delta": round(draw_bias, 4),
                 "home_lambda_scale": round(max(0.90, min(1.10, 1.0 + home_adv * 0.6)), 4),
                 "away_lambda_scale": round(max(0.90, min(1.10, 1.0 + away_adv * 0.6)), 4),
+                "scenario_home_delta": contextual_rules.get("home_delta", 0.0),
+                "scenario_away_delta": contextual_rules.get("away_delta", 0.0),
+                "scenario_draw_delta": contextual_rules.get("draw_delta", 0.0),
                 "resonance_label": resonance_label,
                 "resonance_score": round(resonance_score, 4),
                 "resonance_prob_delta_home": round(resonance_prob_delta_home, 4),
@@ -856,6 +1023,7 @@ class MatchIntelligenceEngine:
                 "signals": match_intelligence.get("signals", []) + (match_intelligence.get("market", {}).get("signals", []) or []),
                 "delta": {"home": round(delta_h, 4), "draw": round(delta_d, 4), "away": round(delta_a, 4)},
                 "resonance_label": qa.get("resonance_label"),
+                "scenario_tags": match_intelligence.get("scenario_tags", []),
             }
         )
         return {"home_win": p_h, "draw": p_d, "away_win": p_a}, diag

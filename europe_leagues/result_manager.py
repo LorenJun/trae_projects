@@ -1467,6 +1467,69 @@ class ResultManager:
             'upset_type': case.爆冷类型,
         }
 
+    def _sync_prediction_archive_result(self, result_data: Dict[str, Any]) -> Dict[str, Any]:
+        """同步比赛结果到 prediction_archive.json 中的 actual_result 和 actual_score 字段。"""
+        archive = self._load_prediction_archive()
+        if not archive:
+            return {'status': 'skipped', 'reason': 'archive_empty'}
+        
+        match_id = result_data.get('match_id', '')
+        home_team = result_data.get('home_team', '')
+        away_team = result_data.get('away_team', '')
+        match_date = result_data.get('match_date', '')
+        actual_score = result_data.get('actual_score', '')
+        actual_winner = result_data.get('actual_winner', '')
+        
+        if not actual_score or not actual_winner:
+            return {'status': 'skipped', 'reason': 'missing_result_data'}
+        
+        updated_count = 0
+        
+        for key, entry in list(archive.items()):
+            if not isinstance(entry, dict):
+                continue
+            
+            # 匹配条件：match_id、teams_match_id 或球队名称+日期
+            entry_match_id = entry.get('match_id', '')
+            entry_teams_id = entry.get('teams_match_id', '')
+            entry_home = entry.get('home_team', '')
+            entry_away = entry.get('away_team', '')
+            entry_date = entry.get('match_date', '')
+            
+            is_match = False
+            
+            # 通过 match_id 匹配
+            if match_id and (match_id == entry_match_id or match_id == entry_teams_id):
+                is_match = True
+            
+            # 通过球队名称+日期匹配
+            if (home_team and away_team and match_date and 
+                home_team == entry_home and away_team == entry_away and match_date == entry_date):
+                is_match = True
+            
+            if not is_match:
+                continue
+            
+            # 仅更新当前比赛对应的 archive entry。
+            # 不要把当前赛果扩散写入 upset_potential.similar_matches，
+            # 否则会污染历史相似样本的真实赛果。
+            entry['actual_result'] = actual_winner
+            entry['actual_score'] = actual_score
+            
+            updated_count += 1
+        
+        if updated_count > 0:
+            self.prediction_archive_store.save(archive)
+            return {
+                'status': 'success',
+                'updated_count': updated_count,
+                'match_id': match_id,
+                'actual_result': actual_winner,
+                'actual_score': actual_score,
+            }
+        
+        return {'status': 'skipped', 'reason': 'no_matching_entry_found', 'match_id': match_id}
+
     def _update_teams_row_score(self, match_id: str, home_score: int, away_score: int) -> Dict:
         for league_code in LEAGUE_NAMES.keys():
             path = self._teams_md_path(league_code)
@@ -1557,8 +1620,10 @@ class ResultManager:
         return predictions
 
     def load_results(self) -> List[Dict]:
-        """从赛程表比分列提取完赛结果。"""
+        """从赛程表比分列和 prediction_archive.json 提取完赛结果。"""
         results: List[Dict] = []
+        
+        # 1. 从 teams_2025-26.md 文件读取
         for row in self._iter_teams_rows():
             if not re.match(r'^\d+\s*-\s*\d+$', row['score_text'] or ''):
                 continue
@@ -1581,29 +1646,117 @@ class ResultManager:
                 'result_status': 'completed',
                 'saved_at': row['match_date'],
             })
+        
+        # 2. 从 prediction_archive.json 读取已完成的结果（runtime-only 模式）
+        try:
+            archive = self._load_prediction_archive()
+            for key, entry in archive.items():
+                if not isinstance(entry, dict):
+                    continue
+                # 只包含有实际结果的比赛
+                if not entry.get('actual_score') or not entry.get('actual_result'):
+                    continue
+                # 检查是否已经在 results 中（避免重复）
+                existing_ids = {r['match_id'] for r in results}
+                match_id = entry.get('match_id') or key
+                if match_id in existing_ids:
+                    continue
+                # 解析比分
+                score_text = entry.get('actual_score', '')
+                if not re.match(r'^\d+\s*-\s*\d+$', score_text):
+                    continue
+                try:
+                    home_score, away_score = [int(x.strip()) for x in score_text.split('-')]
+                except ValueError:
+                    continue
+                results.append({
+                    'match_id': match_id,
+                    'league': entry.get('league', 'unknown'),
+                    'league_name': entry.get('league_name', ''),
+                    'home_team': entry.get('home_team', ''),
+                    'away_team': entry.get('away_team', ''),
+                    'match_date': entry.get('match_date', ''),
+                    'match_time': entry.get('match_time', ''),
+                    'actual_winner': entry.get('actual_winner'),
+                    'actual_score': score_text,
+                    'home_score': home_score,
+                    'away_score': away_score,
+                    'result_status': 'completed',
+                    'saved_at': entry.get('saved_at', entry.get('match_date', '')),
+                    'source': 'archive',
+                })
+        except Exception as e:
+            logger.warning("从 archive 加载结果失败: %s", e)
+        
         return results
 
     def save_result(self, identifier: str, home_score: int, away_score: int, league: Optional[str] = None, date_override: Optional[str] = None):
-        """保存比赛结果到 teams_2025-26.md，支持 match_id 或者球队名模糊匹配。"""
+        """保存比赛结果到 teams_2025-26.md，支持 match_id 或者球队名模糊匹配。
+        
+        如果找不到 teams 文件中的记录，会回退到只更新 prediction_archive.json 和 MEMORY.md。
+        """
         if " vs " in identifier or "VS" in identifier:
             parts = re.split(r'\s+vs\s+', identifier, flags=re.IGNORECASE)
             home_candidate = parts[0].strip()
             away_candidate = parts[1].strip()
-            result_data = self._update_teams_row_score_by_team_names(home_candidate, away_candidate, home_score, away_score, league=league, date_override=date_override)
+            
+            try:
+                result_data = self._update_teams_row_score_by_team_names(home_candidate, away_candidate, home_score, away_score, league=league, date_override=date_override)
+            except ValueError as e:
+                # 找不到 teams 文件中的记录，创建基本的 result_data
+                logger.warning("找不到 teams 文件记录，回退到 runtime-only 模式: %s", e)
+                actual_score = f"{int(home_score)}-{int(away_score)}"
+                actual_winner = self._parse_score_to_winner(actual_score)
+                result_data = {
+                    'match_id': f"{league}_{date_override}_{home_candidate}_{away_candidate}" if league and date_override else f"{home_candidate}_vs_{away_candidate}",
+                    'home_team': home_candidate,
+                    'away_team': away_candidate,
+                    'match_date': date_override or datetime.now().strftime('%Y-%m-%d'),
+                    'league': league or 'unknown',
+                    'actual_score': actual_score,
+                    'actual_winner': actual_winner,
+                    'predicted_winner': None,
+                    'predicted_scores': [],
+                    'note': '',
+                }
+            
             result_data['upset_sync'] = self._auto_sync_upset_case(result_data)
             from runtime.result_sync import mark_result_sync_completed
             mark_result_sync_completed(self.base_dir, result_data.get("match_id", ""), result_data.get("actual_score", ""), result_data.get("actual_winner", ""))
             self._update_memory_result_entry(result_data)
+            # 同步到 prediction_archive.json
+            result_data['archive_sync'] = self._sync_prediction_archive_result(result_data)
             sync_prediction_memory_samples(self.base_dir, limit=100)
             sync_rag_index(self.base_dir, limit=200)
             logger.info("保存比赛结果: %s vs %s -> %s", home_candidate, away_candidate, result_data['actual_score'])
             return result_data
         else:
-            result_data = self._update_teams_row_score(identifier, home_score, away_score)
+            try:
+                result_data = self._update_teams_row_score(identifier, home_score, away_score)
+            except ValueError as e:
+                # 找不到 teams 文件中的记录，创建基本的 result_data
+                logger.warning("找不到 teams 文件记录，回退到 runtime-only 模式: %s", e)
+                actual_score = f"{int(home_score)}-{int(away_score)}"
+                actual_winner = self._parse_score_to_winner(actual_score)
+                result_data = {
+                    'match_id': identifier,
+                    'home_team': '',
+                    'away_team': '',
+                    'match_date': datetime.now().strftime('%Y-%m-%d'),
+                    'league': league or 'unknown',
+                    'actual_score': actual_score,
+                    'actual_winner': actual_winner,
+                    'predicted_winner': None,
+                    'predicted_scores': [],
+                    'note': '',
+                }
+            
             result_data['upset_sync'] = self._auto_sync_upset_case(result_data)
             from runtime.result_sync import mark_result_sync_completed
             mark_result_sync_completed(self.base_dir, result_data.get("match_id", ""), result_data.get("actual_score", ""), result_data.get("actual_winner", ""))
             self._update_memory_result_entry(result_data)
+            # 同步到 prediction_archive.json
+            result_data['archive_sync'] = self._sync_prediction_archive_result(result_data)
             sync_prediction_memory_samples(self.base_dir, limit=100)
             sync_rag_index(self.base_dir, limit=200)
             logger.info("保存比赛结果: %s -> %s", identifier, result_data['actual_score'])
@@ -1808,6 +1961,240 @@ class ResultManager:
             pending.append(pred)
 
         return pending
+
+    def reconcile_memory_pending_entries(self, days_back: int = 7) -> Dict[str, Any]:
+        """协调 MEMORY 中的待处理条目，若 archive 已有赛果则补回 MEMORY。"""
+        from domain.persistence import PredictionPersistenceService
+
+        pending: List[Dict[str, Any]] = []
+        memory_path = self.paths.memory_file
+        if memory_path.exists():
+            try:
+                memory_text = memory_path.read_text(encoding='utf-8')
+                marker = re.search(
+                    r'<!-- prediction-memory:start -->([\s\S]*?)<!-- prediction-memory:end -->',
+                    memory_text,
+                )
+                if marker:
+                    entry_blocks = PredictionPersistenceService._extract_memory_entry_lines(marker.group(1))
+                    for entry in entry_blocks:
+                        normalized = PredictionPersistenceService._unescape_memory_entry_text(entry)
+                        if '赛果:' in normalized or '■ 赛果:' in normalized:
+                            continue
+                        lines = [line.rstrip() for line in normalized.splitlines() if line.strip()]
+                        if not lines:
+                            continue
+                        first_line = lines[0].strip()
+                        header_match = re.match(r'- \[([^\]]+)\]\s+(\d{4}-\d{2}-\d{2})', first_line)
+                        if not header_match:
+                            continue
+                        raw_identity = str(header_match.group(1) or '').strip()
+                        match_date = str(header_match.group(2) or '').strip()
+                        if not self._within_days(match_date, days_back):
+                            continue
+                        parts = [part.strip() for part in raw_identity.split('|') if part.strip()]
+                        if len(parts) < 3:
+                            continue
+                        league_code = parts[0]
+                        if len(parts) >= 4:
+                            home_team = parts[-2]
+                            away_team = parts[-1]
+                        else:
+                            home_team = parts[1]
+                            away_team = parts[2]
+                        memory_id = ''
+                        external_match_id = ''
+                        for line in lines:
+                            memory_id_match = re.search(r'记忆ID:\s*([^|]+?)\s*(?=\||$)', line)
+                            if memory_id_match:
+                                memory_id = str(memory_id_match.group(1) or '').strip()
+                            match_id_match = re.search(r'MatchID:\s*([^|]+?)\s*(?=\||$)', line)
+                            if match_id_match:
+                                external_match_id = str(match_id_match.group(1) or '').strip()
+                        pending.append({
+                            'match_key': raw_identity,
+                            'match_id': external_match_id or memory_id or raw_identity,
+                            'memory_id': memory_id,
+                            'league': league_code,
+                            'home_team': home_team,
+                            'away_team': away_team,
+                            'match_date': match_date,
+                        })
+            except Exception:
+                pending = []
+
+        reconciled = []
+        failed = []
+        archive = self.prediction_archive_store.load()
+        archive_lookup = self._archive_lookup(archive)
+        
+        for pred in pending:
+            try:
+                match_key = pred.get('match_key') or ''
+                archived_pred = None
+                for candidate in (
+                    str(pred.get('match_id') or '').strip(),
+                    str(pred.get('memory_id') or '').strip(),
+                    str(match_key or '').strip(),
+                    f"{pred.get('league', 'unknown')}_{pred.get('match_date', 'unknown')}_{pred.get('home_team', 'unknown')}_{pred.get('away_team', 'unknown')}",
+                ):
+                    if candidate and candidate in archive_lookup:
+                        archived_pred = archive_lookup[candidate]
+                        break
+
+                if not archived_pred:
+                    target_league = str(pred.get('league') or '').strip()
+                    target_home = self._normalize_team_name(target_league, str(pred.get('home_team') or ''))
+                    target_away = self._normalize_team_name(target_league, str(pred.get('away_team') or ''))
+                    target_date = str(pred.get('match_date') or '').strip()
+                    fallback_candidates = []
+                    for entry in archive.values():
+                        if not isinstance(entry, dict):
+                            continue
+                        entry_league = str(entry.get('league') or '').strip()
+                        entry_home = self._normalize_team_name(entry_league, str(entry.get('home_team') or ''))
+                        entry_away = self._normalize_team_name(entry_league, str(entry.get('away_team') or ''))
+                        if entry_league != target_league or entry_home != target_home or entry_away != target_away:
+                            continue
+                        entry_date = str(entry.get('match_date') or '').strip()
+                        try:
+                            date_gap = abs((datetime.strptime(entry_date, '%Y-%m-%d') - datetime.strptime(target_date, '%Y-%m-%d')).days)
+                        except Exception:
+                            date_gap = 999
+                        fallback_candidates.append((date_gap, entry))
+                    if fallback_candidates:
+                        fallback_candidates.sort(key=lambda item: item[0])
+                        archived_pred = fallback_candidates[0][1]
+
+                if archived_pred:
+                    archived_score = str(archived_pred.get('actual_score') or archived_pred.get('score_text') or '').strip()
+                    archived_winner = str(
+                        archived_pred.get('actual_winner')
+                        or self._winner_key_from_text(str(archived_pred.get('actual_result') or '').strip())
+                        or ''
+                    ).strip()
+                    if archived_score and archived_winner:
+                        result_payload = {
+                            'match_id': pred.get('match_id') or archived_pred.get('match_id') or match_key,
+                            'home_team': pred.get('home_team') or archived_pred.get('home_team', ''),
+                            'away_team': pred.get('away_team') or archived_pred.get('away_team', ''),
+                            'match_date': pred.get('match_date') or archived_pred.get('match_date', ''),
+                            'league': pred.get('league') or archived_pred.get('league', 'unknown'),
+                            'actual_score': archived_score,
+                            'actual_winner': archived_winner,
+                            'predicted_winner': pred.get('predicted_winner'),
+                            'predicted_scores': pred.get('predicted_scores', []),
+                            'predicted_ou': pred.get('predicted_ou'),
+                            'note': pred.get('note', ''),
+                        }
+                        self._update_memory_result_entry(result_payload)
+                        reconciled.append({
+                            'match_key': match_key,
+                            'home_team': pred.get('home_team'),
+                            'away_team': pred.get('away_team'),
+                            'match_date': pred.get('match_date'),
+                            'actual_score': archived_score,
+                            'status': 'memory_updated_from_archive'
+                        })
+                    else:
+                        failed.append({
+                            'match_key': match_key,
+                            'home_team': pred.get('home_team'),
+                            'away_team': pred.get('away_team'),
+                            'match_date': pred.get('match_date'),
+                            'status': 'archive_missing_result_fields'
+                        })
+                else:
+                    failed.append({
+                        'match_key': match_key,
+                        'home_team': pred.get('home_team'),
+                        'away_team': pred.get('away_team'),
+                        'match_date': pred.get('match_date'),
+                        'status': 'not_in_archive'
+                    })
+            except Exception as e:
+                failed.append({
+                    'match_key': pred.get('match_key', 'unknown'),
+                    'home_team': pred.get('home_team'),
+                    'away_team': pred.get('away_team'),
+                    'error': str(e),
+                    'status': 'error'
+                })
+        
+        return {
+            'total_pending': len(pending),
+            'reconciled': reconciled,
+            'failed': failed,
+            'reconciled_count': len(reconciled),
+            'failed_count': len(failed)
+        }
+
+    def sync_upset_cases_from_review_entries(self, review_entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """从复盘条目中同步爆冷案例到爆冷案例库。
+        
+        Args:
+            review_entries: 复盘条目列表，每个条目包含比赛信息和预测结果
+            
+        Returns:
+            同步结果统计
+        """
+        total = len(review_entries)
+        processed = 0
+        added = 0
+        skipped = 0
+        errors = []
+        
+        for entry in review_entries:
+            try:
+                # 检查是否是爆冷（预测错误）
+                predicted = entry.get('predicted_winner')
+                actual = entry.get('actual_winner')
+                
+                if not predicted or not actual:
+                    skipped += 1
+                    continue
+                
+                # 如果预测正确，不是爆冷
+                if predicted == actual:
+                    skipped += 1
+                    continue
+                
+                # 构建爆冷案例数据
+                result_data = {
+                    'match_id': entry.get('match_id'),
+                    'league': entry.get('league'),
+                    'match_date': entry.get('match_date'),
+                    'home_team': entry.get('home_team'),
+                    'away_team': entry.get('away_team'),
+                    'predicted_winner': predicted,
+                    'actual_winner': actual,
+                    'actual_score': entry.get('actual_score'),
+                    'confidence_pct': entry.get('confidence_pct', 0),
+                    'note': f"信心:{entry.get('confidence_pct', 0)/100:.2f}"
+                }
+                
+                # 调用自动同步方法
+                sync_result = self._auto_sync_upset_case(result_data)
+                
+                if sync_result.get('status') in ['added', 'updated']:
+                    added += 1
+                processed += 1
+                
+            except Exception as e:
+                errors.append({
+                    'entry': entry.get('match_id', 'unknown'),
+                    'error': str(e)
+                })
+                skipped += 1
+        
+        return {
+            'total_entries': total,
+            'processed_count': processed,
+            'added_count': added,
+            'skipped_count': skipped,
+            'error_count': len(errors),
+            'errors': errors
+        }
 
     def calculate_accuracy(self, league: Optional[str] = None, days: int = 30, ou_report: Optional[Dict[str, Any]] = None) -> Dict:
         """计算预测胜负准确率。"""

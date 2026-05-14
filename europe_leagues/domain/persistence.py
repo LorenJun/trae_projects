@@ -8,6 +8,13 @@ import re
 from datetime import datetime
 from typing import Any, Dict
 
+from runtime.memory_dedupe import (
+    are_entries_duplicate,
+    clean_memory_duplicates,
+    normalize_memory_entry_key,
+    normalize_team_name,
+    validate_memory_entry,
+)
 from runtime.memory_samples import sync_prediction_memory_samples
 from runtime.paths import get_default_paths
 from runtime.rag_store import sync_rag_index
@@ -627,19 +634,46 @@ class PredictionPersistenceService:
             entry_key_bodies, memory_ids = self._memory_identity_aliases(result)
             entry_prefixes = {f'- [{body}]' for body in entry_key_bodies if body}
             memory_id_markers = {f'记忆ID: {memory_id}' for memory_id in memory_ids if memory_id}
+            
+            league_code = str(result.get('league_code') or result.get('league') or '')
+            match_date = str(result.get('match_date') or '')
+            home_team = str(result.get('home_team') or '')
+            away_team = str(result.get('away_team') or '')
+            normalized_home = normalize_team_name(league_code, home_team)
+            normalized_away = normalize_team_name(league_code, away_team)
+            
             marker_block = re.compile(rf'{re.escape(start_marker)}\n(?P<body>.*?){re.escape(end_marker)}', re.DOTALL)
             match = marker_block.search(content)
 
             if match:
                 existing_entries = self._extract_memory_entry_lines(match.group('body'))
-                alias_entries = [
-                    line for line in existing_entries
-                    if self._memory_entry_matches_aliases(line, entry_prefixes, memory_id_markers)
-                ]
-                retained_entries = [
-                    line for line in existing_entries
-                    if not self._memory_entry_matches_aliases(line, entry_prefixes, memory_id_markers)
-                ]
+                
+                alias_entries = []
+                retained_entries = []
+                
+                for existing_entry in existing_entries:
+                    if self._memory_entry_matches_aliases(existing_entry, entry_prefixes, memory_id_markers):
+                        alias_entries.append(existing_entry)
+                        continue
+                    
+                    first_line = existing_entry.split('\n')[0] if existing_entry else ''
+                    entry_match = re.match(r'- \[([^\]]+)\]', first_line)
+                    if entry_match:
+                        existing_key = entry_match.group(1)
+                        existing_norm = normalize_memory_entry_key(existing_key)
+                        # 仅当同联赛、同日期且标准化后的主客队一致时，才视为同一场比赛。
+                        # 避免把不同轮次但主客相同的比赛误合并。
+                        if (
+                            existing_norm[0] == league_code
+                            and existing_norm[1] == match_date
+                            and existing_norm[2] == normalized_home
+                            and existing_norm[3] == normalized_away
+                        ):
+                            alias_entries.append(existing_entry)
+                            continue
+                    
+                    retained_entries.append(existing_entry)
+                
                 latest_entry = max(alias_entries + [entry], key=self._memory_entry_sort_key)
                 new_entries = sorted(
                     [latest_entry] + retained_entries,
@@ -688,11 +722,9 @@ class PredictionPersistenceService:
         except Exception as exc:
             logger.warning('归档单场预测失败: %s', exc)
         self.update_prediction_memory(result)
-        register_prediction_result_sync(self.base_dir, result)
         return result
 
     def persist_prediction_batch(self, predictions: list[Dict[str, Any]], league_code: str) -> None:
         for prediction in predictions:
             self.result_manager.save_prediction_from_enhanced(prediction, league_code)
-            register_prediction_result_sync(self.base_dir, prediction)
         self.result_manager.update_accuracy_stats()

@@ -5,7 +5,11 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from runtime.result_sync import sync_due_prediction_results
+from runtime.result_sync import (
+    migrate_result_sync_registry_match_ids,
+    register_prediction_result_sync,
+    sync_due_prediction_results,
+)
 
 
 class DummyResultManager:
@@ -191,6 +195,77 @@ class ResultSyncTest(unittest.TestCase):
         self.assertEqual(report["updated_count"], 1)
         self.assertEqual(DummyResultManager.saved_calls[0]["home_score"], 0)
         self.assertEqual(DummyResultManager.saved_calls[0]["away_score"], 1)
+
+    def test_register_prediction_result_sync_prefers_canonical_teams_match_id(self):
+        entry = register_prediction_result_sync(
+            str(self.base_dir),
+            {
+                "match_id": "1326947",
+                "external_match_id": "1326947",
+                "internal_match_id": "premier_league_20260510_西汉姆联_阿森纳",
+                "league_code": "premier_league",
+                "league_name": "英超",
+                "match_date": "2026-05-10",
+                "match_time": "23:30",
+                "home_team": "西汉姆联",
+                "away_team": "阿森纳",
+                "prediction": "主胜",
+                "confidence": 0.41,
+            },
+        )
+
+        self.assertEqual(entry["match_id"], "premier_league_20260510_西汉姆联_阿森纳")
+        self.assertEqual(entry["teams_match_id"], "premier_league_20260510_西汉姆联_阿森纳")
+        self.assertEqual(entry["external_match_id"], "1326947")
+
+        registry = json.loads(
+            (self.base_dir / ".okooo-scraper" / "runtime" / "result_sync_registry.json").read_text(encoding="utf-8")
+        )
+        self.assertIn("premier_league_20260510_西汉姆联_阿森纳", registry)
+        self.assertNotIn("1326947", registry)
+
+    def test_migrate_result_sync_registry_match_ids_repairs_invalid_teams_match_id(self):
+        runtime_dir = self.base_dir / ".okooo-scraper" / "runtime"
+        registry_payload = {
+            "1326947": {
+                "match_id": "1326947",
+                "external_match_id": "1326947",
+                "teams_match_id": "1326947",
+                "internal_match_id": "1326947",
+                "league_code": "premier_league",
+                "league_name": "英超",
+                "match_date": "2026-05-10",
+                "match_time": "23:30",
+                "home_team": "西汉姆联",
+                "away_team": "阿森纳",
+                "prediction": "主胜",
+                "confidence": 0.41,
+                "registered_at": "2026-05-09T20:09:05.111041",
+                "kickoff_source": "scheduled_time",
+                "kickoff_at": "2026-05-10T23:30:00",
+                "due_at": "2026-05-11T03:30:00",
+                "status": "pending",
+                "last_prediction_timestamp": "2026-05-09T20:09:04.790761",
+                "check_count": 0,
+                "last_checked_at": "",
+                "result_synced_at": "",
+                "last_error": "",
+            }
+        }
+        (runtime_dir / "result_sync_registry.json").write_text(
+            json.dumps(registry_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        report = migrate_result_sync_registry_match_ids(str(self.base_dir))
+
+        self.assertGreaterEqual(report["migrated_entries"], 1)
+        registry = json.loads((runtime_dir / "result_sync_registry.json").read_text(encoding="utf-8"))
+        self.assertIn("premier_league_20260510_西汉姆联_阿森纳", registry)
+        entry = registry["premier_league_20260510_西汉姆联_阿森纳"]
+        self.assertEqual(entry["teams_match_id"], "premier_league_20260510_西汉姆联_阿森纳")
+        self.assertEqual(entry["external_match_id"], "1326947")
+        self.assertNotIn("1326947", registry)
 
 
 if __name__ == "__main__":

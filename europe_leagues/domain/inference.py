@@ -113,6 +113,129 @@ class InferencePipelineService:
         return reranked[:3], diag
 
     @staticmethod
+    def _apply_draw_confirmation_guard(
+        final_prob: Dict[str, float],
+        current_odds: Optional[Dict[str, Any]],
+        over_under: Optional[Dict[str, Any]],
+        match_intelligence: Optional[Dict[str, Any]],
+    ) -> Tuple[Dict[str, float], Dict[str, Any]]:
+        diag: Dict[str, Any] = {
+            'applied': False,
+            'qualified': False,
+            'reason': 'not_draw_top1',
+            'signals': [],
+            'evidence': [],
+        }
+        if not isinstance(final_prob, dict):
+            diag['reason'] = 'invalid_final_prob'
+            return final_prob, diag
+
+        p_h = float(final_prob.get('home_win') or 0.0)
+        p_d = float(final_prob.get('draw') or 0.0)
+        p_a = float(final_prob.get('away_win') or 0.0)
+        top_side = max((('home_win', p_h), ('draw', p_d), ('away_win', p_a)), key=lambda item: item[1])[0]
+        if top_side != 'draw':
+            return final_prob, diag
+
+        diag['reason'] = 'draw_confirmation_evaluated'
+        sorted_probs = sorted((p_h, p_a), reverse=True)
+        runner_up = sorted_probs[0] if sorted_probs else 0.0
+        top_gap = p_d - runner_up
+        diag['top_gap'] = round(top_gap, 6)
+        if top_gap >= 0.045:
+            diag['qualified'] = True
+            diag['evidence'].append('draw_prob_clear_lead')
+        elif top_gap <= 0.018:
+            diag['signals'].append('draw_confirmation_gap_weak')
+
+        euro_final = None
+        if isinstance(current_odds, dict):
+            euro = current_odds.get('胜平负赔率') or current_odds.get('欧赔')
+            if isinstance(euro, dict) and isinstance(euro.get('final'), dict):
+                euro_final = euro.get('final')
+        draw_odds = home_odds = away_odds = None
+        if isinstance(euro_final, dict):
+            draw_odds = InferencePipelineService._to_float(euro_final.get('draw') if 'draw' in euro_final else euro_final.get('平'))
+            home_odds = InferencePipelineService._to_float(euro_final.get('home') if 'home' in euro_final else euro_final.get('主'))
+            away_odds = InferencePipelineService._to_float(euro_final.get('away') if 'away' in euro_final else euro_final.get('客'))
+        if draw_odds is not None and home_odds is not None and away_odds is not None:
+            market_min = min(home_odds, draw_odds, away_odds)
+            draw_market_gap = draw_odds - market_min
+            diag['draw_market_gap'] = round(draw_market_gap, 4)
+            if draw_market_gap <= 0.18:
+                diag['qualified'] = True
+                diag['evidence'].append('draw_market_supported')
+            elif draw_market_gap >= 0.38:
+                diag['signals'].append('draw_market_not_confirmed')
+
+        ou_line = InferencePipelineService._to_float(over_under.get('line')) if isinstance(over_under, dict) else None
+        ou_over = InferencePipelineService._to_float(over_under.get('over')) if isinstance(over_under, dict) else None
+        ou_under = InferencePipelineService._to_float(over_under.get('under')) if isinstance(over_under, dict) else None
+        if ou_line is not None:
+            diag['ou_line'] = ou_line
+        if ou_under is not None and ou_over is not None:
+            diag['ou_under_edge'] = round(ou_under - ou_over, 4)
+            if ou_line is not None and ou_line <= 2.5 and ou_under > ou_over:
+                diag['qualified'] = True
+                diag['evidence'].append('under_supports_draw')
+            elif ou_under <= ou_over and ou_line is not None and ou_line >= 2.75:
+                diag['signals'].append('open_total_not_support_draw')
+
+        scenario_tags = match_intelligence.get('scenario_tags', []) if isinstance(match_intelligence, dict) else []
+        contextual_rules = match_intelligence.get('contextual_rules', {}) if isinstance(match_intelligence, dict) else {}
+        if 'recent_form_volatility_high' in scenario_tags:
+            diag['qualified'] = True
+            diag['evidence'].append('double_volatility_supports_draw')
+        if 'la_liga_mid_table_home_flat' in scenario_tags:
+            diag['qualified'] = True
+            diag['evidence'].append('la_liga_mid_table_home_flat')
+        if 'premier_league_relegation_home_motivation_bonus' in scenario_tags:
+            diag['signals'].append('relegation_home_motivation_conflicts_draw')
+        volatility = contextual_rules.get('volatility') if isinstance(contextual_rules, dict) else {}
+        if isinstance(volatility, dict):
+            diag['volatility'] = {
+                'home': (volatility.get('home') or {}).get('label'),
+                'away': (volatility.get('away') or {}).get('label'),
+            }
+
+        if diag['qualified']:
+            diag['reason'] = 'draw_confirmation_passed'
+            return final_prob, diag
+
+        draw_excess = min(0.026, max(0.0, p_d - runner_up + 0.006))
+        if draw_excess <= 0.0:
+            diag['reason'] = 'draw_confirmation_no_shift'
+            return final_prob, diag
+        favored_side = 'home_win' if p_h >= p_a else 'away_win'
+        favored_ratio = 0.68 if favored_side == 'home_win' else 0.32
+        if 'premier_league_relegation_home_motivation_bonus' in scenario_tags and favored_side == 'home_win':
+            favored_ratio = 0.78
+        p_d -= draw_excess
+        if favored_side == 'home_win':
+            p_h += draw_excess * favored_ratio
+            p_a += draw_excess * (1.0 - favored_ratio)
+        else:
+            p_a += draw_excess * favored_ratio
+            p_h += draw_excess * (1.0 - favored_ratio)
+        total = p_h + p_d + p_a
+        if total > 0:
+            p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
+        diag.update(
+            {
+                'applied': True,
+                'reason': 'draw_confirmation_failed_shifted',
+                'shift': round(draw_excess, 4),
+                'favored_side': favored_side,
+                'adjusted_probabilities': {
+                    'home_win': round(p_h, 6),
+                    'draw': round(p_d, 6),
+                    'away_win': round(p_a, 6),
+                },
+            }
+        )
+        return {'home_win': p_h, 'draw': p_d, 'away_win': p_a}, diag
+
+    @staticmethod
     def _parse_handicap_value(value: Any) -> Optional[float]:
         if value is None:
             return None
@@ -1080,6 +1203,13 @@ class InferencePipelineService:
             over_under=over_under,
         )
         realtime['context_applied']['real_market_over_under_outcome_adjustment'] = real_ou_outcome_diag
+        final_prob, draw_guard_diag = self._apply_draw_confirmation_guard(
+            final_prob=final_prob,
+            current_odds=current_odds,
+            over_under=over_under,
+            match_intelligence=match_intelligence,
+        )
+        realtime['context_applied']['draw_confirmation_guard'] = draw_guard_diag
         ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
         main_prediction = ranked_probabilities[0][0]
         confidence = ranked_probabilities[0][1]

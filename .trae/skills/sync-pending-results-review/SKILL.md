@@ -1,6 +1,6 @@
 ---
 name: "sync-pending-results-review"
-description: "Syncs unfinished match results, updates MEMORY.md and league SoT, then generates review summaries. Invoke when user asks to update pending results, backfill scores, or produce post-match review summaries."
+description: "Syncs unfinished match results with automatic match_id normalization, updates MEMORY.md and league SoT, then refreshes review summaries and learning outputs. Invoke when user asks to update pending results, backfill scores, or produce post-match review summaries."
 ---
 
 # Sync Pending Results And Review
@@ -11,9 +11,11 @@ description: "Syncs unfinished match results, updates MEMORY.md and league SoT, 
 
 - 查找仍处于待回填状态的预测样本
 - 自动或手工补录真实赛果
+- 预清洗并归一化 `result_sync_registry.json` 中的历史 `match_id`
 - 同步更新 `MEMORY.md`
 - 同步更新五大联赛 `teams_2025-26.md`
 - 刷新准确率统计
+- 刷新 `prediction_review_learning.json`
 - 生成批次复盘总结或单场复盘备注
 
 ## 何时使用
@@ -45,11 +47,24 @@ description: "Syncs unfinished match results, updates MEMORY.md and league SoT, 
 
 - 优先自动同步，避免人工写错比分
 - 自动同步没命中时，先核赛果，再手工补录
+- 每次执行前先归一化 `result_sync_registry.json`，优先修复历史错误 `teams_match_id`
+- `sync-pending-results-review` / `auto-sync-results` 内部应优先使用规范 `teams_match_id` 作为主键，再回退 `internal_match_id` / `external_match_id`
 - `save-result` 优先用项目内部比赛标识；若外部 `MatchID` 无法直接命中 SoT，则改用 `主队 vs 客队`
 - 五大联赛 SoT 以 `europe_leagues/<league>/teams_2025-26.md` 为准
 - 欧战/杯赛类 runtime-only 结果以 `MEMORY.md` 和 runtime archive 为主
 - 更新后必须刷新 `accuracy`
+- 更新后必须刷新 `prediction_review_learning.json`
 - 若发现文档比分与外部赛果不一致，需要纠正错误落盘，而不是只改汇总结论
+- 不允许把当前比赛赛果扩散写入历史 `similar_matches`，避免污染爆冷案例和相似样本
+
+## 当前稳定行为
+
+当前版本的 Skill 依赖的主链，已经补齐以下修复，执行时应默认假设这些行为存在并可用：
+
+- `sync-pending-results-review` 执行前会自动运行历史 registry 迁移，输出 `registry_migration`
+- `auto-sync-results` 会优先使用规范 `teams_match_id`，减少错误命中或错用外部 `MatchID`
+- `save-result` CLI 已修复参数不匹配问题，可以直接用于手工补录
+- `sync-pending-results-review` 结束后除了刷新 `MEMORY.md` / `accuracy`，还会刷新 `prediction_review_learning.json`
 
 ## 标准执行步骤
 
@@ -68,10 +83,12 @@ python3 prediction_system.py sync-pending-results-review \
 
 这个命令会自动串联：
 
+- `result_sync_registry.json` 归一化迁移
 - `pending-results`
 - `auto-sync-results`
 - `accuracy --refresh`
 - `MEMORY.md` 复盘总结更新
+- `prediction_review_learning.json` 刷新
 
 如果你只想预览，不想写回 `MEMORY.md`，加上：
 
@@ -106,6 +123,13 @@ python3 prediction_system.py auto-sync-results --limit 20 --json
 
 若 `updated_count == 0`，不要假设比赛未结束，要继续核查外部赛果。
 
+重点核对输出中的：
+
+- `registry_migration`
+- `updates`
+- `updated_count`
+- `pending_count`
+
 ### 3. 外部核赛果
 
 优先使用澳客移动端历史页：
@@ -133,6 +157,7 @@ python3 prediction_system.py save-result --match-id '<主队> vs <客队>' --hom
 - 当外部 `MatchID` 不是项目内部 `match_id` 时，直接用球队名更稳
 - 若同名比赛可能跨日期冲突，需先核对 `teams_2025-26.md` 中对应联赛行
 - 若联赛文件里已存在比分但备注仍是 `进行中`，需要人工修正备注为赛后格式
+- 若 `save-result` 仍不能直接命中，优先核查 archive / registry 中的 `teams_match_id`、`internal_match_id`、`external_match_id` 是否一致
 
 ### 5. 刷新准确率
 
@@ -149,7 +174,16 @@ python3 prediction_system.py accuracy --refresh --json
 - `score_accuracy`
 - `ou_accuracy`
 
-### 6. 更新滚动记忆
+### 6. 刷新结构化复盘总结
+
+核查 `.okooo-scraper/runtime/prediction_review_learning.json`：
+
+- 文件是否已刷新
+- `reviewed_sample_count` 是否更新
+- `completed_sample_count` 是否更新
+- `days` 是否与本次命令一致
+
+### 7. 更新滚动记忆
 
 核查 `MEMORY.md` 的 `<!-- prediction-memory:start -->` 区块：
 
@@ -158,7 +192,7 @@ python3 prediction_system.py accuracy --refresh --json
 - `更新时间` 是否更新
 - 顶部滚动准确率是否与当前样本一致
 
-### 7. 生成复盘总结
+### 8. 生成复盘总结
 
 若用户要求复盘，需要按当前 `MEMORY.md` 中的标准模板生成：
 
@@ -216,19 +250,26 @@ python3 prediction_system.py accuracy --refresh --json
   - 说明自动队列未命中，不代表没有已完赛比赛，需要继续核外部赛果
 - `save-result` 提示 `找不到比赛`：
   - 往往是外部 `MatchID` 与项目内部 `match_id` 不一致，改用 `主队 vs 客队`
+- `auto-sync-results` 命中了错误比赛或 `MatchID` 看起来不稳定：
+  - 先看 `registry_migration` 是否已修复历史错键，再核查 `teams_match_id / internal_match_id / external_match_id`
 - 联赛 `md` 已有比分，但备注还是 `进行中`：
   - 说明历史写回不完整，需要手工修成赛后格式
 - `MEMORY.md` 和联赛 SoT 不一致：
   - 先以真实赛果为准修正文档，再刷新 `accuracy`
+- `prediction_review_learning.json` 没变化：
+  - 需确认是否已执行最新主链，或是否存在样本数不足导致统计摘要变化不明显
 - 准确率总表没变化：
   - 说明该样本可能还没完整进入统一统计来源，需要继续检查 SoT / archive / memory 三者是否一致
 
 ## 必查文件
 
 - `/Users/bytedance/trae_projects/MEMORY.md`
+- `/Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/runtime/result_sync_registry.json`
+- `/Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/runtime/prediction_review_learning.json`
 - `/Users/bytedance/trae_projects/europe_leagues/<league>/teams_2025-26.md`
 - `/Users/bytedance/trae_projects/europe_leagues/result_manager.py`
 - `/Users/bytedance/trae_projects/europe_leagues/domain/persistence.py`
+- `/Users/bytedance/trae_projects/europe_leagues/runtime/result_sync.py`
 - `/Users/bytedance/trae_projects/europe_leagues/domain/writeback.py`
 
 ## 最终输出要求
@@ -236,8 +277,10 @@ python3 prediction_system.py accuracy --refresh --json
 完成后给用户的结果至少应包括：
 
 - 本次更新了哪些比赛
+- `registry_migration` 的迁移统计
 - 哪些比赛是自动同步，哪些是手工补录
 - `MEMORY.md` 是否已切到已完赛
 - 联赛 `teams_2025-26.md` 是否已同步
 - 刷新后的准确率结果
+- `prediction_review_learning.json` 是否已刷新
 - 若有残留未回填样本，要明确列出

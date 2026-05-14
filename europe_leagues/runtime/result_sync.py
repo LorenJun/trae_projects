@@ -94,6 +94,11 @@ def _parse_teams_match_id(match_id: str) -> Tuple[str, str, str, str]:
     return "", "", "", ""
 
 
+def _looks_like_teams_match_id(value: Any) -> bool:
+    league_code, match_date, home_team, away_team = _parse_teams_match_id(str(value or "").strip())
+    return bool(league_code and match_date and home_team and away_team)
+
+
 def _normalize_team_token(league_code: str, name: str, alias_map: Optional[Dict[str, Dict[str, str]]] = None) -> str:
     canonical = normalize_team_name(league_code, name, alias_map=alias_map)
     return re.sub(r"\s+", "", str(canonical or "").strip())
@@ -219,24 +224,30 @@ def _get_prediction_field(payload: Dict[str, Any], *field_names: str) -> Any:
 
 
 def _build_match_id(payload: Dict[str, Any]) -> str:
+    teams_match_id = _build_teams_match_id(payload)
+    if teams_match_id:
+        return teams_match_id
+    internal_match_id = str(payload.get("internal_match_id") or "").strip()
+    if internal_match_id:
+        return internal_match_id
     explicit = str(payload.get("match_id") or "").strip()
-    if explicit and not explicit.startswith(FALLBACK_MATCH_ID_PREFIXES):
+    if explicit:
         return explicit
     external_match_id = _resolve_external_match_id(payload)
     if external_match_id:
         return external_match_id
-    teams_match_id = _build_teams_match_id(payload)
-    if teams_match_id:
-        return teams_match_id
-    if explicit:
-        return explicit
     return ""
 
 
 def _build_teams_match_id(payload: Dict[str, Any]) -> str:
-    explicit = str(payload.get("teams_match_id") or payload.get("internal_match_id") or "").strip()
-    if explicit:
-        return explicit
+    for candidate in (
+        payload.get("teams_match_id"),
+        payload.get("internal_match_id"),
+        payload.get("match_id"),
+    ):
+        explicit = str(candidate or "").strip()
+        if _looks_like_teams_match_id(explicit):
+            return explicit
     league_code = str(_get_prediction_field(payload, "league_code", "league") or "").strip()
     if league_code not in LEAGUE_SOT_CODES:
         return ""
@@ -418,12 +429,12 @@ def migrate_result_sync_registry_match_ids(base_dir: Optional[str] = None) -> Di
         external_match_id = str(entry.get("external_match_id") or "").strip()
         if not external_match_id and isinstance(archived, dict):
             external_match_id = _resolve_external_match_id(archived)
-        teams_match_id = str(entry.get("teams_match_id") or "").strip() or _build_teams_match_id(entry)
-        target_key = external_match_id or str(entry.get("match_id") or key).strip() or key
         updated_entry = dict(entry)
-        updated_entry["match_id"] = target_key
         updated_entry["external_match_id"] = external_match_id
+        teams_match_id = _build_teams_match_id(updated_entry)
         updated_entry["teams_match_id"] = teams_match_id
+        target_key = _build_match_id(updated_entry) or str(entry.get("match_id") or key).strip() or key
+        updated_entry["match_id"] = target_key
         existing = normalized.get(target_key)
         if existing:
             normalized[target_key] = _merge_registry_entry(updated_entry, existing)
@@ -735,6 +746,7 @@ def sync_due_prediction_results(
     now: Optional[datetime] = None,
     limit: int = 20,
 ) -> Dict[str, Any]:
+    registry_migration = migrate_result_sync_registry_match_ids(base_dir)
     registry = _load_registry(base_dir)
     registry_changed = _refresh_registry_schedule_from_teams(base_dir, registry)
     current_time = now or datetime.now()
@@ -758,6 +770,7 @@ def sync_due_prediction_results(
     if not due_entries:
         return {
             "checked_at": current_time.isoformat(),
+            "registry_migration": registry_migration,
             "due_count": 0,
             "updated_count": 0,
             "pending_count": 0,
@@ -850,6 +863,7 @@ def sync_due_prediction_results(
     updated_count = sum(1 for item in updates if item.get("updated"))
     return {
         "checked_at": current_time.isoformat(),
+        "registry_migration": registry_migration,
         "due_count": len(due_entries),
         "updated_count": updated_count,
         "pending_count": len(due_entries) - updated_count,
