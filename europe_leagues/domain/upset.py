@@ -31,6 +31,35 @@ class UpsetAnalyzer:
             return default
 
     @staticmethod
+    def _normalize_predicted_side(predicted_outcome: Optional[str]) -> str:
+        mapping = {
+            '主胜': 'home',
+            '客胜': 'away',
+            '平局': 'draw',
+            'home': 'home',
+            'away': 'away',
+            'draw': 'draw',
+            'home_win': 'home',
+            'away_win': 'away',
+        }
+        return mapping.get(str(predicted_outcome or '').strip(), 'unknown')
+
+    @staticmethod
+    def _humanize_motivation_flag(flag: str) -> str:
+        mapping = {
+            'underdog_must_take_points': '弱势方存在刚性抢分需求',
+            'pressure_side_relegation': '压力方处于保级区或保级压力带',
+            'favorite_flat_motivation': '热门方战意偏平',
+            'favorite_mid_table_flat': '热门方处于中游战意平缓区间',
+            'underdog_survival_vs_favorite_flat': '弱势方保级压力明显强于热门方常规拿分',
+            'relegation_vs_mid_table': '形成保级队对中游队的典型战意反差',
+            'underdog_high_urgency': '弱势方抢分紧迫度更高',
+            'underdog_motivation_score_advantage': '弱势方战意评分更高',
+            'table_context_side_inferred': '当前基于积分形势而非纯实力差识别战意压力侧',
+        }
+        return mapping.get(str(flag or '').strip(), str(flag or '').strip())
+
+    @staticmethod
     def _case_get(case: Dict, *keys: str) -> Any:
         for k in keys:
             if k in case:
@@ -113,6 +142,95 @@ class UpsetAnalyzer:
             if fin_v and ini_v and fin_v != ini_v:
                 tags.add('handicap_move')
         return tags
+
+    def _score_motivation_risk(
+        self,
+        match_intelligence: Optional[Dict[str, Any]],
+        strength_diff: float,
+        predicted_outcome: Optional[str],
+    ) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            'available': False,
+            'score': 0.0,
+            'supports_upset': False,
+            'favored_side': 'balanced',
+            'pressure_side': 'balanced',
+            'urgency_edge': 0.0,
+            'flags': [],
+            'factors': [],
+        }
+        if not isinstance(match_intelligence, dict):
+            return out
+        motivation = match_intelligence.get('motivation')
+        if not isinstance(motivation, dict):
+            return out
+        risk_signal = motivation.get('risk_signal')
+        if not isinstance(risk_signal, dict) or not risk_signal.get('available'):
+            return out
+
+        home_profile = motivation.get('home') if isinstance(motivation.get('home'), dict) else {}
+        away_profile = motivation.get('away') if isinstance(motivation.get('away'), dict) else {}
+        predicted_side = self._normalize_predicted_side(predicted_outcome)
+        signal_favored_side = str(risk_signal.get('favored_side') or '').strip()
+        if signal_favored_side in {'home', 'away'}:
+            favored_side = signal_favored_side
+        else:
+            favored_side = predicted_side if predicted_side in {'home', 'away'} else ('home' if strength_diff >= 0 else 'away')
+        confidence_scale = 1.0 if signal_favored_side in ('', favored_side, 'balanced') else 0.85
+        pressure_side = str(risk_signal.get('pressure_side') or '').strip()
+        if pressure_side not in {'home', 'away'}:
+            pressure_side = 'away' if favored_side == 'home' else 'home'
+
+        favored_profile = home_profile if favored_side == 'home' else away_profile
+        pressure_profile = away_profile if favored_side == 'home' else home_profile
+        urgency_edge = self._to_float(
+            risk_signal.get('urgency_edge'),
+            self._to_float(pressure_profile.get('urgency'), 0.45) - self._to_float(favored_profile.get('urgency'), 0.45),
+        )
+
+        score = min(12.0, self._to_float(risk_signal.get('score'), 0.0) * 18.0)
+        if pressure_profile.get('is_must_take_points'):
+            score += 3.0
+        if str(favored_profile.get('tier') or '').strip() in {'mid_table_flat', 'upper_mid'}:
+            score += 2.0
+        if 'relegation_vs_mid_table' in (risk_signal.get('flags') or []):
+            score += 2.0
+        if 'pressure_side_relegation' in (risk_signal.get('flags') or []):
+            score += 1.5
+        if urgency_edge >= 0.18:
+            score += 2.0
+        elif urgency_edge >= 0.10:
+            score += 1.0
+        score = round(max(0.0, min(18.0, score * confidence_scale)), 2)
+
+        factors: List[str] = []
+        summary = str(risk_signal.get('summary') or '').strip()
+        if summary:
+            factors.append(summary)
+        for flag in risk_signal.get('flags') or []:
+            text = self._humanize_motivation_flag(str(flag or '').strip())
+            if text and text not in factors:
+                factors.append(text)
+        pressure_objective = str(pressure_profile.get('objective') or '').strip()
+        favored_objective = str(favored_profile.get('objective') or '').strip()
+        if pressure_objective:
+            factors.append(f"压力方目标: {pressure_objective}")
+        if favored_objective and str(favored_profile.get('tier') or '').strip() in {'mid_table_flat', 'upper_mid'}:
+            factors.append(f"热门方目标: {favored_objective}")
+
+        out.update(
+            {
+                'available': True,
+                'score': score,
+                'supports_upset': bool(risk_signal.get('supports_upset')) and pressure_side != favored_side and score >= 6.0,
+                'favored_side': favored_side,
+                'pressure_side': pressure_side,
+                'urgency_edge': round(urgency_edge, 4),
+                'flags': [str(flag or '').strip() for flag in (risk_signal.get('flags') or []) if str(flag or '').strip()],
+                'factors': factors[:4],
+            }
+        )
+        return out
 
     def _find_similar_cases(
         self,
@@ -366,9 +484,31 @@ class UpsetAnalyzer:
         confidence: Optional[float] = None,
         historical_odds_reference: Optional[Dict] = None,
         asian_handicap: Optional[Dict] = None,
-        european_odds: Optional[Dict] = None
+        european_odds: Optional[Dict] = None,
+        match_intelligence: Optional[Dict[str, Any]] = None,
     ) -> Dict:
         """评估爆冷可能性（增强版）"""
+        motivation_signature = None
+        if isinstance(match_intelligence, dict):
+            motivation = match_intelligence.get('motivation') if isinstance(match_intelligence.get('motivation'), dict) else {}
+            home_mot = motivation.get('home') if isinstance(motivation.get('home'), dict) else {}
+            away_mot = motivation.get('away') if isinstance(motivation.get('away'), dict) else {}
+            risk_signal = motivation.get('risk_signal') if isinstance(motivation.get('risk_signal'), dict) else {}
+            motivation_signature = {
+                'home_score': home_mot.get('score'),
+                'home_urgency': home_mot.get('urgency'),
+                'home_tier': home_mot.get('tier'),
+                'home_must': home_mot.get('is_must_take_points'),
+                'away_score': away_mot.get('score'),
+                'away_urgency': away_mot.get('urgency'),
+                'away_tier': away_mot.get('tier'),
+                'away_must': away_mot.get('is_must_take_points'),
+                'risk_score': risk_signal.get('score'),
+                'risk_supports': risk_signal.get('supports_upset'),
+                'risk_flags': list(risk_signal.get('flags') or [])[:3],
+                'favored_side': risk_signal.get('favored_side'),
+                'pressure_side': risk_signal.get('pressure_side'),
+            }
         cache_params = {
             'home': home_team, 'away': away_team, 'league': league_code,
             'diff': strength_diff,
@@ -377,6 +517,7 @@ class UpsetAnalyzer:
             'odds_ref': historical_odds_reference,
             'asian_handicap': asian_handicap,
             'european_odds': european_odds,
+            'motivation_sig': motivation_signature,
         }
         cached = self.cache.get('assess_upset_potential', cache_params)
         if cached:
@@ -385,6 +526,7 @@ class UpsetAnalyzer:
         upset_index = 0.0
         factors = []
         mismatch_analysis = None
+        motivation_risk = None
         
         # 1. 实力差距因素
         if abs(strength_diff) > 20:
@@ -439,6 +581,19 @@ class UpsetAnalyzer:
             if confidence is not None and confidence >= 0.70 and abs(strength_diff) >= 15:
                 upset_index += 5.0
                 factors.append("强热门需防过热")
+
+        # 2.5. 【新增】战意风险：弱势方抢分刚性明显强于热门方时，提升冷门警报
+        motivation_risk = self._score_motivation_risk(
+            match_intelligence=match_intelligence,
+            strength_diff=strength_diff,
+            predicted_outcome=predicted_outcome,
+        )
+        if motivation_risk.get('available') and motivation_risk.get('score', 0.0) > 0.0:
+            upset_index += min(18.0, float(motivation_risk.get('score') or 0.0))
+            for factor in motivation_risk.get('factors') or []:
+                text = str(factor or '').strip()
+                if text and text not in factors:
+                    factors.append(f"[战意] {text}")
         
         # 3. 伤病因素
         if home_strength.get('injured_count', 0) >= 3:
@@ -560,6 +715,7 @@ class UpsetAnalyzer:
             'similar_cases_count': len(similar_cases),
             'factors': factors,
             'historical_odds_reference': historical_odds_reference,
+            'motivation_risk': motivation_risk,
             'handicap_strength_mismatch': mismatch_analysis,
             'case_knowledge': knowledge,
         }

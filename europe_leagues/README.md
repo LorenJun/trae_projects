@@ -15,7 +15,8 @@
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
 > 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`、`realtime.context_applied.live_outcome_adjustment.historical_market_alignment`、`retrieved_memory.summary.live_market_followup`、`live_betting_advice`  
 > 欧战正式 competition config：`europa_league`、`champions_league`、`conference_league` 已进入主链，可直接走 `predict-match` / `harness-run`，但写回仍保持 `runtime_only`  
-> 当前实现说明：`prediction_system.py` 为兼容入口，真实 CLI 路由在 `app/cli.py`
+> 当前实现说明：`prediction_system.py` 为兼容入口，真实 CLI 路由在 `app/cli.py`。  
+> Hermes 或其他接入方应固定按“先发现 `prediction_system.py`，再下钻到 `app/cli.py` 真正执行”的规则识别，避免把兼容壳误当业务实现。
 
 ## 项目结构
 

@@ -97,6 +97,7 @@ trae_projects/
 关键含义：
 
 - `prediction_system.py` 是兼容入口，真实命令实现集中在 `europe_leagues/app/cli.py`
+- Hermes 或其他接入方应固定按“先发现 `prediction_system.py`，再下钻到 `app/cli.py` 真正执行”的规则识别
 - `domain/predictor.py` 作为接口层对外稳定外壳，内部仍调用 `EnhancedPredictor`
 - `enhanced_prediction_workflow.py` 仍是主编排核心，但主要子能力已下沉到 `domain/*`
 - `runtime/paths.py` 已统一 runtime、snapshots、schedules 与 `MEMORY.md` 路径
@@ -105,6 +106,7 @@ trae_projects/
 更完整的架构说明见：
 
 - [europe_leagues_architecture.md](./docs/architecture/europe_leagues_architecture.md)
+- [skill_lifecycle.md](./docs/standards/skill_lifecycle.md)
 
 ## 3. 事实写回边界
 
@@ -320,10 +322,26 @@ python3 prediction_system.py sync-memory-rag --dry-run --json
 4. 如需阶段化、可审计结果，优先使用 Harness
 5. 遇到 `browser-use`、快照、实时源缺失，可降级，但必须显式标记为降级或 mock 数据
 
-## 10. 参考文档
+## 10. Skill 生命周期治理
+
+当前仓库对 Skill 的生命周期治理采用固定分层：
+
+- `SKILL.md` 只负责描述能力正文，不承担安装、更新、回滚或版本检查
+- Skill 的安装与更新属于 CLI / Hook / 启动脚本职责
+- Harness 或接入层应在 Agent 读取 Skill 之前准备好本地最新副本
+- 仓库维护脚本可以同步 Skill 文档内容，但这不等于运行时自动更新机制
+
+因此，当前项目明确不推荐：
+
+- 在每个 Skill 正文里重复写“先检查自己是否有新版”
+- 在执行任务中途弹出 Skill 更新交互
+- 把远端 manifest 比较、仓库鉴权、失败重试写进 `SKILL.md`
+
+## 11. 参考文档
 
 - [README.md](./README.md)
 - [europe_leagues_architecture.md](./docs/architecture/europe_leagues_architecture.md)
 - [workflow.md](./docs/standards/workflow.md)
+- [skill_lifecycle.md](./docs/standards/skill_lifecycle.md)
 - [data_format.md](./docs/standards/data_format.md)
 - [football_actuary_persona.md](./agents/football_actuary_persona.md)

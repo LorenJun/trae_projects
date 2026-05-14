@@ -1,6 +1,6 @@
 ---
 name: "sync-pending-results-review"
-description: "Syncs unfinished match results with automatic match_id normalization, updates MEMORY.md and league SoT, then refreshes review summaries and learning outputs. Invoke when user asks to update pending results, backfill scores, or produce post-match review summaries."
+description: "赛果回填与复盘总结技能，按 `prediction_system.py` 发现入口并下钻到 `app/cli.py` 执行，自动归一化 match_id、同步 MEMORY.md 与联赛 SoT，并刷新 review 与 learning 输出。Invoke when user asks to update pending results, backfill scores, or produce post-match review summaries."
 ---
 
 # Sync Pending Results And Review

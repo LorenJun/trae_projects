@@ -399,6 +399,12 @@ class PredictionPersistenceService:
 
         upset = result.get('upset_potential')
         if isinstance(upset, dict):
+            motivation_risk = upset.get('motivation_risk')
+            if isinstance(motivation_risk, dict):
+                for item in motivation_risk.get('factors') or []:
+                    text = str(item or '').strip()
+                    if text and text not in points:
+                        points.append(text)
             for item in upset.get('factors') or []:
                 text = str(item or '').strip()
                 if text and text not in points:
@@ -429,7 +435,7 @@ class PredictionPersistenceService:
                             points.append(text)
 
         prioritized = []
-        keywords = ('风险', '平局', '伤病', '诱盘', '反打', '退盘', '凯利')
+        keywords = ('战意', '抢分', '保级', '争冠', '风险', '平局', '伤病', '诱盘', '反打', '退盘', '凯利')
         for item in points:
             if any(keyword in item for keyword in keywords) and item not in prioritized:
                 prioritized.append(item)

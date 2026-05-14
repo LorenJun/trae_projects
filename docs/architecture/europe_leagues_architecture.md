@@ -32,6 +32,11 @@ last_updated: 2026-05-08
 - 对外命令入口已经收敛到 `app/cli.py`，`prediction_system.py` 只保留兼容壳
 - 运行时数据不再散落在根目录，而是统一通过 `runtime/paths.py` 指向 `.okooo-scraper/runtime/`、`.okooo-scraper/snapshots/`、`.okooo-scraper/schedules/`
 
+对 Hermes 或其他接入方的固定识别规则：
+- 可以从 `prediction_system.py` 发现项目入口
+- 但必须继续下钻到 `app/cli.py` 识别并执行真实命令
+- 不要把 `prediction_system.py` 当作业务主逻辑实现层
+
 ### 1.1 关键入口
 
 - CLI 兼容入口：`europe_leagues/prediction_system.py`
@@ -138,12 +143,16 @@ flowchart TB
   subgraph L5[治理层]
     Persona[agents/*.md]
     Registry[agent_runtime_registry.py]
+    Skill[skill docs]
+    Hermes[Hermes]
   end
 
   Compat --> CLI
   CLI --> EnvCmd
   CLI --> DP --> EP
-  HarnessCLI --> HP --> EP
+  CLI --> HarnessCLI
+  HarnessCLI --> HP
+  HP --> EP
   EP --> FE
   EP --> OD
   EP --> LV
@@ -172,6 +181,8 @@ flowchart TB
   Registry --> HP
   Registry --> EP
   Persona --> Registry
+  Skill --> Compat
+  Hermes --> Compat
 ```
 
 ---
@@ -185,8 +196,8 @@ flowchart TB
 | CLI 兼容入口 | `prediction_system.py` | 保持旧调用路径不变，内部直接转发到 `app/cli.py` |
 | CLI 主实现 | `app/cli.py` | 子命令注册、参数解析、JSON envelope、`runtime_profile` 注入、命令级编排 |
 | 环境检查与安装指引 | `app/cli.py` | 提供 `health-check`、`setup-openclaw`，输出依赖状态、driver 状态与安装建议 |
-| Harness Core | `harness/core.py` | 定义 `HarnessContext`、`PipelineStage`、`HarnessPipeline` 与可审计阶段记录 |
-| Football Harness | `harness/football.py` | 注册 `match_prediction`、`result_recording` 两类 pipeline，并桥接 collect / predict / save-result / accuracy |
+| Harness Core | `harness/core.py` | 定义 `HarnessContext`、`PipelineStage`、`HarnessPipeline`，负责阶段执行、审计记录与 `runtime_profile` 注入 |
+| Football Harness | `harness/football.py` | 注册 `match_prediction`、`result_recording` 两类 pipeline，桥接 collect / predict / save-result / accuracy 到正式业务能力 |
 
 当前正式 CLI 命令已经不只包含业务命令，还包含运维/环境命令：
 - 业务命令：`predict-match`、`predict-schedule`、`collect-data`、`save-result`、`auto-sync-results`、`accuracy`
@@ -197,6 +208,10 @@ flowchart TB
 这说明接口层现在承担两种职责：
 - 对业务主链提供统一命令入口
 - 对澳客抓取环境和 openclaw 依赖提供统一的可观测性入口
+
+其中 Harness 需要特别强调两点：
+- Harness 不是独立于 CLI 的第二入口，而是 `app/cli.py` 暴露出来的一组正式命令
+- Skill 与 Hermes 在需要阶段化、可审计输出时，应选择 `harness-run`，而不是绕开 CLI 直接调用 `harness/*.py`
 
 ### 3.2 编排层与领域层
 
@@ -357,14 +372,39 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  H[harness-run match_prediction] --> S1[collect_data stage]
-  S1 --> S2[predict_match stage]
-  S2 --> OUT[inputs / artifacts / stages / runtime_profile]
+  Compat[prediction_system.py]
+  CLI[app/cli.py]
+  H1[harness-run match_prediction]
+  H2[harness-run result_recording]
+  P1[HarnessPipeline]
+  C1[collect_data stage]
+  C2[predict_match stage]
+  R1[save_result stage]
+  R2[refresh_accuracy stage]
+  OUT[inputs / artifacts / stages / runtime_profile / error]
+  Skill[Skill]
+  Hermes[Hermes]
 
-  R[harness-run result_recording] --> R1[save_result stage]
-  R1 --> R2[refresh_accuracy stage]
-  R2 --> ROUT[inputs / artifacts / stages / runtime_profile]
+  Skill --> Compat
+  Hermes --> Compat
+  Compat --> CLI
+  CLI --> H1
+  CLI --> H2
+  H1 --> P1
+  H2 --> P1
+  P1 --> C1
+  C1 --> C2
+  P1 --> R1
+  R1 --> R2
+  C2 --> OUT
+  R2 --> OUT
 ```
+
+Harness 当前应理解为：
+- `prediction_system.py` 只是发现入口，真实命令执行落在 `app/cli.py`
+- `harness-run` 是正式 CLI 链路中的“可审计分支”，不是平行框架
+- `match_prediction` 与 `result_recording` 都由 `HarnessPipeline` 组织阶段执行，并输出结构化审计结果
+- Hermes 管理“何时选择 Harness 命令”，Skill 管理“什么时候应该走 Harness”，Harness 自身只管理阶段化执行
 
 ### 4.4 环境依赖链路
 

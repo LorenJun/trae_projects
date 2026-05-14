@@ -90,15 +90,30 @@ class MatchIntelligenceEngine:
         table = self._load_league_table(league_code)
         row = table.get(team_name)
         if not isinstance(row, dict):
-            return {"available": False, "score": 75.0, "reason": "table_unavailable"}
+            return {
+                "available": False,
+                "score": 75.0,
+                "urgency": 0.45,
+                "tier": "unknown",
+                "objective": "信息不足",
+                "target_zone": "unknown",
+                "points_gap_to_objective": None,
+                "is_must_take_points": False,
+                "reason": "table_unavailable",
+                "tags": [],
+                "table_row": {},
+            }
         total_teams = len(table) or 20
         top4_pts = None
+        top1_pts = None
         relegation_cut_pts = None
         for team_row in table.values():
             if not isinstance(team_row, dict):
                 continue
             rank = team_row.get("rank")
             pts = team_row.get("points")
+            if rank == 1:
+                top1_pts = pts
             if rank == 4:
                 top4_pts = pts
             if rank == max(1, total_teams - 2):
@@ -107,33 +122,239 @@ class MatchIntelligenceEngine:
         rank = int(row.get("rank") or total_teams)
         pts = int(row.get("points") or 0)
         score = 72.0
+        urgency = 0.48
         tags: List[str] = []
+        tier = "balanced"
+        objective = "常规拿分"
+        target_zone = "mid_table"
+        points_gap_to_objective: Optional[int] = None
+        is_must_take_points = False
+
+        if top1_pts is not None and rank <= 2 and abs(top1_pts - pts) <= 6:
+            urgency += 0.08
+            tags.append("争冠窗口")
         if rank <= 4:
             score += 12.0
+            urgency += 0.18
+            tier = "europe_guard"
+            objective = "欧战席位保护"
+            target_zone = "top4"
+            points_gap_to_objective = pts - int(top4_pts if top4_pts is not None else pts)
             tags.append("欧战席位保护")
         elif top4_pts is not None and abs(top4_pts - pts) <= 6:
             score += 9.0
+            urgency += 0.16
+            tier = "europe_chase"
+            objective = "冲击欧战区"
+            target_zone = "top4"
+            points_gap_to_objective = pts - int(top4_pts)
             tags.append("冲击欧战区")
         elif rank <= 8:
             score += 4.0
+            urgency += 0.05
+            tier = "upper_mid"
+            objective = "稳固上半区"
+            target_zone = "upper_mid"
             tags.append("上半区竞争")
-        if relegation_cut_pts is not None and abs(pts - relegation_cut_pts) <= 6:
-            score += 10.0
-            tags.append("保级压力")
+
+        if relegation_cut_pts is not None:
+            relegation_gap = pts - int(relegation_cut_pts)
+            if rank >= max(1, total_teams - 2) or relegation_gap <= 0:
+                score += 14.0
+                urgency += 0.28
+                tier = "relegation_battle"
+                objective = "保级抢分"
+                target_zone = "safety"
+                points_gap_to_objective = relegation_gap
+                is_must_take_points = True
+                tags.append("降级区求分")
+            elif relegation_gap <= 6:
+                score += 10.0
+                urgency += 0.18
+                if tier not in {"europe_guard", "europe_chase"}:
+                    tier = "relegation_pressure"
+                    objective = "保级缓冲"
+                    target_zone = "safety"
+                    points_gap_to_objective = relegation_gap
+                tags.append("保级压力")
         elif rank >= max(1, total_teams - 2):
             score += 14.0
+            urgency += 0.28
+            tier = "relegation_battle"
+            objective = "保级抢分"
+            target_zone = "safety"
+            is_must_take_points = True
             tags.append("降级区求分")
         if 8 < rank < max(10, total_teams - 4):
             score -= 4.0
+            urgency -= 0.12
+            if target_zone == "mid_table":
+                tier = "mid_table_flat"
+                objective = "中游拿分"
             tags.append("中游战意一般")
+        if (
+            not is_must_take_points
+            and tier in {"europe_chase", "relegation_battle", "relegation_pressure"}
+            and isinstance(points_gap_to_objective, int)
+            and abs(points_gap_to_objective) <= 3
+        ):
+            is_must_take_points = True
+            urgency += 0.06
+            tags.append("关键分争夺")
         return {
             "available": True,
             "score": round(max(55.0, min(92.0, score)), 2),
+            "urgency": round(max(0.25, min(1.0, urgency)), 4),
             "rank": rank,
             "points": pts,
+            "tier": tier,
+            "objective": objective,
+            "target_zone": target_zone,
+            "points_gap_to_objective": points_gap_to_objective,
+            "is_must_take_points": is_must_take_points,
             "tags": tags,
             "table_row": row,
         }
+
+    @staticmethod
+    def _build_motivation_risk_signal(
+        home_motivation: Dict[str, Any],
+        away_motivation: Dict[str, Any],
+        home_strength: Dict[str, Any],
+        away_strength: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "available": False,
+            "supports_upset": False,
+            "score": 0.0,
+            "favored_side": "balanced",
+            "pressure_side": "balanced",
+            "urgency_edge": 0.0,
+            "score_edge": 0.0,
+            "flags": [],
+            "summary": "",
+        }
+        if not (
+            isinstance(home_motivation, dict)
+            and isinstance(away_motivation, dict)
+            and home_motivation.get("available")
+            and away_motivation.get("available")
+        ):
+            return out
+
+        strength_diff = float(home_strength.get("strength", 0.0)) - float(away_strength.get("strength", 0.0))
+        home_rank = int(home_motivation.get("rank") or 99)
+        away_rank = int(away_motivation.get("rank") or 99)
+        home_score = float(home_motivation.get("score") or 75.0)
+        away_score = float(away_motivation.get("score") or 75.0)
+        home_tier = str(home_motivation.get("tier") or "").strip()
+        away_tier = str(away_motivation.get("tier") or "").strip()
+        home_target_zone = str(home_motivation.get("target_zone") or "").strip()
+        away_target_zone = str(away_motivation.get("target_zone") or "").strip()
+        home_flat = home_tier in {"mid_table_flat", "upper_mid"} or home_target_zone == "mid_table"
+        away_flat = away_tier in {"mid_table_flat", "upper_mid"} or away_target_zone == "mid_table"
+        home_relegation = home_target_zone == "safety" or home_tier in {"relegation_battle", "relegation_pressure"}
+        away_relegation = away_target_zone == "safety" or away_tier in {"relegation_battle", "relegation_pressure"}
+
+        favored_side = "balanced"
+        pressure_side = "balanced"
+        side_confidence = 0.0
+        if abs(strength_diff) >= 4.0:
+            favored_side = "home" if strength_diff > 0 else "away"
+            pressure_side = "away" if favored_side == "home" else "home"
+            side_confidence = min(1.0, abs(strength_diff) / 12.0)
+        elif home_relegation and away_flat:
+            favored_side = "away"
+            pressure_side = "home"
+            side_confidence = 0.72
+        elif away_relegation and home_flat:
+            favored_side = "home"
+            pressure_side = "away"
+            side_confidence = 0.72
+        elif home_motivation.get("is_must_take_points") and not away_motivation.get("is_must_take_points") and away_flat:
+            favored_side = "away"
+            pressure_side = "home"
+            side_confidence = 0.62
+        elif away_motivation.get("is_must_take_points") and not home_motivation.get("is_must_take_points") and home_flat:
+            favored_side = "home"
+            pressure_side = "away"
+            side_confidence = 0.62
+        elif abs(home_rank - away_rank) >= 5:
+            favored_side = "home" if home_rank < away_rank else "away"
+            pressure_side = "away" if favored_side == "home" else "home"
+            side_confidence = 0.45
+
+        if favored_side not in {"home", "away"} or pressure_side not in {"home", "away"}:
+            out["available"] = True
+            return out
+
+        favored_profile = home_motivation if favored_side == "home" else away_motivation
+        pressure_profile = away_motivation if favored_side == "home" else home_motivation
+
+        favored_urgency = float(favored_profile.get("urgency") or 0.45)
+        pressure_urgency = float(pressure_profile.get("urgency") or 0.45)
+        urgency_edge = pressure_urgency - favored_urgency
+        score_edge = float(pressure_profile.get("score") or 75.0) - float(favored_profile.get("score") or 75.0)
+        flags: List[str] = []
+        risk_score = 0.0
+
+        if pressure_profile.get("is_must_take_points"):
+            risk_score += 0.32
+            flags.append("underdog_must_take_points")
+        if str(pressure_profile.get("tier") or "").strip() in {"relegation_battle", "relegation_pressure"}:
+            risk_score += 0.16
+            flags.append("pressure_side_relegation")
+        if favored_profile.get("tier") in {"mid_table_flat", "upper_mid"}:
+            risk_score += 0.18
+            flags.append("favorite_flat_motivation")
+            if str(favored_profile.get("tier") or "").strip() == "mid_table_flat":
+                risk_score += 0.06
+                flags.append("favorite_mid_table_flat")
+        if pressure_profile.get("target_zone") == "safety" and favored_profile.get("target_zone") == "mid_table":
+            risk_score += 0.12
+            flags.append("underdog_survival_vs_favorite_flat")
+        if (
+            pressure_profile.get("target_zone") == "safety"
+            and str(favored_profile.get("tier") or "").strip() in {"mid_table_flat", "upper_mid"}
+        ):
+            risk_score += 0.14
+            flags.append("relegation_vs_mid_table")
+        if urgency_edge >= 0.05:
+            risk_score += min(0.34, urgency_edge * 1.35)
+            flags.append("underdog_high_urgency")
+        if score_edge >= 5.0:
+            risk_score += min(0.16, score_edge / 60.0)
+            flags.append("underdog_motivation_score_advantage")
+        if side_confidence < 0.7 and home_relegation != away_relegation:
+            risk_score += 0.06
+            flags.append("table_context_side_inferred")
+
+        risk_score = round(max(0.0, min(1.0, risk_score)), 4)
+        supports_upset = pressure_side != favored_side and risk_score >= 0.16 and (
+            len(flags) >= 2 or urgency_edge >= 0.05 or pressure_profile.get("is_must_take_points")
+        )
+        side_label = {"home": "主队", "away": "客队", "balanced": "两队"}
+        summary = ""
+        if supports_upset or len(flags) >= 2:
+            summary = (
+                f"{side_label.get(pressure_side, '弱势方')}抢分战意强于"
+                f"{side_label.get(favored_side, '热门方')}，需防热门方兑现不足"
+            )
+
+        out.update(
+            {
+                "available": True,
+                "supports_upset": supports_upset,
+                "score": risk_score,
+                "favored_side": favored_side,
+                "pressure_side": pressure_side,
+                "urgency_edge": round(urgency_edge, 4),
+                "score_edge": round(score_edge, 2),
+                "flags": flags,
+                "summary": summary,
+            }
+        )
+        return out
 
     @staticmethod
     def _derive_recent_form_volatility(ewma_features: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -754,6 +975,20 @@ class MatchIntelligenceEngine:
             total_teams=len(league_table) or 20,
         )
         scenario_tags = list(contextual_rules.get("scenario_tags") or [])
+        motivation_risk = self._build_motivation_risk_signal(
+            home_motivation=home_mot,
+            away_motivation=away_mot,
+            home_strength=home_strength,
+            away_strength=away_strength,
+        )
+        motivation_context_flags: List[str] = []
+        if home_mot.get("is_must_take_points"):
+            motivation_context_flags.append("home_must_take_points")
+        if away_mot.get("is_must_take_points"):
+            motivation_context_flags.append("away_must_take_points")
+        for flag in motivation_risk.get("flags") or []:
+            if flag not in motivation_context_flags:
+                motivation_context_flags.append(str(flag))
         if contextual_rules.get("signals"):
             signals.extend(contextual_rules["signals"])
         if home_poss is not None and away_poss is not None:
@@ -776,6 +1011,23 @@ class MatchIntelligenceEngine:
         mot_edge = (home_mot.get("score", 75.0) - away_mot.get("score", 75.0)) / 100.0
         home_adv += mot_edge * 0.20
         away_adv -= mot_edge * 0.20
+        if motivation_risk.get("supports_upset"):
+            bias = min(0.018, float(motivation_risk.get("score") or 0.0) * 0.045)
+            favored_side = str(motivation_risk.get("favored_side") or "balanced")
+            if favored_side == "home":
+                home_adv -= bias
+                away_adv += bias * 0.55
+                draw_bias += bias * 0.45
+            elif favored_side == "away":
+                away_adv -= bias
+                home_adv += bias * 0.55
+                draw_bias += bias * 0.45
+            scenario_tag = f"motivation_upset_risk_{motivation_risk.get('pressure_side')}"
+            if scenario_tag not in scenario_tags:
+                scenario_tags.append(scenario_tag)
+            summary = str(motivation_risk.get("summary") or "").strip()
+            if summary:
+                signals.append(f"战意差异: {summary}")
         home_adv += float(contextual_rules.get("home_delta") or 0.0)
         away_adv += float(contextual_rules.get("away_delta") or 0.0)
         draw_bias += float(contextual_rules.get("draw_delta") or 0.0)
@@ -924,6 +1176,18 @@ class MatchIntelligenceEngine:
             "motivation": {
                 "home": home_mot,
                 "away": away_mot,
+                "edge": {
+                    "home_minus_away": round(float(home_mot.get("score", 75.0)) - float(away_mot.get("score", 75.0)), 2),
+                    "urgency_home_minus_away": round(float(home_mot.get("urgency", 0.45)) - float(away_mot.get("urgency", 0.45)), 4),
+                    "dominant_side": "home"
+                    if float(home_mot.get("score", 75.0)) > float(away_mot.get("score", 75.0))
+                    else "away"
+                    if float(home_mot.get("score", 75.0)) < float(away_mot.get("score", 75.0))
+                    else "balanced",
+                    "dominant_reason": str(motivation_risk.get("summary") or ""),
+                },
+                "context_flags": motivation_context_flags,
+                "risk_signal": motivation_risk,
                 "suggested_scores": {
                     "home": round(float(analysis_context.get("home_motivation", home_mot.get("score", 75.0))), 2),
                     "away": round(float(analysis_context.get("away_motivation", away_mot.get("score", 75.0))), 2),

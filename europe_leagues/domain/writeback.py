@@ -56,6 +56,18 @@ def format_upset_note(upset: Any) -> str:
     idx_text = f"({int(round(float(idx)))})" if isinstance(idx, (int, float)) else ''
     parts = [f'爆冷:{level}{idx_text}']
 
+    motivation_risk = upset.get('motivation_risk')
+    if isinstance(motivation_risk, dict) and motivation_risk.get('available'):
+        factors = motivation_risk.get('factors') or []
+        if isinstance(factors, list) and factors:
+            compact = ';'.join(str(item).strip() for item in factors[:2] if str(item).strip())
+            if compact:
+                parts.append(f'战意:{compact}')
+        pressure_side = str(motivation_risk.get('pressure_side') or '').strip()
+        if pressure_side in {'home', 'away'} and not any(part.startswith('战意方:') for part in parts):
+            side_label = '主队' if pressure_side == 'home' else '客队'
+            parts.append(f'战意方:{side_label}')
+
     mismatch = upset.get('handicap_strength_mismatch')
     if isinstance(mismatch, dict) and mismatch.get('mismatch_detected'):
         mismatch_level = (mismatch.get('mismatch_level') or '').strip() or '是'

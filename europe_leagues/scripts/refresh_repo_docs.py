@@ -4,10 +4,12 @@
 Purpose:
 - Provide a single entrypoint to refresh the key generated markdown docs after code updates.
 - Keep the skill doc(s) in sync with the latest generated structure.
+- This is a repo-maintainer sync helper, not a runtime skill auto-update hook.
 
 Design notes:
 - Default behavior is "quick": do NOT sync results and do NOT rebuild RAG (no network / no data mutation).
 - Users can enable full refresh explicitly.
+- Skill lifecycle management should stay outside SKILL.md and outside the agent task context.
 """
 
 from __future__ import annotations
@@ -162,7 +164,9 @@ def refresh_repo_docs(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="更新整仓库关键生成文档与相关 skill 文档（默认 quick 模式）")
+    parser = argparse.ArgumentParser(
+        description="更新整仓库关键生成文档与相关 skill 文档（默认 quick 模式；仅仓库维护，不承担运行时 skill 自动更新）"
+    )
     parser.add_argument("--season", default="2025-26", help="赛季标识")
     parser.add_argument("--recent-days", type=int, default=7, help="统计窗口天数")
     parser.add_argument("--full", action="store_true", help="全量刷新：包含赛果同步与 RAG 重建（较慢）")

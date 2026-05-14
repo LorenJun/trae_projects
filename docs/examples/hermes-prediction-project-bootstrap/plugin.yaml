@@ -1,0 +1,5 @@
+name: prediction-project-bootstrap
+version: "1.0.0"
+description: Session-start bootstrap hook for the europe_leagues prediction project.
+provides_hooks:
+  - on_session_start

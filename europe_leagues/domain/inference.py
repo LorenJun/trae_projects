@@ -1226,6 +1226,7 @@ class InferencePipelineService:
             historical_odds_reference=historical_odds_reference,
             asian_handicap=asian_handicap,
             european_odds=european_odds,
+            match_intelligence=match_intelligence,
         )
         match_intelligence = self.match_intelligence_engine._finalize_match_intelligence(
             match_intelligence=match_intelligence,

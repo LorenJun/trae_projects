@@ -55,11 +55,14 @@ last_updated_date: "2026-05-08"
 - 真实命令逻辑集中在 `europe_leagues/app/cli.py`
 - runtime 物理落盘已统一到 `europe_leagues/.okooo-scraper/runtime/`
 - `health-check`、`setup-openclaw` 已成为正式环境入口
+- Hermes 或其他接入方应固定按“先发现 `prediction_system.py`，再下钻到 `app/cli.py` 真正执行”的规则识别
 
 详细架构见：
 
 - [agent.md](./agent.md)
 - [europe_leagues_architecture.md](./docs/architecture/europe_leagues_architecture.md)
+- [skill_lifecycle.md](./docs/standards/skill_lifecycle.md)
+- [claude_sessionstart_hooks.json](./docs/examples/claude_sessionstart_hooks.json)
 
 ## 正式联赛范围
 
@@ -128,6 +131,18 @@ last_updated_date: "2026-05-08"
 - [agent.md](./agent.md)
 - [europe_leagues_architecture.md](./docs/architecture/europe_leagues_architecture.md)
 - [workflow.md](./docs/standards/workflow.md)
+- [skill_lifecycle.md](./docs/standards/skill_lifecycle.md)
+
+## Skill 生命周期治理
+
+当前仓库采用“Skill 正文与生命周期治理分层”的约定：
+
+- `SKILL.md` 只负责描述能力、入口、执行步骤与输出要求
+- 安装、更新、同步、版本检查不写进 `SKILL.md`
+- 生命周期治理应放在 CLI、Hook、启动脚本或 Harness 层
+- 仓库内文档与 Skill 内容同步属于维护脚本职责，不属于 Agent 运行时推理职责
+
+这条规则的目的，是避免把横切治理逻辑污染进能力正文，减少 Token 噪音，并保证 Agent 在开始任务前就已经看到最新 Skill 副本。
 
 ### 2. 环境准备
 

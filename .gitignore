@@ -55,5 +55,13 @@ prediction_history.log
 # Logs
 *.log
 
+# Local AI tooling
+.mcp.json
+.claude/
+.ttadk/
+
+# Runtime-generated analysis cases
+europe_leagues/runtime/motivation_case_*.json
+
 # Deprecated (migrated into teams_2025-26.md)
 prediction_history/
