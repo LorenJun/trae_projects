@@ -170,6 +170,68 @@ def _competition_bucket(league_code: str, competition_stage_name: str = "") -> s
     return "unknown"
 
 
+def _derive_review_tags(case: Dict[str, Any]) -> List[str]:
+    tags: List[str] = []
+    prediction = str(case.get('prediction') or '').strip()
+    actual_result = str(case.get('actual_result') or '').strip()
+    confidence = _safe_float(case.get('confidence')) or 0.0
+    predicted_scores = [str(score).strip() for score in (case.get('predicted_scores') or []) if str(score).strip()]
+    ou_line = _safe_float(case.get('ou_line'))
+    if prediction == '主胜' and actual_result != '主胜':
+        tags.append('主胜高估')
+        if actual_result == '客胜':
+            tags.append('客胜冷门漏判')
+        elif actual_result == '平局':
+            tags.append('平局防守不足')
+    if prediction == '客胜' and actual_result != '客胜':
+        tags.append('客胜高估')
+    if confidence >= 0.65 and prediction and actual_result and prediction != actual_result:
+        tags.append('高信心误判')
+    if prediction == '主胜' and any(score in {'1-0', '2-1', '2-0', '3-0'} for score in predicted_scores):
+        tags.append('比分模板偏主胜')
+    if prediction == '平局' and any(score in {'0-0', '1-1'} for score in predicted_scores):
+        tags.append('比分模板偏平局')
+    if ou_line is None:
+        tags.append('大小球盘口线缺失')
+    return tags
+
+
+def _annotate_review_dimensions(documents: List[Dict[str, Any]], recent_days: int = 30) -> None:
+    _ = recent_days
+    league_tag_counter: Dict[str, Counter[str]] = defaultdict(Counter)
+    league_tag_aliases = {
+        '主胜高估': '主胜偏置',
+        '客胜冷门漏判': '客胜冷门敏感度不足',
+        '平局防守不足': '平局防守不足',
+        '大小球盘口线缺失': '大小球盘口线缺失',
+        '高信心误判': '高信心误判',
+        '比分模板偏主胜': '比分模板偏主胜',
+        '比分模板偏平局': '比分模板偏平局',
+        '客胜高估': '客胜偏置',
+    }
+    for doc in documents:
+        if not isinstance(doc, dict):
+            continue
+        review_tags = _derive_review_tags(doc)
+        doc['review_tags'] = review_tags
+        league_name = str(doc.get('league_name') or doc.get('league_code') or '').strip()
+        for tag in review_tags:
+            normalized_tag = league_tag_aliases.get(tag, tag)
+            if league_name and normalized_tag:
+                league_tag_counter[league_name][normalized_tag] += 1
+    for doc in documents:
+        if not isinstance(doc, dict):
+            continue
+        league_name = str(doc.get('league_name') or doc.get('league_code') or '').strip()
+        league_review_tags = [f'{league_name}-{tag}' for tag, _count in league_tag_counter.get(league_name, Counter()).most_common(4)] if league_name else []
+        doc['league_review_tags'] = league_review_tags
+        review_tags = doc.get('review_tags') or []
+        text = str(doc.get('text') or '').strip()
+        review_line = f"错因标签:{'、'.join(review_tags)}" if review_tags else '错因标签:无'
+        league_line = f"联赛复盘:{'、'.join(league_review_tags)}" if league_review_tags else '联赛复盘:无'
+        doc['text'] = f"{text} | {review_line} | {league_line}" if text else f"{review_line} | {league_line}"
+
+
 def _odds_history_records(base_dir: Optional[str]) -> List[Dict[str, Any]]:
     records: List[Dict[str, Any]] = []
     root = str(get_default_paths(base_dir).base_dir)
@@ -585,6 +647,7 @@ def build_hybrid_rag_index(base_dir: Optional[str] = None, limit: int = 200) -> 
         doc = _market_case_from_snapshot(record, index=index)
         if doc:
             documents.append(doc)
+    _annotate_review_dimensions(documents, recent_days=30)
     index_stats = _build_index_statistics(documents)
     cases_payload = {
         "updated_at": datetime.now().isoformat(),

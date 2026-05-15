@@ -332,6 +332,60 @@ class HybridRAGService:
         return sorted(cases or [], key=priority, reverse=True)
 
     @staticmethod
+    def build_lightweight_decision(
+        *,
+        summary: Dict[str, Any],
+        similar_cases: List[Dict[str, Any]],
+        market_cases: List[Dict[str, Any]],
+        upset_cases: List[Dict[str, Any]],
+        predicted_outcome: Optional[str],
+    ) -> Dict[str, Any]:
+        decision = {
+            'available': False,
+            'risk_bonus': 0,
+            'confidence_penalty': 0.0,
+            'scenario_tags': [],
+        }
+        tags: List[str] = []
+        risk_bonus = 0
+        confidence_penalty = 0.0
+        completed_count = int(summary.get('completed_similar_case_count') or 0)
+        if completed_count > 0 and predicted_outcome:
+            outcome_key = {
+                '主胜': 'home_win_rate',
+                '平局': 'draw_rate',
+                '客胜': 'away_win_rate',
+            }.get(str(predicted_outcome or '').strip(), '')
+            hit_rate = float(summary.get(outcome_key) or 0.0) if outcome_key else 0.0
+            if hit_rate <= 0.4:
+                tags.append('similar_cases_low_hit_rate')
+                risk_bonus += 4
+                confidence_penalty += 0.02
+        if isinstance(upset_cases, list) and upset_cases:
+            tags.append('upset_case_cluster')
+            risk_bonus += min(4, 2 + len(upset_cases))
+            confidence_penalty += 0.015
+        if predicted_outcome and isinstance(market_cases, list):
+            opposing = [item for item in market_cases if str(item.get('actual_result') or '').strip() and str(item.get('actual_result') or '').strip() != str(predicted_outcome or '').strip()]
+            if opposing:
+                tags.append('market_case_opposes_pick')
+                risk_bonus += 3
+                confidence_penalty += 0.012
+        avg_market_total_goals = summary.get('avg_market_total_goals')
+        if isinstance(avg_market_total_goals, (int, float)) and float(avg_market_total_goals) >= 3.2:
+            tags.append('high_total_market_cluster')
+            risk_bonus += 2
+        decision.update(
+            {
+                'available': bool(tags),
+                'risk_bonus': risk_bonus,
+                'confidence_penalty': round(confidence_penalty, 4),
+                'scenario_tags': tags,
+            }
+        )
+        return decision
+
+    @staticmethod
     def _build_directional_summary(
         *,
         summary: Dict[str, Any],

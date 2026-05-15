@@ -734,8 +734,6 @@ def run_openclaw_list_leagues(json_output):
 def run_openclaw_predict_match(args):
     def _execute():
         from domain.predictor import DomainPredictor
-        from domain.persistence import PredictionPersistenceService
-        from result_manager import ResultManager
 
         predictor = DomainPredictor()
         ctx = load_analysis_context_file(getattr(args, "context_file", ""))
@@ -751,20 +749,12 @@ def run_openclaw_predict_match(args):
             match_time=getattr(args, "match_time", "") or "",
             league_hint=getattr(args, "league_hint", None),
             analysis_context=ctx,
+            persist=not bool(getattr(args, "no_write", False)),
         )
-        # Persist single-match prediction into archive + rolling MEMORY.md by default.
-        # Use --no-write when you only want the JSON output without side effects.
-        persisted = {"enabled": not bool(getattr(args, "no_write", False)), "archived": False, "memory_updated": False}
-        if persisted["enabled"] and not result.get("prediction_blocked"):
-            try:
-                manager = ResultManager(EUROPE_LEAGUES_ROOT)
-                manager.save_prediction_from_enhanced(result, args.league)
-                persisted["archived"] = True
-                PredictionPersistenceService(EUROPE_LEAGUES_ROOT, cache=None, result_manager=manager).update_prediction_memory(result)
-                persisted["memory_updated"] = True
-            except Exception as exc:
-                persisted["error"] = str(exc)
-        result["persisted"] = persisted
+        if args.no_write:
+            result["persisted"] = {"enabled": False, "archived": False, "memory_updated": False}
+        else:
+            result.setdefault("persisted", {"enabled": True, "archived": False, "memory_updated": False})
         result.setdefault("runtime_profile", get_command_runtime_profile("predict-match"))
         return result
 
@@ -821,15 +811,12 @@ def run_openclaw_predict_match_lite(args):
             okooo_driver=getattr(args, "okooo_driver", "local-chrome"),
             okooo_headed=bool(getattr(args, "okooo_headed", False)),
         )
-        persisted = {"enabled": not bool(getattr(args, "no_write", False)), "archived": False, "memory_updated": False}
-        if persisted["enabled"]:
-            try:
-                manager = ResultManager(EUROPE_LEAGUES_ROOT)
-                PredictionPersistenceService(EUROPE_LEAGUES_ROOT, cache=None, result_manager=manager).update_prediction_memory(result)
-                persisted["memory_updated"] = True
-            except Exception as exc:
-                persisted["error"] = str(exc)
-        result["persisted"] = persisted
+        if args.no_write:
+            result["persisted"] = {"enabled": False, "archived": False, "memory_updated": False}
+        else:
+            manager = ResultManager(EUROPE_LEAGUES_ROOT)
+            service = PredictionPersistenceService(EUROPE_LEAGUES_ROOT, cache=None, result_manager=manager)
+            result = service.persist_memory_only_prediction(result, getattr(args, "league", "") or result.get("league_code") or "")
         result.setdefault("runtime_profile", get_command_runtime_profile("predict-match-lite"))
         return result
 

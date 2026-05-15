@@ -841,6 +841,47 @@ class InferencePipelineService:
             diag['historical_market_alignment'] = market_alignment_diag
         return {'home_win': p_h, 'draw': p_d, 'away_win': p_a}, diag
 
+    def apply_market_ou_calibration(
+        self,
+        *,
+        home_lambda: float,
+        away_lambda: float,
+        current_odds: Optional[Dict[str, Any]],
+    ) -> Tuple[float, float, Dict[str, Any]]:
+        diag: Dict[str, Any] = {'applied': False, 'market_pressure_source': 'market_signal'}
+        if not self.postprocess_service:
+            diag['reason'] = 'missing_postprocess_service'
+            return home_lambda, away_lambda, diag
+        market_signal = self.postprocess_service.extract_over_under_market_signal(current_odds)
+        diag['market_signal'] = market_signal
+        if not isinstance(market_signal, dict) or not market_signal.get('available'):
+            diag['reason'] = 'market_signal_unavailable'
+            return home_lambda, away_lambda, diag
+        pace_shift = float(market_signal.get('pace_shift') or 0.0)
+        if abs(pace_shift) < 1e-9:
+            diag['reason'] = 'market_signal_flat'
+            diag['market_pace_shift'] = 0.0
+            return home_lambda, away_lambda, diag
+        current_total = max(0.6, float(home_lambda) + float(away_lambda))
+        target_total = max(0.8, min(4.2, current_total + pace_shift * 3.0))
+        share = float(home_lambda) / current_total if current_total > 0 else 0.5
+        new_home = max(0.15, target_total * share)
+        new_away = max(0.15, target_total * (1.0 - share))
+        diag.update(
+            {
+                'applied': True,
+                'market_pace_shift': round(pace_shift, 6),
+                'target_total': round(float(target_total), 6),
+                'base_total': round(float(current_total), 6),
+                'adjusted_lambda': {
+                    'home': round(float(new_home), 6),
+                    'away': round(float(new_away), 6),
+                    'total': round(float(new_home + new_away), 6),
+                },
+            }
+        )
+        return new_home, new_away, diag
+
     def build_real_market_over_under(
         self,
         *,
@@ -850,10 +891,18 @@ class InferencePipelineService:
         analysis_context: Dict[str, Any],
         match_intelligence: Optional[Dict[str, Any]],
         realtime_context_applied: Optional[Dict[str, Any]],
+        predicted_outcome: Optional[str] = None,
+        strength_diff: Optional[float] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        _ = (predicted_outcome, strength_diff)
         diag: Dict[str, Any] = {
             'available': False,
             'requires_real_market_line': True,
+            'refined': {
+                'market_lambda_applied': bool(isinstance(realtime_context_applied, dict) and isinstance(realtime_context_applied.get('market_ou_lambda_calibration'), dict) and realtime_context_applied.get('market_ou_lambda_calibration', {}).get('applied')),
+                'reused_market_signal': False,
+                'market_signal_shift': None,
+            },
         }
         ou_line, ou_line_source = resolve_over_under_line(
             current_odds=current_odds,
@@ -879,6 +928,20 @@ class InferencePipelineService:
                 'line_source': ou_line_source,
                 'reason': 'poisson_predict_over_under_failed',
             }, diag
+
+        if diag['refined']['market_lambda_applied'] and self.postprocess_service:
+            market_signal = self.postprocess_service.extract_over_under_market_signal(current_odds)
+            diag['refined']['reused_market_signal'] = bool(market_signal.get('available'))
+            diag['refined']['market_signal_shift'] = 0.0 if market_signal.get('available') else None
+            if market_signal.get('available'):
+                final_bias = float(market_signal.get('bias_final') or 0.0)
+                if final_bias >= 0.03:
+                    over_under['over'] = max(0.0, float(over_under.get('over') or 0.0) - min(0.03, final_bias * 0.12))
+                    over_under['under'] = min(1.0, float(over_under.get('under') or 0.0) + min(0.03, final_bias * 0.12))
+                elif final_bias <= -0.03:
+                    shift = min(0.03, abs(final_bias) * 0.12)
+                    over_under['over'] = min(1.0, float(over_under.get('over') or 0.0) + shift)
+                    over_under['under'] = max(0.0, float(over_under.get('under') or 0.0) - shift)
 
         over_under, ou_resonance_diag = self.match_intelligence_engine._apply_market_resonance_to_over_under(
             over_under=over_under,
@@ -1043,6 +1106,7 @@ class InferencePipelineService:
         current_odds: Optional[Dict[str, Any]],
         analysis_context: Dict[str, Any],
         realtime: Dict[str, Any],
+        review_learning: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         applied_weights = self.apply_dynamic_weights(league_code)
         home_strength = self.team_manager.analyze_team_strength(league_code, home_team)
@@ -1103,6 +1167,15 @@ class InferencePipelineService:
             realtime['context_applied']['lambda_calibration'] = cal_diag
         except Exception as exc:
             realtime['context_applied']['lambda_calibration'] = {'applied': False, 'error': str(exc)}
+        try:
+            home_lambda, away_lambda, market_ou_lambda_diag = self.apply_market_ou_calibration(
+                home_lambda=home_lambda,
+                away_lambda=away_lambda,
+                current_odds=current_odds,
+            )
+            realtime['context_applied']['market_ou_lambda_calibration'] = market_ou_lambda_diag
+        except Exception as exc:
+            realtime['context_applied']['market_ou_lambda_calibration'] = {'applied': False, 'error': str(exc)}
         try:
             home_lambda, away_lambda, ou_learning_diag = self.apply_league_ou_learning(
                 league_code=league_code,
@@ -1185,6 +1258,16 @@ class InferencePipelineService:
             final_prob = adjusted_prob
             ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
         realtime['context_applied']['live_outcome_adjustment'] = live_adj_diag
+        final_prob, review_outcome_diag = self.postprocess_service.apply_review_outcome_adjustment(
+            final_probabilities=final_prob,
+            strength_diff=strength_diff,
+            asian_handicap=asian_handicap,
+            current_odds=current_odds,
+            review_learning=review_learning,
+        )
+        realtime['context_applied']['review_outcome_adjustment'] = review_outcome_diag
+        if isinstance(review_outcome_diag, dict) and review_outcome_diag.get('applied'):
+            ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
         final_prob, match_intel_diag = self.match_intelligence_engine._apply_match_intelligence_adjustment(final_prob=final_prob, match_intelligence=match_intelligence)
         if isinstance(match_intel_diag, dict):
             realtime['context_applied']['match_intelligence_adjustment'] = match_intel_diag
@@ -1214,6 +1297,7 @@ class InferencePipelineService:
         main_prediction = ranked_probabilities[0][0]
         confidence = ranked_probabilities[0][1]
 
+        lightweight_rag_decision = {}
         upset_potential = self.upset_analyzer.assess_upset_potential(
             home_team=home_team,
             away_team=away_team,
@@ -1242,7 +1326,30 @@ class InferencePipelineService:
             over_under,
         )
         realtime['context_applied']['score_rerank_guard'] = score_guard_diag
+        top_scores, review_score_diag = self.postprocess_service.rerank_top_scores(
+            top_scores,
+            main_prediction,
+            home_lambda=home_lambda,
+            away_lambda=away_lambda,
+            over_under=over_under,
+            strength_diff=strength_diff,
+            confidence=confidence,
+            current_odds=current_odds,
+            review_learning=review_learning,
+            return_diag=True,
+            limit=3,
+        )
+        realtime['context_applied']['review_score_rerank'] = review_score_diag
         total_goals = self.postprocess_service.compute_total_goals_distribution(score_result.get('score_probs', {}), max_bucket=7)
+        total_goals, review_total_goals_diag = self.postprocess_service.apply_three_layer_total_goals_adjustment(
+            total_goals,
+            predicted_outcome_label=main_prediction,
+            strength_diff=strength_diff,
+            current_odds=current_odds,
+            review_learning=review_learning,
+            total_lambda=home_lambda + away_lambda,
+        )
+        realtime['context_applied']['review_total_goals_adjustment'] = review_total_goals_diag
 
         return {
             'applied_weights': applied_weights,
@@ -1262,6 +1369,7 @@ class InferencePipelineService:
             'top_scores': top_scores,
             'total_goals': total_goals,
             'home_lambda': home_lambda,
+            'lightweight_rag_decision': lightweight_rag_decision,
             'away_lambda': away_lambda,
             'over_under': over_under,
         }
