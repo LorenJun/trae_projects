@@ -361,7 +361,8 @@ def _pick_top_scores(
     ou_line: Optional[float],
     over_prob: Optional[float],
     under_prob: Optional[float],
-) -> List[List[Any]]:
+    include_diag: bool = False,
+) -> Any:
     line = float(ou_line) if isinstance(ou_line, (int, float)) else 2.5
     context = _build_score_context(
         probabilities=probabilities,
@@ -393,7 +394,9 @@ def _pick_top_scores(
     for index, (score, value) in enumerate(ranked_scores):
         confidence = 0.2 - index * 0.025 - max(0.0, top_score - value) * 0.03
         results.append([score, round(_clamp(confidence, 0.08, 0.24), 4)])
-    return results, score_guard_diag
+    if include_diag:
+        return results, score_guard_diag
+    return results
 
 
 def _favorite_from_probs(probabilities: Dict[str, float]) -> str:
@@ -521,6 +524,7 @@ def build_lightweight_prediction_result(
         ou_line=_safe_float(ou_line),
         over_prob=_safe_float(over_prob),
         under_prob=_safe_float(under_prob),
+        include_diag=True,
     )
     risk = _build_risk_summary(snapshot, probabilities)
     league_code = _league_code_from_name(league_name, league_code)

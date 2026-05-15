@@ -739,23 +739,151 @@ class PredictionPersistenceService:
         except Exception as exc:
             logger.warning('更新 MEMORY.md 失败: %s', exc)
 
-    def prepare_cached_prediction(self, cached: Dict[str, Any], runtime_profile: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_persistence_payload(self, result: Dict[str, Any], league_code: str) -> PredictionPersistencePayload:
+        match_date = str(result.get('match_date') or datetime.now().strftime('%Y-%m-%d'))
+        home_team = str(result.get('home_team') or '')
+        away_team = str(result.get('away_team') or '')
+        explicit_teams_match_id = str(result.get('teams_match_id') or '').strip()
+        teams_match_id = explicit_teams_match_id or self.result_manager._find_existing_teams_match_id(
+            league_code,
+            match_date,
+            home_team,
+            away_team,
+        )
+        realtime = result.get('realtime') if isinstance(result.get('realtime'), dict) else {}
+        external_match_id = str(result.get('external_match_id') or result.get('match_id') or '').strip()
+        if not external_match_id and realtime:
+            okooo = realtime.get('okooo')
+            if isinstance(okooo, dict):
+                external_match_id = str(okooo.get('match_id') or '').strip()
+        internal_match_id = str(result.get('internal_match_id') or '').strip()
+        if not internal_match_id:
+            internal_match_id = teams_match_id or self.result_manager._runtime_only_match_id(
+                external_match_id,
+                league_code,
+                match_date,
+                home_team,
+                away_team,
+            )
+        storage_mode = str(result.get('storage_mode') or '').strip() or ('league_sot' if teams_match_id else 'runtime_only')
+        prediction = str(result.get('prediction') or '').strip()
+        predicted_winner = str(result.get('predicted_winner') or {'主胜': 'home', '客胜': 'away', '平局': 'draw'}.get(prediction, '')).strip()
+        top_scores = result.get('top_scores') if isinstance(result.get('top_scores'), list) else []
+        predicted_scores = []
+        for item in top_scores[:2]:
+            if isinstance(item, (list, tuple)) and item:
+                predicted_scores.append(str(item[0]))
+        over_under = result.get('over_under') if isinstance(result.get('over_under'), dict) else {}
+        over_under_available = (
+            bool(over_under)
+            and bool(over_under.get('available', True))
+            and isinstance(over_under.get('line'), (int, float))
+        )
+        predicted_ou = None
+        if over_under_available:
+            predicted_ou = {
+                'side': '大' if over_under.get('over', 0) > over_under.get('under', 0) else '小',
+                'line': float(over_under.get('line')),
+            }
+        league_name = str(result.get('league_name') or LEAGUE_DISPLAY_NAMES.get(league_code) or league_code)
+        match_id = str(result.get('match_id') or '').strip() or internal_match_id
+        return PredictionPersistencePayload(
+            match_id=match_id,
+            external_match_id=external_match_id,
+            internal_match_id=internal_match_id,
+            teams_match_id=teams_match_id,
+            storage_mode=storage_mode,
+            league_code=league_code,
+            league_name=league_name,
+            match_date=match_date,
+            match_time=str(result.get('match_time') or ''),
+            home_team=home_team,
+            away_team=away_team,
+            prediction=prediction,
+            predicted_winner=predicted_winner,
+            confidence=float(result.get('confidence') or 0.0),
+            top_scores=top_scores,
+            predicted_scores=predicted_scores,
+            over_under=over_under,
+            predicted_ou=predicted_ou,
+            runtime_profile=result.get('runtime_profile', {}),
+            full_prediction=result,
+        )
+
+    @staticmethod
+    def _persisted_status(enabled: bool, archived: bool = False, memory_updated: bool = False, result_sync_registered: bool = False, error: str = '') -> Dict[str, Any]:
+        persisted = {
+            'enabled': enabled,
+            'archived': archived,
+            'memory_updated': memory_updated,
+        }
+        if result_sync_registered:
+            persisted['result_sync_registered'] = True
+        if error:
+            persisted['error'] = error
+        return persisted
+
+    def _apply_persistence_payload(self, result: Dict[str, Any], payload: PredictionPersistencePayload) -> None:
+        result['match_id'] = payload.match_id
+        result['external_match_id'] = payload.external_match_id
+        result['internal_match_id'] = payload.internal_match_id
+        result['teams_match_id'] = payload.teams_match_id
+        result['storage_mode'] = payload.storage_mode
+        result['predicted_winner'] = payload.predicted_winner
+
+    def prepare_cached_prediction(self, cached: Dict[str, Any], runtime_profile: Dict[str, Any], league_code: str) -> Dict[str, Any]:
         if 'runtime_profile' not in cached:
             cached['runtime_profile'] = runtime_profile
+        payload = self._build_persistence_payload(cached, league_code)
+        self._apply_persistence_payload(cached, payload)
         self.update_prediction_memory(cached)
         register_prediction_result_sync(self.base_dir, cached)
+        cached['persisted'] = self._persisted_status(True, memory_updated=True, result_sync_registered=True)
         return cached
 
     def persist_prediction(self, cache_name: str, cache_params: Dict[str, Any], result: Dict[str, Any], league_code: str) -> Dict[str, Any]:
-        self.cache.set(cache_name, cache_params, result)
+        if self.cache is not None:
+            self.cache.set(cache_name, cache_params, result)
+        payload = self._build_persistence_payload(result, league_code)
+        self._apply_persistence_payload(result, payload)
+        persisted = self._persisted_status(True)
         try:
             self.result_manager.save_prediction_from_enhanced(result, league_code)
+            persisted['archived'] = True
         except Exception as exc:
             logger.warning('归档单场预测失败: %s', exc)
-        self.update_prediction_memory(result)
+            persisted['error'] = str(exc)
+        try:
+            self.update_prediction_memory(result)
+            persisted['memory_updated'] = True
+        except Exception as exc:
+            logger.warning('更新 MEMORY.md 失败: %s', exc)
+            persisted['error'] = str(exc)
+        try:
+            register_prediction_result_sync(self.base_dir, result)
+            persisted['result_sync_registered'] = True
+        except Exception as exc:
+            logger.warning('登记自动赛果同步失败: %s', exc)
+            persisted['error'] = str(exc)
+        result['persisted'] = persisted
         return result
 
+    def persist_memory_only_prediction(self, result: Dict[str, Any], league_code: str) -> Dict[str, Any]:
+        payload = self._build_persistence_payload(result, league_code)
+        self._apply_persistence_payload(result, payload)
+        persisted = self._persisted_status(True)
+        try:
+            self.update_prediction_memory(result)
+            persisted['memory_updated'] = True
+        except Exception as exc:
+            logger.warning('更新 MEMORY.md 失败: %s', exc)
+            persisted['error'] = str(exc)
+        result['persisted'] = persisted
+        return result
+
+    def refresh_accuracy_stats(self) -> Dict[str, Any]:
+        return self.result_manager.update_accuracy_stats()
+
     def persist_prediction_batch(self, predictions: list[Dict[str, Any]], league_code: str) -> None:
-        for prediction in predictions:
-            self.result_manager.save_prediction_from_enhanced(prediction, league_code)
-        self.result_manager.update_accuracy_stats()
+        _ = (predictions, league_code)
+        self.refresh_accuracy_stats()

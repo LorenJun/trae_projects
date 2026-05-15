@@ -1102,6 +1102,199 @@ class ResultManager:
             return True
         return runtime_profile != self.prediction_runtime_profile
 
+    @staticmethod
+    def _json_clone(value: Any) -> Any:
+        try:
+            return json.loads(json.dumps(value, ensure_ascii=False))
+        except Exception:
+            return value
+
+    @staticmethod
+    def _compact_text_list(values: Any, limit: int = 5) -> List[str]:
+        if not isinstance(values, list):
+            return []
+        items: List[str] = []
+        for value in values:
+            text = str(value or '').strip()
+            if text and text not in items:
+                items.append(text)
+            if len(items) >= limit:
+                break
+        return items
+
+    @classmethod
+    def _compact_realtime_context(cls, realtime: Any) -> Dict[str, Any]:
+        if not isinstance(realtime, dict):
+            return {}
+
+        compact: Dict[str, Any] = {}
+        okooo = realtime.get('okooo') if isinstance(realtime.get('okooo'), dict) else {}
+        if okooo:
+            compact_okooo = {
+                key: cls._json_clone(okooo.get(key))
+                for key in ('match_id', 'source_snapshot', 'snapshot_path', 'snapshot_dir', 'snapshot_dir_alias', 'snapshot_dir_aliases')
+                if okooo.get(key) not in (None, '', [], {})
+            }
+            if compact_okooo:
+                compact['okooo'] = compact_okooo
+
+        context_applied = realtime.get('context_applied') if isinstance(realtime.get('context_applied'), dict) else {}
+        compact_context: Dict[str, Any] = {}
+
+        def add_group(name: str, payload: Dict[str, Any]) -> None:
+            if payload:
+                compact_context[name] = payload
+
+        match_intelligence = context_applied.get('match_intelligence') if isinstance(context_applied.get('match_intelligence'), dict) else {}
+        add_group('match_intelligence', {
+            'signals': cls._compact_text_list(match_intelligence.get('signals')),
+        })
+
+        live_outcome_adjustment = context_applied.get('live_outcome_adjustment') if isinstance(context_applied.get('live_outcome_adjustment'), dict) else {}
+        live_payload: Dict[str, Any] = {}
+        if 'applied' in live_outcome_adjustment:
+            live_payload['applied'] = bool(live_outcome_adjustment.get('applied'))
+        signals = cls._compact_text_list(live_outcome_adjustment.get('signals'))
+        if signals:
+            live_payload['signals'] = signals
+        historical_market_alignment = live_outcome_adjustment.get('historical_market_alignment') if isinstance(live_outcome_adjustment.get('historical_market_alignment'), dict) else {}
+        if historical_market_alignment:
+            compact_alignment = {
+                key: cls._json_clone(historical_market_alignment.get(key))
+                for key in ('matched', 'direction', 'sample_size', 'follow_signal')
+                if historical_market_alignment.get(key) not in (None, '', [], {})
+            }
+            if compact_alignment:
+                live_payload['historical_market_alignment'] = compact_alignment
+        add_group('live_outcome_adjustment', live_payload)
+
+        review_learning = context_applied.get('review_learning') if isinstance(context_applied.get('review_learning'), dict) else {}
+        add_group('review_learning', {
+            key: cls._json_clone(review_learning.get(key))
+            for key in ('available', 'score_bias_scope', 'over_under_bias_scope')
+            if review_learning.get(key) not in (None, '', [], {})
+        } | ({'league_tags': cls._compact_text_list(review_learning.get('league_tags'), limit=4)} if cls._compact_text_list(review_learning.get('league_tags'), limit=4) else {}))
+
+        posterior_outcome_pipeline = context_applied.get('posterior_outcome_pipeline') if isinstance(context_applied.get('posterior_outcome_pipeline'), dict) else {}
+        add_group('posterior_outcome_pipeline', {
+            'stages_applied': cls._compact_text_list(posterior_outcome_pipeline.get('stages_applied')),
+        })
+
+        review_outcome_adjustment = context_applied.get('review_outcome_adjustment') if isinstance(context_applied.get('review_outcome_adjustment'), dict) else {}
+        review_outcome_payload: Dict[str, Any] = {}
+        if 'applied' in review_outcome_adjustment:
+            review_outcome_payload['applied'] = bool(review_outcome_adjustment.get('applied'))
+        signals = cls._compact_text_list(review_outcome_adjustment.get('signals'))
+        if signals:
+            review_outcome_payload['signals'] = signals
+        for key in ('stratified_review', 'three_layer_review'):
+            nested = review_outcome_adjustment.get(key) if isinstance(review_outcome_adjustment.get(key), dict) else {}
+            bucket_key = str(nested.get('bucket_key') or '').strip()
+            if bucket_key:
+                review_outcome_payload[key] = {'bucket_key': bucket_key}
+        add_group('review_outcome_adjustment', review_outcome_payload)
+
+        review_score_rerank = context_applied.get('review_score_rerank') if isinstance(context_applied.get('review_score_rerank'), dict) else {}
+        review_score_payload: Dict[str, Any] = {}
+        if 'applied' in review_score_rerank:
+            review_score_payload['applied'] = bool(review_score_rerank.get('applied'))
+        signals = cls._compact_text_list(review_score_rerank.get('signals'))
+        if signals:
+            review_score_payload['signals'] = signals
+        scenario_name = str(review_score_rerank.get('scenario_name') or '').strip()
+        if scenario_name:
+            review_score_payload['scenario_name'] = scenario_name
+        add_group('review_score_rerank', review_score_payload)
+
+        review_total_goals_adjustment = context_applied.get('review_total_goals_adjustment') if isinstance(context_applied.get('review_total_goals_adjustment'), dict) else {}
+        review_total_payload: Dict[str, Any] = {}
+        if 'applied' in review_total_goals_adjustment:
+            review_total_payload['applied'] = bool(review_total_goals_adjustment.get('applied'))
+        signals = cls._compact_text_list(review_total_goals_adjustment.get('signals'))
+        if signals:
+            review_total_payload['signals'] = signals
+        scenario_name = str(review_total_goals_adjustment.get('scenario_name') or '').strip()
+        if scenario_name:
+            review_total_payload['scenario_name'] = scenario_name
+        add_group('review_total_goals_adjustment', review_total_payload)
+
+        rag_lightweight_decision = context_applied.get('rag_lightweight_decision') if isinstance(context_applied.get('rag_lightweight_decision'), dict) else {}
+        rag_payload: Dict[str, Any] = {
+            key: cls._json_clone(rag_lightweight_decision.get(key))
+            for key in ('available', 'risk_bonus', 'confidence_penalty')
+            if rag_lightweight_decision.get(key) not in (None, '', [], {})
+        }
+        scenario_tags = cls._compact_text_list(rag_lightweight_decision.get('scenario_tags'), limit=5)
+        if scenario_tags:
+            rag_payload['scenario_tags'] = scenario_tags
+        add_group('rag_lightweight_decision', rag_payload)
+
+        staking_kelly = context_applied.get('staking_kelly') if isinstance(context_applied.get('staking_kelly'), dict) else {}
+        staking_payload: Dict[str, Any] = {}
+        if 'available' in staking_kelly:
+            staking_payload['available'] = bool(staking_kelly.get('available'))
+        recommended = staking_kelly.get('recommended') if isinstance(staking_kelly.get('recommended'), dict) else {}
+        if recommended:
+            staking_payload['recommended'] = cls._json_clone(recommended)
+        add_group('staking_kelly', staking_payload)
+
+        if compact_context:
+            compact['context_applied'] = compact_context
+        return compact
+
+    @classmethod
+    def _compact_archive_full_prediction(cls, enhanced_pred: Dict[str, Any]) -> Dict[str, Any]:
+        full_prediction = {
+            key: cls._json_clone(enhanced_pred.get(key))
+            for key in (
+                'match_id',
+                'external_match_id',
+                'internal_match_id',
+                'teams_match_id',
+                'league_code',
+                'league_name',
+                'match_date',
+                'match_time',
+                'home_team',
+                'away_team',
+                'prediction',
+                'predicted_winner',
+                'confidence',
+                'top_scores',
+                'over_under',
+                'market_snapshot',
+                'storage_mode',
+                'line_source',
+                'timestamp',
+                'actual_score',
+                'actual_winner',
+                'competition_stage',
+                'competition_stage_name',
+                'strength_diff',
+                'retrieved_memory_explanation',
+                'live_betting_advice',
+                'snapshot_path',
+                'snapshot_dir',
+            )
+            if enhanced_pred.get(key) not in (None, '', [], {})
+        }
+        realtime = cls._compact_realtime_context(enhanced_pred.get('realtime'))
+        if realtime:
+            full_prediction['realtime'] = realtime
+        rag_decision = enhanced_pred.get('rag_decision') if isinstance(enhanced_pred.get('rag_decision'), dict) else {}
+        if rag_decision:
+            compact_rag = {
+                key: cls._json_clone(rag_decision.get(key))
+                for key in ('available', 'risk_bonus', 'confidence_penalty')
+                if rag_decision.get(key) not in (None, '', [], {})
+            }
+            scenario_tags = cls._compact_text_list(rag_decision.get('scenario_tags'), limit=5)
+            if scenario_tags:
+                compact_rag['scenario_tags'] = scenario_tags
+            if compact_rag:
+                full_prediction['rag_decision'] = compact_rag
+        return full_prediction
+
     def migrate_prediction_archive_runtime_profiles(self) -> Dict[str, Any]:
         archive = self._load_prediction_archive()
         total_records = len(archive)
@@ -2302,15 +2495,15 @@ class ResultManager:
         match_date = enhanced_pred.get('match_date', datetime.now().strftime('%Y-%m-%d'))
         home_team = enhanced_pred.get('home_team', '')
         away_team = enhanced_pred.get('away_team', '')
-        teams_match_id = self._find_existing_teams_match_id(league_code, match_date, home_team, away_team)
-        external_match_id = str(enhanced_pred.get('match_id') or '').strip()
+        teams_match_id = str(enhanced_pred.get('teams_match_id') or '').strip() or self._find_existing_teams_match_id(league_code, match_date, home_team, away_team)
+        external_match_id = str(enhanced_pred.get('external_match_id') or enhanced_pred.get('match_id') or '').strip()
         realtime = enhanced_pred.get('realtime')
         if not external_match_id and isinstance(realtime, dict):
             okooo = realtime.get('okooo')
             if isinstance(okooo, dict):
                 external_match_id = str(okooo.get('match_id') or '').strip()
-        match_id = teams_match_id or self._runtime_only_match_id(external_match_id, league_code, match_date, home_team, away_team)
-        storage_mode = 'league_sot' if teams_match_id else 'runtime_only'
+        match_id = str(enhanced_pred.get('internal_match_id') or '').strip() or teams_match_id or self._runtime_only_match_id(external_match_id, league_code, match_date, home_team, away_team)
+        storage_mode = str(enhanced_pred.get('storage_mode') or '').strip() or ('league_sot' if teams_match_id else 'runtime_only')
         enhanced_pred['teams_match_id'] = teams_match_id
         enhanced_pred['internal_match_id'] = match_id
         enhanced_pred['storage_mode'] = storage_mode
@@ -2333,6 +2526,8 @@ class ResultManager:
                 'line': float(over_under.get('line')),
             }
 
+        compact_full_prediction = self._compact_archive_full_prediction(enhanced_pred)
+        compact_realtime = compact_full_prediction.get('realtime', {}) if isinstance(compact_full_prediction.get('realtime'), dict) else {}
         prediction_data = {
             'match_id': match_id,
             'external_match_id': external_match_id,
@@ -2357,9 +2552,8 @@ class ResultManager:
             ),
             'predicted_ou': predicted_ou,
             'correct': False,
-            'model_predictions': enhanced_pred.get('model_predictions', {}),
             'runtime_profile': enhanced_pred.get('runtime_profile', {}),
-            'full_prediction': enhanced_pred,
+            'full_prediction': compact_full_prediction,
             'saved_at': datetime.now().isoformat()
         }
         self._archive_prediction(
@@ -2383,16 +2577,14 @@ class ResultManager:
                 'confidence': enhanced_pred.get('confidence'),
                 'upset_potential': enhanced_pred.get('upset_potential', {}),
                 'match_intelligence': enhanced_pred.get('match_intelligence', {}),
-                'realtime': enhanced_pred.get('realtime', {}),
+                'realtime': compact_realtime,
                 'storage_mode': storage_mode,
                 'runtime_profile': enhanced_pred.get('runtime_profile', {}),
                 'note': f"预测:{prediction_result} 信心:{float(enhanced_pred.get('confidence') or 0):.2f}".strip(),
-                'full_prediction': enhanced_pred,
+                'full_prediction': compact_full_prediction,
                 'archived_at': datetime.now().isoformat(),
             }
         )
-        from runtime.result_sync import register_prediction_result_sync
-        register_prediction_result_sync(self.base_dir, prediction_data)
         if teams_match_id:
             logger.info("预测已关联联赛 SoT 行: %s", teams_match_id)
         else:

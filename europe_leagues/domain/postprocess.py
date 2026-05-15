@@ -6,6 +6,8 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from domain.review_learning import PredictionReviewLearningService
+
 
 OUTCOME_LABELS = (
     ('主胜', 'home_win', 'home'),
@@ -17,6 +19,61 @@ OUTCOME_LABELS = (
 class PredictionPostprocessService:
     def __init__(self, league_config: Dict[str, Dict[str, Any]]):
         self.league_config = league_config
+
+    @staticmethod
+    def _safe_float(value: Any) -> Optional[float]:
+        try:
+            if value in (None, ''):
+                return None
+            return float(value)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _normalize_prob_triplet(final_probabilities: Dict[str, float]) -> Dict[str, float]:
+        home = float(final_probabilities.get('home_win') or 0.0)
+        draw = float(final_probabilities.get('draw') or 0.0)
+        away = float(final_probabilities.get('away_win') or 0.0)
+        total = home + draw + away
+        if total <= 0:
+            return {'home_win': 0.0, 'draw': 0.0, 'away_win': 0.0}
+        return {
+            'home_win': home / total,
+            'draw': draw / total,
+            'away_win': away / total,
+        }
+
+    @staticmethod
+    def _shift_from_side_to_targets(
+        probabilities: Dict[str, float],
+        *,
+        from_key: str,
+        draw_shift: float = 0.0,
+        away_shift: float = 0.0,
+        home_shift: float = 0.0,
+    ) -> Dict[str, float]:
+        updated = dict(probabilities)
+        total_shift = max(0.0, draw_shift) + max(0.0, away_shift) + max(0.0, home_shift)
+        available = max(0.0, float(updated.get(from_key) or 0.0) - 0.02)
+        actual_shift = min(total_shift, available)
+        if actual_shift <= 0:
+            return PredictionPostprocessService._normalize_prob_triplet(updated)
+        scale = actual_shift / total_shift if total_shift > 0 else 0.0
+        draw_take = max(0.0, draw_shift) * scale
+        away_take = max(0.0, away_shift) * scale
+        home_take = max(0.0, home_shift) * scale
+        updated[from_key] = max(0.0, float(updated.get(from_key) or 0.0) - actual_shift)
+        updated['draw'] = float(updated.get('draw') or 0.0) + draw_take
+        updated['away_win'] = float(updated.get('away_win') or 0.0) + away_take
+        updated['home_win'] = float(updated.get('home_win') or 0.0) + home_take
+        return PredictionPostprocessService._normalize_prob_triplet(updated)
+
+    @staticmethod
+    def _rescale_score_list(scores: List[Tuple[str, float]]) -> List[Tuple[str, float]]:
+        total = sum(max(0.0, float(prob or 0.0)) for _, prob in scores)
+        if total <= 0:
+            return [(score, float(prob or 0.0)) for score, prob in scores]
+        return [(score, float(prob or 0.0) / total) for score, prob in scores]
 
     @staticmethod
     def build_market_snapshot(current_odds: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -341,6 +398,378 @@ class PredictionPostprocessService:
                 fragment += f"，高频风险包括{'、'.join(risk_bits[:2])}"
             fragments.append(fragment)
         return '；'.join(fragments) + '。'
+
+    def normalize_ou_market_prices(self, prices: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        source = prices if isinstance(prices, dict) else {}
+        over_raw = self._safe_float(source.get('over'))
+        under_raw = self._safe_float(source.get('under'))
+        if over_raw is None or under_raw is None:
+            return {'available': False, 'reason': 'missing_prices'}
+        if over_raw <= 0 or under_raw <= 0:
+            return {'available': False, 'reason': 'invalid_prices'}
+        if max(over_raw, under_raw) <= 1.2:
+            fmt = 'hong_kong'
+            over_decimal = round(over_raw + 1.0, 6)
+            under_decimal = round(under_raw + 1.0, 6)
+        else:
+            fmt = 'decimal'
+            over_decimal = round(over_raw, 6)
+            under_decimal = round(under_raw, 6)
+        implied_over = 1.0 / over_decimal if over_decimal > 1.01 else 0.0
+        implied_under = 1.0 / under_decimal if under_decimal > 1.01 else 0.0
+        total = implied_over + implied_under
+        return {
+            'available': total > 0,
+            'format': fmt,
+            'over_raw': over_raw,
+            'under_raw': under_raw,
+            'over_decimal': over_decimal,
+            'under_decimal': under_decimal,
+            'over_prob': round(implied_over / total, 6) if total > 0 else None,
+            'under_prob': round(implied_under / total, 6) if total > 0 else None,
+        }
+
+    def extract_over_under_market_signal(self, current_odds: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        totals = current_odds.get('大小球') if isinstance(current_odds, dict) and isinstance(current_odds.get('大小球'), dict) else {}
+        initial = totals.get('initial') if isinstance(totals.get('initial'), dict) else {}
+        final = totals.get('final') if isinstance(totals.get('final'), dict) else {}
+        initial_line = self._safe_float(initial.get('line'))
+        final_line = self._safe_float(final.get('line'))
+        initial_prices = self.normalize_ou_market_prices(initial)
+        final_prices = self.normalize_ou_market_prices(final)
+        if initial_line is None or final_line is None or not initial_prices.get('available') or not final_prices.get('available'):
+            return {'available': False, 'reason': 'missing_ou_market'}
+        bias_initial = float(initial_prices.get('over_prob') or 0.0) - float(initial_prices.get('under_prob') or 0.0)
+        bias_final = float(final_prices.get('over_prob') or 0.0) - float(final_prices.get('under_prob') or 0.0)
+        line_delta = final_line - initial_line
+        bias_delta = bias_final - bias_initial
+        signals: List[str] = []
+        if line_delta >= 0.24:
+            signals.append('ou_line_up')
+        elif line_delta <= -0.24:
+            signals.append('ou_line_down')
+        over_raw_initial = self._safe_float(initial.get('over'))
+        over_raw_final = self._safe_float(final.get('over'))
+        under_raw_initial = self._safe_float(initial.get('under'))
+        under_raw_final = self._safe_float(final.get('under'))
+        if over_raw_initial is not None and over_raw_final is not None and over_raw_final + 1e-9 < over_raw_initial:
+            signals.append('over_water_drop')
+        if under_raw_initial is not None and under_raw_final is not None and under_raw_final + 1e-9 < under_raw_initial:
+            signals.append('under_water_drop')
+        goal_pressure = 'balanced'
+        if bias_final >= 0.03:
+            goal_pressure = 'over'
+        elif bias_final <= -0.03:
+            goal_pressure = 'under'
+        direction = 1.0 if goal_pressure == 'over' else -1.0 if goal_pressure == 'under' else 0.0
+        pace_shift = direction * (abs(line_delta) * 0.08 + abs(bias_delta) * 0.25 + abs(bias_final) * 0.06)
+        return {
+            'available': True,
+            'goal_pressure': goal_pressure,
+            'signals': signals,
+            'initial_line': initial_line,
+            'final_line': final_line,
+            'line_delta': round(line_delta, 4),
+            'bias_initial': round(bias_initial, 6),
+            'bias_final': round(bias_final, 6),
+            'bias_delta': round(bias_delta, 6),
+            'pace_shift': round(pace_shift, 6),
+            'initial_price_format': initial_prices.get('format'),
+            'final_price_format': final_prices.get('format'),
+            'initial_prices': initial_prices,
+            'final_prices': final_prices,
+        }
+
+    def build_three_layer_runtime_context(
+        self,
+        *,
+        predicted_outcome_label: str,
+        strength_diff: Any,
+        current_odds: Optional[Dict[str, Any]],
+        review_learning: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        _ = review_learning
+        winner_map = {'主胜': 'home', '平局': 'draw', '客胜': 'away'}
+        predicted_winner = winner_map.get(str(predicted_outcome_label or '').strip(), '')
+        asian = current_odds.get('亚值') if isinstance(current_odds, dict) and isinstance(current_odds.get('亚值'), dict) else {}
+        asian_final = asian.get('final') if isinstance(asian.get('final'), dict) else {}
+        asian_line = (
+            asian_final.get('handicap_value')
+            if 'handicap_value' in asian_final
+            else asian_final.get('handicap')
+            if 'handicap' in asian_final
+            else asian_final.get('盘口值')
+        )
+        handicap_depth_bucket = PredictionReviewLearningService._classify_handicap_depth(asian_line)
+        strength_value = self._safe_float(strength_diff)
+        strength_gap_bucket = (
+            PredictionReviewLearningService._classify_strength_gap_bucket(strength_value)
+            if strength_value is not None
+            else 'unknown'
+        )
+        euro = current_odds.get('欧赔') if isinstance(current_odds, dict) and isinstance(current_odds.get('欧赔'), dict) else {}
+        euro_final = euro.get('final') if isinstance(euro.get('final'), dict) else {}
+        euro_home = self._safe_float(euro_final.get('home') if 'home' in euro_final else euro_final.get('主'))
+        euro_draw = self._safe_float(euro_final.get('draw') if 'draw' in euro_final else euro_final.get('平'))
+        euro_away = self._safe_float(euro_final.get('away') if 'away' in euro_final else euro_final.get('客'))
+        euro_support_bucket = PredictionReviewLearningService._classify_euro_support_bucket(
+            predicted_winner=predicted_winner,
+            euro_home=euro_home,
+            euro_draw=euro_draw,
+            euro_away=euro_away,
+        ) if predicted_winner else 'unknown'
+        if predicted_winner in {'home', 'away'} and euro_home and euro_draw and euro_away and euro_support_bucket == 'support':
+            implied_home = 1.0 / euro_home
+            implied_draw = 1.0 / euro_draw
+            implied_away = 1.0 / euro_away
+            implied_total = implied_home + implied_draw + implied_away
+            if implied_total > 0:
+                implied_home /= implied_total
+                implied_draw /= implied_total
+                implied_away /= implied_total
+                predicted_prob = implied_home if predicted_winner == 'home' else implied_away
+                if predicted_prob - implied_draw <= 0.07:
+                    euro_support_bucket = 'draw_guarded'
+        scenario_name = ''
+        if predicted_winner == 'home' and handicap_depth_bucket in {'level_ball', 'level_shallow'} and strength_value is not None and strength_value >= 18:
+            scenario_name = 'strong_home_shallow_line'
+        elif predicted_winner == 'away' and handicap_depth_bucket in {'level_ball', 'level_shallow'}:
+            if strength_value is not None and strength_value <= -12:
+                scenario_name = 'away_shallow_market_doubt'
+        elif predicted_winner in {'home', 'away'} and handicap_depth_bucket in {'level_ball', 'level_shallow'}:
+            if strength_value is not None and abs(strength_value) <= 8 and euro_support_bucket in {'draw_guarded', 'draw_live', 'draw_soft'}:
+                scenario_name = 'balanced_draw_guard'
+        elif predicted_winner == 'draw' and handicap_depth_bucket in {'level_ball', 'level_shallow'}:
+            if strength_value is not None and abs(strength_value) <= 8:
+                scenario_name = 'balanced_draw_guard'
+        return {
+            'predicted_winner': predicted_winner,
+            'predicted_outcome_label': predicted_outcome_label,
+            'handicap_depth_bucket': handicap_depth_bucket,
+            'strength_gap_bucket': strength_gap_bucket,
+            'euro_support_bucket': euro_support_bucket,
+            'scenario_name': scenario_name,
+            'asian_line': self._safe_float(asian_line),
+            'strength_diff': strength_value,
+            'stratified_key': f'{predicted_winner}:{handicap_depth_bucket}' if predicted_winner else '',
+            'three_layer_key': f'{predicted_winner}:{handicap_depth_bucket}:{euro_support_bucket}' if predicted_winner else '',
+        }
+
+    def apply_review_outcome_adjustment(
+        self,
+        *,
+        final_probabilities: Dict[str, float],
+        strength_diff: Any,
+        asian_handicap: Optional[Dict[str, Any]],
+        current_odds: Optional[Dict[str, Any]],
+        review_learning: Optional[Dict[str, Any]],
+    ) -> Tuple[Dict[str, float], Dict[str, Any]]:
+        probabilities = self._normalize_prob_triplet(final_probabilities or {})
+        ranked = sorted(probabilities.items(), key=lambda item: item[1], reverse=True)
+        top_key = ranked[0][0] if ranked else 'draw'
+        label_map = {'home_win': '主胜', 'draw': '平局', 'away_win': '客胜'}
+        predicted_outcome_label = label_map.get(top_key, '平局')
+        odds_payload = dict(current_odds or {})
+        if isinstance(asian_handicap, dict) and '亚值' not in odds_payload:
+            odds_payload['亚值'] = asian_handicap
+        context = self.build_three_layer_runtime_context(
+            predicted_outcome_label=predicted_outcome_label,
+            strength_diff=strength_diff,
+            current_odds=odds_payload,
+            review_learning=review_learning,
+        )
+        learning = review_learning if isinstance(review_learning, dict) else {}
+        league_review = learning.get('league_review') if isinstance(learning.get('league_review'), dict) else {}
+        stratified_review = learning.get('outcome_stratified_review') if isinstance(learning.get('outcome_stratified_review'), dict) else {}
+        three_layer_review = learning.get('three_layer_outcome_review') if isinstance(learning.get('three_layer_outcome_review'), dict) else {}
+        matched_stratified = stratified_review.get(context.get('stratified_key')) if isinstance(stratified_review.get(context.get('stratified_key')), dict) else {}
+        matched_three_layer = three_layer_review.get(context.get('three_layer_key')) if isinstance(three_layer_review.get(context.get('three_layer_key')), dict) else {}
+        signals: List[str] = []
+        draw_shift = 0.0
+        away_shift = 0.0
+        home_shift = 0.0
+        top_prob = float(probabilities.get(top_key) or 0.0)
+        runner_up = float(sorted((value for key, value in probabilities.items() if key != top_key), reverse=True)[0] if len(probabilities) > 1 else 0.0)
+        top_lead = top_prob - runner_up
+        home_bias_gate = {'qualified': False, 'evidence': []}
+        if top_key == 'home_win' and '主胜偏置' in ' '.join(str(item) for item in (league_review.get('league_tags') or [])):
+            if top_lead < 0.14:
+                home_bias_gate['evidence'].append('limited_probability_edge')
+            if context.get('strength_diff') is None or abs(float(context.get('strength_diff') or 0.0)) < 14:
+                home_bias_gate['evidence'].append('limited_strength_gap')
+            if context.get('handicap_depth_bucket') in {'level_ball', 'level_shallow'}:
+                home_bias_gate['evidence'].append('shallow_market')
+            if top_lead >= 0.18:
+                home_bias_gate['qualified'] = True
+            if home_bias_gate['qualified']:
+                draw_shift = max(draw_shift, 0.01)
+                away_shift = max(away_shift, 0.008)
+                signals.append('review-home-bias-correction')
+        if '平局防守不足' in ' '.join(str(item) for item in (league_review.get('league_tags') or [])) and top_key in {'home_win', 'away_win'}:
+            draw_shift = max(draw_shift, 0.01)
+            signals.append('review-draw-gap-correction')
+        if '客胜冷门敏感度不足' in ' '.join(str(item) for item in (league_review.get('league_tags') or [])) and top_key == 'home_win':
+            away_shift = max(away_shift, 0.008)
+            signals.append('review-away-upset-correction')
+        if matched_stratified:
+            draw_shift = max(draw_shift, float(matched_stratified.get('recommended_draw_shift') or 0.0))
+            if top_key == 'home_win':
+                away_shift = max(away_shift, float(matched_stratified.get('recommended_upset_shift') or 0.0))
+            elif top_key == 'away_win':
+                home_shift = max(home_shift, float(matched_stratified.get('recommended_upset_shift') or 0.0))
+            if float(matched_stratified.get('recommended_draw_shift') or 0.0) > 0 or float(matched_stratified.get('recommended_upset_shift') or 0.0) > 0:
+                signals.append('review-stratified-handicap-strength-correction')
+        if matched_three_layer:
+            draw_shift = max(draw_shift, float(matched_three_layer.get('recommended_draw_shift') or 0.0))
+            if top_key == 'home_win':
+                away_shift = max(away_shift, float(matched_three_layer.get('recommended_upset_shift') or 0.0))
+            elif top_key == 'away_win':
+                home_shift = max(home_shift, float(matched_three_layer.get('recommended_upset_shift') or 0.0))
+        if context.get('scenario_name'):
+            signals.append(f"review-scenario-{context.get('scenario_name')}")
+        heuristic_applied = False
+        if context.get('scenario_name') == 'strong_home_shallow_line' and top_key == 'home_win':
+            draw_shift = max(draw_shift, 0.012)
+            away_shift = max(away_shift, 0.008)
+            heuristic_applied = not bool(matched_three_layer)
+        elif context.get('scenario_name') == 'away_shallow_market_doubt' and top_key == 'away_win':
+            draw_shift = max(draw_shift, 0.014)
+            home_shift = max(home_shift, 0.008)
+            heuristic_applied = not bool(matched_three_layer)
+        elif context.get('scenario_name') == 'balanced_draw_guard' and top_key in {'home_win', 'away_win'}:
+            draw_shift = max(draw_shift, 0.014)
+            heuristic_applied = not bool(matched_three_layer)
+        if heuristic_applied:
+            signals.append('review-three-layer-heuristic')
+        adjusted = dict(probabilities)
+        if top_key == 'home_win':
+            adjusted = self._shift_from_side_to_targets(adjusted, from_key='home_win', draw_shift=draw_shift, away_shift=away_shift)
+        elif top_key == 'away_win':
+            adjusted = self._shift_from_side_to_targets(adjusted, from_key='away_win', draw_shift=draw_shift, home_shift=home_shift)
+        diag = {
+            'applied': adjusted != probabilities,
+            'signals': list(dict.fromkeys(signals)),
+            'reason': 'applied' if adjusted != probabilities else 'three_layer_evaluated_no_adjustment',
+            'three_layer_evaluated': True,
+            'home_bias_gate': home_bias_gate,
+            'stratified_review': {
+                'handicap_depth_bucket': context.get('handicap_depth_bucket'),
+                'strength_gap_bucket': context.get('strength_gap_bucket'),
+                'matched_key': context.get('stratified_key'),
+                'matched': matched_stratified,
+            },
+            'three_layer_context': context,
+        }
+        return adjusted, diag
+
+    def rerank_top_scores(
+        self,
+        top_scores: List[Tuple[str, float]],
+        predicted_outcome_label: str,
+        *,
+        home_lambda: float,
+        away_lambda: float,
+        over_under: Optional[Dict[str, Any]],
+        strength_diff: Any,
+        confidence: float,
+        current_odds: Optional[Dict[str, Any]],
+        review_learning: Optional[Dict[str, Any]],
+        return_diag: bool = False,
+        limit: int = 3,
+    ) -> Any:
+        scores = [(str(score), float(prob or 0.0)) for score, prob in (top_scores or []) if str(score).strip()]
+        adjusted = dict(scores)
+        context = self.build_three_layer_runtime_context(
+            predicted_outcome_label=predicted_outcome_label,
+            strength_diff=strength_diff,
+            current_odds=current_odds,
+            review_learning=review_learning,
+        )
+        learning = review_learning if isinstance(review_learning, dict) else {}
+        score_bias = learning.get('score_bias') if isinstance(learning.get('score_bias'), dict) else {}
+        line = self._safe_float((over_under or {}).get('line')) if isinstance(over_under, dict) else None
+        over_prob = self._safe_float((over_under or {}).get('over')) if isinstance(over_under, dict) else None
+        under_prob = self._safe_float((over_under or {}).get('under')) if isinstance(over_under, dict) else None
+        open_match = bool((line is not None and line >= 2.75) or (over_prob is not None and under_prob is not None and over_prob > under_prob) or (home_lambda + away_lambda >= 2.8))
+        signals: List[str] = []
+        if context.get('scenario_name') == 'strong_home_shallow_line' and predicted_outcome_label == '主胜':
+            for score, factor in {'1-0': 0.92, '2-0': 0.88, '3-0': 0.8, '2-1': 1.16, '3-1': 1.08}.items():
+                if score in adjusted:
+                    adjusted[score] *= factor
+            signals.append('score-three-layer-strong_home_shallow_line')
+        low_total_penalty = float(score_bias.get('recommended_low_total_penalty') or 0.0)
+        if predicted_outcome_label == '主胜' and open_match:
+            for score, factor in {
+                '1-0': max(0.78, 0.88 - low_total_penalty),
+                '2-0': max(0.84, 0.94 - low_total_penalty * 0.5),
+                '2-1': 1.07 + low_total_penalty,
+                '3-1': 1.05 + low_total_penalty * 0.7,
+                '3-0': 0.94,
+            }.items():
+                if score in adjusted:
+                    adjusted[score] *= factor
+            signals.append('score-template-cap')
+        if predicted_outcome_label == '平局' and open_match:
+            for score, factor in {'0-0': 0.82, '1-1': 0.9, '2-2': 1.14, '3-3': 1.04}.items():
+                if score in adjusted:
+                    adjusted[score] *= factor
+            signals.append('score-template-cap')
+        reranked = sorted(self._rescale_score_list(list(adjusted.items())), key=lambda item: item[1], reverse=True)
+        reranked = reranked[: max(1, int(limit or 3))]
+        diag = {
+            'applied': reranked != scores[: len(reranked)],
+            'signals': list(dict.fromkeys(signals)),
+            'scenario_name': context.get('scenario_name'),
+            'open_match': open_match,
+            'confidence': float(confidence or 0.0),
+        }
+        if return_diag:
+            return reranked, diag
+        return reranked
+
+    def apply_three_layer_total_goals_adjustment(
+        self,
+        total_goals: Dict[str, Any],
+        *,
+        predicted_outcome_label: str,
+        strength_diff: Any,
+        current_odds: Optional[Dict[str, Any]],
+        review_learning: Optional[Dict[str, Any]],
+        total_lambda: float,
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        if not isinstance(total_goals, dict) or not total_goals.get('available'):
+            return total_goals, {'applied': False, 'reason': 'unavailable_total_goals'}
+        buckets = {
+            str(key): float(value or 0.0)
+            for key, value in (total_goals.get('buckets') or {}).items()
+        }
+        context = self.build_three_layer_runtime_context(
+            predicted_outcome_label=predicted_outcome_label,
+            strength_diff=strength_diff,
+            current_odds=current_odds,
+            review_learning=review_learning,
+        )
+        signals: List[str] = []
+        if predicted_outcome_label == '平局' and context.get('scenario_name') == 'balanced_draw_guard' and float(total_lambda or 0.0) <= 2.4:
+            take = min(0.02, buckets.get('4', 0.0) * 0.18)
+            buckets['4'] = max(0.0, buckets.get('4', 0.0) - take)
+            buckets['1'] = buckets.get('1', 0.0) + take * 0.7
+            buckets['2'] = buckets.get('2', 0.0) + take * 0.3
+            signals.append('total-goals-three-layer-draw_market_balance')
+        total = sum(buckets.values())
+        if total > 0:
+            for key in list(buckets.keys()):
+                buckets[key] = buckets[key] / total
+        top_totals = sorted(((key, value) for key, value in buckets.items()), key=lambda item: item[1], reverse=True)[:3]
+        adjusted = dict(total_goals)
+        adjusted['buckets'] = {key: round(float(value), 6) for key, value in buckets.items()}
+        adjusted['top_totals'] = [{'total': key, 'prob': round(float(value), 4)} for key, value in top_totals]
+        diag = {
+            'applied': bool(signals),
+            'signals': signals,
+            'scenario_name': context.get('scenario_name'),
+        }
+        return adjusted, diag
 
     def build_prediction_result(
         self,

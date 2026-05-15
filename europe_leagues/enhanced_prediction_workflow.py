@@ -20,6 +20,7 @@ from domain.persistence import PredictionPersistenceService
 from domain.postprocess import PredictionPostprocessService
 from domain.rag import LightweightRAGService
 from domain.reporting import PredictionReportService
+from domain.review_learning import PredictionReviewLearningService
 from domain.team_strength import TeamStrengthService
 from domain.upset import UpsetAnalyzer
 from domain.writeback import TeamsWritebackGateway
@@ -46,15 +47,28 @@ from runtime.cache import PredictionCache
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RUNTIME_DIR = str(get_default_paths(SCRIPT_DIR).ensure_runtime_dir())
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.join(RUNTIME_DIR, 'enhanced_prediction.log'), encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
+
+
+def _configure_logger() -> None:
+    if logger.handlers:
+        return
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler = logging.FileHandler(
+        os.path.join(RUNTIME_DIR, 'enhanced_prediction.log'),
+        encoding='utf-8',
+        delay=True,
+    )
+    file_handler.setFormatter(formatter)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    logger.propagate = False
+
+
+_configure_logger()
 
 # 定义联赛配置
 LEAGUE_CONFIG = {
@@ -306,6 +320,7 @@ class EnhancedPredictor:
         self.result_manager = ResultManager(base_dir=self.base_dir)
         self.postprocess_service = PredictionPostprocessService(LEAGUE_CONFIG)
         self.rag_service = LightweightRAGService(self.base_dir)
+        self.review_learning_service = PredictionReviewLearningService(self.base_dir)
         self.persistence_service = PredictionPersistenceService(self.base_dir, self.cache, self.result_manager)
         # 初始化多模型融合
         self.model_fusion = MultiModelFusion()
@@ -332,9 +347,6 @@ class EnhancedPredictor:
 
     def _format_memory_prediction_entry(self, result: Dict[str, Any]) -> str:
         return self.persistence_service.format_memory_prediction_entry(result)
-
-    def _update_prediction_memory(self, result: Dict[str, Any]) -> None:
-        self.persistence_service.update_prediction_memory(result)
 
     @staticmethod
     def _normalize_probs(p: Dict[str, float]) -> Dict[str, float]:
@@ -547,6 +559,7 @@ class EnhancedPredictor:
         match_time: str = "",
         league_hint: Optional[str] = None,
         analysis_context: Optional[Dict] = None,
+        persist: bool = True,
     ) -> Dict:
         """预测单场比赛（增强版）。
 
@@ -575,7 +588,11 @@ class EnhancedPredictor:
         cached = self.cache.get('predict_match', cache_params)
         if cached:
             logger.info(f"使用缓存预测: {home_team} vs {away_team}")
-            return self.persistence_service.prepare_cached_prediction(cached, self.runtime_profile)
+            if persist:
+                return self.persistence_service.prepare_cached_prediction(cached, self.runtime_profile, league_code)
+            if 'runtime_profile' not in cached:
+                cached['runtime_profile'] = self.runtime_profile
+            return cached
         
         
         logger.info(f"开始预测: {home_team} vs {away_team} ({league_code})")
@@ -593,6 +610,17 @@ class EnhancedPredictor:
             match_time=match_time,
             diag_key="okooo_totals_fetch_last_moment",
         )
+        review_learning = self.review_learning_service.build_prediction_context(
+            league_code=league_code,
+            days=30,
+            sample_limit=12,
+        )
+        realtime['context_applied']['review_learning'] = {
+            'available': bool(isinstance(review_learning, dict) and review_learning.get('available')),
+            'score_bias_scope': review_learning.get('score_bias_scope') if isinstance(review_learning, dict) else '',
+            'over_under_bias_scope': review_learning.get('over_under_bias_scope') if isinstance(review_learning, dict) else '',
+            'league_tags': (review_learning.get('league_review') or {}).get('league_tags', []) if isinstance(review_learning, dict) else [],
+        }
         core = self.inference_service.run(
             home_team=home_team,
             away_team=away_team,
@@ -601,6 +629,7 @@ class EnhancedPredictor:
             current_odds=current_odds,
             analysis_context=analysis_context,
             realtime=realtime,
+            review_learning=review_learning,
         )
         applied_weights = core["applied_weights"]
         home_strength = core["home_strength"]
@@ -619,6 +648,7 @@ class EnhancedPredictor:
         away_lambda = core["away_lambda"]
         over_under = core["over_under"]
         fusion_result = core["fusion_result"]
+        lightweight_rag_decision = core.get("lightweight_rag_decision") or {}
 
         # 5.5 凯利仓位建议（基于模型概率 + 欧赔/竞彩赔率；输出半凯利封顶5% + 1/4凯利封顶3%）
         staking = {}
@@ -651,6 +681,17 @@ class EnhancedPredictor:
             top_scores=top_scores,
             top_k=5,
         )
+        memory_summary = retrieved_memory.get('summary') if isinstance(retrieved_memory, dict) else {}
+        lightweight_rag_decision = self.rag_service.build_lightweight_decision(
+            summary=memory_summary if isinstance(memory_summary, dict) else {},
+            similar_cases=retrieved_memory.get('similar_cases') if isinstance(retrieved_memory, dict) else [],
+            market_cases=retrieved_memory.get('market_cases') if isinstance(retrieved_memory, dict) else [],
+            upset_cases=retrieved_memory.get('upset_cases') if isinstance(retrieved_memory, dict) else [],
+            predicted_outcome=main_prediction,
+        )
+        if lightweight_rag_decision:
+            analysis_context['rag_lightweight_decision'] = lightweight_rag_decision
+            realtime['context_applied']['rag_lightweight_decision'] = lightweight_rag_decision
         result = self.postprocess_service.build_prediction_result(
             match_id=match_id,
             home_team=home_team,
@@ -682,7 +723,10 @@ class EnhancedPredictor:
             current_odds=current_odds,
         )
 
-        self.persistence_service.persist_prediction('predict_match', cache_params, result, league_code)
+        if persist:
+            self.persistence_service.persist_prediction('predict_match', cache_params, result, league_code)
+        else:
+            result['persisted'] = {'enabled': False, 'archived': False, 'memory_updated': False}
         logger.info(f"预测完成: {home_team} vs {away_team} -> {main_prediction} ({confidence:.1%})")
         
         return result
@@ -736,8 +780,8 @@ class EnhancedPredictor:
         else:
             logger.warning(f"未找到 teams 文件: {teams_path}")
         
-        self.persistence_service.persist_prediction_batch(predictions, league_code)
-        logger.info(f"预测已保存到历史数据库")
+        self.persistence_service.refresh_accuracy_stats()
+        logger.info("批量预测已刷新准确率统计")
         
         return teams_path if os.path.exists(teams_path) else None
     
