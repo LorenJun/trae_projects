@@ -4,8 +4,8 @@
 > 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
 > 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层、历史盘口一致性与临场建议层  
 > 3. 五大联赛 SoT 写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写入 `MEMORY.md` 与 runtime-only 归档  
-> 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
-> 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
+> 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填；结果闭环会统一刷新 archive / MEMORY / RAG / review-learning  
+> 5. `prediction_system.py accuracy --refresh --json` 仍可作为显式重建入口，但正常赛果闭环后准确率会自动同步刷新  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
 > 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`、`realtime.context_applied.live_outcome_adjustment.historical_market_alignment`、`retrieved_memory.summary.live_market_followup`、`live_betting_advice`  
 > 欧战正式 competition config：`europa_league`、`champions_league`、`conference_league` 已进入主链，但写回仍保持 `runtime_only`
@@ -81,6 +81,13 @@ cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py predict-schedule --league premier_league --date 2026-04-28 --days 1 --json
 ```
 
+如只需要批量查看结果、不产生写回和统计刷新副作用：
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py predict-schedule --league premier_league --date 2026-04-28 --days 1 --no-write --json
+```
+
 ### Harness 编排
 
 ```bash
@@ -106,8 +113,10 @@ python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026
    - 缺失大小球时自动补抓
    - 回填 EWMA 近况
    - 按需注入 `team_context`
+   - 运行 inference / postprocess / review-learning 主链调整
    - 检索 RAG 相似比赛、盘口样本与爆冷案例
    - 在 `1X2` 赔率接近且大小球变化接近时，抓取历史 `match_id` 的盘口轨迹做临场增强
+   - 由 `PredictionPersistenceService` 统一处理预测落盘 side effects
 6. 输出终版结论时，优先检查：
    - `final_probabilities`
    - `top_scores`
@@ -123,7 +132,7 @@ python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026
 7. 若任务要求落盘，只走正式双路径：
    - 五大联赛：`teams_2025-26.md`
    - 欧战/杯赛：`MEMORY.md`、`prediction_archive.json`、`prediction_memory_odds_samples.json`
-8. 赛后用 `save-result` 或 `bulk_fetch_and_update.py` 回填，再用 `accuracy --refresh` 更新统计
+8. 赛后用 `save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填；结果闭环会自动更新统计、记忆样本、RAG 与 review-learning，只有显式重建时再执行 `accuracy --refresh`
 
 ## 大小球的当前规则
 
@@ -321,6 +330,6 @@ PY
 - 单场：`prediction_system.py save-result --match-id ... --home-score ... --away-score ... --json`
 - 批量：`bulk_fetch_and_update.py --start ... --end ... --yes`
 
-更新后再执行：
+更新后默认会自动完成结果闭环衍生刷新；如需显式重建再执行：
 
 - `prediction_system.py accuracy --refresh --json`

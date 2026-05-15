@@ -852,12 +852,6 @@ def sync_due_prediction_results(
             updates.append({"match_id": match_id, "updated": False, "reason": str(exc)})
         registry[match_id] = entry
 
-    if any(item.get("updated") for item in updates):
-        try:
-            manager.update_accuracy_stats()
-        except Exception as exc:
-            logger.warning("自动同步赛果后更新准确率失败: %s", exc)
-
     if registry_changed or due_entries:
         _save_registry(base_dir, registry)
     updated_count = sum(1 for item in updates if item.get("updated"))

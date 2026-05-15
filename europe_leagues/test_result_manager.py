@@ -14,6 +14,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from runtime.result_sync import _load_registry, register_prediction_result_sync
+
 from app.cli import _parse_memory_completed_entry
 from data_collector import DataCollector
 from result_manager import ResultManager
@@ -76,6 +78,10 @@ class ResultManagerTest(unittest.TestCase):
         )
         runtime_dir = self.base_dir / ".okooo-scraper" / "runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
+        (runtime_dir / "prediction_review_learning.json").write_text(
+            json.dumps({"updated_at": "stale"}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         (runtime_dir / "prediction_archive.json").write_text(
             json.dumps(
                 {
@@ -123,11 +129,23 @@ class ResultManagerTest(unittest.TestCase):
         self.assertEqual(result["predicted_winner"], "home")
         self.assertEqual(result["note"], "预测:主胜 信心:0.61 爆冷:低 ✅")
 
-    def test_save_result_overwrites_existing_score_with_latest_value(self):
+    def test_save_result_without_force_keeps_existing_score(self):
         with quiet_test_output():
             self.manager.save_result("la_liga_20260511_巴塞罗那_皇家马德里", 2, 1)
             updated = self.manager.save_result("la_liga_20260511_巴塞罗那_皇家马德里", 3, 2)
+        self.assertEqual(updated["actual_score"], "2-1")
+        self.assertTrue(updated.get("already_exists"))
+
+        content = (self.base_dir / "la_liga" / "teams_2025-26.md").read_text(encoding="utf-8")
+        self.assertIn("| 2026-05-11 | 03:00 | 巴塞罗那 | 2-1 | 皇家马德里 |", content)
+        self.assertNotIn("| 2026-05-11 | 03:00 | 巴塞罗那 | 3-2 | 皇家马德里 |", content)
+
+    def test_save_result_force_overwrites_existing_score_with_latest_value(self):
+        with quiet_test_output():
+            self.manager.save_result("la_liga_20260511_巴塞罗那_皇家马德里", 2, 1)
+            updated = self.manager.save_result("la_liga_20260511_巴塞罗那_皇家马德里", 3, 2, force=True)
         self.assertEqual(updated["actual_score"], "3-2")
+        self.assertTrue(updated.get("forced"))
 
         content = (self.base_dir / "la_liga" / "teams_2025-26.md").read_text(encoding="utf-8")
         self.assertIn("| 2026-05-11 | 03:00 | 巴塞罗那 | 3-2 | 皇家马德里 |", content)
@@ -170,6 +188,49 @@ class ResultManagerTest(unittest.TestCase):
         self.assertEqual(similar_matches[0]["actual_score"], "0-2")
         self.assertEqual(similar_matches[1]["actual_result"], "平局")
         self.assertEqual(similar_matches[1]["actual_score"], "1-1")
+
+    def test_save_result_refreshes_closeout_derivatives_and_registry(self):
+        register_prediction_result_sync(
+            str(self.base_dir),
+            {
+                "match_id": "la_liga_20260511_巴塞罗那_皇家马德里",
+                "internal_match_id": "la_liga_20260511_巴塞罗那_皇家马德里",
+                "teams_match_id": "la_liga_20260511_巴塞罗那_皇家马德里",
+                "league_code": "la_liga",
+                "league_name": "西甲",
+                "match_date": "2026-05-11",
+                "match_time": "03:00",
+                "home_team": "巴塞罗那",
+                "away_team": "皇家马德里",
+                "prediction": "主胜",
+                "confidence": 0.61,
+            },
+        )
+
+        with quiet_test_output():
+            result = self.manager.save_result("la_liga_20260511_巴塞罗那_皇家马德里", 2, 1)
+
+        self.assertTrue(result["refresh"]["accuracy_refreshed"])
+        self.assertTrue(result["refresh"]["memory_samples_synced"])
+        self.assertTrue(result["refresh"]["rag_index_synced"])
+        self.assertTrue(result["refresh"]["review_learning_refreshed"])
+        self.assertEqual(result["archive_sync"]["status"], "success")
+        self.assertTrue(result["registry_sync"]["completed"])
+        self.assertEqual(result["upset_sync"]["status"], "skipped")
+
+        accuracy_payload = json.loads(
+            (self.base_dir / ".okooo-scraper" / "runtime" / "accuracy_stats.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(accuracy_payload["overall"]["total_predictions"], 1)
+
+        review_payload = json.loads(
+            (self.base_dir / ".okooo-scraper" / "runtime" / "prediction_review_learning.json").read_text(encoding="utf-8")
+        )
+        self.assertNotEqual(review_payload.get("updated_at"), "stale")
+
+        registry = _load_registry(str(self.base_dir))
+        self.assertEqual(registry["la_liga_20260511_巴塞罗那_皇家马德里"]["status"], "completed")
+        self.assertEqual(registry["la_liga_20260511_巴塞罗那_皇家马德里"]["actual_score"], "2-1")
 
     def test_reconcile_memory_pending_entries_updates_memory_from_archive_result(self):
         archive = self.manager.prediction_archive_store.load()

@@ -57,7 +57,7 @@ last_updated: 2026-05-08
 - 仓库里出现某个联赛目录，不等于它已经进入正式主链
 - 例如 `afc_champions_league/` 当前更像数据目录或快照落盘目录，不属于现行 `LEAGUE_CONFIG`
 
-### 1.3 单一事实来源与 runtime 边界
+### 1.3 事实写回与 runtime 边界
 
 项目当前的“事实写回”采用双路径：
 - **五大联赛 SoT**：`europe_leagues/<league>/teams_2025-26.md`
@@ -222,10 +222,10 @@ flowchart TB
 | 特征服务 | `domain/features.py` | EWMA、analysis context、上下文增强与赛前补齐 |
 | 赔率服务 | `domain/odds.py` | 盘口解析、真实大小球线补齐、历史赔率参考 |
 | 临场服务 | `domain/live.py` | 实时刷新、已有快照复用、driver 透传、上下文注入 |
-| 推理服务 | `domain/inference.py` | 组织核心推理输入与模型输出 |
-| 后处理 | `domain/postprocess.py` | 概率归一、凯利、结果对象整形、RAG 解释文本拼装 |
-| 持久化 | `domain/persistence.py` | 写入 `MEMORY.md`、runtime archive、滚动记忆样本、RAG 索引、赛果同步登记 |
-| RAG 服务 | `domain/rag.py` | 封装 `HybridRAGService`，供主链读取结构化相似案例 |
+| 推理服务 | `domain/inference.py` | 组织核心推理输入、盘口/概率校准与主预测输出 |
+| 后处理 | `domain/postprocess.py` | 概率归一、凯利、review-learning 调整、结果对象整形与 RAG 解释文本拼装 |
+| 持久化 | `domain/persistence.py` | 作为 `PredictionPersistenceService` owner 编排预测落盘，统一写入 `MEMORY.md`、runtime archive、滚动记忆样本、RAG 索引与赛果同步登记 |
+| RAG 服务 | `domain/rag.py` | 封装 `HybridRAGService`，供主链读取结构化相似案例与轻量决策增强 |
 | 报告服务 | `domain/reporting.py` | 预测报告格式化与 RAG 记忆解释输出 |
 | 文本写回 | `domain/writeback.py` | 写回 `teams_2025-26.md` 备注列 |
 | 球队实力 | `domain/team_strength.py` | 球队强弱、伤病与比赛画像支撑 |
@@ -268,7 +268,7 @@ flowchart TB
 | 滚动记忆样本 | `runtime/memory_samples.py` | 从 `MEMORY.md`、archive、赛果中构建结构化赔率样本 |
 | 赛果同步 | `runtime/result_sync.py` | 预测后登记、到期检查、后台轮询与 match_id 迁移 |
 | RAG 索引 | `runtime/rag_store.py` | 构建 `rag_cases.json`、`rag_index.json`、`rag_registry.json` 并提供检索 |
-| 结果管理 | `result_manager.py` | 兼容型赛果写回、准确率刷新、archive/RAG 联动更新 |
+| 结果管理 | `result_manager.py` | archive / result / accuracy 底座能力，承接兼容型赛果写回与联动更新 |
 
 这里有一个容易被忽略但很重要的设计点：
 - `storage/*` 管的是“稳定文件边界”

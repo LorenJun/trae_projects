@@ -3,8 +3,10 @@
 这个目录用于集中索引项目中可直接执行的脚本（不移动原文件，避免破坏导入路径）。
 
 ## 赛程更新
-- 当前赛程/比分的批量更新入口是 `teams_2025-26.md`（赛程表比分列只在“已完赛”写 `x-y`，未完赛统一为 `-`）
-- 注意：文档里曾提到的 `update_schedules_from_500.py` 目前仓库内不存在，需补齐对应脚本或改用已存在的更新方式
+- 当前正式赛程/比分更新以各联赛 `teams_2025-26.md` 为 SoT（比分列只在“已完赛”写 `x-y`，未完赛统一为 `-`）
+- 单场预测后的正式写回入口是 `python3 prediction_system.py predict-match ...` / `predict-schedule ...`
+- 赛后回填入口是 `python3 prediction_system.py save-result ...`、`auto-sync-results ...`、`result-sync-daemon ...`，批量脚本可用仓库根目录 `bulk_fetch_and_update.py`
+- 不再引用不存在的 `update_schedules_from_500.py`
 
 ## 球员数据更新
 - `python3 generate_premier_league_players_csv.py`：英超官网名单 → `premier_league_players_2026.csv`

@@ -662,11 +662,220 @@ class PredictionPostprocessService:
         }
         return adjusted, diag
 
+    @staticmethod
+    def _parse_score_components(score: str) -> Optional[Dict[str, int]]:
+        match = re.match(r'^(\d+)\s*-\s*(\d+)$', str(score).strip())
+        if not match:
+            return None
+        home_goals = int(match.group(1))
+        away_goals = int(match.group(2))
+        return {
+            'home_goals': home_goals,
+            'away_goals': away_goals,
+            'total_goals': home_goals + away_goals,
+            'goal_diff': home_goals - away_goals,
+        }
+
+    @staticmethod
+    def _clamp_score_factor(factor: float) -> float:
+        return max(0.82, min(1.18, float(factor or 1.0)))
+
+    @classmethod
+    def _score_matches_outcome(cls, score: str, predicted_outcome_label: str) -> bool:
+        components = cls._parse_score_components(score)
+        if not components:
+            return False
+        goal_diff = int(components['goal_diff'])
+        if predicted_outcome_label == '主胜':
+            return goal_diff > 0
+        if predicted_outcome_label == '客胜':
+            return goal_diff < 0
+        if predicted_outcome_label == '平局':
+            return goal_diff == 0
+        return True
+
+    @classmethod
+    def _is_low_conservative_template(cls, score: str, predicted_outcome_label: str) -> bool:
+        components = cls._parse_score_components(score)
+        if not components:
+            return False
+        total_goals = int(components['total_goals'])
+        if predicted_outcome_label == '平局':
+            return total_goals <= 2
+        winner_goals = int(components['home_goals']) if predicted_outcome_label == '主胜' else int(components['away_goals'])
+        return winner_goals <= 2 and total_goals <= 3
+
+    @classmethod
+    def _apply_review_score_correction(
+        cls,
+        adjusted: Dict[str, float],
+        *,
+        predicted_outcome_label: str,
+        score_bias: Dict[str, Any],
+        open_match: bool,
+    ) -> bool:
+        conservative_home = float(score_bias.get('conservative_home_win_rate') or 0.0)
+        conservative_away = float(score_bias.get('conservative_away_win_rate') or 0.0)
+        low_total = float(score_bias.get('low_total_underestimate_rate') or 0.0)
+        home_ceiling = float(score_bias.get('home_goal_ceiling_underestimate_rate') or 0.0)
+        away_ceiling = float(score_bias.get('away_goal_ceiling_underestimate_rate') or 0.0)
+        home_boost = float(score_bias.get('recommended_home_goal_boost') or 0.0)
+        away_boost = float(score_bias.get('recommended_away_goal_boost') or 0.0)
+        changed = False
+
+        for score, base_prob in list(adjusted.items()):
+            components = cls._parse_score_components(score)
+            if not components or float(base_prob or 0.0) <= 0:
+                continue
+            factor = 1.0
+            home_goals = int(components['home_goals'])
+            away_goals = int(components['away_goals'])
+            total_goals = int(components['total_goals'])
+
+            if predicted_outcome_label == '主胜':
+                signal_strength = max(conservative_home, home_ceiling, low_total)
+                if signal_strength >= 0.18 or home_boost >= 0.03:
+                    if score == '1-0':
+                        factor *= 1.0 - min(0.18, 0.05 + conservative_home * 0.16 + low_total * 0.08)
+                    elif score == '2-0':
+                        factor *= 1.0 - min(0.14, 0.03 + max(conservative_home, home_ceiling) * 0.12)
+                    elif score == '2-1':
+                        factor *= 1.0 + min(0.18, 0.04 + max(conservative_home, low_total) * 0.12 + home_boost * 0.7)
+                    elif score == '3-0':
+                        factor *= 1.0 + min(0.18, 0.03 + max(home_ceiling, home_boost) * 0.14)
+                    elif score == '3-1':
+                        factor *= 1.0 + min(0.18, 0.04 + max(conservative_home, home_ceiling, low_total) * 0.14 + home_boost * 0.6)
+                    elif home_goals >= 3 and total_goals >= 4:
+                        factor *= 1.0 + min(0.12, 0.02 + home_ceiling * 0.08 + low_total * 0.05)
+            elif predicted_outcome_label == '客胜':
+                signal_strength = max(conservative_away, away_ceiling, low_total)
+                if signal_strength >= 0.18 or away_boost >= 0.03:
+                    if score == '0-1':
+                        factor *= 1.0 - min(0.18, 0.05 + conservative_away * 0.16 + low_total * 0.08)
+                    elif score == '0-2':
+                        factor *= 1.0 + min(0.16, 0.04 + max(conservative_away, away_ceiling) * 0.12 + away_boost * 0.7)
+                    elif score == '1-2':
+                        factor *= 1.0 + min(0.18, 0.05 + max(conservative_away, low_total) * 0.12 + away_boost * 0.7)
+                    elif score == '0-3':
+                        factor *= 1.0 + min(0.18, 0.04 + max(away_ceiling, away_boost) * 0.16)
+                    elif away_goals >= 3 and total_goals >= 3:
+                        factor *= 1.0 + min(0.12, 0.02 + away_ceiling * 0.08 + low_total * 0.05)
+            elif predicted_outcome_label == '平局' and open_match and low_total >= 0.2:
+                if score == '0-0':
+                    factor *= 1.0 - min(0.16, 0.04 + low_total * 0.12)
+                elif score == '1-1':
+                    factor *= 1.0 - min(0.1, 0.02 + low_total * 0.06)
+                elif score == '2-2':
+                    factor *= 1.0 + min(0.18, 0.05 + low_total * 0.12)
+                elif total_goals >= 5:
+                    factor *= 1.0 + min(0.12, 0.02 + low_total * 0.08)
+
+            factor = cls._clamp_score_factor(factor)
+            if abs(factor - 1.0) > 1e-9:
+                adjusted[score] = float(base_prob or 0.0) * factor
+                changed = True
+        return changed
+
+    @classmethod
+    def _build_score_selection_profile(
+        cls,
+        scores: List[Tuple[str, float]],
+        *,
+        predicted_outcome_label: str,
+    ) -> Dict[str, Any]:
+        totals = set()
+        goal_diffs = set()
+        low_template_count = 0
+        winner_goals = []
+        total_goal_values = []
+        for score, _prob in scores:
+            components = cls._parse_score_components(score)
+            if not components:
+                continue
+            total_goals = int(components['total_goals'])
+            totals.add(total_goals)
+            goal_diffs.add(abs(int(components['goal_diff'])))
+            total_goal_values.append(total_goals)
+            if predicted_outcome_label == '主胜':
+                winner_goals.append(int(components['home_goals']))
+            elif predicted_outcome_label == '客胜':
+                winner_goals.append(int(components['away_goals']))
+            else:
+                winner_goals.append(int(components['home_goals']))
+            if cls._is_low_conservative_template(score, predicted_outcome_label):
+                low_template_count += 1
+        score_count = len(scores)
+        all_low_templates = bool(score_count and low_template_count == score_count)
+        same_total_layer = len(totals) <= 1 if score_count else False
+        same_goal_margin = len(goal_diffs) <= 1 if score_count else False
+        return {
+            'score_count': score_count,
+            'totals': totals,
+            'goal_diffs': goal_diffs,
+            'all_low_templates': all_low_templates,
+            'same_total_layer': same_total_layer,
+            'same_goal_margin': same_goal_margin,
+            'needs_expansion': bool(score_count >= 2 and (same_total_layer or same_goal_margin or all_low_templates)),
+            'max_winner_goals': max(winner_goals) if winner_goals else 0,
+            'max_total_goals': max(total_goal_values) if total_goal_values else 0,
+            'avg_total_goals': (sum(total_goal_values) / len(total_goal_values)) if total_goal_values else 0.0,
+        }
+
+    @classmethod
+    def _pick_coverage_expansion_candidate(
+        cls,
+        ranked_scores: List[Tuple[str, float]],
+        selected_scores: List[Tuple[str, float]],
+        *,
+        predicted_outcome_label: str,
+        expansion_strength: float,
+    ) -> Tuple[Optional[Tuple[str, float]], Dict[str, Any]]:
+        profile = cls._build_score_selection_profile(selected_scores, predicted_outcome_label=predicted_outcome_label)
+        if not profile.get('needs_expansion'):
+            return None, profile
+        selected_names = {score for score, _prob in selected_scores}
+        min_selected_prob = min((float(prob or 0.0) for _score, prob in selected_scores), default=0.0)
+        threshold_ratio = max(0.42, 0.62 - float(expansion_strength or 0.0) * 2.5)
+        threshold = min_selected_prob * threshold_ratio
+        best_candidate: Optional[Tuple[str, float]] = None
+        best_value = -1.0
+
+        for index, (score, prob) in enumerate(ranked_scores):
+            if score in selected_names or float(prob or 0.0) < threshold:
+                continue
+            components = cls._parse_score_components(score)
+            if not components:
+                continue
+            total_goals = int(components['total_goals'])
+            goal_diff = abs(int(components['goal_diff']))
+            winner_goals = int(components['home_goals']) if predicted_outcome_label == '主胜' else int(components['away_goals']) if predicted_outcome_label == '客胜' else int(components['home_goals'])
+            bonus = 0.0
+            if total_goals not in profile['totals']:
+                bonus += 1.4
+            if goal_diff not in profile['goal_diffs']:
+                bonus += 1.1
+            if profile['all_low_templates'] and not cls._is_low_conservative_template(score, predicted_outcome_label):
+                bonus += 1.6
+            if winner_goals > int(profile['max_winner_goals'] or 0):
+                bonus += 1.1
+            if total_goals > int(profile['max_total_goals'] or 0):
+                bonus += 0.8
+            if abs(total_goals - float(profile['avg_total_goals'] or 0.0)) <= 2:
+                bonus += 0.4
+            elif abs(total_goals - float(profile['avg_total_goals'] or 0.0)) >= 4:
+                bonus -= 0.25
+            candidate_value = bonus + float(prob or 0.0) * 8.0 - index * 0.01
+            if bonus >= 1.5 and candidate_value > best_value:
+                best_candidate = (score, float(prob or 0.0))
+                best_value = candidate_value
+        return best_candidate, profile
+
     def rerank_top_scores(
         self,
         top_scores: List[Tuple[str, float]],
         predicted_outcome_label: str,
         *,
+        ranked_probabilities: Optional[List[Tuple[str, float]]] = None,
         home_lambda: float,
         away_lambda: float,
         over_under: Optional[Dict[str, Any]],
@@ -678,7 +887,36 @@ class PredictionPostprocessService:
         limit: int = 3,
     ) -> Any:
         scores = [(str(score), float(prob or 0.0)) for score, prob in (top_scores or []) if str(score).strip()]
-        adjusted = dict(scores)
+        ranked_outcomes = [
+            (str(label), float(prob or 0.0))
+            for label, prob in (ranked_probabilities or [])
+            if str(label).strip()
+        ]
+        primary_probability = 0.0
+        secondary_probability = 0.0
+        secondary_gap = 1.0
+        if ranked_outcomes:
+            primary_probability = float(ranked_outcomes[0][1] or 0.0)
+            if len(ranked_outcomes) > 1:
+                secondary_probability = float(ranked_outcomes[1][1] or 0.0)
+                secondary_gap = max(0.0, primary_probability - secondary_probability)
+        double_pick = bool(
+            ranked_outcomes
+            and len(ranked_outcomes) > 1
+            and secondary_probability >= 0.28
+            and secondary_gap <= 0.06
+        )
+        allowed_outcomes = [predicted_outcome_label]
+        if double_pick:
+            secondary_label = str(ranked_outcomes[1][0]).strip()
+            if secondary_label and secondary_label not in allowed_outcomes:
+                allowed_outcomes.append(secondary_label)
+        directional_scores = [
+            (score, prob)
+            for score, prob in scores
+            if any(self._score_matches_outcome(score, outcome) for outcome in allowed_outcomes)
+        ]
+        adjusted = dict(directional_scores)
         context = self.build_three_layer_runtime_context(
             predicted_outcome_label=predicted_outcome_label,
             strength_diff=strength_diff,
@@ -692,6 +930,11 @@ class PredictionPostprocessService:
         under_prob = self._safe_float((over_under or {}).get('under')) if isinstance(over_under, dict) else None
         open_match = bool((line is not None and line >= 2.75) or (over_prob is not None and under_prob is not None and over_prob > under_prob) or (home_lambda + away_lambda >= 2.8))
         signals: List[str] = []
+        filtered_out_count = len(scores) - len(directional_scores)
+        if filtered_out_count > 0:
+            signals.append('score-direction-filter')
+        if double_pick:
+            signals.append('score-double-pick')
         if context.get('scenario_name') == 'strong_home_shallow_line' and predicted_outcome_label == '主胜':
             for score, factor in {'1-0': 0.92, '2-0': 0.88, '3-0': 0.8, '2-1': 1.16, '3-1': 1.08}.items():
                 if score in adjusted:
@@ -714,14 +957,91 @@ class PredictionPostprocessService:
                 if score in adjusted:
                     adjusted[score] *= factor
             signals.append('score-template-cap')
-        reranked = sorted(self._rescale_score_list(list(adjusted.items())), key=lambda item: item[1], reverse=True)
-        reranked = reranked[: max(1, int(limit or 3))]
+        low_tempo_guard = bool(
+            line is not None and line <= 2.75 and over_prob is not None and under_prob is not None and under_prob - over_prob >= 0.06
+        )
+        shallow_market_guard = bool(
+            context.get('handicap_depth_bucket') in {'level_ball', 'level_shallow'}
+            and float(confidence or 0.0) <= 0.52
+            and primary_probability <= 0.52
+            and secondary_gap <= 0.08
+        )
+        if low_tempo_guard:
+            if predicted_outcome_label == '主胜':
+                for score, factor in {'3-1': 0.86, '3-0': 0.9, '2-1': 0.96, '1-0': 1.04}.items():
+                    if score in adjusted:
+                        adjusted[score] *= factor
+            elif predicted_outcome_label == '客胜':
+                for score, factor in {'1-3': 0.86, '0-3': 0.9, '1-2': 0.96, '0-1': 1.04}.items():
+                    if score in adjusted:
+                        adjusted[score] *= factor
+            elif predicted_outcome_label == '平局' and not open_match:
+                for score, factor in {'2-2': 0.84, '3-3': 0.76, '1-1': 1.04, '0-0': 1.03}.items():
+                    if score in adjusted:
+                        adjusted[score] *= factor
+            signals.append('score-market-low-tempo-guard')
+        if shallow_market_guard:
+            if predicted_outcome_label == '主胜':
+                for score, factor in {'3-0': 0.84, '3-1': 0.88, '2-0': 0.95, '2-1': 1.03, '1-0': 1.04}.items():
+                    if score in adjusted:
+                        adjusted[score] *= factor
+            elif predicted_outcome_label == '客胜':
+                for score, factor in {'0-3': 0.84, '1-3': 0.88, '0-2': 0.95, '1-2': 1.03, '0-1': 1.04}.items():
+                    if score in adjusted:
+                        adjusted[score] *= factor
+            signals.append('score-market-shallow-cap')
+        if self._apply_review_score_correction(
+            adjusted,
+            predicted_outcome_label=predicted_outcome_label,
+            score_bias=score_bias,
+            open_match=open_match,
+        ):
+            signals.append('score-review-conservative-correction')
+        ranked_adjusted = sorted(self._rescale_score_list(list(adjusted.items())), key=lambda item: item[1], reverse=True)
+        target_limit = max(2 if double_pick else 1, int(limit or 3))
+        reranked = list(ranked_adjusted[:target_limit])
+        coverage_profile = self._build_score_selection_profile(reranked, predicted_outcome_label=predicted_outcome_label)
+        coverage_expansion_strength = float(score_bias.get('recommended_score_coverage_expansion') or 0.0)
+        coverage_expansion_rate = float(score_bias.get('coverage_expansion_rate') or 0.0)
+        coverage_expansion_applied = False
+        coverage_candidate = None
+        if (
+            target_limit >= 3
+            and coverage_profile.get('needs_expansion')
+            and (coverage_expansion_rate >= 0.18 or coverage_expansion_strength >= 0.03)
+        ):
+            coverage_candidate, coverage_profile = self._pick_coverage_expansion_candidate(
+                ranked_adjusted,
+                reranked,
+                predicted_outcome_label=predicted_outcome_label,
+                expansion_strength=coverage_expansion_strength,
+            )
+            if coverage_candidate:
+                if len(reranked) >= target_limit:
+                    reranked = reranked[:-1]
+                reranked.append(coverage_candidate)
+                reranked = sorted(self._rescale_score_list(reranked), key=lambda item: item[1], reverse=True)[:target_limit]
+                coverage_expansion_applied = True
+                signals.append('score-review-coverage-expansion')
         diag = {
             'applied': reranked != scores[: len(reranked)],
             'signals': list(dict.fromkeys(signals)),
             'scenario_name': context.get('scenario_name'),
             'open_match': open_match,
             'confidence': float(confidence or 0.0),
+            'filtered_out_count': filtered_out_count,
+            'allowed_outcomes': allowed_outcomes,
+            'double_pick': double_pick,
+            'secondary_gap': secondary_gap,
+            'secondary_probability': secondary_probability,
+            'coverage_profile': {
+                'same_total_layer': bool(coverage_profile.get('same_total_layer')),
+                'same_goal_margin': bool(coverage_profile.get('same_goal_margin')),
+                'all_low_templates': bool(coverage_profile.get('all_low_templates')),
+                'needs_expansion': bool(coverage_profile.get('needs_expansion')),
+            },
+            'coverage_expansion_applied': coverage_expansion_applied,
+            'coverage_expansion_candidate': coverage_candidate[0] if coverage_candidate else None,
         }
         if return_diag:
             return reranked, diag

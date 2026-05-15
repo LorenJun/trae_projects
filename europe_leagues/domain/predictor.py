@@ -21,8 +21,17 @@ class DomainPredictor:
         league_code: str,
         match_date: str,
         matches: Optional[List[Dict[str, Any]]] = None,
-    ) -> Optional[str]:
-        return self._predictor.generate_prediction_report(league_code, match_date, matches=matches)
+        *,
+        persist: bool = True,
+        write_teams: bool = True,
+    ) -> Dict[str, Any]:
+        return self._predictor.generate_prediction_report(
+            league_code,
+            match_date,
+            matches=matches,
+            persist=persist,
+            write_teams=write_teams,
+        )
 
 
 __all__ = ["DomainPredictor", "LEAGUE_CONFIG"]

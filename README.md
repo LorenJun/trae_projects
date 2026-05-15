@@ -13,8 +13,8 @@ last_updated_date: "2026-05-08"
 > 1. `prediction_system.py collect-data` 获取赛程、`match_id` 与上下文  
 > 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层  
 > 3. 五大联赛写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写回 `MEMORY.md` 与 `.okooo-scraper/runtime/*`  
-> 4. 赛后用 `save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
-> 5. 最后用 `accuracy --refresh` 刷新胜负 / 比分 / 大小球统计  
+> 4. 赛后用 `save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填；结果闭环会统一刷新 archive / MEMORY / RAG / review-learning  
+> 5. `accuracy --refresh` 仍可作为显式重建入口，但正常赛果闭环后准确率会自动同步刷新  
 > 6. 如需阶段化、可审计结果，优先使用 `harness-run --pipeline ... --json`
 
 ## 项目简介
@@ -25,7 +25,8 @@ last_updated_date: "2026-05-08"
 - `prediction_system.py` 兼容入口
 - `app/cli.py` 真实 CLI 路由与 JSON 输出
 - `DomainPredictor` / `EnhancedPredictor` 主预测编排
-- `HybridRAGService` 结构化记忆检索
+- `PredictionPersistenceService` 统一预测持久化 side effects
+- `HybridRAGService` + review-learning + postprocess 主链增强
 - SoT / runtime-only 双路径写回
 - 赛果同步、准确率统计与 RAG 联动更新
 
@@ -53,6 +54,8 @@ last_updated_date: "2026-05-08"
 
 - `prediction_system.py` 已收缩为兼容壳
 - 真实命令逻辑集中在 `europe_leagues/app/cli.py`
+- `EnhancedPredictor` 负责预测主编排，`PredictionPersistenceService` 负责预测持久化编排
+- `domain/inference.py`、`domain/postprocess.py`、`domain/rag.py` 与 review-learning 已接入正式预测主链
 - runtime 物理落盘已统一到 `europe_leagues/.okooo-scraper/runtime/`
 - `health-check`、`setup-openclaw` 已成为正式环境入口
 - Hermes 或其他接入方应固定按“先发现 `prediction_system.py`，再下钻到 `app/cli.py` 真正执行”的规则识别
@@ -180,8 +183,8 @@ python3 prediction_system.py list-leagues --json
 4. 检查 over_under.line / line_source / over_under.market.final
 5. 检查 retrieved_memory / retrieved_memory_explanation
 6. 按比赛类型写回 SoT 或 runtime-only 归档
-7. save-result / bulk_fetch_and_update.py / auto-sync-results 回填赛果
-8. accuracy --refresh 更新胜负 / 比分 / 大小球统计
+7. save-result / bulk_fetch_and_update.py / auto-sync-results / result-sync-daemon 回填赛果
+8. 结果闭环自动刷新胜负 / 比分 / 大小球统计、记忆样本、RAG 与 review-learning；需要显式重建时再执行 accuracy --refresh
 ```
 
 关键原则：

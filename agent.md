@@ -12,9 +12,9 @@ last_updated_date: "2026-05-15"
 > 当前正式流程  
 > 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
 > 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测  
-> 3. 结果写回 `europe_leagues/<league>/teams_2025-26.md`  
-> 4. 赛后用 `prediction_system.py save-result` 或 `bulk_fetch_and_update.py` 回填  
-> 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
+> 3. 五大联赛写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写回 `MEMORY.md` 与 runtime-only 归档  
+> 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
+> 5. 结果闭环会统一刷新 accuracy / MEMORY / RAG / review-learning；`prediction_system.py accuracy --refresh --json` 仍可作为显式重建入口  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
 > 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`
 
@@ -88,13 +88,13 @@ trae_projects/
 - `EnhancedPredictor` 仍保留主流程编排职责，但大部分子能力已拆到 `domain/`、`collectors/`、`storage/`、`runtime/`
 - `agents/*.md` 与 `agent_runtime_registry.py` 共同决定运行时输出中的 `runtime_profile`
 
-## 单一事实来源
+## 事实写回与 runtime 边界
 
-正式预测与赛果学习统一以：
+正式写回遵守当前双路径：
 
-- `europe_leagues/<league>/teams_2025-26.md`
-
-为准。
+- 五大联赛 SoT：`europe_leagues/<league>/teams_2025-26.md`
+- 欧战/杯赛滚动记忆：项目根 `MEMORY.md`
+- 运行时归档与索引：`europe_leagues/.okooo-scraper/runtime/*.json`
 
 运行时抓取与缓存目录：
 
@@ -130,8 +130,9 @@ trae_projects/
 
 - 输出中区分 `模型结论`、`盘口结论`、`综合结论`
 - 明确样本边界、降级情况与风险提示
-- 正式流程服从 `prediction_system.py` -> `app/cli.py`、`DomainPredictor` / `EnhancedPredictor`、`bulk_fetch_and_update.py` 与 `harness`
-- 正式写回仍以 `teams_2025-26.md` 为准
+- 正式流程服从 `prediction_system.py` -> `app/cli.py` -> `DomainPredictor` / `EnhancedPredictor`
+- 预测持久化由 `PredictionPersistenceService` 统一编排，`ResultManager` 负责 archive / result / accuracy 底座能力
+- 正式写回遵守五大联赛 SoT + 欧战/杯赛 runtime-only 的双路径边界
 
 ## Agent 分工
 
@@ -189,7 +190,7 @@ trae_projects/
 
 当前要求：
 
-- 以 `teams_2025-26.md` 为单一事实来源
+- 五大联赛以 `teams_2025-26.md` 为 SoT，欧战/杯赛结合 `MEMORY.md` 与 runtime archive 回填
 - 支持 `bulk_fetch_and_update.py` 批量回填
 - 统计胜负、比分、大小球准确率
 - 在精算师职业画像中，主要承担“第 4 维统计验证与模型评估 + 第 6 维策略迭代支持”职责
@@ -217,10 +218,10 @@ trae_projects/
 临场数据更新与滚动记忆管理技能：
 
 - 获取临场数据（首发阵容、伤停更新、赔率变化）
-- **覆盖更新** MEMORY.md 中原预测行（非重复添加）
+- 生成【临场更新】版预测说明，避免重复堆叠旧结论
 - 使用【临场更新】标记区分初始预测 vs 临场更新
 - 必须包含"调整说明"解释预测变化的逻辑
-- 每场比赛在滚动记忆中只有**一个最终预测**
+- 五大联赛优先遵守 `teams_2025-26.md` 写回，欧战/杯赛再走 `MEMORY.md` 与 runtime-only 归档
 
 标准格式：
 ```markdown
@@ -485,8 +486,8 @@ Step 4: 刷新实时快照（欧赔/亚值/大小球/凯利）
 Step 4.5: 自动补 EWMA form、缺失大小球，按需注入 `team_context`
 Step 5: 运行 `DomainPredictor` / `EnhancedPredictor` 编排流程
 Step 6: 输出最终结论
-Step 7: 批量或单场写回 teams_2025-26.md
-Step 8: 赛后回填真实比分并更新胜负/比分/大小球准确率
+Step 7: 按比赛类型写回 teams_2025-26.md 或 MEMORY.md / runtime archive
+Step 8: 赛后回填真实比分，并由结果闭环自动刷新胜负/比分/大小球准确率、记忆样本、RAG 与 review-learning
 ```
 
 ## 推荐命令

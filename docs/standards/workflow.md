@@ -10,8 +10,8 @@ last_updated: "2026-05-13"
 > 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
 > 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层、历史盘口一致性与临场建议层  
 > 3. 五大联赛 SoT 写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写入 `MEMORY.md` 与 runtime-only 归档  
-> 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
-> 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
+> 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填；结果闭环会统一刷新 archive / MEMORY / RAG / review-learning  
+> 5. `prediction_system.py accuracy --refresh --json` 仍可作为显式重建入口，但正常赛果闭环后准确率会自动同步刷新  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
 > 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`、`realtime.context_applied.live_outcome_adjustment.historical_market_alignment`、`retrieved_memory.summary.live_market_followup`、`live_betting_advice`
 
@@ -55,7 +55,7 @@ Step 9: 需要落盘时按比赛类型写回 teams_2025-26.md 或 MEMORY.md / ru
         ↓
 Step 10: 比赛结束后单场或批量回填赛果
         ↓
-Step 11: 更新胜负 / 比分 / 大小球准确率、记忆样本与 RAG 索引
+Step 11: 结果闭环自动刷新胜负 / 比分 / 大小球准确率、记忆样本、RAG 与 review-learning
 ```
 
 ## 统一职业身份
@@ -115,7 +115,7 @@ Step 11: 更新胜负 / 比分 / 大小球准确率、记忆样本与 RAG 索引
 1. 只读查询：允许仅读文档或读取联赛文件，不写入。
 2. 数据采集：必须优先确认联赛、日期、球队、可选时间，并尽量获取 match_id。
 3. 赛前预测：必须经过“确认比赛 -> 抓赛程/拿 match_id -> 刷新实时快照 -> RAG 检索 -> 分析 -> 生成预测 -> 按比赛类型写回（如需要）”。
-4. 赛果回填：必须经过“确认比赛 -> 校验比分 -> save-result -> 必要时刷新 accuracy”。
+4. 赛果回填：必须经过“确认比赛 -> 校验比分 -> save-result/auto-sync-results/result-sync-daemon/批量回填 -> 校验结果闭环已刷新”；仅在需要显式重建统计时再执行 accuracy --refresh。
 5. 准确率统计：直接读取 `teams_2025-26.md`、`MEMORY.md` 与运行时统计结果，不依赖旧模板文件。
 6. 若准备创建新的预测 markdown、结果 markdown 或临时主流程文件，视为偏航，立即停止并改回 `teams_2025-26.md` 或 `MEMORY.md` 的既有链路。
 7. 若数据不足，先说明缺口，再执行 collect-data 或降级方案，不允许跳过采集直接输出确定性结论。
@@ -342,7 +342,17 @@ cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py harness-run --pipeline result_recording --match-id <match_id> --home-score <n> --away-score <n> --refresh --json
 ```
 
-## Step 10: 更新准确率与历史学习数据
+## Step 10: 结果闭环衍生刷新与显式重建
+
+正常赛果闭环后会自动刷新：
+
+- 胜平负命中率
+- 比分 Top 命中率
+- 大小球命中率
+- 历史复盘与学习数据更新
+- 记忆样本与 RAG 索引刷新
+
+如需对已有数据做显式重建，仍可执行 `prediction_system.py accuracy --refresh --json`。
 
 当前统计应围绕：
 
@@ -398,7 +408,7 @@ python3 prediction_system.py accuracy --refresh --json
 - 检查是否真的进入 `handicap.php`
 - 检查是否成功点开 `大小球` tab
 - 检查是否被风控拦截
-- 若仍失败，可 fallback，但必须在结果中说明已回退默认线
+- 若仍失败，必须保留 `missing_real_line` / “待补真实盘口” 标记，不得伪造默认盘口线
 
 ### 3. 结果写回位置错误
 

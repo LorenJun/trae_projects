@@ -884,6 +884,18 @@ class PredictionPersistenceService:
     def refresh_accuracy_stats(self) -> Dict[str, Any]:
         return self.result_manager.update_accuracy_stats()
 
-    def persist_prediction_batch(self, predictions: list[Dict[str, Any]], league_code: str) -> None:
-        _ = (predictions, league_code)
+    def persist_prediction_batch(self, predictions: list[Dict[str, Any]], league_code: str) -> Dict[str, Any]:
+        _ = league_code
+        prediction_count = len(predictions or [])
         self.refresh_accuracy_stats()
+        return {
+            'prediction_count': prediction_count,
+            'accuracy_refreshed': True,
+            'persisted': {
+                'enabled': True,
+                'archived': False,
+                'memory_updated': False,
+                'result_sync_registered': False,
+                'batch_mode': True,
+            },
+        }

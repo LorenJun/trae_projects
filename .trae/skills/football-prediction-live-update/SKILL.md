@@ -15,7 +15,7 @@ name: football-prediction-live-update
 
 ## 概述
 
-本技能定义了如何将临场数据（首发阵容、伤停更新、赔率变化）整合到预测中，并正确更新 MEMORY.md 滚动记忆的标准流程。
+本技能定义了如何将临场数据（首发阵容、伤停更新、赔率变化）整合到当前正式预测链路中，并在需要时更新滚动记忆与预测备注。
 
 ## 核心原则
 
@@ -185,10 +185,10 @@ def update_memory_md(match_id, updated_prediction, live_data):
 
 ## 自动化脚本
 
-使用 `scripts/update_memory_live.py` 自动更新MEMORY.md：
+使用 `scripts/update_memory_live.py` 自动生成临场更新内容：
 
 ```bash
-python3 .claude/skills/football-prediction-live-update/scripts/update_memory_live.py \
+python3 .trae/skills/football-prediction-live-update/scripts/update_memory_live.py \
     --match-id la_liga_20260515_赫罗纳_皇家社会 \
     --odds-change "2.13->1.99" \
     --confidence-boost 12 \
@@ -212,7 +212,7 @@ python3 .claude/skills/football-prediction-live-update/scripts/update_memory_liv
 | 原预测被意外删除 | 更新前先备份，或从git历史恢复 |
 | 临场数据获取失败 | 使用备用数据源，或标记为"数据待补" |
 
-## 相关技能
+## 相关文档
 
-- `football-prediction-sync-results` - 赛后结果同步与复盘
-- `update-five-leagues-standings` - 积分榜更新
+- `../../docs/standards/workflow.md` - 正式预测、写回与回填流程
+- `../../docs/standards/skill_lifecycle.md` - Skill 正文与维护治理边界

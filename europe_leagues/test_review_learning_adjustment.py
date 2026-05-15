@@ -9,7 +9,7 @@ from domain.odds import HistoricalOddsReference, build_market_context
 from domain.postprocess import PredictionPostprocessService
 from domain.rag import HybridRAGService
 from domain.review_learning import PredictionReviewLearningService
-from domain.writeback import build_prediction_note
+from domain.writeback import build_prediction_note, normalize_existing_prediction_note
 
 
 class _DummyMatchIntelligenceEngine:
@@ -251,6 +251,230 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertTrue(diag["applied"])
         self.assertIn("score-template-cap", diag["signals"])
         self.assertEqual(reranked[0][0], "2-2")
+
+    def test_rerank_top_scores_filters_scores_that_conflict_with_prediction_direction(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-1", 0.24), ("0-1", 0.22), ("1-0", 0.2), ("2-1", 0.18), ("2-0", 0.16)],
+            "主胜",
+            ranked_probabilities=[("主胜", 0.48), ("平局", 0.28), ("客胜", 0.24)],
+            home_lambda=1.74,
+            away_lambda=0.96,
+            over_under={"over": 0.46, "under": 0.54, "line": 2.5},
+            strength_diff=10,
+            confidence=0.48,
+            current_odds={"亚值": {"final": {"handicap_value": -0.25}}, "欧赔": {"final": {"home": 2.18, "draw": 3.18, "away": 3.36}}},
+            review_learning={},
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-direction-filter", diag["signals"])
+        self.assertEqual(diag["filtered_out_count"], 2)
+        self.assertEqual([score for score, _ in reranked], ["1-0", "2-1", "2-0"])
+
+    def test_rerank_top_scores_adds_second_direction_when_match_is_double_pick(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-1", 0.24), ("1-0", 0.21), ("0-0", 0.18), ("2-1", 0.15), ("0-1", 0.12)],
+            "主胜",
+            ranked_probabilities=[("主胜", 0.41), ("平局", 0.38), ("客胜", 0.21)],
+            home_lambda=1.52,
+            away_lambda=1.1,
+            over_under={"over": 0.43, "under": 0.57, "line": 2.5},
+            strength_diff=6,
+            confidence=0.41,
+            current_odds={"亚值": {"final": {"handicap_value": -0.25}}, "欧赔": {"final": {"home": 2.32, "draw": 3.01, "away": 3.34}}},
+            review_learning={},
+            return_diag=True,
+            limit=3,
+        )
+        self.assertTrue(diag["double_pick"])
+        self.assertIn("score-double-pick", diag["signals"])
+        self.assertEqual(diag["allowed_outcomes"], ["主胜", "平局"])
+        self.assertEqual([score for score, _ in reranked], ["1-1", "1-0", "0-0"])
+
+    def test_rerank_top_scores_applies_review_conservative_correction_for_home_win(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-0", 0.26), ("2-0", 0.22), ("2-1", 0.21), ("3-1", 0.18), ("3-0", 0.13)],
+            "主胜",
+            ranked_probabilities=[("主胜", 0.52), ("平局", 0.27), ("客胜", 0.21)],
+            home_lambda=1.88,
+            away_lambda=1.02,
+            over_under={"over": 0.58, "under": 0.42, "line": 2.75},
+            strength_diff=14,
+            confidence=0.52,
+            current_odds={"亚值": {"final": {"handicap_value": -0.25}}, "欧赔": {"final": {"home": 2.24, "draw": 3.18, "away": 3.28}}},
+            review_learning={
+                "score_bias": {
+                    "available": True,
+                    "conservative_home_win_rate": 0.46,
+                    "low_total_underestimate_rate": 0.5,
+                    "home_goal_ceiling_underestimate_rate": 0.42,
+                    "recommended_home_goal_boost": 0.04,
+                    "recommended_low_total_penalty": 0.025,
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-review-conservative-correction", diag["signals"])
+        self.assertNotEqual(reranked[0][0], "1-0")
+        self.assertTrue(any(score in {"2-1", "3-1", "3-0"} for score, _ in reranked[:2]))
+
+    def test_rerank_top_scores_applies_review_conservative_correction_for_away_win(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("0-1", 0.29), ("0-2", 0.23), ("1-2", 0.2), ("0-3", 0.16), ("1-3", 0.12)],
+            "客胜",
+            ranked_probabilities=[("客胜", 0.47), ("平局", 0.29), ("主胜", 0.24)],
+            home_lambda=0.92,
+            away_lambda=1.74,
+            over_under={"over": 0.57, "under": 0.43, "line": 2.75},
+            strength_diff=-13,
+            confidence=0.47,
+            current_odds={"亚值": {"final": {"handicap_value": 0.25}}, "欧赔": {"final": {"home": 3.08, "draw": 3.16, "away": 2.2}}},
+            review_learning={
+                "score_bias": {
+                    "available": True,
+                    "conservative_away_win_rate": 0.48,
+                    "low_total_underestimate_rate": 0.44,
+                    "away_goal_ceiling_underestimate_rate": 0.4,
+                    "recommended_away_goal_boost": 0.05,
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-review-conservative-correction", diag["signals"])
+        self.assertNotEqual(reranked[0][0], "0-1")
+        self.assertTrue(any(score in {"0-2", "1-2", "0-3"} for score, _ in reranked[:2]))
+
+    def test_rerank_top_scores_expands_coverage_when_templates_are_too_homogeneous(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-0", 0.24), ("2-0", 0.23), ("2-1", 0.22), ("3-1", 0.15), ("3-0", 0.14), ("4-1", 0.02)],
+            "主胜",
+            ranked_probabilities=[("主胜", 0.51), ("平局", 0.27), ("客胜", 0.22)],
+            home_lambda=1.94,
+            away_lambda=0.98,
+            over_under={"over": 0.55, "under": 0.45, "line": 2.75},
+            strength_diff=16,
+            confidence=0.5,
+            current_odds={"亚值": {"final": {"handicap_value": -0.25}}, "欧赔": {"final": {"home": 2.18, "draw": 3.24, "away": 3.42}}},
+            review_learning={
+                "score_bias": {
+                    "available": True,
+                    "coverage_expansion_rate": 0.5,
+                    "recommended_score_coverage_expansion": 0.05,
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertTrue(diag["coverage_profile"]["needs_expansion"])
+        self.assertTrue(diag["coverage_expansion_applied"])
+        self.assertIn("score-review-coverage-expansion", diag["signals"])
+        self.assertIn(diag["coverage_expansion_candidate"], {"3-1", "3-0"})
+        self.assertTrue(any(score in {"3-1", "3-0"} for score, _ in reranked))
+
+    def test_rerank_top_scores_keeps_direction_stable_after_review_correction(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-0", 0.25), ("2-0", 0.21), ("2-1", 0.19), ("0-0", 0.18), ("0-1", 0.17), ("3-1", 0.12)],
+            "主胜",
+            ranked_probabilities=[("主胜", 0.49), ("平局", 0.3), ("客胜", 0.21)],
+            home_lambda=1.82,
+            away_lambda=0.94,
+            over_under={"over": 0.56, "under": 0.44, "line": 2.75},
+            strength_diff=15,
+            confidence=0.49,
+            current_odds={"亚值": {"final": {"handicap_value": -0.25}}, "欧赔": {"final": {"home": 2.2, "draw": 3.22, "away": 3.36}}},
+            review_learning={
+                "score_bias": {
+                    "available": True,
+                    "conservative_home_win_rate": 0.45,
+                    "home_goal_ceiling_underestimate_rate": 0.41,
+                    "coverage_expansion_rate": 0.44,
+                    "recommended_home_goal_boost": 0.04,
+                    "recommended_score_coverage_expansion": 0.04,
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertTrue(diag["applied"])
+        self.assertTrue(all(score not in {"0-0", "0-1"} for score, _ in reranked))
+        self.assertEqual(diag["allowed_outcomes"], ["主胜"])
+
+    def test_rerank_top_scores_applies_market_low_tempo_guard_for_home_win(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("3-1", 0.24), ("2-1", 0.22), ("1-0", 0.2), ("2-0", 0.18)],
+            "主胜",
+            ranked_probabilities=[("主胜", 0.5), ("平局", 0.27), ("客胜", 0.23)],
+            home_lambda=1.56,
+            away_lambda=0.86,
+            over_under={"over": 0.44, "under": 0.56, "line": 2.5},
+            strength_diff=10,
+            confidence=0.5,
+            current_odds={"亚值": {"final": {"handicap_value": -0.25}}, "欧赔": {"final": {"home": 2.16, "draw": 3.18, "away": 3.48}}},
+            review_learning={},
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-market-low-tempo-guard", diag["signals"])
+        self.assertNotEqual(reranked[0][0], "3-1")
+        self.assertIn(reranked[0][0], {"2-1", "1-0"})
+
+    def test_rerank_top_scores_applies_market_low_tempo_guard_for_draw(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("2-2", 0.25), ("1-1", 0.22), ("0-0", 0.2), ("3-3", 0.1)],
+            "平局",
+            ranked_probabilities=[("平局", 0.42), ("主胜", 0.31), ("客胜", 0.27)],
+            home_lambda=1.14,
+            away_lambda=1.02,
+            over_under={"over": 0.43, "under": 0.57, "line": 2.5},
+            strength_diff=2,
+            confidence=0.42,
+            current_odds={"亚值": {"final": {"handicap_value": 0.0}}, "欧赔": {"final": {"home": 2.64, "draw": 2.98, "away": 2.82}}},
+            review_learning={},
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-market-low-tempo-guard", diag["signals"])
+        self.assertNotEqual(reranked[0][0], "2-2")
+        self.assertIn(reranked[0][0], {"1-1", "0-0"})
+
+    def test_rerank_top_scores_caps_big_win_template_when_market_is_shallow(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("3-0", 0.23), ("3-1", 0.22), ("2-1", 0.2), ("1-0", 0.19), ("2-0", 0.16)],
+            "主胜",
+            ranked_probabilities=[("主胜", 0.5), ("平局", 0.44), ("客胜", 0.06)],
+            home_lambda=1.66,
+            away_lambda=1.02,
+            over_under={"over": 0.5, "under": 0.5, "line": 2.75},
+            strength_diff=12,
+            confidence=0.5,
+            current_odds={"亚值": {"final": {"handicap_value": -0.25}}, "欧赔": {"final": {"home": 2.26, "draw": 3.05, "away": 3.38}}},
+            review_learning={},
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-market-shallow-cap", diag["signals"])
+        self.assertNotIn(reranked[0][0], {"3-0", "3-1"})
+
+    def test_rerank_top_scores_keeps_double_pick_behavior_after_market_guards(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-1", 0.24), ("1-0", 0.21), ("0-0", 0.18), ("2-1", 0.15), ("0-1", 0.12)],
+            "主胜",
+            ranked_probabilities=[("主胜", 0.41), ("平局", 0.38), ("客胜", 0.21)],
+            home_lambda=1.52,
+            away_lambda=1.1,
+            over_under={"over": 0.43, "under": 0.57, "line": 2.5},
+            strength_diff=6,
+            confidence=0.41,
+            current_odds={"亚值": {"final": {"handicap_value": -0.25}}, "欧赔": {"final": {"home": 2.32, "draw": 3.01, "away": 3.34}}},
+            review_learning={},
+            return_diag=True,
+            limit=3,
+        )
+        self.assertTrue(diag["double_pick"])
+        self.assertEqual(diag["allowed_outcomes"], ["主胜", "平局"])
+        self.assertTrue(any(score == "1-1" for score, _ in reranked))
 
     def test_apply_three_layer_total_goals_adjustment_rebalances_buckets(self):
         adjusted, diag = self.service.apply_three_layer_total_goals_adjustment(
@@ -730,6 +954,48 @@ class HistoricalOddsAlignmentTest(unittest.TestCase):
             }
         )
         self.assertIn("MatchID:1302909", note)
+
+    def test_build_prediction_note_filters_scores_against_single_direction(self):
+        note = build_prediction_note(
+            {
+                "prediction": "主胜",
+                "confidence": 0.39,
+                "top_scores": [("1-1", 0.24), ("1-0", 0.22), ("0-0", 0.2)],
+                "over_under": {"line": 2.75, "over": 0.4, "under": 0.6},
+                "upset_potential": {"level": "中", "index": 63},
+            }
+        )
+        self.assertIn("比分:1-0", note)
+        self.assertNotIn("比分:1-1/1-0", note)
+        self.assertNotIn("0-0", note)
+
+    def test_build_prediction_note_sanitizes_case_hint_and_closes_parenthesis(self):
+        note = build_prediction_note(
+            {
+                "prediction": "主胜",
+                "confidence": 0.41,
+                "top_scores": [("2-1", 0.2), ("1-0", 0.18)],
+                "upset_potential": {
+                    "level": "中",
+                    "index": 63,
+                    "case_knowledge": {
+                        "available": True,
+                        "hint": "诺丁汉森林vs纽卡斯尔联(中度爆冷,平局大师 | ",
+                    },
+                },
+            }
+        )
+        self.assertIn("案例:诺丁汉森林vs纽卡斯尔联(中度爆冷,平局大师)", note)
+        self.assertNotIn("|", note)
+
+    def test_normalize_existing_prediction_note_repairs_historical_score_and_case_fragments(self):
+        normalized = normalize_existing_prediction_note(
+            "已完赛；预测:主胜 信心:0.42 比分:1-0/0-1 大小:小2.5(0.72) 爆冷:中(46) 案例:切尔西vs曼联(中度爆冷,强队胜强队 动态调权:样本不足"
+        )
+        self.assertIn("比分:1-0", normalized)
+        self.assertNotIn("0-1", normalized)
+        self.assertIn("案例:切尔西vs曼联(中度爆冷,强队胜强队)", normalized)
+        self.assertIn("动态调权:样本不足", normalized)
 
 
 class InferenceScoreRerankGuardTest(unittest.TestCase):
