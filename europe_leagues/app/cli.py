@@ -63,6 +63,40 @@ def run_quietly(func):
     return result, stdout_buffer.getvalue(), stderr_buffer.getvalue()
 
 
+FORMAL_COMMANDS = (
+    "list-leagues",
+    "predict-match",
+    "predict-match-lite",
+    "predict-schedule",
+    "collect-data",
+    "pending-results",
+    "save-result",
+    "auto-sync-results",
+    "result-sync-daemon",
+    "accuracy",
+    "sync-pending-results-review",
+    "build-season-master-review",
+    "refresh-repo-docs",
+    "purge-nonreal-data",
+    "rag-rebuild",
+    "rag-diagnose",
+    "sync-memory-rag",
+    "health-check",
+    "migrate-archive",
+    "setup-openclaw",
+    "harness-list",
+    "harness-run",
+)
+
+LEGACY_COMMANDS = (
+    "enhanced",
+    "original",
+    "ml-test",
+    "results",
+    "show-accuracy",
+    "update-accuracy",
+)
+
 COMMAND_AGENT_ROLES = {
     "list-leagues": [],
     "predict-match": ["data_collector", "match_analyzer", "odds_analyzer"],
@@ -76,11 +110,13 @@ COMMAND_AGENT_ROLES = {
     "accuracy": ["result_tracker"],
     "sync-pending-results-review": ["result_tracker"],
     "build-season-master-review": ["result_tracker"],
+    "refresh-repo-docs": ["result_tracker"],
     "purge-nonreal-data": ["result_tracker"],
     "rag-rebuild": ["result_tracker"],
     "rag-diagnose": ["result_tracker"],
     "sync-memory-rag": ["result_tracker"],
     "health-check": [],
+    "migrate-archive": ["result_tracker"],
     "setup-openclaw": [],
     "harness-list": [],
     "harness-run": [],
@@ -627,7 +663,8 @@ def run_enhanced_system(league_code=None, days=3):
             for day_offset in range(days):
                 match_date = (base_date + timedelta(days=day_offset)).strftime("%Y-%m-%d")
                 print(f"  📅 生成 {match_date} 的预测...")
-                teams_file = predictor.generate_prediction_report(l_code, match_date)
+                report = predictor.generate_prediction_report(l_code, match_date)
+                teams_file = report.get("teams_file") if isinstance(report, dict) else report
                 if teams_file:
                     print(f"  ✅ 已更新 {os.path.basename(teams_file)}")
                     updated_files.append(teams_file)
@@ -856,18 +893,49 @@ def run_openclaw_predict_schedule(args):
         base_date = datetime.strptime(args.date, "%Y-%m-%d")
         updates = []
         runtime_profile = get_command_runtime_profile("predict-schedule")
+        persist = not bool(getattr(args, "no_write", False))
 
         for league_code in leagues:
             for day_offset in range(args.days):
                 match_date = (base_date + timedelta(days=day_offset)).strftime("%Y-%m-%d")
-                teams_file = predictor.generate_prediction_report(league_code, match_date)
+                report = predictor.generate_prediction_report(
+                    league_code,
+                    match_date,
+                    persist=persist,
+                    write_teams=persist,
+                )
+                if isinstance(report, dict):
+                    teams_file = report.get("teams_file")
+                    teams_updated = bool(report.get("teams_updated"))
+                    prediction_count = int(report.get("prediction_count") or 0)
+                    accuracy_refreshed = bool(report.get("accuracy_refreshed"))
+                    persisted = report.get("persisted") or {
+                        "enabled": persist,
+                        "archived": False,
+                        "memory_updated": False,
+                        "result_sync_registered": False,
+                    }
+                else:
+                    teams_file = report
+                    teams_updated = bool(teams_file)
+                    prediction_count = 0
+                    accuracy_refreshed = False
+                    persisted = {
+                        "enabled": persist,
+                        "archived": False,
+                        "memory_updated": False,
+                        "result_sync_registered": False,
+                    }
                 updates.append(
                     {
                         "league": league_code,
                         "league_name": league_config[league_code]["name"],
                         "match_date": match_date,
                         "teams_file": teams_file,
-                        "updated": bool(teams_file),
+                        "updated": teams_updated,
+                        "prediction_count": prediction_count,
+                        "accuracy_refreshed": accuracy_refreshed,
+                        "persisted": persisted,
                         "runtime_profile": runtime_profile,
                     }
                 )
@@ -950,6 +1018,7 @@ def run_openclaw_save_result(args):
             args.match_id,
             args.home_score,
             args.away_score,
+            force=bool(getattr(args, "force", False)),
         )
         if isinstance(result, dict):
             result.setdefault("runtime_profile", get_command_runtime_profile("save-result"))
@@ -1535,15 +1604,15 @@ def build_parser():
 
     subparsers = parser.add_subparsers(title="子命令", dest="command")
 
-    parser_enhanced = subparsers.add_parser("enhanced", help="运行增强版预测系统")
+    parser_enhanced = subparsers.add_parser("enhanced", help="[legacy] 运行增强版预测系统")
     parser_enhanced.add_argument("-l", "--league", help="指定联赛代码")
     parser_enhanced.add_argument("-d", "--days", type=int, default=3, help="预测天数（默认3）")
 
-    subparsers.add_parser("original", help="运行原始版预测系统")
-    subparsers.add_parser("ml-test", help="测试机器学习模型")
-    subparsers.add_parser("results", help="结果管理交互式菜单")
-    subparsers.add_parser("show-accuracy", help="显示准确率统计")
-    subparsers.add_parser("update-accuracy", help="更新准确率统计")
+    subparsers.add_parser("original", help="[legacy] 运行原始版预测系统")
+    subparsers.add_parser("ml-test", help="[legacy] 测试机器学习模型")
+    subparsers.add_parser("results", help="[legacy] 结果管理交互式菜单")
+    subparsers.add_parser("show-accuracy", help="[legacy] 显示准确率统计")
+    subparsers.add_parser("update-accuracy", help="[legacy] 更新准确率统计")
 
     parser_list = subparsers.add_parser("list-leagues", help="列出联赛，适合自动化调用")
     add_json_flag(parser_list)
@@ -1576,10 +1645,11 @@ def build_parser():
     parser_predict_match_lite.add_argument("--no-write", action="store_true", help="只输出预测结果，不写入 MEMORY.md")
     add_json_flag(parser_predict_match_lite)
 
-    parser_predict_schedule = subparsers.add_parser("predict-schedule", help="按日期批量生成预测并写回")
+    parser_predict_schedule = subparsers.add_parser("predict-schedule", help="按日期批量生成预测并按批次写回")
     parser_predict_schedule.add_argument("--league", help="联赛代码；留空表示全部联赛")
     parser_predict_schedule.add_argument("--date", required=True, help="开始日期 YYYY-MM-DD")
     parser_predict_schedule.add_argument("--days", type=int, default=1, help="连续处理天数")
+    parser_predict_schedule.add_argument("--no-write", action="store_true", help="只输出批量预测结果，不写入 teams/统计")
     add_json_flag(parser_predict_schedule)
 
     parser_collect = subparsers.add_parser("collect-data", help="抓取或降级采集比赛数据")

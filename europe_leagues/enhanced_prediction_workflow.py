@@ -7,7 +7,6 @@
 import os
 import sys
 import json
-import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import logging
@@ -121,70 +120,6 @@ LEAGUE_CONFIG = {
         'avg_goals': 2.7
     }
 }
-
-class PredictionCache:
-    """智能缓存系统 - 避免重复计算。
-
-    默认关闭（不读不写、不创建目录），以保证预测链路尽量使用实时数据。
-    如需开启（用于本地性能优化），设置环境变量：
-      ENABLE_PREDICTION_CACHE=1
-    """
-    
-    def __init__(self, cache_dir: str = '.prediction_cache', enabled: Optional[bool] = None):
-        if enabled is None:
-            enabled = os.getenv('ENABLE_PREDICTION_CACHE', '0') == '1'
-        self.enabled = bool(enabled) and bool(cache_dir)
-        self.cache_dir = cache_dir
-        if self.enabled:
-            os.makedirs(cache_dir, exist_ok=True)
-    
-    def _get_cache_key(self, func_name: str, params: Dict) -> str:
-        """生成缓存键"""
-        params_str = json.dumps(params, sort_keys=True, default=str)
-        key_str = f"{func_name}_{params_str}"
-        return hashlib.md5(key_str.encode()).hexdigest()
-    
-    def get(self, func_name: str, params: Dict, ttl_hours: int = 24) -> Optional[Any]:
-        """获取缓存数据"""
-        if not self.enabled:
-            return None
-        cache_key = self._get_cache_key(func_name, params)
-        cache_file = os.path.join(self.cache_dir, f"{cache_key}.json")
-        
-        if not os.path.exists(cache_file):
-            return None
-        
-        try:
-            with open(cache_file, 'r', encoding='utf-8') as f:
-                cache_data = json.load(f)
-            
-            # 检查是否过期
-            cache_time = datetime.fromisoformat(cache_data['timestamp'])
-            if datetime.now() - cache_time > timedelta(hours=ttl_hours):
-                os.remove(cache_file)
-                return None
-            
-            return cache_data['data']
-        except Exception as e:
-            logger.warning(f"读取缓存失败: {e}")
-            return None
-    
-    def set(self, func_name: str, params: Dict, data: Any):
-        """设置缓存数据"""
-        if not self.enabled:
-            return
-        cache_key = self._get_cache_key(func_name, params)
-        cache_file = os.path.join(self.cache_dir, f"{cache_key}.json")
-        
-        try:
-            cache_data = {
-                'timestamp': datetime.now().isoformat(),
-                'data': data
-            }
-            with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump(cache_data, f, ensure_ascii=False, default=str)
-        except Exception as e:
-            logger.warning(f"写入缓存失败: {e}")
 
 class DynamicWeightAdjuster:
     """动态权重调整器 - 根据历史准确率调整模型权重"""
@@ -725,15 +660,25 @@ class EnhancedPredictor:
 
         if persist:
             self.persistence_service.persist_prediction('predict_match', cache_params, result, league_code)
+            teams_path = self.writeback.teams_file_path(league_code)
+            if result.get('storage_mode') == 'league_sot' and os.path.exists(teams_path):
+                self.writeback.write_prediction(league_code, result)
         else:
             result['persisted'] = {'enabled': False, 'archived': False, 'memory_updated': False}
         logger.info(f"预测完成: {home_team} vs {away_team} -> {main_prediction} ({confidence:.1%})")
-        
+
         return result
     
-    def generate_prediction_report(self, league_code: str, match_date: str, 
-                                  matches: List[Dict] = None) -> Optional[str]:
-        """生成预测并写回 teams_2025-26.md（不再生成独立 predictions.md 文件）"""
+    def generate_prediction_report(
+        self,
+        league_code: str,
+        match_date: str,
+        matches: List[Dict] = None,
+        *,
+        persist: bool = True,
+        write_teams: bool = True,
+    ) -> Dict[str, Any]:
+        """生成预测并按批次决定是否写回 teams 与刷新统计。"""
         if not matches:
             matches = self.snapshot_repository.get_matches_from_odds_snapshots(league_code, match_date)
             if not matches:
@@ -745,7 +690,20 @@ class EnhancedPredictor:
         
         if not matches:
             logger.warning(f"没有比赛数据: {league_code} {match_date}")
-            return None
+            return {
+                'league_code': league_code,
+                'match_date': match_date,
+                'teams_file': None,
+                'teams_updated': False,
+                'prediction_count': 0,
+                'accuracy_refreshed': False,
+                'persisted': {
+                    'enabled': bool(persist),
+                    'archived': False,
+                    'memory_updated': False,
+                    'result_sync_registered': False,
+                },
+            }
         
         # 预测所有比赛
         predictions = []
@@ -767,23 +725,49 @@ class EnhancedPredictor:
                 league_code,
                 match_date,
                 current_odds=current_odds,
+                persist=False,
                 # We already attempted a live refresh above in this loop; avoid double refreshing.
                 force_refresh_odds=False,
             )
             predictions.append(pred)
         
-        # Write back to league teams_2025-26.md schedule table notes.
         teams_path = self.writeback.teams_file_path(league_code)
-        if os.path.exists(teams_path):
+        teams_updated = False
+        if write_teams and os.path.exists(teams_path):
             self.writeback.write_predictions(league_code, match_date, predictions)
+            teams_updated = True
             logger.info(f"已更新 teams 文件: {teams_path}")
-        else:
+        elif write_teams:
             logger.warning(f"未找到 teams 文件: {teams_path}")
-        
-        self.persistence_service.refresh_accuracy_stats()
-        logger.info("批量预测已刷新准确率统计")
-        
-        return teams_path if os.path.exists(teams_path) else None
+
+        batch_summary = {
+            'prediction_count': len(predictions),
+            'accuracy_refreshed': False,
+            'persisted': {
+                'enabled': bool(persist),
+                'archived': False,
+                'memory_updated': False,
+                'result_sync_registered': False,
+            },
+        }
+        if persist:
+            batch_summary = self.persistence_service.persist_prediction_batch(predictions, league_code)
+            logger.info("批量预测已刷新准确率统计")
+
+        return {
+            'league_code': league_code,
+            'match_date': match_date,
+            'teams_file': teams_path if teams_updated else None,
+            'teams_updated': teams_updated,
+            'prediction_count': len(predictions),
+            'accuracy_refreshed': bool(batch_summary.get('accuracy_refreshed')),
+            'persisted': batch_summary.get('persisted') or {
+                'enabled': bool(persist),
+                'archived': False,
+                'memory_updated': False,
+                'result_sync_registered': False,
+            },
+        }
     
     def _get_sample_matches(self, league_code: str) -> List[Dict]:
         return self.reporting_service.get_sample_matches(league_code)

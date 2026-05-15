@@ -596,8 +596,30 @@ class PredictionReviewLearningService:
             "home_goal_ceiling_underestimate_rate": round(score_reason_counts.get("主队进球上沿低估", 0) / score_miss_count, 4) if score_miss_count else 0.0,
             "away_goal_ceiling_underestimate_rate": round(score_reason_counts.get("客队进球上沿低估", 0) / score_miss_count, 4) if score_miss_count else 0.0,
             "clean_sheet_coverage_gap_rate": round(score_reason_counts.get("零封场景覆盖不足", 0) / score_miss_count, 4) if score_miss_count else 0.0,
+            "coverage_expansion_rate": round(
+                (
+                    score_reason_counts.get("比分候选覆盖不足", 0)
+                    + score_reason_counts.get("零封场景覆盖不足", 0)
+                    + score_reason_counts.get("主队强势取胜覆盖不足", 0)
+                )
+                / score_miss_count,
+                4,
+            ) if score_miss_count else 0.0,
             "recommended_home_goal_boost": round(min(0.08, 0.01 + score_reason_counts.get("主队进球上沿低估", 0) * 0.01), 4) if score_miss_count else 0.0,
+            "recommended_away_goal_boost": round(min(0.08, 0.01 + score_reason_counts.get("客队进球上沿低估", 0) * 0.01), 4) if score_miss_count else 0.0,
             "recommended_low_total_penalty": round(min(0.05, 0.01 + score_reason_counts.get("总进球低估", 0) * 0.005), 4) if score_miss_count else 0.0,
+            "recommended_score_coverage_expansion": round(
+                min(
+                    0.08,
+                    0.01
+                    + (
+                        score_reason_counts.get("比分候选覆盖不足", 0)
+                        + score_reason_counts.get("零封场景覆盖不足", 0)
+                        + score_reason_counts.get("主队强势取胜覆盖不足", 0)
+                    ) * 0.01,
+                ),
+                4,
+            ) if score_miss_count else 0.0,
         }
         ou_bias = {
             "available": ou_miss_count > 0,

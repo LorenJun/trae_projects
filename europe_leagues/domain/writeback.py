@@ -45,13 +45,87 @@ def resolve_prediction_summary(prediction: Dict[str, Any]) -> tuple[str, float]:
     return str(prediction.get('prediction') or '平局').strip() or '平局', _safe_float(prediction.get('confidence')) or 0.0
 
 
+def _sanitize_note_fragment(value: Any) -> str:
+    text = str(value or '').replace('|', '/').strip()
+    text = re.sub(r'\s+', ' ', text)
+    text = text.strip(' ;；,/')
+    missing_right_paren = text.count('(') - text.count(')')
+    if missing_right_paren > 0:
+        text = text.rstrip(' /,;；') + (')' * missing_right_paren)
+    return text.strip(' ;；,/')
+
+
+def _score_matches_prediction(score: str, prediction_text: str) -> bool:
+    normalized = str(score or '').strip()
+    if not normalized or '-' not in normalized:
+        return False
+    try:
+        home_goals, away_goals = [int(part.strip()) for part in normalized.split('-', 1)]
+    except Exception:
+        return False
+
+    prediction_label = str(prediction_text or '').strip()
+    allowed = set()
+    if '主胜' in prediction_label:
+        allowed.add('home')
+    if '平局' in prediction_label:
+        allowed.add('draw')
+    if '客胜' in prediction_label:
+        allowed.add('away')
+    if not allowed:
+        return True
+
+    if home_goals > away_goals:
+        return 'home' in allowed
+    if home_goals < away_goals:
+        return 'away' in allowed
+    return 'draw' in allowed
+
+
+def _filter_score_candidates(raw_scores: Any, prediction_text: str, limit: int | None = None) -> List[str]:
+    score_parts: List[str] = []
+    for raw_part in str(raw_scores or '').split('/'):
+        score = raw_part.strip()
+        if not score or not _score_matches_prediction(score, prediction_text):
+            continue
+        if score in score_parts:
+            continue
+        score_parts.append(score)
+        if limit is not None and len(score_parts) >= limit:
+            break
+    return score_parts
+
+
+def normalize_existing_prediction_note(note: str) -> str:
+    text = str(note or '').strip()
+    if not text or '预测:' not in text:
+        return text
+
+    prediction_match = re.search(r'预测:(主胜|平局|客胜)', text)
+    prediction_label = prediction_match.group(1) if prediction_match else ''
+
+    def _replace_score_fragment(match: re.Match[str]) -> str:
+        filtered = _filter_score_candidates(match.group(1), prediction_label)
+        return f"比分:{'/'.join(filtered)}" if filtered else '比分:-'
+
+    text = re.sub(r'比分:([0-9]+-[0-9]+(?:/[0-9]+-[0-9]+)*)', _replace_score_fragment, text)
+
+    def _replace_case_fragment(match: re.Match[str]) -> str:
+        hint = _sanitize_note_fragment(match.group(1))
+        return f'案例:{hint}' if hint else ''
+
+    text = re.sub(r'案例:(.+?)(?=(?: 动态调权:| MatchID:|；赛果:|；复盘:|$))', _replace_case_fragment, text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
 def format_upset_note(upset: Any) -> str:
     if isinstance(upset, str):
-        return f"爆冷:{upset or '-'}".strip()
+        return f"爆冷:{_sanitize_note_fragment(upset) or '-'}".strip()
     if not isinstance(upset, dict):
         return '爆冷:-'
 
-    level = (upset.get('level') or '').strip() or '-'
+    level = _sanitize_note_fragment(upset.get('level')) or '-'
     idx = upset.get('index')
     idx_text = f"({int(round(float(idx)))})" if isinstance(idx, (int, float)) else ''
     parts = [f'爆冷:{level}{idx_text}']
@@ -60,7 +134,7 @@ def format_upset_note(upset: Any) -> str:
     if isinstance(motivation_risk, dict) and motivation_risk.get('available'):
         factors = motivation_risk.get('factors') or []
         if isinstance(factors, list) and factors:
-            compact = ';'.join(str(item).strip() for item in factors[:2] if str(item).strip())
+            compact = ';'.join(_sanitize_note_fragment(item) for item in factors[:2] if _sanitize_note_fragment(item))
             if compact:
                 parts.append(f'战意:{compact}')
         pressure_side = str(motivation_risk.get('pressure_side') or '').strip()
@@ -77,13 +151,13 @@ def format_upset_note(upset: Any) -> str:
             parts.append(f'建议:{suggestion}')
         factors = mismatch.get('warning_factors') or []
         if isinstance(factors, list) and factors:
-            compact = ';'.join(str(item).strip() for item in factors[:2] if str(item).strip())
+            compact = ';'.join(_sanitize_note_fragment(item) for item in factors[:2] if _sanitize_note_fragment(item))
             if compact:
                 parts.append(f'因子:{compact}')
 
     knowledge = upset.get('case_knowledge')
     if isinstance(knowledge, dict) and knowledge.get('available'):
-        hint = (knowledge.get('hint') or '').strip()
+        hint = _sanitize_note_fragment(knowledge.get('hint'))
         if hint:
             parts.append(f'案例:{hint}')
 
@@ -91,12 +165,15 @@ def format_upset_note(upset: Any) -> str:
 
 
 def format_score_ou_note(prediction: Dict[str, Any]) -> str:
+    prediction_text, _ = resolve_prediction_summary(prediction)
     top_scores = prediction.get('top_scores') or []
     score_parts = []
     if isinstance(top_scores, list):
-        for item in top_scores[:2]:
-            if isinstance(item, (list, tuple)) and item:
-                score_parts.append(str(item[0]).strip())
+        score_parts = _filter_score_candidates(
+            '/'.join(str(item[0]).strip() for item in top_scores if isinstance(item, (list, tuple)) and item),
+            prediction_text,
+            limit=2,
+        )
     score_note = f"比分:{'/'.join(score_parts)}" if score_parts else ''
 
     over_under = prediction.get('over_under') or {}
@@ -212,20 +289,18 @@ def update_teams_md_prediction_notes(
             continue
         date, _time, home, score, away, note = cells
         prediction = prediction_index.get((date, _normalize_team_name(home), _normalize_team_name(away)))
-        if not prediction:
-            out_lines.append(line)
-            continue
-        if re.match(r'^\d+\s*-\s*\d+$', score or ''):
-            out_lines.append(line)
-            continue
+        current_note = normalize_existing_prediction_note(note)
 
-        merged = strip_existing_prediction_fragments(note).rstrip('；; ').strip()
-        pred_note = build_prediction_note(prediction)
-        new_note = f'{merged}；{pred_note}' if merged else pred_note
-        if new_note == note:
+        if prediction and not re.match(r'^\d+\s*-\s*\d+$', score or ''):
+            merged = strip_existing_prediction_fragments(current_note).rstrip('；; ').strip()
+            pred_note = build_prediction_note(prediction)
+            current_note = f'{merged}；{pred_note}' if merged else pred_note
+            current_note = normalize_existing_prediction_note(current_note)
+
+        if current_note == note:
             out_lines.append(line)
             continue
-        cells[5] = new_note
+        cells[5] = current_note
         out_lines.append('| ' + ' | '.join(cells) + ' |\n')
         changed += 1
 

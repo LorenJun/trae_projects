@@ -14,7 +14,6 @@ from runtime.result_sync import (
 
 class DummyResultManager:
     saved_calls = []
-    accuracy_refreshes = 0
 
     def __init__(self, base_dir=None):
         self.base_dir = base_dir
@@ -22,12 +21,11 @@ class DummyResultManager:
     @classmethod
     def reset(cls):
         cls.saved_calls = []
-        cls.accuracy_refreshes = 0
 
     def load_results(self):
         return []
 
-    def save_result(self, identifier, home_score, away_score, league=None, date_override=None):
+    def save_result(self, identifier, home_score, away_score, league=None, date_override=None, force=False):
         self.__class__.saved_calls.append(
             {
                 "identifier": identifier,
@@ -35,6 +33,7 @@ class DummyResultManager:
                 "away_score": away_score,
                 "league": league,
                 "date_override": date_override,
+                "force": force,
             }
         )
         actual_winner = "home" if home_score > away_score else "away" if away_score > home_score else "draw"
@@ -42,11 +41,8 @@ class DummyResultManager:
             "match_id": "premier_league_20260510_西汉姆联_阿森纳",
             "actual_score": f"{home_score}-{away_score}",
             "actual_winner": actual_winner,
+            "refresh": {"accuracy_refreshed": True, "review_learning_refreshed": True},
         }
-
-    def update_accuracy_stats(self):
-        self.__class__.accuracy_refreshes += 1
-        return {"overall": {}}
 
 
 class ResultSyncTest(unittest.TestCase):
@@ -134,11 +130,10 @@ class ResultSyncTest(unittest.TestCase):
                     "away_score": 1,
                     "league": "premier_league",
                     "date_override": "2026-05-10",
+                    "force": False,
                 }
             ],
         )
-        self.assertEqual(DummyResultManager.accuracy_refreshes, 1)
-
         registry = json.loads(
             (self.base_dir / ".okooo-scraper" / "runtime" / "result_sync_registry.json").read_text(encoding="utf-8")
         )

@@ -52,6 +52,7 @@ class InferencePipelineService:
     def _rerank_scores_for_under_three(
         score_probs: Optional[Dict[str, Any]],
         over_under: Optional[Dict[str, Any]],
+        limit: int = 8,
     ) -> Tuple[List[Tuple[str, float]], Dict[str, Any]]:
         ranked = sorted(
             ((str(score), float(prob or 0.0)) for score, prob in (score_probs or {}).items()),
@@ -68,7 +69,7 @@ class InferencePipelineService:
         }
         if not ranked or not isinstance(over_under, dict):
             diag['reason'] = 'missing_score_probs_or_over_under'
-            return ranked[:3], diag
+            return ranked[: max(3, int(limit or 8))], diag
 
         line = InferencePipelineService._to_float(over_under.get('line'))
         over_prob = InferencePipelineService._to_float(over_under.get('over'))
@@ -78,10 +79,10 @@ class InferencePipelineService:
         diag['under'] = under_prob
         if line is None or over_prob is None or under_prob is None:
             diag['reason'] = 'invalid_over_under_payload'
-            return ranked[:3], diag
+            return ranked[: max(3, int(limit or 8))], diag
         if line > 3.0 or under_prob <= over_prob:
             diag['reason'] = 'not_under_three'
-            return ranked[:3], diag
+            return ranked[: max(3, int(limit or 8))], diag
 
         if line <= 2.5:
             factors = {'3-1': 0.64, '2-2': 0.74}
@@ -1324,11 +1325,13 @@ class InferencePipelineService:
         top_scores, score_guard_diag = self._rerank_scores_for_under_three(
             score_result.get('score_probs'),
             over_under,
+            limit=8,
         )
         realtime['context_applied']['score_rerank_guard'] = score_guard_diag
         top_scores, review_score_diag = self.postprocess_service.rerank_top_scores(
             top_scores,
             main_prediction,
+            ranked_probabilities=ranked_probabilities,
             home_lambda=home_lambda,
             away_lambda=away_lambda,
             over_under=over_under,
