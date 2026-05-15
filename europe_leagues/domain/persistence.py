@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from runtime.memory_dedupe import (
     are_entries_duplicate,
@@ -38,6 +39,30 @@ LEAGUE_DISPLAY_NAMES = {
 
 NON_SOT_COMPETITION_KEYWORDS = ('杯', '欧冠', '欧联', '欧协联', '亚冠', '淘汰赛', '半决赛', '决赛')
 MEMORY_ACCURACY_PREFIX = '> 滚动预测准确率：'
+
+
+@dataclass(frozen=True)
+class PredictionPersistencePayload:
+    match_id: str
+    external_match_id: str
+    internal_match_id: str
+    teams_match_id: str
+    storage_mode: str
+    league_code: str
+    league_name: str
+    match_date: str
+    match_time: str
+    home_team: str
+    away_team: str
+    prediction: str
+    predicted_winner: str
+    confidence: float
+    top_scores: list[Any]
+    predicted_scores: list[str]
+    over_under: Dict[str, Any]
+    predicted_ou: Optional[Dict[str, Any]]
+    runtime_profile: Any
+    full_prediction: Dict[str, Any]
 
 
 class PredictionPersistenceService:
