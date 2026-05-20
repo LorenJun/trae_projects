@@ -1,0 +1,92 @@
+{
+  "match": {
+    "league": "premier_league",
+    "date": "2026-05-16",
+    "home_team": "阿斯顿维拉",
+    "away_team": "利物浦"
+  },
+  "expected_goals_total": 2.5068714354073025,
+  "over_under_line": 2.5,
+  "raw_top_totals": [
+    {
+      "total": "2",
+      "prob": 0.2559
+    },
+    {
+      "total": "3",
+      "prob": 0.216
+    },
+    {
+      "total": "1",
+      "prob": 0.2123
+    }
+  ],
+  "final_top_totals": [
+    {
+      "total": "2",
+      "prob": 0.2394
+    },
+    {
+      "total": "3",
+      "prob": 0.2318
+    },
+    {
+      "total": "1",
+      "prob": 0.1987
+    }
+  ],
+  "raw_buckets": {
+    "0": 0.074933,
+    "1": 0.21235,
+    "2": 0.255934,
+    "3": 0.216002,
+    "4": 0.134702,
+    "5": 0.067368,
+    "6": 0.027194,
+    "7": 0.0,
+    "7+": 0.011516
+  },
+  "final_buckets": {
+    "0": 0.070105,
+    "1": 0.198668,
+    "2": 0.239444,
+    "3": 0.231752,
+    "4": 0.145202,
+    "5": 0.073318,
+    "6": 0.029294,
+    "7": 0.0,
+    "7+": 0.012216
+  },
+  "review_total_goals_adjustment": {
+    "applied": true,
+    "signals": [
+      "review-total-goals-reduce-low-bias"
+    ],
+    "scenario_name": "",
+    "review_bias": {
+      "applied": true,
+      "signals": [
+        "review-total-goals-reduce-low-bias"
+      ],
+      "reason": "towards_high",
+      "line": 2.5,
+      "shift": 0.035,
+      "near_focus_line": true
+    }
+  },
+  "review_over_under_adjustment": {
+    "applied": true,
+    "signals": [
+      "review-ou-reduce-under-bias"
+    ],
+    "reason": "review-bias-over",
+    "line": 2.5,
+    "shift": 0.04,
+    "near_focus_line": true,
+    "bias_scope": "league",
+    "adjusted": {
+      "over": 0.491518,
+      "under": 0.508482
+    }
+  }
+}

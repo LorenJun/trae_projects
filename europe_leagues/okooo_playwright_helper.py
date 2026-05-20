@@ -11,23 +11,7 @@ from typing import Dict, List, Optional
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 
 
-# 用户代理列表
-USER_AGENTS = [
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
-]
-
-# 视口大小列表
-VIEWPORTS = [
-    {"width": 1920, "height": 1080},
-    {"width": 1680, "height": 1050},
-    {"width": 1440, "height": 900},
-    {"width": 1536, "height": 864},
-    {"width": 1366, "height": 768},
-]
+from okooo_mobile_access import cache_busted_okooo_url, mobile_context_options, mobile_headers, random_mobile_profile
 
 # 博彩公司ID映射
 BOOKMAKER_MAP = {
@@ -51,15 +35,8 @@ class OkoooPlaywrightHelper:
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
         self.playwright = None
+        self.mobile_profile = None
         
-    def _get_random_user_agent(self) -> str:
-        """获取随机用户代理"""
-        return random.choice(USER_AGENTS)
-    
-    def _get_random_viewport(self) -> Dict:
-        """获取随机视口大小"""
-        return random.choice(VIEWPORTS)
-    
     def _add_stealth_scripts(self, page: Page):
         """添加反检测脚本"""
         # 隐藏webdriver属性
@@ -180,11 +157,9 @@ class OkoooPlaywrightHelper:
         )
         
         # 创建上下文
+        self.mobile_profile = random_mobile_profile()
         self.context = self.browser.new_context(
-            viewport=self._get_random_viewport(),
-            user_agent=self._get_random_user_agent(),
-            locale='zh-CN',
-            timezone_id='Asia/Shanghai',
+            **mobile_context_options(profile=self.mobile_profile),
             geolocation={'latitude': 31.2304, 'longitude': 121.4737},  # 上海
             permissions=['geolocation'],
             color_scheme='light',
@@ -193,19 +168,21 @@ class OkoooPlaywrightHelper:
         )
         
         # 设置额外HTTP头
-        self.context.set_extra_http_headers({
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Cache-Control': 'max-age=0',
-        })
+        self.context.set_extra_http_headers(
+            mobile_headers(
+                {
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                },
+                profile=self.mobile_profile,
+            )
+        )
         
         # 创建页面
         self.page = self.context.new_page()
@@ -225,7 +202,11 @@ class OkoooPlaywrightHelper:
             time.sleep(random.uniform(0.5, 1.5))
             
             # 访问页面
-            self.page.goto(url, wait_until='networkidle', timeout=60000)
+            self.page.goto(
+                cache_busted_okooo_url(url, profile=self.mobile_profile),
+                wait_until='networkidle',
+                timeout=60000,
+            )
             
             # 等待页面加载
             time.sleep(wait_time)
@@ -245,7 +226,7 @@ class OkoooPlaywrightHelper:
     
     def extract_odds_data(self, match_id: str) -> Optional[Dict]:
         """从澳客网提取赔率数据"""
-        url = f"https://www.okooo.com/soccer/match/{match_id}/odds/"
+        url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
         
         if not self.navigate(url, wait_time=6):
             return None

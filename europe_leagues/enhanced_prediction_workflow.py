@@ -5,6 +5,7 @@
 整合多模型融合、智能缓存、动态权重调整的完整预测系统"""
 
 import os
+import re
 import sys
 import json
 from datetime import datetime, timedelta
@@ -47,6 +48,12 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RUNTIME_DIR = str(get_default_paths(SCRIPT_DIR).ensure_runtime_dir())
 
 logger = logging.getLogger(__name__)
+
+
+ROUND_HEADER_RE = re.compile(r"^### 第(\d+)轮(?:（收官轮）)?\s*$")
+TABLE_ROW_RE = re.compile(
+    r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*(.*?)\s*\|\s*$"
+)
 
 
 def _configure_logger() -> None:
@@ -118,6 +125,25 @@ LEAGUE_CONFIG = {
         'code': 'conference_league',
         'teams': [],
         'avg_goals': 2.7
+    },
+    'world_cup': {
+        'name': '世界杯',
+        'code': 'world_cup',
+        'teams': [
+            '墨西哥', '南非', '韩国', '捷克',
+            '加拿大', '波黑', '卡塔尔', '瑞士',
+            '巴西', '摩洛哥', '海地', '苏格兰',
+            '美国', '巴拉圭', '澳大利亚', '土耳其',
+            '德国', '库拉索', '科特迪瓦', '厄瓜多尔',
+            '荷兰', '日本', '瑞典', '突尼斯',
+            '比利时', '埃及', '伊朗', '新西兰',
+            '西班牙', '佛得角', '沙特', '乌拉圭',
+            '法国', '塞内加尔', '伊拉克', '挪威',
+            '阿根廷', '阿尔及利亚', '奥地利', '约旦',
+            '葡萄牙', '刚果民主共和国', '乌兹别克斯坦', '哥伦比亚',
+            '英格兰', '克罗地亚', '加纳', '巴拿马'
+        ],
+        'avg_goals': 2.65
     }
 }
 
@@ -253,7 +279,7 @@ class EnhancedPredictor:
         self.weight_adjuster = DynamicWeightAdjuster()
         self.cache = PredictionCache()
         self.result_manager = ResultManager(base_dir=self.base_dir)
-        self.postprocess_service = PredictionPostprocessService(LEAGUE_CONFIG)
+        self.postprocess_service = PredictionPostprocessService(LEAGUE_CONFIG, self.base_dir)
         self.rag_service = LightweightRAGService(self.base_dir)
         self.review_learning_service = PredictionReviewLearningService(self.base_dir)
         self.persistence_service = PredictionPersistenceService(self.base_dir, self.cache, self.result_manager)
@@ -473,13 +499,92 @@ class EnhancedPredictor:
     def _get_matches_from_odds_snapshots(self, league_code: str, match_date: str) -> List[Dict]:
         return self.snapshot_repository.get_matches_from_odds_snapshots(league_code, match_date)
 
+    def _load_schedule_matches(self, league_code: str, match_date: str) -> List[Dict[str, Any]]:
+        matches: List[Dict[str, Any]] = []
+        seen_keys = set()
+
+        schedule_path = self.paths.schedules_dir / league_code / f"{match_date}.json"
+        if schedule_path.exists():
+            try:
+                payload = json.loads(schedule_path.read_text(encoding='utf-8'))
+            except Exception:
+                payload = {}
+            raw_matches = payload.get('matches') if isinstance(payload, dict) else None
+            if isinstance(raw_matches, list):
+                for row in raw_matches:
+                    if not isinstance(row, dict):
+                        continue
+                    home_team = str(row.get('home_team') or '').strip()
+                    away_team = str(row.get('away_team') or '').strip()
+                    if not home_team or not away_team:
+                        continue
+                    key = (home_team, away_team)
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    matches.append(
+                        {
+                            'home_team': home_team,
+                            'away_team': away_team,
+                            'match_time': str(row.get('kickoff_time') or row.get('time') or '').strip(),
+                            'match_id': str(row.get('match_id') or '').strip(),
+                            'current_odds': None,
+                            '_source': 'okooo_schedule',
+                        }
+                    )
+            if matches:
+                return matches
+
+        teams_path = self.paths.teams_file(league_code)
+        if not teams_path.exists():
+            return []
+
+        try:
+            lines = teams_path.read_text(encoding='utf-8').splitlines(True)
+        except Exception:
+            return []
+
+        in_target_round = False
+        for line in lines:
+            stripped = line.strip()
+            header_match = ROUND_HEADER_RE.match(stripped)
+            if header_match:
+                in_target_round = False
+                continue
+            row_match = TABLE_ROW_RE.match(stripped)
+            if not row_match:
+                continue
+            date_text, time_text, home_team, score_text, away_team, _remark = [item.strip() for item in row_match.groups()]
+            if date_text == '日期' or set(date_text) == {'-'}:
+                continue
+            if score_text and score_text != '-':
+                continue
+            if date_text != match_date:
+                in_target_round = False
+                continue
+            in_target_round = True
+            key = (home_team, away_team)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            matches.append(
+                {
+                    'home_team': home_team,
+                    'away_team': away_team,
+                    'match_time': time_text,
+                    'current_odds': None,
+                    '_source': 'teams_markdown',
+                }
+            )
+        return matches if in_target_round or matches else []
+
     @staticmethod
     def _to_float(value: Any) -> Optional[float]:
         return LiveRefreshService.to_float(value)
 
     def _extract_current_odds_from_csv_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
         return self.snapshot_repository.extract_current_odds_from_csv_row(row)
-    
+
     def predict_match(
         self,
         home_team: str,
@@ -528,23 +633,9 @@ class EnhancedPredictor:
             if 'runtime_profile' not in cached:
                 cached['runtime_profile'] = self.runtime_profile
             return cached
-        
-        
+
+
         logger.info(f"开始预测: {home_team} vs {away_team} ({league_code})")
-        current_odds = self.live_refresh_service.ensure_totals_if_needed(
-            league_code=league_code,
-            match_date=match_date,
-            home_team=home_team,
-            away_team=away_team,
-            current_odds=current_odds,
-            analysis_context=analysis_context,
-            realtime=realtime,
-            force_refresh_odds=force_refresh_odds,
-            okooo_driver=okooo_driver,
-            okooo_headed=okooo_headed,
-            match_time=match_time,
-            diag_key="okooo_totals_fetch_last_moment",
-        )
         review_learning = self.review_learning_service.build_prediction_context(
             league_code=league_code,
             days=30,
@@ -680,11 +771,15 @@ class EnhancedPredictor:
     ) -> Dict[str, Any]:
         """生成预测并按批次决定是否写回 teams 与刷新统计。"""
         if not matches:
-            matches = self.snapshot_repository.get_matches_from_odds_snapshots(league_code, match_date)
-            if not matches:
-                matches = self.snapshot_repository.get_matches_from_odds_history(league_code, match_date)
-            if not matches:
-                matches = self.reporting_service.get_sample_matches(league_code)
+            matches = self._load_schedule_matches(league_code, match_date)
+            if matches:
+                matches = self.snapshot_repository.fill_missing_current_odds(league_code, match_date, matches)
+            else:
+                matches = self.snapshot_repository.get_matches_from_odds_snapshots(league_code, match_date)
+                if not matches:
+                    matches = self.snapshot_repository.get_matches_from_odds_history(league_code, match_date)
+                if not matches:
+                    matches = self.reporting_service.get_sample_matches(league_code)
         else:
             matches = self.snapshot_repository.fill_missing_current_odds(league_code, match_date, matches)
         
@@ -710,6 +805,8 @@ class EnhancedPredictor:
         for match in matches:
             home = match.get('home_team', match.get('主队'))
             away = match.get('away_team', match.get('客队'))
+            match_time = match.get('match_time', match.get('时间', ''))
+            match_id = match.get('match_id', '')
             current_odds = match.get('current_odds')
             current_odds = self.live_refresh_service.refresh_report_match_odds(
                 league_code=league_code,
@@ -725,6 +822,8 @@ class EnhancedPredictor:
                 league_code,
                 match_date,
                 current_odds=current_odds,
+                match_id=match_id,
+                match_time=match_time,
                 persist=False,
                 # We already attempted a live refresh above in this loop; avoid double refreshing.
                 force_refresh_odds=False,
@@ -734,9 +833,10 @@ class EnhancedPredictor:
         teams_path = self.writeback.teams_file_path(league_code)
         teams_updated = False
         if write_teams and os.path.exists(teams_path):
-            self.writeback.write_predictions(league_code, match_date, predictions)
-            teams_updated = True
-            logger.info(f"已更新 teams 文件: {teams_path}")
+            changed_count = self.writeback.write_predictions(league_code, match_date, predictions)
+            teams_updated = changed_count > 0
+            if teams_updated:
+                logger.info(f"已更新 teams 文件: {teams_path}")
         elif write_teams:
             logger.warning(f"未找到 teams 文件: {teams_path}")
 
@@ -752,7 +852,7 @@ class EnhancedPredictor:
         }
         if persist:
             batch_summary = self.persistence_service.persist_prediction_batch(predictions, league_code)
-            logger.info("批量预测已刷新准确率统计")
+            logger.info("批量预测已更新滚动记忆并刷新准确率统计")
 
         return {
             'league_code': league_code,

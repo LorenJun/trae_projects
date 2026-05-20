@@ -206,10 +206,6 @@ class LiveRefreshService:
                 if not refreshed:
                     continue
                 path, payload = refreshed
-                realtime['okooo']['snapshot_path'] = path or ''
-                realtime['okooo']['match_id'] = str(payload.get('match_id') or mid or '')
-                realtime['okooo']['refreshed'] = True
-                realtime['okooo']['driver'] = driver
                 if not snapshot_matches_request(
                     payload,
                     home_team=home_team,
@@ -227,6 +223,10 @@ class LiveRefreshService:
                         }
                     )
                     continue
+                realtime['okooo']['snapshot_path'] = path or ''
+                realtime['okooo']['match_id'] = str(payload.get('match_id') or mid or '')
+                realtime['okooo']['refreshed'] = True
+                realtime['okooo']['driver'] = driver
                 # #region debug-point C:live-refresh-hit
                 emit_local_debug_event({"sessionId":"snapshot-routing-chain","runId":"pre-fix","hypothesisId":"C","location":"domain/live.py:196","msg":"[DEBUG] live refresh snapshot hit","data":{"league_code":league_code,"home_team":home_team,"away_team":away_team,"requested_match_id":mid,"driver":driver,"snapshot_path":path,"payload_match_id":str(payload.get("match_id") or ""),"payload_home_team":str(payload.get("home_team") or payload.get("team1") or ""),"payload_away_team":str(payload.get("away_team") or payload.get("team2") or ""),"totals_found":bool(isinstance(payload.get("大小球"), dict) and payload.get("大小球", {}).get("found")),"totals_final_line":((payload.get("大小球") or {}).get("final") or {}).get("line")}})
                 # #endregion
@@ -263,6 +263,7 @@ class LiveRefreshService:
         try:
             current_odds, diag = auto_fetch_okooo_totals_if_needed(
                 base_dir=self.base_dir,
+                league_code=league_code,
                 league_name=(self.league_config.get(league_code, {}) or {}).get('name') or '',
                 match_date=match_date,
                 home_team=home_team,
@@ -376,6 +377,24 @@ class LiveRefreshService:
             'cache_params': cache_params,
         }
 
+    @staticmethod
+    def _has_market_content(current_odds: Optional[Dict[str, Any]]) -> bool:
+        if not isinstance(current_odds, dict):
+            return False
+        for key in ('胜平负赔率', '欧赔', '亚值', '大小球', '凯利', '离散率'):
+            block = current_odds.get(key)
+            if not isinstance(block, dict):
+                continue
+            if key == '离散率':
+                if block:
+                    return True
+                continue
+            initial = block.get('initial') if isinstance(block.get('initial'), dict) else {}
+            final = block.get('final') if isinstance(block.get('final'), dict) else {}
+            if initial or final:
+                return True
+        return False
+
     def refresh_report_match_odds(
         self,
         *,
@@ -385,31 +404,39 @@ class LiveRefreshService:
         away_team: str,
         current_odds: Optional[Dict[str, Any]],
         prefer_existing: bool = False,
+        okooo_driver: str = 'local-chrome',
+        okooo_headed: bool = False,
     ) -> Optional[Dict[str, Any]]:
         if os.environ.get('OKOOO_REFRESH_LIVE', '1') == '0' or not home_team or not away_team:
             return current_odds
-        if prefer_existing and isinstance(current_odds, dict):
-            if any(
-                current_odds.get(key)
-                for key in ('胜平负赔率', '欧赔', '亚值', '大小球', '凯利', '离散率')
-            ):
-                return current_odds
-        try:
-            match_id = ''
-            if isinstance(current_odds, dict):
-                match_id = str(current_odds.get('match_id') or '')
-            refreshed = refresh_okooo_snapshot(
-                self.base_dir,
-                league_code,
-                home_team,
-                away_team,
-                match_date,
-                driver='local-chrome',
-                match_id=match_id,
-            )
-            if refreshed:
-                _path, payload = refreshed
-                return extract_okooo_current_odds(payload)
-        except Exception:
+        if prefer_existing and self._has_market_content(current_odds):
             return current_odds
+        match_id = ''
+        if isinstance(current_odds, dict):
+            match_id = str(current_odds.get('match_id') or '')
+        for driver in build_okooo_driver_chain(okooo_driver):
+            try:
+                refreshed = refresh_okooo_snapshot(
+                    self.base_dir,
+                    league_code,
+                    home_team,
+                    away_team,
+                    match_date,
+                    driver=driver,
+                    match_id=match_id,
+                    headed=bool(okooo_headed),
+                )
+                if not refreshed:
+                    continue
+                _path, payload = refreshed
+                if not snapshot_matches_request(
+                    payload,
+                    home_team=home_team,
+                    away_team=away_team,
+                    match_date=match_date,
+                ):
+                    continue
+                return extract_okooo_current_odds(payload)
+            except Exception:
+                continue
         return current_odds

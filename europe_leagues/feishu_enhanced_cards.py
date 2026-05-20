@@ -175,7 +175,8 @@ class FeishuEnhancedCardBuilder:
         top_scores = match.get('top_scores', [])
         
         over_under = match.get('over_under', {})
-        ou_line = over_under.get('line', 2.5)
+        ou_line = over_under.get('line')
+        ou_line_display = f"{ou_line:g}" if isinstance(ou_line, (int, float)) else "未取得真实盘口"
         under_prob = over_under.get('under', 0) * 100
         over_prob = over_under.get('over', 0) * 100
         
@@ -284,7 +285,7 @@ class FeishuEnhancedCardBuilder:
                     "is_short": True,
                     "text": {
                         "tag": "lark_md",
-                        "content": f"**📊 大小球 {ou_line}**\n🔽 小 {under_prob:.0f}%  |  🔼 大 {over_prob:.0f}%"
+                        "content": f"**📊 大小球 {ou_line_display}**\n🔽 小 {under_prob:.0f}%  |  🔼 大 {over_prob:.0f}%"
                     }
                 },
                 {

@@ -8,6 +8,8 @@ import re
 import time
 from playwright.sync_api import sync_playwright
 
+from okooo_mobile_access import cache_busted_okooo_url, mobile_context_options, mobile_headers, random_mobile_profile
+
 
 def search_okooo_match(team1_name, team2_name, league_name=None):
     """
@@ -23,22 +25,22 @@ def search_okooo_match(team1_name, team2_name, league_name=None):
     """
     
     with sync_playwright() as p:
+        profile = random_mobile_profile()
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
-            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-        )
+        context = browser.new_context(**mobile_context_options(profile=profile))
+        context.set_extra_http_headers(mobile_headers(profile=profile))
         
         page = context.new_page()
         
         try:
-            # 方法1: 尝试直接访问比赛页面（如果知道大致ID范围）
-            # 先访问澳客网首页获取亚冠比赛列表
+            # 优先从移动端热门赛事入口进入，避免桌面页更容易触发拦截。
             print(f"正在搜索: {team1_name} vs {team2_name}")
             
-            # 访问亚冠赛程页面
-            page.goto('https://www.okooo.com/soccer/league/167/schedule/21692/', 
-                     wait_until='domcontentloaded', timeout=30000)
+            page.goto(
+                cache_busted_okooo_url('https://m.okooo.com/saishi/remen/', profile=profile),
+                wait_until='domcontentloaded',
+                timeout=30000,
+            )
             page.wait_for_timeout(5000)
             
             # 在页面中搜索球队名称
@@ -47,7 +49,7 @@ def search_okooo_match(team1_name, team2_name, league_name=None):
                 const team2 = "{team2_name}";
                 
                 // 查找所有包含比赛信息的链接
-                const links = document.querySelectorAll('a[href*="/soccer/match/"]');
+                const links = document.querySelectorAll('a[href*="MatchID="], a[href*="matchid="], a[href*="odds.php"], a[href*="history.php"]');
                 
                 for (const link of links) {{
                     const text = link.textContent || '';
@@ -55,10 +57,10 @@ def search_okooo_match(team1_name, team2_name, league_name=None):
                     
                     // 检查是否包含两个球队名称
                     if ((text.includes(team1) || text.includes(team2)) &&
-                        href.match(/\/soccer\/match\/(\d+)\//)) {{
+                        href.match(/[?&]MatchID=(\d+)/i)) {{
                         
                         // 提取比赛ID
-                        const match = href.match(/\/soccer\/match\/(\d+)\//);
+                        const match = href.match(/[?&]MatchID=(\d+)/i);
                         if (match) {{
                             // 查找比赛时间
                             let timeText = '';
@@ -98,22 +100,22 @@ def search_okooo_match(team1_name, team2_name, league_name=None):
                 # 方法2: 使用搜索功能
                 print("\n尝试使用搜索功能...")
                 
-                # 访问澳客网搜索
-                search_url = f'https://www.okooo.com/search/?keyword={team1_name}'
-                page.goto(search_url, wait_until='domcontentloaded', timeout=30000)
+                # 在移动端页内继续筛选，避免再次切到桌面搜索页。
+                search_url = f'https://m.okooo.com/saishi/remen/?keyword={team1_name}'
+                page.goto(cache_busted_okooo_url(search_url, profile=profile), wait_until='domcontentloaded', timeout=30000)
                 page.wait_for_timeout(3000)
                 
                 # 提取搜索结果
                 search_results = page.evaluate(f'''() => {{
                     const results = [];
-                    const links = document.querySelectorAll('a[href*="/soccer/match/"]');
+                    const links = document.querySelectorAll('a[href*="MatchID="], a[href*="matchid="], a[href*="odds.php"], a[href*="history.php"]');
                     
                     for (const link of links) {{
                         const text = link.textContent || '';
                         const href = link.href || '';
                         
                         if (text.includes("{team1_name}") || text.includes("{team2_name}")) {{
-                            const match = href.match(/\/soccer\/match\/(\d+)\//);
+                            const match = href.match(/[?&]MatchID=(\d+)/i);
                             if (match) {{
                                 results.push({{
                                     match_id: match[1],
@@ -156,17 +158,16 @@ def verify_match_id(match_id, expected_teams=None):
     """
     
     with sync_playwright() as p:
+        profile = random_mobile_profile()
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
-            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-        )
+        context = browser.new_context(**mobile_context_options(profile=profile))
+        context.set_extra_http_headers(mobile_headers(profile=profile))
         
         page = context.new_page()
         
         try:
-            url = f'https://www.okooo.com/soccer/match/{match_id}/'
-            page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            url = f'https://m.okooo.com/match/odds.php?MatchID={match_id}'
+            page.goto(cache_busted_okooo_url(url, profile=profile), wait_until='domcontentloaded', timeout=30000)
             page.wait_for_timeout(3000)
             
             title = page.title()

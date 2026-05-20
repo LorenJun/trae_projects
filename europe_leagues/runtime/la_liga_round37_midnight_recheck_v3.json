@@ -1,0 +1,57 @@
+[
+  {
+    "home": "埃尔切",
+    "away": "赫塔费",
+    "exit_code": 0,
+    "external_match_id": "",
+    "line_source": "missing_real_line",
+    "used_real_market_line": null,
+    "okooo_match_id": "",
+    "okooo_refreshed": false,
+    "okooo_error": "refresh_snapshot failed: rc=1\nTraceback (most recent call last):\n  File \"/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py\", line 2590, in <module>\n    main()\n  File \"/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py\", line 2576, in main\n    \"欧赔\": _extract_europe_with_fallback(match_id, found[\"schedule_row\"][\"href\"], client_factory, f\"{session_prefix}_eu\"),\nKeyError: 'href'"
+  },
+  {
+    "home": "巴塞罗那",
+    "away": "皇家贝蒂斯",
+    "exit_code": 0,
+    "external_match_id": "1302911",
+    "line_source": "snapshot_final",
+    "used_real_market_line": true,
+    "okooo_match_id": "1302911",
+    "okooo_refreshed": false,
+    "okooo_error": "refresh_snapshot failed: rc=1\nTraceback (most recent call last):\n  File \"/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py\", line 2590, in <module>\n    main()\n  File \"/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py\", line 2576, in main\n    \"欧赔\": _extract_europe_with_fallback(match_id, found[\"schedule_row\"][\"href\"], client_factory, f\"{session_prefix}_eu\"),\nKeyError: 'href'"
+  },
+  {
+    "home": "毕尔巴鄂竞技",
+    "away": "塞尔塔",
+    "exit_code": 0,
+    "external_match_id": "",
+    "line_source": "missing_real_line",
+    "used_real_market_line": null,
+    "okooo_match_id": "",
+    "okooo_refreshed": false,
+    "okooo_error": "refresh_snapshot failed: rc=1\nTraceback (most recent call last):\n  File \"/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py\", line 2590, in <module>\n    main()\n  File \"/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py\", line 2576, in main\n    \"欧赔\": _extract_europe_with_fallback(match_id, found[\"schedule_row\"][\"href\"], client_factory, f\"{session_prefix}_eu\"),\nKeyError: 'href'"
+  },
+  {
+    "home": "莱万特",
+    "away": "马略卡",
+    "exit_code": 0,
+    "external_match_id": "",
+    "line_source": "missing_real_line",
+    "used_real_market_line": null,
+    "okooo_match_id": "",
+    "okooo_refreshed": false,
+    "okooo_error": "refresh_snapshot failed: rc=1\nTraceback (most recent call last):\n  File \"/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py\", line 2590, in <module>\n    main()\n  File \"/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py\", line 2576, in main\n    \"欧赔\": _extract_europe_with_fallback(match_id, found[\"schedule_row\"][\"href\"], client_factory, f\"{session_prefix}_eu\"),\nKeyError: 'href'"
+  },
+  {
+    "home": "马德里竞技",
+    "away": "赫罗纳",
+    "exit_code": 0,
+    "external_match_id": "",
+    "line_source": "missing_real_line",
+    "used_real_market_line": null,
+    "okooo_match_id": "",
+    "okooo_refreshed": false,
+    "okooo_error": "refresh_snapshot failed: rc=1\nTraceback (most recent call last):\n  File \"/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py\", line 2590, in <module>\n    main()\n  File \"/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py\", line 2576, in main\n    \"欧赔\": _extract_europe_with_fallback(match_id, found[\"schedule_row\"][\"href\"], client_factory, f\"{session_prefix}_eu\"),\nKeyError: 'href'"
+  }
+]

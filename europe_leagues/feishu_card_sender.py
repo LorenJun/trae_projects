@@ -140,7 +140,8 @@ class FeishuCardBuilder:
         
         # 大小球
         over_under = match.get('over_under', {})
-        ou_line = over_under.get('line', 2.5)
+        ou_line = over_under.get('line')
+        ou_line_display = f"{ou_line:g}" if isinstance(ou_line, (int, float)) else "未取得真实盘口"
         under_prob = over_under.get('under', 0) * 100
         over_prob = over_under.get('over', 0) * 100
         
@@ -240,7 +241,7 @@ class FeishuCardBuilder:
                     "is_short": True,
                     "text": {
                         "tag": "lark_md",
-                        "content": f"**大小球 {ou_line}**\n小 {under_prob:.1f}% / 大 {over_prob:.1f}%"
+                        "content": f"**大小球 {ou_line_display}**\n小 {under_prob:.1f}% / 大 {over_prob:.1f}%"
                     }
                 },
                 {

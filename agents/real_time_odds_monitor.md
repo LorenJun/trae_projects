@@ -1,7 +1,7 @@
 # 实时赔率监控系统（优化版）
 
 > 当前说明：本文是扩展性方案稿，不是当前仓库的正式生产链路。  
-> 当前正式赔率链路以 `prediction_system.py collect-data / predict-match / predict-schedule`、`okooo_fetch_daily_schedule.py`、`okooo_save_snapshot.py`、`EnhancedPredictor.predict_match()` 为准。  
+> 当前正式赔率链路以 `prediction_system.py` / `app/cli.py` 为统一入口；`okooo_fetch_daily_schedule.py`、`okooo_save_snapshot.py` 仅作为显式赛程抓取、快照调试或补抓脚本。  
 > 真实大小球口径以澳客移动端 `handicap.php` 页内 `大小球` tab 和最终 `over_under.line_source` / `over_under.market.final` 为准。
 
 ## 系统概述
@@ -19,6 +19,9 @@
 - 正式生产流程优先使用澳客赛程与实时快照，而不是本文中的多博彩商融合示例
 - 若需要进入现行预测链路，先走 `collect-data` / `predict-match`，不要把本文示例直接视作主流程实现
 - 若后续将本文方案落地，输出仍应回到 `teams_2025-26.md` 与 `.okooo-scraper/runtime/`
+- 当前澳客访问默认口径是 `local-chrome + iPhone Safari UA + Referer: https://m.okooo.com/`
+- 当前公共移动设备池统一由 `okooo_mobile_access.py` 提供，规模为 `100` 组随机 profile
+- 欧赔正式输出优先 `multi_company_consensus`，`99家平均` 仅作为 fallback
 
 ---
 

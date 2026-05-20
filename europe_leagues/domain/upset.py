@@ -232,6 +232,111 @@ class UpsetAnalyzer:
         )
         return out
 
+    @staticmethod
+    def _build_risk_level(score: float) -> str:
+        if float(score or 0.0) >= 70:
+            return '高'
+        if float(score or 0.0) >= 40:
+            return '中'
+        return '低'
+
+    @staticmethod
+    def _build_warning_level(level: str) -> str:
+        if level == '高':
+            return '🔴'
+        if level == '中':
+            return '🟡'
+        return '🟢'
+
+    @staticmethod
+    def _empty_breakdown() -> Dict[str, Any]:
+        return {
+            'available': True,
+            'modules': {},
+            'top_drivers': [],
+            'suppressors': [],
+            'summary': '',
+        }
+
+    @staticmethod
+    def _record_breakdown_module(
+        breakdown: Dict[str, Any],
+        *,
+        category: str,
+        module_key: str,
+        score: float,
+        factor: Optional[str] = None,
+    ) -> None:
+        if not isinstance(breakdown, dict):
+            return
+        modules = breakdown.setdefault('modules', {})
+        slot = modules.setdefault(
+            module_key,
+            {
+                'category': category,
+                'score': 0.0,
+                'triggered': False,
+                'factors': [],
+            },
+        )
+        score = max(0.0, float(score or 0.0))
+        if score > 0:
+            slot['score'] = round(float(slot.get('score') or 0.0) + score, 2)
+            slot['triggered'] = True
+        text = str(factor or '').strip()
+        if text and text not in slot['factors']:
+            slot['factors'].append(text)
+
+    @classmethod
+    def _finalize_breakdown(
+        cls,
+        breakdown: Dict[str, Any],
+        *,
+        base_score: float,
+        context_score: float,
+        market_score: float,
+        knowledge_score: float,
+    ) -> Dict[str, Any]:
+        modules = breakdown.get('modules') if isinstance(breakdown.get('modules'), dict) else {}
+        ranked_modules = sorted(
+            (
+                (key, value)
+                for key, value in modules.items()
+                if isinstance(value, dict) and bool(value.get('triggered'))
+            ),
+            key=lambda item: float(item[1].get('score') or 0.0),
+            reverse=True,
+        )
+        top_drivers: List[str] = []
+        for _key, value in ranked_modules:
+            factors = value.get('factors') or []
+            for factor in factors:
+                text = str(factor or '').strip()
+                if text and text not in top_drivers:
+                    top_drivers.append(text)
+                if len(top_drivers) >= 3:
+                    break
+            if len(top_drivers) >= 3:
+                break
+        active_categories = []
+        for category_name, category_score in (
+            ('基础面', base_score),
+            ('情境面', context_score),
+            ('市场面', market_score),
+            ('知识面', knowledge_score),
+        ):
+            if float(category_score or 0.0) > 0:
+                active_categories.append(category_name)
+        if len(active_categories) >= 2:
+            summary = f"{active_categories[0]}与{active_categories[1]}共同抬升冷门风险"
+        elif active_categories:
+            summary = f"{active_categories[0]}是当前冷门风险的主要来源"
+        else:
+            summary = '当前冷门风险主要来自常规基线，尚无明显共振因子'
+        breakdown['top_drivers'] = top_drivers
+        breakdown['summary'] = summary
+        return breakdown
+
     def _find_similar_cases(
         self,
         league_name: str,
@@ -524,16 +629,44 @@ class UpsetAnalyzer:
             return cached
         
         upset_index = 0.0
-        factors = []
+        factors: List[str] = []
         mismatch_analysis = None
         motivation_risk = None
+        breakdown = self._empty_breakdown()
+        category_scores = {
+            'base_score': 0.0,
+            'context_score': 0.0,
+            'market_score': 0.0,
+            'knowledge_score': 0.0,
+        }
+
+        def add_factor(text: str) -> None:
+            normalized = str(text or '').strip()
+            if normalized and normalized not in factors:
+                factors.append(normalized)
+
+        def add_score(category_key: str, module_key: str, score: float, factor: Optional[str] = None) -> None:
+            nonlocal upset_index
+            delta = max(0.0, float(score or 0.0))
+            if delta <= 0:
+                return
+            upset_index += delta
+            category_scores[category_key] = round(float(category_scores.get(category_key) or 0.0) + delta, 2)
+            self._record_breakdown_module(
+                breakdown,
+                category=category_key.replace('_score', ''),
+                module_key=module_key,
+                score=delta,
+                factor=factor,
+            )
+            if factor:
+                add_factor(factor)
         
         # 1. 实力差距因素
         if abs(strength_diff) > 20:
-            upset_index += 30
-            factors.append(f"实力差距大({strength_diff:+.1f})")
+            add_score('base_score', 'strength_gap', 30.0, f"实力差距大({strength_diff:+.1f})")
         elif abs(strength_diff) > 10:
-            upset_index += 15
+            add_score('base_score', 'strength_gap', 15.0, f"实力差距中高({strength_diff:+.1f})")
         
         # 2. 历史爆冷案例（精确匹配 + 模式学习）
         league_name = (self.league_config.get(league_code, {}) or {}).get('name', league_code)
@@ -551,8 +684,7 @@ class UpsetAnalyzer:
                 similar_cases.append(case)
         
         if similar_cases:
-            upset_index += len(similar_cases) * 15
-            factors.append(f"历史爆冷案例({len(similar_cases)}个)")
+            add_score('knowledge_score', 'historical_patterns', len(similar_cases) * 15.0, f"历史爆冷案例({len(similar_cases)}个)")
 
         # 基于案例库做“模式学习”：同一联赛中，历史上与当前预测方向相同但被反打的比例越高，爆冷指数越高。
         if predicted_outcome:
@@ -565,8 +697,7 @@ class UpsetAnalyzer:
 
             if opposite_cases:
                 boost = min(20.0, len(opposite_cases) * 3.0)
-                upset_index += boost
-                factors.append(f"历史同向反打({len(opposite_cases)}次)")
+                add_score('knowledge_score', 'historical_patterns', boost, f"历史同向反打({len(opposite_cases)}次)")
 
                 super_cold = 0
                 for case in opposite_cases:
@@ -574,13 +705,11 @@ class UpsetAnalyzer:
                     if odds >= 5.0:
                         super_cold += 1
                 if super_cold:
-                    upset_index += min(10.0, super_cold * 5.0)
-                    factors.append(f"历史超级冷门({super_cold}次)")
+                    add_score('knowledge_score', 'historical_patterns', min(10.0, super_cold * 5.0), f"历史超级冷门({super_cold}次)")
 
             # 经验规律：强热门且高信心时，若信息面不足（战意/轮换/临场）很容易“过热被穿”
             if confidence is not None and confidence >= 0.70 and abs(strength_diff) >= 15:
-                upset_index += 5.0
-                factors.append("强热门需防过热")
+                add_score('knowledge_score', 'historical_patterns', 5.0, "强热门需防过热")
 
         # 2.5. 【新增】战意风险：弱势方抢分刚性明显强于热门方时，提升冷门警报
         motivation_risk = self._score_motivation_risk(
@@ -589,33 +718,37 @@ class UpsetAnalyzer:
             predicted_outcome=predicted_outcome,
         )
         if motivation_risk.get('available') and motivation_risk.get('score', 0.0) > 0.0:
-            upset_index += min(18.0, float(motivation_risk.get('score') or 0.0))
+            add_score('context_score', 'motivation', min(18.0, float(motivation_risk.get('score') or 0.0)))
             for factor in motivation_risk.get('factors') or []:
                 text = str(factor or '').strip()
                 if text and text not in factors:
-                    factors.append(f"[战意] {text}")
+                    tagged = f"[战意] {text}"
+                    add_factor(tagged)
+                    self._record_breakdown_module(
+                        breakdown,
+                        category='context',
+                        module_key='motivation',
+                        score=0.0,
+                        factor=tagged,
+                    )
         
         # 3. 伤病因素
         if home_strength.get('injured_count', 0) >= 3:
-            upset_index += 20
-            factors.append(f"{home_team}伤病严重({home_strength['injured_count']}人)")
+            add_score('base_score', 'injury_absence', 20.0, f"{home_team}伤病严重({home_strength['injured_count']}人)")
         elif home_strength.get('injured_count', 0) >= 2:
-            upset_index += 10
+            add_score('base_score', 'injury_absence', 10.0, f"{home_team}伤病偏多({home_strength['injured_count']}人)")
         
         if away_strength.get('injured_count', 0) >= 3:
-            upset_index += 20
-            factors.append(f"{away_team}伤病严重({away_strength['injured_count']}人)")
+            add_score('base_score', 'injury_absence', 20.0, f"{away_team}伤病严重({away_strength['injured_count']}人)")
         elif away_strength.get('injured_count', 0) >= 2:
-            upset_index += 10
+            add_score('base_score', 'injury_absence', 10.0, f"{away_team}伤病偏多({away_strength['injured_count']}人)")
         
         # 4. 核心球员缺席
         if not home_strength.get('key_players_available', True):
-            upset_index += 25
-            factors.append(f"{home_team}核心球员缺席")
+            add_score('base_score', 'key_player_absence', 25.0, f"{home_team}核心球员缺席")
         
         if not away_strength.get('key_players_available', True):
-            upset_index += 25
-            factors.append(f"{away_team}核心球员缺席")
+            add_score('base_score', 'key_player_absence', 25.0, f"{away_team}核心球员缺席")
 
         # 5. 历史相似赔率参考
         if historical_odds_reference and historical_odds_reference.get('available'):
@@ -625,15 +758,22 @@ class UpsetAnalyzer:
             result_rates = summary.get('result_rates', {})
 
             if sample_size >= 3:
-                upset_index += min(15.0, cold_rate * 25.0)
+                add_score('market_score', 'historical_odds', min(15.0, cold_rate * 25.0))
                 if cold_rate >= 0.4:
-                    factors.append(f"相似赔率冷门占比高({cold_rate:.0%})")
+                    factor = f"相似赔率冷门占比高({cold_rate:.0%})"
+                    add_factor(factor)
+                    self._record_breakdown_module(
+                        breakdown,
+                        category='market',
+                        module_key='historical_odds',
+                        score=0.0,
+                        factor=factor,
+                    )
 
                 if predicted_outcome:
                     reverse_rate = 1.0 - result_rates.get(predicted_outcome, 0.0)
                     if reverse_rate >= 0.6:
-                        upset_index += min(10.0, reverse_rate * 10.0)
-                        factors.append(f"相似赔率反向结果偏多({reverse_rate:.0%})")
+                        add_score('market_score', 'historical_odds', min(10.0, reverse_rate * 10.0), f"相似赔率反向结果偏多({reverse_rate:.0%})")
         
         # 6. 【新增】强队实力指数与让步数据不匹配分析
         if asian_handicap or european_odds:
@@ -651,17 +791,25 @@ class UpsetAnalyzer:
                 
                 # 根据不匹配程度增加爆冷指数
                 if level == '高':
-                    upset_index += min(35, gap)
+                    add_score('market_score', 'market_mismatch', min(35, gap))
                 elif level == '中':
-                    upset_index += min(20, gap)
+                    add_score('market_score', 'market_mismatch', min(20, gap))
                 else:
-                    upset_index += min(10, gap)
+                    add_score('market_score', 'market_mismatch', min(10, gap))
                     
                 # 添加不匹配因素到列表
                 warning_factors = mismatch_analysis.get('warning_factors', [])
                 for factor in warning_factors:
                     if factor not in factors:
-                        factors.append(f"[实力-盘口不匹配] {factor}")
+                        tagged = f"[实力-盘口不匹配] {factor}"
+                        add_factor(tagged)
+                        self._record_breakdown_module(
+                            breakdown,
+                            category='market',
+                            module_key='market_mismatch',
+                            score=0.0,
+                            factor=tagged,
+                        )
 
         # 7. 【新增】爆冷案例库知识检索（相似案例 Top-K），用于解释与复盘
         knowledge = {'available': False, 'top_cases': [], 'hint': ''}
@@ -689,24 +837,29 @@ class UpsetAnalyzer:
 
                 # Conservative boost: only when similarity is reasonably high and the case is a real upset.
                 if float(best.get('score') or 0.0) >= 0.55 and best.get('upset_level') not in ('微弱爆冷', ''):
-                    upset_index += min(8.0, float(best.get('score') or 0.0) * 8.0)
-                    factors.append(f"[案例库] 相似案例:{knowledge['hint']} s={best.get('score')}")
+                    add_score('knowledge_score', 'case_knowledge', min(8.0, float(best.get('score') or 0.0) * 8.0), f"[案例库] 相似案例:{knowledge['hint']} s={best.get('score')}")
         except Exception:
             # Keep prediction robust; knowledge is best-effort.
             knowledge = {'available': False, 'top_cases': [], 'hint': ''}
         
         # 确定爆冷等级
-        upset_index = min(100, upset_index)
-        
-        if upset_index >= 70:
-            upset_level = '高'
-            warning_level = '🔴'
-        elif upset_index >= 40:
-            upset_level = '中'
-            warning_level = '🟡'
-        else:
-            upset_level = '低'
-            warning_level = '🟢'
+        raw_total_score = round(
+            float(category_scores.get('base_score') or 0.0)
+            + float(category_scores.get('context_score') or 0.0)
+            + float(category_scores.get('market_score') or 0.0)
+            + float(category_scores.get('knowledge_score') or 0.0),
+            2,
+        )
+        upset_index = min(100, raw_total_score)
+        upset_level = self._build_risk_level(upset_index)
+        warning_level = self._build_warning_level(upset_level)
+        breakdown = self._finalize_breakdown(
+            breakdown,
+            base_score=float(category_scores.get('base_score') or 0.0),
+            context_score=float(category_scores.get('context_score') or 0.0),
+            market_score=float(category_scores.get('market_score') or 0.0),
+            knowledge_score=float(category_scores.get('knowledge_score') or 0.0),
+        )
         
         result = {
             'index': upset_index,
@@ -714,6 +867,16 @@ class UpsetAnalyzer:
             'warning_level': warning_level,
             'similar_cases_count': len(similar_cases),
             'factors': factors,
+            'risk_score_detail': {
+                'base_score': round(float(category_scores.get('base_score') or 0.0), 2),
+                'context_score': round(float(category_scores.get('context_score') or 0.0), 2),
+                'market_score': round(float(category_scores.get('market_score') or 0.0), 2),
+                'knowledge_score': round(float(category_scores.get('knowledge_score') or 0.0), 2),
+                'total_score': raw_total_score,
+                'capped_score': upset_index,
+                'level': upset_level,
+            },
+            'risk_breakdown': breakdown,
             'historical_odds_reference': historical_odds_reference,
             'motivation_risk': motivation_risk,
             'handicap_strength_mismatch': mismatch_analysis,

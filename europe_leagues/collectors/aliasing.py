@@ -58,6 +58,16 @@ def normalize_team_name(league_code: str, name: str, alias_map: Optional[Dict[st
         return ''
     mapping = alias_map if alias_map is not None else load_team_alias_map()
     league_map = mapping.get(league_code, {})
-    if isinstance(league_map, dict):
+    if isinstance(league_map, dict) and raw_name in league_map:
         return league_map.get(raw_name, raw_name)
+
+    global_matches = set()
+    for candidate_map in mapping.values():
+        if not isinstance(candidate_map, dict):
+            continue
+        canonical_name = candidate_map.get(raw_name)
+        if canonical_name:
+            global_matches.add(str(canonical_name).strip())
+    if len(global_matches) == 1:
+        return next(iter(global_matches))
     return raw_name

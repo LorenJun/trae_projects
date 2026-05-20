@@ -7,10 +7,12 @@ import argparse
 import ast
 import html
 import re
-import urllib.request
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
+
+import requests
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -134,7 +136,7 @@ def normalize_team_name(name: str) -> str:
 
 
 def fetch_text(url: str) -> str:
-    request = urllib.request.Request(
+    response = requests.get(
         url,
         headers={
             "User-Agent": (
@@ -142,9 +144,11 @@ def fetch_text(url: str) -> str:
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
             )
         },
+        timeout=30,
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return response.read().decode("utf-8", errors="ignore")
+    response.raise_for_status()
+    response.encoding = response.encoding or "utf-8"
+    return response.text
 
 
 def clean_html_text(raw: str) -> str:
@@ -168,6 +172,43 @@ def parse_time_value(raw_value: str) -> Tuple[str, str]:
         raise ValueError(f"无法解析开球时间: {raw_value}")
     year, month, day, hour, minute = [int(part) for part in parts[:5]]
     return f"{year:04d}-{month:02d}-{day:02d}", f"{hour:02d}:{minute:02d}"
+
+
+def _parse_schedule_datetime(date_text: str, time_text: str) -> Tuple[Optional[datetime], bool]:
+    normalized_date = str(date_text or "").strip()
+    normalized_time = str(time_text or "").strip()
+    if not normalized_date:
+        return None, False
+    if normalized_time:
+        try:
+            return datetime.strptime(f"{normalized_date} {normalized_time}", "%Y-%m-%d %H:%M"), True
+        except Exception:
+            pass
+    try:
+        return datetime.strptime(normalized_date, "%Y-%m-%d"), False
+    except Exception:
+        return None, False
+
+
+def choose_later_schedule(
+    existing_date: str,
+    existing_time: str,
+    fetched_date: str,
+    fetched_time: str,
+) -> Tuple[str, str]:
+    existing_dt, existing_has_time = _parse_schedule_datetime(existing_date, existing_time)
+    fetched_dt, fetched_has_time = _parse_schedule_datetime(fetched_date, fetched_time)
+    if fetched_dt is None:
+        return str(existing_date or "").strip(), str(existing_time or "").strip()
+    if existing_dt is None:
+        return str(fetched_date or "").strip(), str(fetched_time or "").strip()
+    if fetched_dt > existing_dt:
+        return str(fetched_date or "").strip(), str(fetched_time or "").strip()
+    if fetched_dt < existing_dt:
+        return str(existing_date or "").strip(), str(existing_time or "").strip()
+    if fetched_has_time and not existing_has_time:
+        return str(fetched_date or "").strip(), str(fetched_time or "").strip()
+    return str(existing_date or "").strip(), str(existing_time or "").strip()
 
 
 def parse_source_schedule(url: str) -> Dict[int, List[SourceMatch]]:
@@ -261,10 +302,16 @@ def merge_fallback_schedule(
         for match in matches:
             fallback = fallback_rows.get((round_no, match.home_team, match.away_team))
             if fallback:
+                chosen_date, chosen_time = choose_later_schedule(
+                    match.date,
+                    match.time,
+                    fallback[0],
+                    fallback[1],
+                )
                 match = SourceMatch(
                     round_no=match.round_no,
-                    date=fallback[0],
-                    time=fallback[1],
+                    date=chosen_date,
+                    time=chosen_time,
                     home_team=match.home_team,
                     away_team=match.away_team,
                     score=match.score,
@@ -309,13 +356,22 @@ def build_round_table(source_rows: List[SourceMatch], existing_rows: Dict[Tuple[
         else:
             score = "-"
 
+        final_date, final_time = match.date, match.time
+        if existing:
+            final_date, final_time = choose_later_schedule(
+                existing.date,
+                existing.time,
+                match.date,
+                match.time,
+            )
+
         remark = existing.remark if existing else ("已结束" if match.finished else "进行中")
         if match.finished and remark.startswith("进行中"):
             remark = remark.replace("进行中", "已结束", 1)
         if not match.finished and not remark:
             remark = "进行中"
         output.append(
-            f"| {match.date} | {match.time} | {match.home_team} | {score} | {match.away_team} | {remark} |\n"
+            f"| {final_date} | {final_time} | {match.home_team} | {score} | {match.away_team} | {remark} |\n"
         )
     return output
 

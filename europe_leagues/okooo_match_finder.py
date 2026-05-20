@@ -7,6 +7,8 @@
 import re
 from playwright.sync_api import sync_playwright
 
+from okooo_mobile_access import cache_busted_okooo_url, mobile_context_options, mobile_headers, random_mobile_profile
+
 
 class OkoooMatchFinder:
     """澳客网比赛ID查找器 - 纯在线搜索方式"""
@@ -74,11 +76,10 @@ class OkoooMatchFinder:
         """在线搜索比赛ID（从移动端热门赛事入口查找 MatchID）"""
 
         with sync_playwright() as p:
+            profile = random_mobile_profile()
             browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-            )
+            context = browser.new_context(**mobile_context_options(profile=profile))
+            context.set_extra_http_headers(mobile_headers(profile=profile))
 
             page = context.new_page()
 
@@ -87,7 +88,7 @@ class OkoooMatchFinder:
                 # we then follow its links to locate specific match pages that contain MatchID.
                 start_url = "https://m.okooo.com/saishi/remen/"
                 print(f"  从热门赛事页查找: {start_url}")
-                page.goto(start_url, wait_until="domcontentloaded", timeout=30000)
+                page.goto(cache_busted_okooo_url(start_url, profile=profile), wait_until="domcontentloaded", timeout=30000)
                 page.wait_for_timeout(2500)
 
                 html = page.content()
@@ -157,7 +158,7 @@ class OkoooMatchFinder:
                 max_pages = 25 if league_hint else 15
                 for href, text in ordered[:max_pages]:
                     try:
-                        page.goto(href, wait_until="domcontentloaded", timeout=30000)
+                        page.goto(cache_busted_okooo_url(href, profile=profile), wait_until="domcontentloaded", timeout=30000)
                         page.wait_for_timeout(2500)
                         sub_html = page.content()
                         if self._is_blocked(sub_html):
@@ -167,14 +168,14 @@ class OkoooMatchFinder:
                         m = re.search(r"[?&]MatchID=(\d+)", href, flags=re.IGNORECASE)
                         if m:
                             match_id = m.group(1)
-                            if self._quick_verify(page, match_id, team1, team2):
+                            if self._quick_verify(page, match_id, team1, team2, profile):
                                 print(f"  ✓ 命中 MatchID: {match_id} (from url)")
                                 browser.close()
                                 return match_id
 
                         # Otherwise, attempt to extract MatchID from the page.
                         for match_id in self._extract_match_ids(sub_html):
-                            if self._quick_verify(page, match_id, team1, team2):
+                            if self._quick_verify(page, match_id, team1, team2, profile):
                                 print(f"  ✓ 命中 MatchID: {match_id}")
                                 browser.close()
                                 return match_id
@@ -187,7 +188,7 @@ class OkoooMatchFinder:
                             inner_text = ""
                         if self._text_has_teams(inner_text, team1, team2):
                             for match_id in self._extract_match_ids(inner_text):
-                                if self._quick_verify(page, match_id, team1, team2):
+                                if self._quick_verify(page, match_id, team1, team2, profile):
                                     print(f"  ✓ 命中 MatchID: {match_id}")
                                     browser.close()
                                     return match_id
@@ -204,12 +205,12 @@ class OkoooMatchFinder:
                 browser.close()
                 return None
 
-    def _quick_verify(self, page, match_id, team1, team2):
+    def _quick_verify(self, page, match_id, team1, team2, profile):
         """快速验证比赛ID"""
         try:
             # Prefer mobile odds page because desktop match pages are more likely blocked.
             url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
-            page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            page.goto(cache_busted_okooo_url(url, profile=profile), wait_until="domcontentloaded", timeout=20000)
             page.wait_for_timeout(2000)
             html = page.content()
             if self._is_blocked(html):
@@ -238,14 +239,13 @@ class OkoooMatchFinder:
 
         try:
             with sync_playwright() as p:
+                profile = random_mobile_profile()
                 browser = p.chromium.launch(headless=True)
-                context = browser.new_context(
-                    viewport={'width': 1920, 'height': 1080},
-                    user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-                )
+                context = browser.new_context(**mobile_context_options(profile=profile))
+                context.set_extra_http_headers(mobile_headers(profile=profile))
 
                 page = context.new_page()
-                result = self._do_verify(page, match_id, expected_teams)
+                result = self._do_verify(page, match_id, expected_teams, profile)
 
                 browser.close()
                 return result
@@ -253,11 +253,11 @@ class OkoooMatchFinder:
             print(f"    ⚠ 验证跳过: {e}")
             return True
 
-    def _do_verify(self, page, match_id, expected_teams):
+    def _do_verify(self, page, match_id, expected_teams, profile):
         """执行实际的验证逻辑"""
         try:
-            url = f'https://www.okooo.com/soccer/match/{match_id}/'
-            page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
+            page.goto(cache_busted_okooo_url(url, profile=profile), wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(3000)
 
             title = page.title()
@@ -358,7 +358,7 @@ def find_and_fetch_odds(team1, team2, league_hint=None, headless=True):
 
     print(f"✓ 找到比赛ID: {match_id}")
 
-    odds_url = f"https://www.okooo.com/soccer/match/{match_id}/odds/"
+    odds_url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
     print(f"📊 赔率链接: {odds_url}")
 
     print("📥 获取赔率数据...")
@@ -397,8 +397,8 @@ if __name__ == '__main__':
 
         if match_id:
             print(f"\n✅ 比赛ID: {match_id}")
-            print(f"   欧指: https://www.okooo.com/soccer/match/{match_id}/odds/")
-            print(f"   亚盘: https://www.okooo.com/soccer/match/{match_id}/ah/")
+            print(f"   欧指: https://m.okooo.com/match/odds.php?MatchID={match_id}")
+            print(f"   亚盘: https://m.okooo.com/match/handicap.php?MatchID={match_id}")
         else:
             print("\n❌ 未找到比赛")
     else:

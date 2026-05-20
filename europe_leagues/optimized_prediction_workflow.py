@@ -70,8 +70,6 @@ def _external_snapshot_dirs(league_code):
     base_dir = SCRIPT_DIR
     dirs = [
         os.path.join(_external_snapshot_root(base_dir), league_code),
-        os.path.join(base_dir, 'okooo_snapshots'),
-        os.path.join(base_dir, 'okooo_snapshots', league_code),
     ]
     seen = set()
     result = []

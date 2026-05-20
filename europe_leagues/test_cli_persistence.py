@@ -95,9 +95,12 @@ class CliPersistenceTest(unittest.TestCase):
                     "accuracy_refreshed": persist,
                     "persisted": {
                         "enabled": persist,
-                        "archived": False,
-                        "memory_updated": False,
-                        "result_sync_registered": False,
+                        "archived": persist,
+                        "memory_updated": persist,
+                        "result_sync_registered": persist,
+                        "archive_count": 3 if persist else 0,
+                        "memory_update_count": 3 if persist else 0,
+                        "result_sync_registration_count": 3 if persist else 0,
                     },
                 }
 
@@ -121,6 +124,12 @@ class CliPersistenceTest(unittest.TestCase):
         self.assertTrue(all(item["updated"] for item in updates))
         self.assertTrue(all(item["prediction_count"] == 3 for item in updates))
         self.assertTrue(all(item["persisted"]["enabled"] for item in updates))
+        self.assertTrue(all(item["persisted"]["archived"] for item in updates))
+        self.assertTrue(all(item["persisted"]["memory_updated"] for item in updates))
+        self.assertTrue(all(item["persisted"]["result_sync_registered"] for item in updates))
+        self.assertTrue(all(item["persisted"]["archive_count"] == 3 for item in updates))
+        self.assertTrue(all(item["persisted"]["memory_update_count"] == 3 for item in updates))
+        self.assertTrue(all(item["persisted"]["result_sync_registration_count"] == 3 for item in updates))
         self.assertTrue(all(item["runtime_profile"]["agent_roles"] == ["data_collector", "match_analyzer", "odds_analyzer"] for item in updates))
 
     def test_predict_schedule_no_write_disables_batch_persistence(self):
@@ -140,6 +149,8 @@ class CliPersistenceTest(unittest.TestCase):
                         "archived": False,
                         "memory_updated": False,
                         "result_sync_registered": False,
+                        "memory_update_count": 0,
+                        "result_sync_registration_count": 0,
                     },
                 }
 
@@ -160,7 +171,7 @@ class CliPersistenceTest(unittest.TestCase):
         update = captured["payload"]["data"][0]
         self.assertFalse(update["updated"])
         self.assertFalse(update["accuracy_refreshed"])
-        self.assertEqual(update["persisted"], {"enabled": False, "archived": False, "memory_updated": False, "result_sync_registered": False})
+        self.assertEqual(update["persisted"], {"enabled": False, "archived": False, "memory_updated": False, "result_sync_registered": False, "memory_update_count": 0, "result_sync_registration_count": 0})
 
     def test_collect_data_serializes_matches_and_runtime_profile(self):
         captured = {}

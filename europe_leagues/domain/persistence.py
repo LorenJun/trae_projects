@@ -9,17 +9,37 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from collectors.aliasing import load_team_alias_map, normalize_team_name
+
+
+@dataclass(frozen=True)
+class ParsedMemoryEntry:
+    raw: str
+    normalized: str
+    first_line: str
+    key: str
+    league_code: str
+    match_date: str
+    home_team: str
+    away_team: str
+    normalized_home: str
+    normalized_away: str
+    headline_match_id: str
+    memory_id: str
+    updated_at: datetime
+    completed: bool
+
 from runtime.memory_dedupe import (
     are_entries_duplicate,
     clean_memory_duplicates,
     normalize_memory_entry_key,
-    normalize_team_name,
     validate_memory_entry,
 )
 from runtime.memory_samples import sync_prediction_memory_samples
 from runtime.paths import get_default_paths
 from runtime.rag_store import sync_rag_index
-from runtime.result_sync import register_prediction_result_sync
+from runtime.result_sync import LEAGUE_SOT_CODES, register_prediction_result_sync
+from storage.teams_md import TeamsMarkdownStore
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +52,11 @@ LEAGUE_DISPLAY_NAMES = {
     'europa_league': '欧联',
     'champions_league': '欧冠',
     'conference_league': '欧协联',
+    'world_cup': '世界杯',
     '欧联': '欧联',
     '欧冠': '欧冠',
     '欧协联': '欧协联',
+    '世界杯': '世界杯',
 }
 
 NON_SOT_COMPETITION_KEYWORDS = ('杯', '欧冠', '欧联', '欧协联', '亚冠', '淘汰赛', '半决赛', '决赛')
@@ -71,6 +93,7 @@ class PredictionPersistenceService:
         self.paths = get_default_paths(base_dir)
         self.cache = cache
         self.result_manager = result_manager
+        self.team_alias_map = load_team_alias_map(base_dir)
 
     def memory_file_path(self) -> str:
         return str(self.paths.memory_file)
@@ -334,27 +357,17 @@ class PredictionPersistenceService:
             body_lines = [summary_line]
         return start_marker + '\n' + '\n'.join(body_lines) + '\n' + end_marker
 
-    @staticmethod
-    def _canonical_memory_identity(result: Dict[str, Any]) -> tuple[str, str]:
-        league_code = str(result.get('league_code') or result.get('league') or '-')
-        match_date = str(result.get('match_date') or '-')
-        home_team = str(result.get('home_team') or '-')
-        away_team = str(result.get('away_team') or '-')
-        external_match_id = str(result.get('match_id') or result.get('external_match_id') or '').strip()
-        league_name = str(result.get('league_name') or LEAGUE_DISPLAY_NAMES.get(league_code) or league_code or '-')
-        competition_stage_name = str(
-            result.get('competition_stage_name')
-            or result.get('competition_stage')
-            or ''
-        ).strip()
-        is_non_sot = (
-            str(result.get('storage_mode') or '').strip() == 'runtime_only'
-            or bool(competition_stage_name)
-            or any(keyword in league_name for keyword in NON_SOT_COMPETITION_KEYWORDS)
-        )
-        if is_non_sot and external_match_id:
-            return external_match_id, f'{league_code}|{home_team}|{away_team}'
-        return f'{league_code}|{match_date}|{home_team}|{away_team}', f'{league_code}|{match_date}|{home_team}|{away_team}'
+    @classmethod
+    def _canonical_memory_identity(cls, result: Dict[str, Any]) -> tuple[str, str]:
+        league_code = str(result.get('league_code') or result.get('league') or '-').strip()
+        match_date = str(result.get('match_date') or '-').strip()
+        home_team = str(result.get('home_team') or '-').strip()
+        away_team = str(result.get('away_team') or '-').strip()
+        alias_map = load_team_alias_map(None)
+        normalized_home = normalize_team_name(league_code, home_team, alias_map) or home_team
+        normalized_away = normalize_team_name(league_code, away_team, alias_map) or away_team
+        canonical_identity = f'{league_code}|{match_date}|{normalized_home}|{normalized_away}'
+        return canonical_identity, canonical_identity
 
     @classmethod
     def _memory_identity_aliases(cls, result: Dict[str, Any]) -> tuple[set[str], set[str]]:
@@ -362,6 +375,9 @@ class PredictionPersistenceService:
         match_date = str(result.get('match_date') or '-').strip()
         home_team = str(result.get('home_team') or '-').strip()
         away_team = str(result.get('away_team') or '-').strip()
+        alias_map = load_team_alias_map(None)
+        normalized_home = normalize_team_name(league_code, home_team, alias_map) or home_team
+        normalized_away = normalize_team_name(league_code, away_team, alias_map) or away_team
         external_match_id = str(result.get('match_id') or result.get('external_match_id') or '').strip()
         dedupe_id, display_identity = cls._canonical_memory_identity(result)
 
@@ -373,16 +389,15 @@ class PredictionPersistenceService:
         if dedupe_id:
             memory_ids.add(dedupe_id)
 
-        legacy_date_identity = ''
+        if league_code and match_date and normalized_home and normalized_away:
+            normalized_identity = f'{league_code}|{match_date}|{normalized_home}|{normalized_away}'
+            entry_keys.add(normalized_identity)
+            memory_ids.add(normalized_identity)
+
         if league_code and match_date and home_team and away_team:
             legacy_date_identity = f'{league_code}|{match_date}|{home_team}|{away_team}'
             entry_keys.add(legacy_date_identity)
             memory_ids.add(legacy_date_identity)
-
-        legacy_runtime_identity = ''
-        if league_code and home_team and away_team:
-            legacy_runtime_identity = f'{league_code}|{home_team}|{away_team}'
-            entry_keys.add(legacy_runtime_identity)
 
         if external_match_id:
             memory_ids.add(external_match_id)
@@ -417,6 +432,224 @@ class PredictionPersistenceService:
         normalized = PredictionPersistenceService._unescape_memory_entry_text(line)
         first_line = normalized.splitlines()[0].strip() if normalized.splitlines() else ''
         return any(first_line.startswith(prefix) for prefix in entry_prefixes) or any(marker in normalized for marker in memory_id_markers)
+
+    @classmethod
+    def _parse_memory_entry(cls, entry: str) -> Optional[ParsedMemoryEntry]:
+        normalized = cls._unescape_memory_entry_text(entry).strip()
+        if not normalized:
+            return None
+        lines = [line.rstrip() for line in normalized.splitlines() if line.strip()]
+        if not lines:
+            return None
+        first_line = lines[0].strip()
+        key_match = re.match(r'- \[([^\]]+)\]\s+(\d{4}-\d{2}-\d{2})', first_line)
+        if not key_match:
+            return None
+        key = str(key_match.group(1) or '').strip()
+        match_date = str(key_match.group(2) or '').strip()
+        parts = [part.strip() for part in key.split('|') if part.strip()]
+        if len(parts) >= 4:
+            league_code = parts[0]
+            home_team = parts[-2]
+            away_team = parts[-1]
+        elif len(parts) == 3:
+            league_code = parts[0]
+            home_team = parts[1]
+            away_team = parts[2]
+        else:
+            return None
+        if not (league_code and match_date and home_team and away_team):
+            return None
+        alias_map = load_team_alias_map(None)
+        normalized_home = normalize_team_name(league_code, home_team, alias_map) or home_team
+        normalized_away = normalize_team_name(league_code, away_team, alias_map) or away_team
+        headline_match_id_match = re.search(r'MatchID:\s*([^|]+?)(?=\s*\||$)', first_line)
+        headline_match_id = str(headline_match_id_match.group(1) or '').strip() if headline_match_id_match else ''
+        memory_id = ''
+        for line in lines[1:]:
+            memory_id_match = re.search(r'记忆ID:\s*([^|]+?)(?=\s*\||$)', line)
+            if memory_id_match:
+                memory_id = str(memory_id_match.group(1) or '').strip()
+                break
+        return ParsedMemoryEntry(
+            raw=entry,
+            normalized=normalized,
+            first_line=first_line,
+            key=key,
+            league_code=league_code,
+            match_date=match_date,
+            home_team=home_team,
+            away_team=away_team,
+            normalized_home=normalized_home,
+            normalized_away=normalized_away,
+            headline_match_id=headline_match_id,
+            memory_id=memory_id,
+            updated_at=cls._memory_entry_updated_at(normalized),
+            completed=cls._memory_entry_is_completed(normalized),
+        )
+
+    @staticmethod
+    def _memory_entry_id_is_real(match_id: str, league_code: str, match_date: str, home_team: str, away_team: str) -> bool:
+        raw = str(match_id or '').strip()
+        if not raw:
+            return False
+        if raw.isdigit():
+            return True
+        if '|' in raw:
+            return False
+        alias_map = load_team_alias_map(None)
+        normalized_home = normalize_team_name(league_code, home_team, alias_map) or home_team
+        normalized_away = normalize_team_name(league_code, away_team, alias_map) or away_team
+        compact_date = match_date.replace('-', '')
+        synthetic_ids = {
+            f'{league_code}|{match_date}|{home_team}|{away_team}',
+            f'{league_code}|{match_date}|{normalized_home}|{normalized_away}',
+            f'{league_code}_{compact_date}_{home_team}_{away_team}',
+            f'{league_code}_{compact_date}_{normalized_home}_{normalized_away}',
+        }
+        if raw in synthetic_ids:
+            return False
+        if raw.startswith(f'{league_code}_'):
+            return False
+        return True
+
+    @staticmethod
+    def _memory_entry_uses_canonical_teams(entry: ParsedMemoryEntry) -> bool:
+        return entry.home_team == entry.normalized_home and entry.away_team == entry.normalized_away
+
+    @classmethod
+    def _canonicalize_memory_entry(cls, entry: ParsedMemoryEntry) -> str:
+        canonical_key = f'{entry.league_code}|{entry.match_date}|{entry.normalized_home}|{entry.normalized_away}'
+        synthetic_match_id = f"{entry.league_code}_{entry.match_date.replace('-', '')}_{entry.normalized_home}_{entry.normalized_away}"
+        current_match_id = entry.headline_match_id or entry.memory_id
+        canonical_match_id = current_match_id if cls._memory_entry_id_is_real(
+            current_match_id,
+            entry.league_code,
+            entry.match_date,
+            entry.home_team,
+            entry.away_team,
+        ) else synthetic_match_id
+
+        lines = entry.normalized.splitlines()
+        if not lines:
+            return entry.normalized
+
+        first_line = re.sub(r'^- \[[^\]]+\]', f'- [{canonical_key}]', lines[0].strip(), count=1)
+        team_segment = f' {entry.home_team} vs {entry.away_team}'
+        canonical_segment = f' {entry.normalized_home} vs {entry.normalized_away}'
+        if team_segment in first_line:
+            first_line = first_line.replace(team_segment, canonical_segment, 1)
+        first_line = re.sub(r'MatchID:\s*([^|]+?)(?=\s*\||$)', f'MatchID: {canonical_match_id}', first_line, count=1)
+        lines[0] = first_line
+
+        normalized_lines = [first_line]
+        for raw_line in lines[1:]:
+            line = raw_line
+            if team_segment.strip() in line:
+                line = line.replace(f'{entry.home_team} vs {entry.away_team}', f'{entry.normalized_home} vs {entry.normalized_away}')
+            line = re.sub(
+                r'记忆ID:\s*(.+?)(?=\s*\|\s*更新时间:|\s*\|\s*MatchID:|$)',
+                f'记忆ID: {canonical_key}',
+                line,
+                count=1,
+            )
+            line = re.sub(r'MatchID:\s*([^|]+?)(?=\s*\||$)', f'MatchID: {canonical_match_id}', line, count=1)
+            normalized_lines.append(line)
+        return '\n'.join(normalized_lines)
+
+    @classmethod
+    def _cleanup_prediction_memory_entries(cls, entries: list[str]) -> list[str]:
+        grouped: Dict[tuple[str, str, str, str], list[ParsedMemoryEntry]] = {}
+        for entry in entries:
+            parsed = cls._parse_memory_entry(entry)
+            if not parsed:
+                continue
+            group_key = (
+                parsed.league_code,
+                parsed.match_date,
+                parsed.normalized_home,
+                parsed.normalized_away,
+            )
+            grouped.setdefault(group_key, []).append(parsed)
+
+        survivors: list[ParsedMemoryEntry] = []
+        for group_entries in grouped.values():
+            survivor = max(
+                group_entries,
+                key=lambda item: (
+                    cls._memory_entry_id_is_real(
+                        item.headline_match_id or item.memory_id,
+                        item.league_code,
+                        item.match_date,
+                        item.home_team,
+                        item.away_team,
+                    ),
+                    item.completed,
+                    cls._memory_entry_uses_canonical_teams(item),
+                    item.updated_at,
+                    item.normalized,
+                ),
+            )
+            survivors.append(survivor)
+        survivors.sort(key=lambda item: (item.updated_at, item.normalized), reverse=True)
+        return [cls._canonicalize_memory_entry(item) for item in survivors]
+
+    def _build_memory_schedule_truth_index(self) -> Dict[str, set[tuple[str, str, str]]]:
+        store = TeamsMarkdownStore(self.base_dir)
+        truth_index: Dict[str, set[tuple[str, str, str]]] = {}
+        for league_code in LEAGUE_SOT_CODES:
+            try:
+                lines = store.read_lines(league_code)
+            except Exception:
+                continue
+            schedule_rows: set[tuple[str, str, str]] = set()
+            for line in lines:
+                if not line.strip().startswith('|'):
+                    continue
+                cols = [c.strip() for c in line.strip().strip('|').split('|')]
+                if len(cols) != 6:
+                    continue
+                row_date, _row_time, row_home, _row_score, row_away, _row_note = cols
+                if not (row_date and row_home and row_away):
+                    continue
+                normalized_home = normalize_team_name(league_code, row_home, self.team_alias_map) or row_home
+                normalized_away = normalize_team_name(league_code, row_away, self.team_alias_map) or row_away
+                schedule_rows.add((row_date, normalized_home, normalized_away))
+            if schedule_rows:
+                truth_index[league_code] = schedule_rows
+        return truth_index
+
+    def _memory_entry_exists_in_schedule_truth(
+        self,
+        entry: ParsedMemoryEntry,
+        truth_index: Dict[str, set[tuple[str, str, str]]],
+    ) -> bool:
+        if entry.league_code not in LEAGUE_SOT_CODES:
+            return True
+        league_truth = truth_index.get(entry.league_code)
+        if not league_truth:
+            return True
+        return (entry.match_date, entry.normalized_home, entry.normalized_away) in league_truth
+
+    def _prune_memory_entries_with_schedule_mismatch(self, entries: list[str]) -> list[str]:
+        truth_index = self._build_memory_schedule_truth_index()
+        retained: list[str] = []
+        for raw_entry in entries:
+            parsed = self._parse_memory_entry(raw_entry)
+            if not parsed:
+                retained.append(raw_entry)
+                continue
+            if not self._memory_entry_exists_in_schedule_truth(parsed, truth_index):
+                logger.info(
+                    '删除滚动记忆非真实赛程条目: %s %s vs %s (%s)',
+                    parsed.match_date,
+                    parsed.home_team,
+                    parsed.away_team,
+                    parsed.league_code,
+                )
+                continue
+            retained.append(raw_entry)
+        return retained
 
     @staticmethod
     def _memory_risk_points(result: Dict[str, Any]) -> list[str]:
@@ -678,43 +911,18 @@ class PredictionPersistenceService:
 
             if match:
                 existing_entries = self._extract_memory_entry_lines(match.group('body'))
-                
-                alias_entries = []
-                retained_entries = []
-                
-                for existing_entry in existing_entries:
-                    if self._memory_entry_matches_aliases(existing_entry, entry_prefixes, memory_id_markers):
-                        alias_entries.append(existing_entry)
-                        continue
-                    
-                    first_line = existing_entry.split('\n')[0] if existing_entry else ''
-                    entry_match = re.match(r'- \[([^\]]+)\]', first_line)
-                    if entry_match:
-                        existing_key = entry_match.group(1)
-                        existing_norm = normalize_memory_entry_key(existing_key)
-                        # 仅当同联赛、同日期且标准化后的主客队一致时，才视为同一场比赛。
-                        # 避免把不同轮次但主客相同的比赛误合并。
-                        if (
-                            existing_norm[0] == league_code
-                            and existing_norm[1] == match_date
-                            and existing_norm[2] == normalized_home
-                            and existing_norm[3] == normalized_away
-                        ):
-                            alias_entries.append(existing_entry)
-                            continue
-                    
-                    retained_entries.append(existing_entry)
-                
-                latest_entry = max(alias_entries + [entry], key=self._memory_entry_sort_key)
-                new_entries = sorted(
-                    [latest_entry] + retained_entries,
-                    key=self._memory_entry_sort_key,
-                    reverse=True,
-                )[:max_entries]
+                retained_entries = [
+                    existing_entry
+                    for existing_entry in existing_entries
+                    if not self._memory_entry_matches_aliases(existing_entry, entry_prefixes, memory_id_markers)
+                ]
+                retained_entries = self._prune_memory_entries_with_schedule_mismatch(retained_entries)
+                new_entries = self._cleanup_prediction_memory_entries([entry] + retained_entries)[:max_entries]
                 replacement = self.render_prediction_memory_block(new_entries, start_marker, end_marker)
                 content = marker_block.sub(replacement, content, count=1)
             else:
-                rendered_block = self.render_prediction_memory_block([entry], start_marker, end_marker)
+                rendered_entries = self._cleanup_prediction_memory_entries([entry])[:max_entries]
+                rendered_block = self.render_prediction_memory_block(rendered_entries, start_marker, end_marker)
                 section = (
                     f'{section_title}\n\n'
                     f'{section_note}\n\n'
@@ -831,19 +1039,7 @@ class PredictionPersistenceService:
         result['storage_mode'] = payload.storage_mode
         result['predicted_winner'] = payload.predicted_winner
 
-    def prepare_cached_prediction(self, cached: Dict[str, Any], runtime_profile: Dict[str, Any], league_code: str) -> Dict[str, Any]:
-        if 'runtime_profile' not in cached:
-            cached['runtime_profile'] = runtime_profile
-        payload = self._build_persistence_payload(cached, league_code)
-        self._apply_persistence_payload(cached, payload)
-        self.update_prediction_memory(cached)
-        register_prediction_result_sync(self.base_dir, cached)
-        cached['persisted'] = self._persisted_status(True, memory_updated=True, result_sync_registered=True)
-        return cached
-
-    def persist_prediction(self, cache_name: str, cache_params: Dict[str, Any], result: Dict[str, Any], league_code: str) -> Dict[str, Any]:
-        if self.cache is not None:
-            self.cache.set(cache_name, cache_params, result)
+    def _persist_prediction_side_effects(self, result: Dict[str, Any], league_code: str, *, register_result_sync: bool) -> Dict[str, Any]:
         payload = self._build_persistence_payload(result, league_code)
         self._apply_persistence_payload(result, payload)
         persisted = self._persisted_status(True)
@@ -851,7 +1047,7 @@ class PredictionPersistenceService:
             self.result_manager.save_prediction_from_enhanced(result, league_code)
             persisted['archived'] = True
         except Exception as exc:
-            logger.warning('归档单场预测失败: %s', exc)
+            logger.warning('归档预测失败: %s', exc)
             persisted['error'] = str(exc)
         try:
             self.update_prediction_memory(result)
@@ -859,14 +1055,25 @@ class PredictionPersistenceService:
         except Exception as exc:
             logger.warning('更新 MEMORY.md 失败: %s', exc)
             persisted['error'] = str(exc)
-        try:
-            register_prediction_result_sync(self.base_dir, result)
-            persisted['result_sync_registered'] = True
-        except Exception as exc:
-            logger.warning('登记自动赛果同步失败: %s', exc)
-            persisted['error'] = str(exc)
+        if register_result_sync:
+            try:
+                register_prediction_result_sync(self.base_dir, result)
+                persisted['result_sync_registered'] = True
+            except Exception as exc:
+                logger.warning('登记自动赛果同步失败: %s', exc)
+                persisted['error'] = str(exc)
         result['persisted'] = persisted
         return result
+
+    def prepare_cached_prediction(self, cached: Dict[str, Any], runtime_profile: Dict[str, Any], league_code: str) -> Dict[str, Any]:
+        if 'runtime_profile' not in cached:
+            cached['runtime_profile'] = runtime_profile
+        return self._persist_prediction_side_effects(cached, league_code, register_result_sync=True)
+
+    def persist_prediction(self, cache_name: str, cache_params: Dict[str, Any], result: Dict[str, Any], league_code: str) -> Dict[str, Any]:
+        if self.cache is not None:
+            self.cache.set(cache_name, cache_params, result)
+        return self._persist_prediction_side_effects(result, league_code, register_result_sync=True)
 
     def persist_memory_only_prediction(self, result: Dict[str, Any], league_code: str) -> Dict[str, Any]:
         payload = self._build_persistence_payload(result, league_code)
@@ -885,17 +1092,46 @@ class PredictionPersistenceService:
         return self.result_manager.update_accuracy_stats()
 
     def persist_prediction_batch(self, predictions: list[Dict[str, Any]], league_code: str) -> Dict[str, Any]:
-        _ = league_code
         prediction_count = len(predictions or [])
+        archive_count = 0
+        memory_update_count = 0
+        result_sync_registration_count = 0
+
+        for prediction in predictions or []:
+            if not isinstance(prediction, dict):
+                continue
+            if prediction.get('prediction_blocked'):
+                continue
+            if not str(prediction.get('home_team') or '').strip() or not str(prediction.get('away_team') or '').strip():
+                continue
+            if not str(prediction.get('prediction') or prediction.get('predicted_winner') or '').strip():
+                continue
+
+            persisted_prediction = self._persist_prediction_side_effects(
+                prediction,
+                league_code,
+                register_result_sync=True,
+            )
+            persisted = persisted_prediction.get('persisted') if isinstance(persisted_prediction, dict) else {}
+            if isinstance(persisted, dict) and persisted.get('archived'):
+                archive_count += 1
+            if isinstance(persisted, dict) and persisted.get('memory_updated'):
+                memory_update_count += 1
+            if isinstance(persisted, dict) and persisted.get('result_sync_registered'):
+                result_sync_registration_count += 1
+
         self.refresh_accuracy_stats()
         return {
             'prediction_count': prediction_count,
             'accuracy_refreshed': True,
             'persisted': {
                 'enabled': True,
-                'archived': False,
-                'memory_updated': False,
-                'result_sync_registered': False,
+                'archived': archive_count > 0,
+                'memory_updated': memory_update_count > 0,
+                'result_sync_registered': result_sync_registration_count > 0,
                 'batch_mode': True,
+                'archive_count': archive_count,
+                'memory_update_count': memory_update_count,
+                'result_sync_registration_count': result_sync_registration_count,
             },
         }

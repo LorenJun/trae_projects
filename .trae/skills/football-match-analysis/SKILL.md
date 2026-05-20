@@ -1,106 +1,93 @@
 ---
 name: "football-match-analysis"
-description: "足球比赛预测分析技能，按 `prediction_system.py` 发现入口并下钻到 `app/cli.py` 执行，衔接 collect-data、实时快照、DomainPredictor、EnhancedPredictor 与 Harness 正式链路，输出胜平负、比分、大小球、水位、风险与最终建议。Invoke when user needs match prediction, betting analysis, or match odds evaluation."
+description: "足球比赛预测主技能，按 `prediction_system.py` 发现入口并下钻到 `europe_leagues/app/cli.py` 执行，衔接 collect-data、实时快照、DomainPredictor、EnhancedPredictor、RAG、persistence 与 result sync 正式链路。Invoke when user needs match prediction, betting analysis, or match odds evaluation."
 ---
 
 # Football Match Analysis
 
-本 Skill 是当前项目的足球预测主技能。执行时必须遵循“赛程/MatchID -> 实时快照 -> `app/cli.py` -> `DomainPredictor` -> `EnhancedPredictor` -> `HybridRAGService` -> 历史盘口一致性 / 临场建议 -> 双路径写回/统计”的正式链路，而不是只靠静态基本面或固定 `2.5` 大小球线下结论。
+本 Skill 是当前仓库里与 `europe_leagues/` 正式应用对应的预测主技能。
 
-## 当前主流程
+## 入口规则
 
-1. 确认 `league`、主队、客队、比赛日期，必要时补 `match_time`
+始终按以下两层理解入口：
+
+- 发现 / 兼容入口：`europe_leagues/prediction_system.py`
+- 真实命令实现：`europe_leagues/app/cli.py`
+
+不要把 `prediction_system.py` 误判成业务主逻辑实现层。
+
+## 正式主流程
+
+1. 确认 `league`、主客队、比赛日期，必要时补 `match_time`
 2. 优先通过 `prediction_system.py collect-data` 或 `okooo_fetch_daily_schedule.py` 获取 `match_id`
-3. 调用 `prediction_system.py predict-match`，由 `prediction_system.py` 兼容入口转发到 `app/cli.py`，再进入 `DomainPredictor` / `EnhancedPredictor`，自动：
-   - 刷新澳客实时快照
-   - 在缺失大小球时自动补抓
-   - 回填 `home_form/away_form` 的 EWMA 近况
-   - 可选注入 `team_context`
-   - 构建 `match_intelligence` 并执行动态调权
-   - 检索 RAG 相似比赛、盘口样本与爆冷案例
-   - 在 `1X2` 赔率接近且大小球变化接近时，抓取历史 `match_id` 盘口轨迹做临场增强
-4. 输出最终结论时必须包含：
-   - 胜平负概率
-   - Top 比分
-   - 真实大小球盘口线与大/小水位
-   - 风险提示与最终建议
-   - `retrieved_memory_explanation`
-   - `live_betting_advice`
-   - `runtime_profile` / 诊断字段
-5. 若是批量赛程，使用 `prediction_system.py predict-schedule`
-6. 赛后回填使用 `bulk_fetch_and_update.py` 或 `prediction_system.py save-result` / `accuracy --refresh`
+3. 调用 `prediction_system.py predict-match` 或 `predict-schedule`
+4. 命令会经 `app/cli.py` 进入 `DomainPredictor` / `EnhancedPredictor`
+5. 预测链会联动：
+   - 实时快照刷新
+   - 缺失大小球补抓
+   - EWMA 近况补齐
+   - RAG 相似比赛 / 盘口样本 / 爆冷案例检索
+   - `domain/persistence.py` 负责 side effects
+   - `runtime/result_sync.py` / `result_manager.py` 负责赛后闭环
 
-## Hermes 识别规则
+## 当前澳客访问口径
 
-- Hermes 或其他接入方可以从 `prediction_system.py` 发现项目入口
-- 但必须继续下钻到 `app/cli.py` 识别并执行真实命令
-- 不要把 `prediction_system.py` 当作业务主逻辑实现层
-- 单场预测应绑定 `prediction_system.py predict-match`，但执行识别应落到 `app/cli.py -> DomainPredictor -> EnhancedPredictor`
-- 批量预测应绑定 `prediction_system.py predict-schedule`，同样按 `app/cli.py` 的真实路由执行
-- 若需要阶段化、可审计链路，识别为 `prediction_system.py harness-run --pipeline match_prediction`，不要绕开 CLI 直接拼接底层模块
+- 默认快照 driver：`local-chrome`
+- 默认请求特征：`iPhone Safari UA + Referer: https://m.okooo.com/`
+- 公共移动 profile 池：`europe_leagues/okooo_mobile_access.py`
+- 当前设备池规模：`100` 组随机 `iPhone Safari` profile
+- 欧赔解析优先 `multi_company_consensus`；`99家平均` 仅作为 fallback
+
+## 当前正式命令面
+
+本 Skill 相关的高频正式命令包括：
+
+- `collect-data`
+- `predict-match`
+- `predict-match-lite`
+- `predict-schedule`
+- `pending-results`
+- `save-result`
+- `auto-sync-results`
+- `result-sync-daemon`
+- `accuracy`
+- `sync-pending-results-review`
+- `harness-run`
+
+## SoT / runtime 边界
+
+### SoT-backed
+
+以下 competition 以 markdown SoT 为主：
+
+- `premier_league`
+- `la_liga`
+- `serie_a`
+- `bundesliga`
+- `ligue_1`
+- `world_cup`
+
+### runtime-only
+
+以下 competition 以 `MEMORY.md` 与 runtime archive 为主：
+
+- `europa_league`
+- `champions_league`
+- `conference_league`
+- 其他杯赛 / 欧战扩展比赛
 
 ## 关键规则
 
-- 大小球不要默认按 `2.5` 解读；真实盘口抓取失败时必须返回 `missing_real_line` 或“待补真实盘口”
-- 澳客移动端里，大小球优先从 `亚值` 页面内的 `大小球` tab 抓取
+- 大小球不要默认按 `2.5` 解读；真实盘口缺失时必须明确落为缺失态
 - 若已知 `match_id`，优先直连抓取，避免重复赛程模糊匹配
 - 若球队在赛程里显示简称，需结合 `okooo_team_aliases.json`
-- 单场正式入口优先用 `prediction_system.py predict-match`，直接调用 `EnhancedPredictor()` 仅用于调试或深度排查
-- 若用户要求可审计编排结果，可走 `prediction_system.py harness-run --pipeline match_prediction`
-- 新预测会原生把 `RAG记忆:` 写入 `MEMORY.md`，旧记录才需要 `sync-memory-rag`
-- 新预测会把 `MatchID` 同步写入 SoT 备注与 `MEMORY.md`，便于后续按 `match_id` 追踪实时盘口与历史赔率轨迹
-- RAG 结果要优先检查 `realtime.context_applied.live_outcome_adjustment.historical_market_alignment`、`retrieved_memory.summary.live_market_followup` 与 `live_betting_advice`
-- 终版结论必须区分：
-  - `模型概率`
-  - `盘口信号`
-  - `实战建议`
+- 新预测会联动 SoT 或 runtime-only 写回、archive、MEMORY、RAG 与 result sync registry
+- 赛后回填应优先走 `save-result` / `auto-sync-results` / `result-sync-daemon` / `sync-pending-results-review`
+- 默认使用 CLI-first，不要把底层 Python import 当成标准用户流程
 
-## 关键模块边界
+## 推荐命令
 
-- CLI / JSON 输出：`europe_leagues/app/cli.py`
-- 领域外壳：`europe_leagues/domain/predictor.py`
-- 主编排：`europe_leagues/enhanced_prediction_workflow.py`
-- 子服务：`europe_leagues/domain/features.py`、`odds.py`、`intelligence.py`、`live.py`、`inference.py`、`postprocess.py`、`persistence.py`
-- Harness：`europe_leagues/harness/core.py`、`football.py`
-
-## 推荐数据源
-
-### 一级数据源
-
-- 中国竞彩网：胜平负、让球赔率
-- 澳客移动端：欧赔、亚值、凯利、大小球
-- 本地正式数据：五大联赛 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛 `MEMORY.md` 与 runtime archive
-
-### 澳客关键入口
-
-- 热门赛事：`https://m.okooo.com/saishi/remen/`
-- 欧赔：`https://m.okooo.com/match/odds.php?MatchID=<id>`
-- 亚值：`https://m.okooo.com/match/handicap.php?MatchID=<id>`
-- 大小球：`亚值页面内大小球 tab`
-
-## 当前技能与 Agent 协同
-
-| 模块 | 作用 | 当前要求 |
-|---|---|---|
-| 数据采集Agent | 找比赛、抓赛程/快照 | 优先拿 `match_id`，必要时补 `match_time` |
-| 比赛分析Agent | 基本面/战术/伤停/战意 | 可结合 `team_context` / `match_intelligence`，不脱离盘口单独下结论 |
-| 赔率分析Agent | 欧赔/亚值/凯利/大小球 | 真实盘口优先，检查 `line_source` 与 `over_under.market.final` |
-| 结果追踪Agent | 赛果回填、准确率更新 | 遵守双路径写回，并同步维护 `MEMORY.md`、runtime archive 与准确率 |
-
-## 预测输出最低标准
-
-最终回答至少应包含：
-
-- `胜平负`: 主胜 / 平 / 客胜 概率
-- `比分`: Top 2 或 Top 3
-- `大小球`: 真实盘口线 + 大/小水位 + 倾向
-- `风险`: 冷门 / 平局风险 / 伤停风险
-- `结论`: 稳健玩法和进取玩法
-- `诊断`: 必要时补充 `realtime.okooo`、`context_applied`、`line_source`、`retrieved_memory_explanation`、`historical_market_alignment`、`live_market_followup`、`runtime_profile`
-
-## 项目内推荐命令
-
-### 单场正式入口
+### 单场预测
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
@@ -114,7 +101,7 @@ python3 prediction_system.py predict-match \
   --json
 ```
 
-### 批量赛程预测
+### 批量预测
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
@@ -139,56 +126,42 @@ python3 prediction_system.py harness-run \
   --json
 ```
 
-## 可选：球队状态增强（SofaScore）
-
-默认预测会按环境变量自动尝试注入 `team_context`。若希望把“战术倾向/控球率/上一场首发/球员近期评分趋势”作为结构化输入参与判断，可显式开启或调整窗口：
-
-- 默认开启；如需关闭：`ENABLE_TEAM_CONTEXT=0`
-- 近况窗口：`TEAM_CONTEXT_LAST_N=5`
-- 注入位置：`analysis_context['team_context']`
-- 诊断位置：`realtime.context_applied['team_context']`
-
-示例：
-
-```bash
-cd /Users/bytedance/trae_projects
-ENABLE_TEAM_CONTEXT=1 TEAM_CONTEXT_LAST_N=5 python3 - <<'PY'
-import sys
-sys.path.insert(0,'/Users/bytedance/trae_projects/europe_leagues')
-from domain.predictor import DomainPredictor
-
-p = DomainPredictor()
-r = p.predict_match(
-    home_team='曼联',
-    away_team='布伦特福德',
-    league_code='premier_league',
-    match_date='2026-04-28',
-    match_time='03:00',
-    match_id='1296070',
-    force_refresh_odds=False,
-)
-print(r['analysis_context'].get('team_context', {}).get('ok'))
-PY
-```
-
-### 统一 CLI 入口
+### 结果回填
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py predict-match --league premier_league --home-team 曼联 --away-team 布伦特福德 --date 2026-04-28 --json
+python3 prediction_system.py auto-sync-results --json
+python3 prediction_system.py save-result --match-id premier_league_20260428_曼联_布伦特福德 --home-score 2 --away-score 1 --json
 ```
 
-### 批量结果回填与统计
+## 输出最低标准
 
-```bash
-cd /Users/bytedance/trae_projects/europe_leagues
-python3 bulk_fetch_and_update.py --start 2026-05-01 --end 2026-05-04 --yes
-```
+最终回答至少应覆盖：
 
-## 常见失败回退
+- 胜平负方向与概率
+- Top 比分
+- 真实欧赔初赔 / 即赔，优先输出 `multi_company_consensus`
+- 真实大小球盘口线与大/小水位
+- 真实亚值盘口与水位
+- 凯利初始 / 即时值
+- 风险提示
+- `retrieved_memory_explanation`
+- `live_betting_advice`
+- 必要时补充 `runtime_profile`
 
-- 没抓到大小球：返回 `missing_real_line` / “待补真实盘口”，不要伪造 `default_2.5`
-- 赛程匹配失败：先用 `okooo_fetch_daily_schedule.py` 落当天赛程，再取 `match_id`
-- 遇到简称不一致：更新 `okooo_team_aliases.json`
-- `/ou/` 被拦截：改走 `handicap.php` 页面内的 `大小球` tab
-- 需要校验是否真的注入真实盘口：检查 `over_under.line_source == snapshot_final`
+## 已验证样例
+
+当前链路已用以下样例做过正式 `predict-match` 验证：
+
+- `la_liga / 埃尔切 vs 赫塔费 / MatchID=1302914`
+- 可稳定拿到真实：
+  - 欧赔 `multi_company_consensus`
+  - 亚值
+  - 大小球
+  - 凯利
+
+## 调试边界
+
+允许开发时临时直接调用底层 Python 类做排查，但那不是标准用户入口。
+
+如果 skill 说明与 `europe_leagues/README.md`、`README_使用指南.md`、`europe_leagues/app/cli.py` 冲突，以当前代码实现为准。

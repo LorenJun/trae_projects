@@ -101,7 +101,9 @@ def fetch_day(league_name, league_code, date):
             return json.loads(out_path.read_text(encoding="utf-8"))
         print(f"⚠️ 未找到输出文件: {league_name} {date}")
         return None
-    except Exception as e:
+    except BaseException as e:
+        if isinstance(e, KeyboardInterrupt):
+            raise
         import traceback
         print(f"⚠️ 异常: {league_name} {date} -> {e}")
         print(traceback.format_exc())

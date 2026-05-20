@@ -24,16 +24,10 @@ from typing import Dict, List, Optional, Tuple
 
 import requests
 
+from okooo_mobile_access import cache_busted_okooo_url, mobile_context_options, mobile_headers, random_mobile_profile
+
 
 BASE_DIR = Path(__file__).resolve().parent
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    )
-}
 
 LEAGUE_CONFIG = {
     "premier_league": {"name": "英超", "competition_id": 1, "okooo_id": 92},
@@ -85,7 +79,6 @@ class MatchFixture:
 class OddsSnapshotBackfill:
     def __init__(self) -> None:
         self.session = requests.Session()
-        self.session.headers.update(HEADERS)
         self._match_id_cache: Dict[Tuple[str, str, str], str] = {}
         self._odds_cache: Dict[str, Dict] = {}
 
@@ -93,7 +86,12 @@ class OddsSnapshotBackfill:
         last_error = None
         for attempt in range(retries):
             try:
-                response = self.session.get(url, timeout=timeout)
+                profile = random_mobile_profile()
+                response = self.session.get(
+                    cache_busted_okooo_url(url, profile=profile),
+                    headers=mobile_headers(profile=profile),
+                    timeout=timeout,
+                )
                 response.raise_for_status()
                 if encoding:
                     return response.content.decode(encoding, "ignore")
@@ -152,14 +150,17 @@ class OddsSnapshotBackfill:
             from playwright.sync_api import sync_playwright
             
             with sync_playwright() as p:
+                profile = random_mobile_profile()
                 browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
+                context = browser.new_context(**mobile_context_options(profile=profile))
+                context.set_extra_http_headers(mobile_headers(profile=profile))
+                page = context.new_page()
                 
                 # 欧赔页面
-                ouzhi_url = f"https://www.okooo.com/soccer/match/{match_id}/odds/"
+                ouzhi_url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
                 
                 try:
-                    page.goto(ouzhi_url, wait_until='networkidle', timeout=30000)
+                    page.goto(cache_busted_okooo_url(ouzhi_url, profile=profile), wait_until='networkidle', timeout=30000)
                     page.wait_for_timeout(3000)
                     
                     # 获取页面内容
@@ -168,6 +169,7 @@ class OddsSnapshotBackfill:
                     # 检查是否被阻断
                     if "访问被阻断" in page_content or "安全威胁" in page_content:
                         print("  [WARN] 澳客网访问被阻断")
+                        context.close()
                         browser.close()
                         return odds_data
                     
@@ -192,10 +194,12 @@ class OddsSnapshotBackfill:
                                     odds_data["away_win_final"] = float(numbers[5])
                                 break
                     
+                    context.close()
                     browser.close()
                     
                 except Exception as e:
                     print(f"  [WARN] Playwright 访问页面失败: {e}")
+                    context.close()
                     browser.close()
                     
         except ImportError:

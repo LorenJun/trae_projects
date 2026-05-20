@@ -44,13 +44,9 @@ def get_okooo_driver_status(chrome_path: str = DEFAULT_CHROME_PATH) -> Dict[str,
 
 def build_okooo_driver_chain(preferred: str, chrome_path: str = DEFAULT_CHROME_PATH) -> List[str]:
     status = get_okooo_driver_status(chrome_path=chrome_path)
+    if preferred not in {"local-chrome", "browser-use"}:
+        preferred = "local-chrome"
     order = [preferred]
-    if preferred == "local-chrome":
-        order.append("browser-use")
-    elif preferred == "browser-use":
-        order.append("local-chrome")
-    else:
-        order = ["local-chrome", "browser-use"]
     return [driver for driver in order if status.get(driver, {}).get("available")]
 
 

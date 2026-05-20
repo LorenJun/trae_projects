@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""模块说明：执行历史赔率快照回填任务的兼容脚本入口。
+"""模块说明：旧版赔率快照回填脚本的兼容占位入口。
 
-澳客网(okooo.com) 赔率数据采集脚本
-使用 Playwright 绕过反爬虫机制
-支持自动查找比赛ID"""
+该脚本基于旧 Playwright + MatchFinder 链路，已不再代表当前正式方案。
+当前推荐路径：
+- 赛程与 MatchID：`okooo_fetch_daily_schedule.py` / `prediction_system.py collect-data`
+- 实时快照：`okooo_save_snapshot.py --driver local-chrome`
+- 正式预测：`prediction_system.py predict-match` / `predict-schedule`
+"""
 
 import argparse
 import json
@@ -262,94 +265,13 @@ def display_odds_summary(odds_data: Dict):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='澳客网赔率数据采集工具 - 支持自动查找比赛ID',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-使用示例:
-  # 通过比赛ID获取
-  python backfill_odds_snapshots.py --match-id 1324404 --league afc_champions_league
-  
-  # 通过球队名称自动查找（推荐）
-  python backfill_odds_snapshots.py --teams "神户胜利,吉达国民" --league afc_champions_league
-  
-  # 显示浏览器窗口（调试用）
-  python backfill_odds_snapshots.py --teams "神户胜利,吉达国民" --league afc_champions_league --no-headless
-        """
+    raise SystemExit(
+        "backfill_odds_snapshots.py 已废弃，不再走旧 Playwright + MatchFinder 链路。\n"
+        "请改用：\n"
+        "1. python3 prediction_system.py collect-data --league <league> --date <YYYY-MM-DD>\n"
+        "2. python3 okooo_save_snapshot.py --driver local-chrome --league <联赛中文> --team1 <主队> --team2 <客队> --date <YYYY-MM-DD> [--match-id <id>]\n"
+        "3. python3 prediction_system.py predict-match ...\n"
     )
-    
-    # 两种获取方式
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--match-id', type=str, help='澳客网比赛ID')
-    group.add_argument('--teams', type=str, help='球队名称，格式: "主队,客队"')
-    
-    parser.add_argument('--league', type=str, default='premier_league',
-                        choices=list(LEAGUE_CONFIG.keys()),
-                        help='联赛名称（默认: premier_league）')
-    parser.add_argument('--output-dir', type=str, help='输出目录')
-    parser.add_argument('--headless', action='store_true', default=True,
-                        help='使用无头模式（默认）')
-    parser.add_argument('--no-headless', dest='headless', action='store_false',
-                        help='显示浏览器窗口')
-    
-    args = parser.parse_args()
-    
-    print("=" * 70)
-    print("澳客网赔率数据采集工具")
-    print("=" * 70)
-    
-    # 设置输出目录
-    if not args.output_dir:
-        args.output_dir = os.path.join(
-            os.path.dirname(__file__),
-            args.league,
-            "analysis",
-            "odds_snapshots"
-        )
-    
-    with OddsSnapshotBackfill(args.league, headless=args.headless) as backfill:
-        
-        # 方式1: 通过比赛ID获取
-        if args.match_id:
-            print(f"\n通过比赛ID获取: {args.match_id}")
-            
-            # 验证ID
-            print("\n验证比赛ID...")
-            if not backfill.verify_match_id(args.match_id, []):
-                print("✗ 比赛ID验证失败")
-                sys.exit(1)
-            
-            odds_data = backfill.get_match_odds(args.match_id)
-            
-            if odds_data:
-                display_odds_summary(odds_data)
-                backfill.save_odds_snapshot(odds_data, args.output_dir)
-            else:
-                print("\n✗ 获取赔率失败")
-                sys.exit(1)
-        
-        # 方式2: 通过球队名称自动查找（推荐）
-        elif args.teams:
-            teams = [t.strip() for t in args.teams.split(',')]
-            if len(teams) != 2:
-                print("✗ 球队名称格式错误，请使用: \"主队,客队\"")
-                sys.exit(1)
-            
-            team1, team2 = teams
-            result = backfill.get_odds_by_teams(team1, team2)
-            
-            if result:
-                odds_data = result['odds_data']
-                display_odds_summary(odds_data)
-                backfill.save_odds_snapshot(odds_data, args.output_dir)
-                
-                print("\n" + "=" * 70)
-                print("✓ 完成!")
-                print(f"比赛ID: {result['match_id']}")
-                print(f"数据文件: {args.output_dir}")
-            else:
-                print("\n✗ 获取失败")
-                sys.exit(1)
 
 
 if __name__ == "__main__":

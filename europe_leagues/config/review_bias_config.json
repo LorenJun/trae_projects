@@ -1,0 +1,280 @@
+{
+  "outcome": {
+    "context_floors": {
+      "home:unknown": {
+        "draw_shift": 0.011,
+        "upset_shift": 0.0158
+      },
+      "home:level_medium": {
+        "draw_shift": 0.02,
+        "upset_shift": 0.016
+      },
+      "home:unknown:market_opposes": {
+        "draw_shift": 0.012,
+        "upset_shift": 0.022
+      }
+    },
+    "motivation_risk": {
+      "enabled": true,
+      "min_score": 8.0,
+      "base_draw_shift": 0.006,
+      "base_side_shift": 0.008,
+      "max_draw_shift": 0.02,
+      "max_side_shift": 0.024
+    },
+    "league_tag_bias": {
+      "home_bias": {
+        "draw_shift": 0.01,
+        "upset_shift": 0.008
+      },
+      "draw_bias": {
+        "draw_shift": 0.01
+      },
+      "away_upset_bias": {
+        "upset_shift": 0.008
+      }
+    },
+    "scenario_shifts": {
+      "strong_home_shallow_line": {
+        "draw_shift": 0.012,
+        "upset_shift": 0.008
+      },
+      "away_shallow_market_doubt": {
+        "draw_shift": 0.014,
+        "home_shift": 0.008
+      },
+      "balanced_draw_guard": {
+        "draw_shift": 0.014
+      }
+    },
+    "learning_multipliers": {
+      "draw_multiplier": 1.0,
+      "upset_multiplier": 1.0,
+      "stratified_max_draw_shift": 0.02,
+      "stratified_max_upset_shift": 0.016,
+      "three_layer_max_draw_shift": 0.024,
+      "three_layer_max_upset_shift": 0.02
+    },
+    "premier_league": {
+      "league_tag_bias": {
+        "home_bias": {
+          "draw_shift": 0.013,
+          "upset_shift": 0.009
+        },
+        "draw_bias": {
+          "draw_shift": 0.014
+        },
+        "away_upset_bias": {
+          "upset_shift": 0.009
+        }
+      },
+      "scenario_shifts": {
+        "strong_home_shallow_line": {
+          "draw_shift": 0.014,
+          "upset_shift": 0.009
+        },
+        "balanced_draw_guard": {
+          "draw_shift": 0.018
+        }
+      },
+      "learning_multipliers": {
+        "draw_multiplier": 1.18,
+        "upset_multiplier": 1.02,
+        "stratified_max_draw_shift": 0.024,
+        "three_layer_max_draw_shift": 0.028
+      }
+    },
+    "serie_a": {
+      "league_tag_bias": {
+        "home_bias": {
+          "draw_shift": 0.01,
+          "upset_shift": 0.012
+        },
+        "away_upset_bias": {
+          "upset_shift": 0.013
+        }
+      },
+      "scenario_shifts": {
+        "strong_home_shallow_line": {
+          "draw_shift": 0.012,
+          "upset_shift": 0.012
+        },
+        "away_shallow_market_doubt": {
+          "draw_shift": 0.015,
+          "home_shift": 0.011
+        }
+      },
+      "learning_multipliers": {
+        "draw_multiplier": 1.0,
+        "upset_multiplier": 1.2,
+        "stratified_max_upset_shift": 0.02,
+        "three_layer_max_upset_shift": 0.024
+      }
+    },
+    "ligue_1": {
+      "league_tag_bias": {
+        "home_bias": {
+          "draw_shift": 0.01,
+          "upset_shift": 0.012
+        },
+        "away_upset_bias": {
+          "upset_shift": 0.013
+        }
+      },
+      "scenario_shifts": {
+        "strong_home_shallow_line": {
+          "draw_shift": 0.012,
+          "upset_shift": 0.012
+        },
+        "away_shallow_market_doubt": {
+          "draw_shift": 0.015,
+          "home_shift": 0.011
+        }
+      },
+      "learning_multipliers": {
+        "draw_multiplier": 1.0,
+        "upset_multiplier": 1.2,
+        "stratified_max_upset_shift": 0.02,
+        "three_layer_max_upset_shift": 0.024
+      }
+    },
+    "bundesliga": {
+      "league_tag_bias": {
+        "home_bias": {
+          "draw_shift": 0.009,
+          "upset_shift": 0.007
+        },
+        "draw_bias": {
+          "draw_shift": 0.01
+        },
+        "away_upset_bias": {
+          "upset_shift": 0.007
+        }
+      },
+      "scenario_shifts": {
+        "strong_home_shallow_line": {
+          "draw_shift": 0.011,
+          "upset_shift": 0.007
+        },
+        "away_shallow_market_doubt": {
+          "draw_shift": 0.013,
+          "home_shift": 0.007
+        },
+        "balanced_draw_guard": {
+          "draw_shift": 0.013
+        }
+      },
+      "learning_multipliers": {
+        "draw_multiplier": 0.95,
+        "upset_multiplier": 0.95,
+        "stratified_max_draw_shift": 0.018,
+        "stratified_max_upset_shift": 0.014,
+        "three_layer_max_draw_shift": 0.022,
+        "three_layer_max_upset_shift": 0.018
+      }
+    },
+    "la_liga": {
+      "league_tag_bias": {
+        "home_bias": {
+          "draw_shift": 0.009,
+          "upset_shift": 0.007
+        },
+        "draw_bias": {
+          "draw_shift": 0.01
+        },
+        "away_upset_bias": {
+          "upset_shift": 0.007
+        }
+      },
+      "scenario_shifts": {
+        "strong_home_shallow_line": {
+          "draw_shift": 0.011,
+          "upset_shift": 0.007
+        },
+        "away_shallow_market_doubt": {
+          "draw_shift": 0.013,
+          "home_shift": 0.007
+        },
+        "balanced_draw_guard": {
+          "draw_shift": 0.013
+        }
+      },
+      "learning_multipliers": {
+        "draw_multiplier": 0.95,
+        "upset_multiplier": 0.95,
+        "stratified_max_draw_shift": 0.018,
+        "stratified_max_upset_shift": 0.014,
+        "three_layer_max_draw_shift": 0.022,
+        "three_layer_max_upset_shift": 0.018
+      }
+    }
+  },
+  "score": {
+    "open_match_total_threshold": 2.8,
+    "strong_open_match_total_threshold": 3.1,
+    "motivation_risk_min_score": 8.0,
+    "home_open_template": {
+      "1-0": 0.84,
+      "2-0": 0.91,
+      "2-1": 1.1,
+      "3-0": 1.02,
+      "3-1": 1.12
+    },
+    "away_open_template": {
+      "0-1": 0.84,
+      "0-2": 0.98,
+      "1-2": 1.1,
+      "0-3": 1.04,
+      "1-3": 1.12
+    },
+    "draw_open_template": {
+      "0-0": 0.8,
+      "1-1": 0.88,
+      "2-2": 1.16,
+      "3-3": 1.06
+    },
+    "bundesliga": {
+      "home_open_template": {
+        "1-0": 0.8,
+        "2-0": 0.9,
+        "2-1": 1.12,
+        "3-0": 1.08,
+        "3-1": 1.14
+      },
+      "away_open_template": {
+        "0-1": 0.82,
+        "0-2": 1.0,
+        "1-2": 1.12,
+        "0-3": 1.06,
+        "1-3": 1.14
+      }
+    }
+  },
+  "over_under": {
+    "base_over_shift": 0.04,
+    "base_under_shift": 0.006,
+    "line_window": [2.5, 3.0, 3.5],
+    "bundesliga": {
+      "base_over_shift": 0.04,
+      "base_under_shift": 0.006
+    }
+  },
+  "total_goals": {
+    "line_window": [2.5, 3.0, 3.5],
+    "base_over_shift": 0.035,
+    "base_under_shift": 0.01,
+    "max_total_shift": 0.06,
+    "low_bucket_keys": ["0", "1", "2"],
+    "high_bucket_targets": {
+      "3": 0.45,
+      "4": 0.3,
+      "5": 0.17,
+      "6": 0.06,
+      "7+": 0.02
+    },
+    "bundesliga": {
+      "base_over_shift": 0.04,
+      "max_total_shift": 0.065
+    }
+  }
+}

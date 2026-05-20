@@ -10,11 +10,12 @@ last_updated_date: "2026-05-15"
 # 足球比赛预测分析Agent
 
 > 当前正式流程  
-> 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
-> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测  
-> 3. 五大联赛写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写回 `MEMORY.md` 与 runtime-only 归档  
-> 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
-> 5. 结果闭环会统一刷新 accuracy / MEMORY / RAG / review-learning；`prediction_system.py accuracy --refresh --json` 仍可作为显式重建入口  
+> 1. `prediction_system.py` 是发现入口，真实命令实现位于 `europe_leagues/app/cli.py`  
+> 2. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
+> 3. `prediction_system.py predict-match / predict-schedule` 执行增强预测  
+> 4. 五大联赛写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写回 `MEMORY.md` 与 runtime-only 归档  
+> 5. 赛后优先用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `sync-pending-results-review` 回填  
+> 6. 结果闭环会统一刷新 accuracy / MEMORY / RAG / review-learning；`prediction_system.py accuracy --refresh --json` 仍可作为显式重建入口  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
 > 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`
 
@@ -191,13 +192,13 @@ trae_projects/
 当前要求：
 
 - 五大联赛以 `teams_2025-26.md` 为 SoT，欧战/杯赛结合 `MEMORY.md` 与 runtime archive 回填
-- 支持 `bulk_fetch_and_update.py` 批量回填
+- 批量结果闭环优先使用 `auto-sync-results` 与 `sync-pending-results-review`
 - 统计胜负、比分、大小球准确率
 - 在精算师职业画像中，主要承担“第 4 维统计验证与模型评估 + 第 6 维策略迭代支持”职责
 
 ## 技能说明
 
-当前项目在 `.trae/skills/` 目录下维护了 13 个技能，按功能分类如下：
+当前项目在 `.trae/skills/` 目录下维护多项技能，按功能分类如下：
 
 ### 足球预测核心技能
 
@@ -233,12 +234,11 @@ trae_projects/
   - 调整说明: 原预测主胜(39.7%)→临场提升为主胜(52%)，赔率走势+亚盘升盘确认信心
 ```
 
-自动化脚本：
+推荐执行路径：
 ```bash
-python3 .trae/skills/football-prediction-live-update/scripts/update_memory_live.py \
-    --match-id la_liga_20260515_赫罗纳_皇家社会 \
-    --odds-change "2.13->1.99" \
-    --reasoning "临场降强信号，亚盘升盘"
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py collect-data --league la_liga --date 2026-05-15 --json
+python3 prediction_system.py predict-match --league la_liga --home-team 赫罗纳 --away-team 皇家社会 --date 2026-05-15 --json
 ```
 
 触发关键词：临场更新、首发阵容、赔率变化、live-update
@@ -254,6 +254,11 @@ python3 .trae/skills/football-prediction-live-update/scripts/update_memory_live.
 
 推荐命令：
 ```bash
+# 正式入口优先
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py collect-data --league premier_league --date 2026-04-28 --json
+
+# 需要显式赛程 / 快照调试时再用 support 脚本
 # 抓某天联赛赛程
 python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026-04-28
 
@@ -484,7 +489,7 @@ Step 2: 抓赛程并获取 MatchID / kickoff_time
 Step 3: 通过 `collect-data` 复用赛程与已有快照
 Step 4: 刷新实时快照（欧赔/亚值/大小球/凯利）
 Step 4.5: 自动补 EWMA form、缺失大小球，按需注入 `team_context`
-Step 5: 运行 `DomainPredictor` / `EnhancedPredictor` 编排流程
+Step 5: 通过 `prediction_system.py predict-match` / `predict-schedule` 进入正式预测编排流程
 Step 6: 输出最终结论
 Step 7: 按比赛类型写回 teams_2025-26.md 或 MEMORY.md / runtime archive
 Step 8: 赛后回填真实比分，并由结果闭环自动刷新胜负/比分/大小球准确率、记忆样本、RAG 与 review-learning
@@ -531,7 +536,8 @@ python3 prediction_system.py harness-run --pipeline match_prediction --league pr
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 bulk_fetch_and_update.py --start 2026-05-01 --end 2026-05-04 --yes
+python3 prediction_system.py auto-sync-results --limit 20 --json
+python3 prediction_system.py sync-pending-results-review --days-back 30 --limit 20 --review-sample-limit 8 --json
 ```
 
 ## 结果验收标准

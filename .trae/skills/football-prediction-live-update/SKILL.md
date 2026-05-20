@@ -1,6 +1,6 @@
 ---
 title: 足球预测临场数据更新与滚动记忆管理
-description: 获取临场数据（首发、伤停、赔率变化）并更新MEMORY.md滚动记忆的标准流程
+description: 将临场数据（首发、伤停、赔率变化）接入当前 `europe_leagues` 正式预测链，并在需要时更新 SoT / MEMORY / runtime 相关产物。默认采用 CLI-first 方式。 
 triggers:
   - 临场更新
   - 首发阵容
@@ -13,206 +13,129 @@ name: football-prediction-live-update
 
 # 足球预测临场数据更新与滚动记忆管理
 
-## 概述
+本 Skill 定义了如何把临场数据并入当前正式预测主链，而不是临时拼接一套独立流程。
 
-本技能定义了如何将临场数据（首发阵容、伤停更新、赔率变化）整合到当前正式预测链路中，并在需要时更新滚动记忆与预测备注。
+## 入口规则
+
+- 发现 / 兼容入口：`europe_leagues/prediction_system.py`
+- 真实命令实现：`europe_leagues/app/cli.py`
+
+默认使用 CLI-first；不要把直接改 `MEMORY.md` 或直接 import 底层类当成主路径。
+
+## 核心目标
+
+- 获取首发、伤停、赔率变化等临场信息
+- 重新评估胜平负、比分、大小球与风险提示
+- 在需要时用新结论覆盖原预测，而不是重复追加
+- 让临场更新仍然落在正式持久化与结果闭环规则内
 
 ## 核心原则
 
-1. **覆盖更新**：临场分析后，用新预测**覆盖**原预测行，而非重复添加
-2. **标记区分**：使用【临场更新】标记区分初始预测 vs 临场更新
-3. **变化说明**：必须包含"调整说明"解释预测变化的逻辑
-4. **单一来源**：每场比赛在滚动记忆中只有**一个最终预测**
+1. 每场比赛只有一个最终有效预测视图
+2. 临场更新应覆盖旧预测，而不是制造重复记录
+3. 必须写清“调整说明”，解释为何临场结论变化
+4. 若进入正式落盘，仍应遵守 SoT-backed / runtime-only 边界
 
-## 标准格式
+## 当前访问与盘口口径
 
-### 更新前（初始预测）
-```markdown
-- [la_liga|2026-05-15|赫罗纳|皇家社会] 2026-05-15 西甲 赫罗纳 vs 皇家社会
-  预测: 主胜 (39.7%) | 比分: 1-0 > 1-1 > 0-1 | 大小球: 小球 2.75 (64.9%)
-  · MatchID: ... | 更新时间: 2026-05-15 00:07:51
-```
+- 临场赔率刷新仍走正式快照链，不要临时拼裸请求
+- 默认快照 driver：`local-chrome`
+- 默认请求特征：`iPhone Safari UA + Referer: https://m.okooo.com/`
+- 当前公共设备池：`100` 组随机 `iPhone Safari` profile
+- 欧赔优先解析 `multi_company_consensus`
+- 大小球真实盘口优先来自 `handicap.php -> 大小球 tab`
 
-### 更新后（临场更新）
-```markdown
-- [la_liga|2026-05-15|赫罗纳|皇家社会] 2026-05-15 西甲 赫罗纳 vs 皇家社会
-  【临场更新】预测: 主胜 (52.0%) | 比分: 2-1 > 1-0 > 1-1 | 大小球: 小球 2.75 | 亚盘: 赫罗纳-0.5 | 信心: ★★★★☆
-  ◦ 欧赔: 2.13/3.57/3.06->1.99/3.68/3.37
-  ◦ 亚盘: 平/半 1.96/1.86->半球 2.01/1.90
-  ◦ 大小: 2.75 1.91/1.87->2.75 1.90/1.90
-  ◦ 凯利: 0.93/0.93/0.93->0.94/0.94/0.94
-  ▲ 风险: 低(31) 压力方目标: 保级抢分; 历史同向反打(9次)
-  ◆ RAG记忆: ...
-  · MatchID: ... | 更新时间: 2026-05-15 10:30:00
-  ◦ 临场分析依据:
-    - 首发阵容: [赫罗纳] ... [皇家社会] ...
-    - 伤停更新: 赫罗纳主力中场伤愈复出，皇家社会边锋停赛
-    - 赔率变化: 主胜2.13→1.99(↓0.14)，11/12家公司下调；亚盘平/半→半球(升盘)
-    - 战意评估: 赫罗纳保级关键战，主场必须抢分；皇家社会欧战资格无望，动力不足
-    - 机构信号: 符合"临场降强"信号——机构真实看好赫罗纳
-    - 调整说明: 原预测主胜(39.7%)→临场提升为主胜(52%)，从双选31升级为单选3，赔率走势+亚盘升盘确认信心
-```
+## 推荐流程
 
-## 更新流程
-
-### 步骤1: 获取临场数据
-
-```python
-# 从多个数据源获取临场信息
-live_data = {
-    'lineups': fetch_lineups(match_id),      # 首发阵容
-    'injuries': fetch_injuries(match_id),    # 伤停更新
-    'odds_changes': fetch_odds_changes(match_id),  # 赔率变化
-    'weather': fetch_weather(venue),         # 天气（可选）
-    'news': fetch_team_news(match_id)        # 球队新闻
-}
-```
-
-### 步骤2: 分析影响
-
-```python
-def analyze_live_impact(original_prediction, live_data):
-    """分析临场数据对原预测的影响"""
-    impact = {
-        'direction_change': False,  # 方向是否改变
-        'confidence_change': 0,     # 信心度变化
-        'score_adjustment': [],     # 比分调整
-        'reasoning': []             # 调整理由
-    }
-    
-    # 分析赔率变化
-    if live_data['odds_changes']['home_win'] < original_prediction['odds']['home_win'] - 0.1:
-        impact['confidence_change'] += 10
-        impact['reasoning'].append("主胜赔率大幅下调，机构看好主队")
-    
-    # 分析首发阵容
-    key_players_out = live_data['lineups'].get('key_absences', [])
-    if key_players_out:
-        impact['reasoning'].append(f"关键球员缺阵: {', '.join(key_players_out)}")
-    
-    # 分析战意
-    if live_data['team_news'].get('motivation') == 'high':
-        impact['confidence_change'] += 5
-        impact['reasoning'].append("保级/争冠战意强烈")
-    
-    return impact
-```
-
-### 步骤3: 生成更新后预测
-
-```python
-def generate_updated_prediction(original, impact):
-    """基于影响分析生成更新后的预测"""
-    updated = original.copy()
-    
-    # 更新概率
-    updated['probabilities']['home_win'] += impact['confidence_change']
-    
-    # 更新比分排序（如有必要）
-    if impact.get('score_adjustment'):
-        updated['scores'] = impact['score_adjustment']
-    
-    # 生成调整说明
-    updated['adjustment_note'] = f"原预测{original['prediction']}→临场更新为{updated['prediction']}，{'；'.join(impact['reasoning'])}"
-    
-    return updated
-```
-
-### 步骤4: 更新 MEMORY.md
-
-```python
-def update_memory_md(match_id, updated_prediction, live_data):
-    """更新 MEMORY.md 文件"""
-    
-    # 读取现有内容
-    with open('MEMORY.md', 'r') as f:
-        content = f.read()
-    
-    # 查找并替换该比赛的记录
-    match_pattern = rf"(- \[.*?{match_id}.*?\n)(  预测:.*?\n)(.*?)(?=\n- \[|$)"
-    
-    # 构建新记录
-    new_record = build_memory_record(updated_prediction, live_data)
-    
-    # 替换（覆盖更新）
-    updated_content = re.sub(match_pattern, new_record, content, flags=re.DOTALL)
-    
-    # 写回文件
-    with open('MEMORY.md', 'w') as f:
-        f.write(updated_content)
-```
-
-## 关键字段说明
-
-### 预测行字段
-| 字段 | 格式 | 示例 |
-|------|------|------|
-| 预测方向 | 主胜/平局/客胜/双选XX (概率%) | 主胜 (52.0%) |
-| 比分 | 首选 > 次选 > 第三 | 2-1 > 1-0 > 1-1 |
-| 大小球 | 大球/小球 X.X (概率%) | 小球 2.75 (64.9%) |
-| 亚盘 | 让球方±盘口 | 赫罗纳-0.5 |
-| 信心 | ★数量 | ★★★★☆ |
-
-### 临场分析依据字段
-| 字段 | 内容 |
-|------|------|
-| 首发阵容 | 双方首发11人名单 |
-| 伤停更新 | 新增伤停或复出球员 |
-| 赔率变化 | 初盘→临盘变化，标注↑↓ |
-| 战意评估 | 保级/争冠/欧战资格等动机分析 |
-| 机构信号 | 凯利指数、盘口异动等 |
-| 调整说明 | 原预测→新预测的变化逻辑 |
-
-## 常见调整场景
-
-### 场景1: 赔率大幅下调（临场降强）
-```markdown
-调整说明: 原预测主胜(39.7%)→临场提升为主胜(52%)，主胜赔率2.13→1.99(↓0.14)，
-         11/12家公司下调，亚盘平/半→半球升盘，符合"临场降强"信号
-```
-
-### 场景2: 关键球员伤停
-```markdown
-调整说明: 原预测主胜(45%)→临场调整为平局(40%)，主队核心前锋伤缺，
-         进攻火力大减，历史同阵容下胜率仅30%
-```
-
-### 场景3: 战意差异明显
-```markdown
-调整说明: 原预测客胜(35%)→临场调整为双选30(客胜/平局50%)，
-         客队已夺冠无欲无求，主队保级生死战战意极强，需防冷门
-```
-
-## 自动化脚本
-
-使用 `scripts/update_memory_live.py` 自动生成临场更新内容：
+### 1. 先采集上下文
 
 ```bash
-python3 .trae/skills/football-prediction-live-update/scripts/update_memory_live.py \
-    --match-id la_liga_20260515_赫罗纳_皇家社会 \
-    --odds-change "2.13->1.99" \
-    --confidence-boost 12 \
-    --reasoning "临场降强信号，亚盘升盘"
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py collect-data --league la_liga --date 2026-05-15 --json
 ```
 
-## 注意事项
+### 2. 重新执行正式预测
 
-1. **更新时间**：必须在比赛开始前30分钟内完成更新
-2. **数据来源**：优先使用澳客网、官方首发名单等可靠来源
-3. **版本控制**：每次更新修改`更新时间`字段
-4. **避免重复**：确保是"覆盖"而非"追加"新记录
-5. **AI记忆同步**：更新MEMORY.md后，同步更新AI上下文记忆
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py predict-match \
+  --league la_liga \
+  --home-team 赫罗纳 \
+  --away-team 皇家社会 \
+  --date 2026-05-15 \
+  --json
+```
 
-## 故障排除
+### 3. 需要阶段化审计时用 Harness
 
-| 问题 | 解决方案 |
-|------|----------|
-| MEMORY.md中找不到比赛记录 | 检查MatchID是否正确，或比赛尚未初始预测 |
-| 更新后格式错乱 | 使用统一的`build_memory_record()`函数生成记录 |
-| 原预测被意外删除 | 更新前先备份，或从git历史恢复 |
-| 临场数据获取失败 | 使用备用数据源，或标记为"数据待补" |
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py harness-run \
+  --pipeline match_prediction \
+  --league la_liga \
+  --home-team 赫罗纳 \
+  --away-team 皇家社会 \
+  --date 2026-05-15 \
+  --json
+```
 
-## 相关文档
+## 临场更新时应重点检查
 
-- `../../docs/standards/workflow.md` - 正式预测、写回与回填流程
-- `../../docs/standards/skill_lifecycle.md` - Skill 正文与维护治理边界
+- 首发是否改变球队强弱结构
+- 伤停变化是否影响关键位置
+- 欧赔 / 亚盘 / 大小球是否出现同向强化或反向走弱
+- `market_snapshot.欧赔.company_mode` 是否为 `multi_company_consensus`
+- `market_snapshot.欧赔.companies` 是否为空
+- `retrieved_memory_explanation` 与历史盘路是否支持临场修正
+- `live_betting_advice` 是否因临场信息发生变化
+
+## 更新后的正式落盘边界
+
+### SoT-backed
+
+以下 competition 更新后仍写 SoT：
+
+- `premier_league`
+- `la_liga`
+- `serie_a`
+- `bundesliga`
+- `ligue_1`
+- `world_cup`
+
+### runtime-only
+
+以下 competition 更新后仍写 `MEMORY.md` 与 runtime archive：
+
+- `europa_league`
+- `champions_league`
+- `conference_league`
+- 其他杯赛 / 欧战扩展比赛
+
+## 调整说明建议
+
+临场更新后，结论里至少要能回答：
+
+- 原预测是什么
+- 新预测是什么
+- 哪些临场信息改变了判断
+- 是方向改变、信心改变，还是比分排序改变
+
+## 调试边界
+
+默认不要：
+
+- 直接正则替换 `MEMORY.md`
+- 直接在文档里硬拼临场条目
+- 假设存在某个固定的辅助脚本路径
+
+这些方式容易绕开正式持久化与结果闭环。
+
+## 什么时候才做底层调试
+
+只有在 CLI 输出和预期不一致，需要排查内部行为时，才临时使用底层 Python 调试。
+
+即便如此，也应把 CLI 输出视为正式契约，把底层 import 视为开发手段。
+
+## 最终规则
+
+如果 skill 说明与 `europe_leagues/README.md`、`README_使用指南.md`、`app/cli.py`、`domain/persistence.py` 的当前实现冲突，以当前代码实现为准。

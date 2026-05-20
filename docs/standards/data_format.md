@@ -7,11 +7,12 @@ last_updated: "2026-05-08"
 # 数据格式规范
 
 > 当前正式流程  
-> 1. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
-> 2. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层  
-> 3. 五大联赛 SoT 写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写入 `MEMORY.md` 与 runtime-only 归档  
-> 4. 赛后用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `bulk_fetch_and_update.py` 回填  
-> 5. 最后用 `prediction_system.py accuracy --refresh --json` 刷新胜负 / 比分 / 大小球统计  
+> 1. `prediction_system.py` 是发现入口，真实命令实现位于 `europe_leagues/app/cli.py`  
+> 2. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
+> 3. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层  
+> 4. 五大联赛 SoT 写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写入 `MEMORY.md` 与 runtime-only 归档  
+> 5. 赛后优先用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `sync-pending-results-review` 回填  
+> 6. `prediction_system.py accuracy --refresh --json` 是显式重建入口，不是唯一常规路径  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
 > 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`retrieved_memory_explanation`
 
@@ -264,11 +265,16 @@ docs/
 | `daxiao_php` | 从 `daxiao.php` fallback 抓到 |
 | `desktop_ou` | 从桌面 `/ou/` fallback 抓到 |
 
-项目当前推荐优先级：
+项目当前 fallback 来源顺序：
 
 1. `asian_inner_tab`
 2. `overunder.php` / `daxiao.php`
 3. `desktop /ou/`
+
+说明：
+
+- 当前正式链路默认只推荐 `handicap.php` 页内 `大小球` tab 作为主来源
+- `overunder.php`、`daxiao.php`、桌面 `/ou/` 仅用于兼容或补救，不应在主流程说明中当作默认推荐路径
 
 ## 预测输入 `current_odds` 结构
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """模块说明：抓取澳客单场赔率页面并落盘欧赔、亚盘、大小球与凯利快照。
 
-Fetch an okooo match snapshot via browser-use (user-like browsing) and save JSON to disk.
+Fetch an okooo match snapshot via the current formal mobile access strategy and save JSON to disk.
 
 Output naming rule:
   赛事名称_时间.json
@@ -9,8 +9,9 @@ Example:
   巴黎圣曼vs南特_2026-04-21_23-10-05.json
 
 Notes:
-- This script intentionally depends only on `browser-use` CLI (not Playwright) because direct HTTP
-  requests are often blocked (405) and some environments don't have Playwright installed."""
+- The formal path defaults to `local-chrome`.
+- The access strategy uses `iPhone Safari` mobile profiles plus `Referer: https://m.okooo.com/`.
+- `browser-use` is kept only as an explicit debug driver, not the default formal path."""
 
 from __future__ import annotations
 
@@ -28,6 +29,14 @@ from typing import Any, Callable, Dict, Optional
 
 import requests
 from websocket import create_connection
+
+from okooo_mobile_access import (
+    OkoooMobileProfile,
+    cache_busted_okooo_url,
+    is_okooo_mobile_url,
+    mobile_headers,
+    random_mobile_profile,
+)
 
 REMEN_URL = "https://m.okooo.com/saishi/remen/"
 # Retry faster by default. For transient rendering issues we still retry, but
@@ -120,7 +129,17 @@ def _time_tokens(hh_mm: str) -> list[str]:
         return []
     hh = int(m.group(1))
     mm = m.group(2)
-    return [f"{hh:02d}:{mm}", f"{hh}:{mm}"]
+    tokens = [f"{hh:02d}:{mm}", f"{hh}:{mm}"]
+    # Some schedule pages render midnight kickoffs as 24:00 instead of 00:00.
+    if hh == 0 and mm == "00":
+        tokens.extend(["24:00", "24"])
+    seen = set()
+    uniq = []
+    for item in tokens:
+        if item and item not in seen:
+            seen.add(item)
+            uniq.append(item)
+    return uniq
 
 
 def _candidate_date_hints(date_yyyy_mm_dd: str, hh_mm: str = "") -> list[str]:
@@ -176,6 +195,80 @@ def _load_alias_table() -> Dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _schedule_cache_path(league: str, match_date: str) -> Path:
+    return _default_data_root() / "schedules" / _league_slug(league) / f"{match_date}.json"
+
+
+def _ensure_daily_schedule_cache(league: str, match_date: str) -> Optional[Path]:
+    path = _schedule_cache_path(league, match_date)
+    if path.exists():
+        return path
+    script_path = Path(__file__).resolve().parent / "okooo_fetch_daily_schedule.py"
+    if not script_path.exists():
+        return None
+    try:
+        cp = subprocess.run(
+            ["python3", str(script_path), "--league", league, "--date", match_date],
+            cwd=str(Path(__file__).resolve().parent),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except Exception:
+        return None
+    if cp.returncode == 0 and path.exists():
+        return path
+    return None
+
+
+def _find_match_id_from_schedule_cache(
+    league: str,
+    team1: str,
+    team2: str,
+    candidate_dates: list[str],
+    alias_table: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    alias_table = alias_table or {}
+    t1_tokens = _norm_team_tokens_multi(_team_aliases(alias_table, league, team1))
+    t2_tokens = _norm_team_tokens_multi(_team_aliases(alias_table, league, team2))
+    best: Dict[str, Any] = {}
+    best_score = -1.0
+    for current_date in candidate_dates or []:
+        path = _ensure_daily_schedule_cache(league, current_date)
+        if not path or not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for row in payload.get("matches") or []:
+            if not isinstance(row, dict):
+                continue
+            home_compact = re.sub(r"\s+", "", str(row.get("home_team") or ""))
+            away_compact = re.sub(r"\s+", "", str(row.get("away_team") or ""))
+            if not home_compact or not away_compact:
+                continue
+            home_match = any(tok and home_compact.find(tok) >= 0 for tok in t1_tokens)
+            away_match = any(tok and away_compact.find(tok) >= 0 for tok in t2_tokens)
+            if not home_match or not away_match:
+                continue
+            score = 20.0 + (0.5 if current_date else 0.0)
+            if score <= best_score:
+                continue
+            best_score = score
+            normalized_row = dict(row)
+            if not normalized_row.get("href") and normalized_row.get("history_url"):
+                normalized_row["href"] = normalized_row.get("history_url")
+            best = {
+                "match_id": str(row.get("match_id") or ""),
+                "schedule_row": normalized_row,
+                "_matched_date_hint": current_date,
+                "_source": "daily_schedule_cache",
+            }
+    return best if best.get("match_id") else {}
 
 
 def _team_aliases(alias_table: Dict[str, Any], league: str, team_name: str) -> list[str]:
@@ -427,6 +520,7 @@ def _find_existing_snapshot_by_match_id(out_dir: Path, match_id: str) -> Optiona
 class BrowserUse:
     session: str
     headed: bool = False
+    mobile_profile: OkoooMobileProfile | None = None
 
     def _run_once(self, cmd: list[str], timeout: int) -> subprocess.CompletedProcess:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -464,7 +558,9 @@ class BrowserUse:
         raise RuntimeError(f"browser-use failed: {' '.join(cmd)}\n{tail}")
 
     def open(self, url: str) -> None:
-        self.run("open", url, timeout=90, use_headed=self.headed)
+        profile = random_mobile_profile() if is_okooo_mobile_url(url) else None
+        self.mobile_profile = profile
+        self.run("open", cache_busted_okooo_url(url, profile=profile), timeout=90, use_headed=self.headed)
 
     def state(self) -> str:
         return self.run("state", timeout=60)
@@ -496,6 +592,7 @@ class LocalChromeSession:
         self.target_id: str | None = None
         self.ws = None
         self._msg_id = 0
+        self.mobile_profile: OkoooMobileProfile | None = None
 
     def _browser_version(self) -> Dict[str, Any]:
         r = requests.get(f"http://127.0.0.1:{self.port}/json/version", timeout=10)
@@ -513,7 +610,12 @@ class LocalChromeSession:
     def _connect_if_needed(self, url: str = "about:blank") -> None:
         if self.ws:
             return
-        target = self._new_target(url)
+        profile = random_mobile_profile() if is_okooo_mobile_url(url) else None
+        self.mobile_profile = profile
+        # Create a blank target first, then navigate with explicit mobile headers
+        # and referrer. Opening the okooo mobile URL as the initial target can be
+        # treated as a cold direct hit and is much more likely to be blocked.
+        target = self._new_target("about:blank")
         self.target_id = target.get("id")
         ws_url = target.get("webSocketDebuggerUrl")
         if not ws_url:
@@ -521,6 +623,42 @@ class LocalChromeSession:
         self.ws = create_connection(ws_url, timeout=20, suppress_origin=True)
         self._cdp("Page.enable")
         self._cdp("Runtime.enable")
+        self._cdp("Network.enable")
+        self._apply_okooo_mobile_profile(profile)
+
+    def _apply_okooo_mobile_profile(self, profile: OkoooMobileProfile | None = None) -> None:
+        # Mobile emulation + no-cache headers reduce the chance of desktop or stale
+        # variants being served for m.okooo.com pages.
+        resolved = profile or self.mobile_profile or random_mobile_profile()
+        self.mobile_profile = resolved
+        headers = mobile_headers(profile=resolved)
+        self._cdp(
+            "Network.setUserAgentOverride",
+            {
+                "userAgent": resolved.user_agent,
+                "acceptLanguage": resolved.accept_language,
+                "platform": "iOS",
+            },
+        )
+        self._cdp("Network.setCacheDisabled", {"cacheDisabled": True})
+        self._cdp("Network.setExtraHTTPHeaders", {"headers": headers})
+        self._cdp(
+            "Emulation.setDeviceMetricsOverride",
+            {
+                "width": resolved.viewport["width"],
+                "height": resolved.viewport["height"],
+                "deviceScaleFactor": resolved.device_scale_factor,
+                "mobile": True,
+            },
+        )
+        self._cdp("Emulation.setTouchEmulationEnabled", {"enabled": True})
+
+    def _navigate(self, url: str) -> None:
+        resolved_url = cache_busted_okooo_url(url, profile=self.mobile_profile)
+        params: Dict[str, Any] = {"url": resolved_url}
+        if is_okooo_mobile_url(url):
+            params["referrer"] = "https://m.okooo.com/"
+        self._cdp("Page.navigate", params)
 
     def _cdp(self, method: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
         if not self.ws:
@@ -540,9 +678,10 @@ class LocalChromeSession:
     def open(self, url: str) -> None:
         if not self.ws:
             self._connect_if_needed(url)
-            time.sleep(3.5)
-            return
-        self._cdp("Page.navigate", {"url": url})
+        if is_okooo_mobile_url(url):
+            self.mobile_profile = random_mobile_profile()
+            self._apply_okooo_mobile_profile(self.mobile_profile)
+        self._navigate(url)
         time.sleep(3.5)
 
     def state(self) -> str:
@@ -719,6 +858,35 @@ def _annotate_attempts(data: Dict[str, Any], attempts: list[Dict[str, Any]]) -> 
     return out
 
 
+def _score_europe_payload(data: Dict[str, Any]) -> tuple[int, int, int]:
+    if not _is_success_payload(data):
+        return (0, 0, 0)
+    if not isinstance(data, dict):
+        return (0, 0, 0)
+    consensus = data.get("consensus") if isinstance(data.get("consensus"), dict) else {}
+    companies = data.get("companies") if isinstance(data.get("companies"), list) else []
+    mode = data.get("company_mode") or consensus.get("mode")
+    mode_score = {
+        "multi_company_consensus": 3,
+        "single_company": 2,
+        "average_row_fallback": 1,
+    }.get(str(mode), 0)
+    filtered_count = int(consensus.get("filtered_company_count") or 0)
+    company_count = int(consensus.get("company_count") or 0)
+    return (mode_score, max(filtered_count, len(companies)), company_count)
+
+
+def _pick_preferred_europe_result(*candidates: Dict[str, Any]) -> Dict[str, Any]:
+    best: Dict[str, Any] | None = None
+    best_score = (-1, -1, -1)
+    for candidate in candidates:
+        score = _score_europe_payload(candidate)
+        if score > best_score:
+            best = candidate
+            best_score = score
+    return best or {}
+
+
 def _open_ready(bu: BrowserUse, url: str, settle_seconds: float = 2.5) -> str:
     bu.open(url)
     time.sleep(settle_seconds)
@@ -773,7 +941,7 @@ def _parse_europe_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
   const body = document.body?.innerText || '';
   const lines = body.split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
   const compact = body.replace(/\s+/g, ' ').trim();
-  const numRe = /\d+(?:\.\d+)?/g;
+  const compactOddsRe = /\d{1,2}\.\d{2}/g;
 
   const aliasPairs = [
     ['Bet365', 'Bet365'],
@@ -818,6 +986,7 @@ def _parse_europe_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
     '利记': 3,
   };
   const round4 = (v) => +Number(v).toFixed(4);
+  const sanitizeText = (text) => (text || '').replace(/[!#＊*·•|｜]/g, '').replace(/\s+/g, ' ').trim();
   const normalizeCompany = (name) => {
     const row = aliasPairs.find(x => x[0] === name);
     return row ? row[1] : name;
@@ -846,11 +1015,13 @@ def _parse_europe_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
   };
 
   const parseLine = (line, companyAlias, sourceTag) => {
-    const idx = line.indexOf(companyAlias);
+    const cleanLine = sanitizeText(line);
+    const cleanAlias = sanitizeText(companyAlias);
+    const idx = cleanLine.toLowerCase().indexOf(cleanAlias.toLowerCase());
     if (idx < 0) return null;
     const company = normalizeCompany(companyAlias);
-    const tail = line.slice(idx + companyAlias.length).trim();
-    const nums = (tail.match(numRe) || []).map(x => parseFloat(x));
+    const tail = cleanLine.slice(idx + cleanAlias.length).trim();
+    const nums = (tail.match(compactOddsRe) || []).map(x => parseFloat(x));
     if (nums.length < 6) return null;
     const initial = { home: nums[0], draw: nums[1], away: nums[2] };
     const final = { home: nums[3], draw: nums[4], away: nums[5] };
@@ -866,7 +1037,7 @@ def _parse_europe_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
         away: round4(final.away - initial.away),
       },
       _source: sourceTag,
-      _matched_line: line,
+      _matched_line: cleanLine,
       _priority: priority[company] || 1,
     };
   };
@@ -1624,6 +1795,17 @@ def _parse_kelly_anywhere_on_page(bu: BrowserUse) -> Dict[str, Any]:
 
 
 def _parse_desktop_avg_row(row_cells: list[str]) -> Dict[str, Any]:
+    def pick_triplet(idx: int) -> dict[str, float | None] | None:
+        if idx >= len(row_cells):
+            return None
+        cell = (row_cells[idx] or "").strip()
+        if not cell:
+            return None
+        nums = [float(x) for x in re.findall(r"\d{1,2}\.\d{2}", cell)]
+        if len(nums) >= 3:
+            return {"home": nums[0], "draw": nums[1], "away": nums[2]}
+        return None
+
     def pick_float(idx: int) -> float | None:
         if idx >= len(row_cells):
             return None
@@ -1634,8 +1816,14 @@ def _parse_desktop_avg_row(row_cells: list[str]) -> Dict[str, Any]:
 
     # Desktop okooo odds row layout observed:
     # [0]序号 [1]公司 [2:5]初赔 [5:8]即时 [8]变化图 [9:12]概率 [12:15]凯利 [15]赔付率
-    initial = {"home": pick_float(2), "draw": pick_float(3), "away": pick_float(4)}
-    final = {"home": pick_float(5), "draw": pick_float(6), "away": pick_float(7)}
+    compact_initial = pick_triplet(1)
+    compact_final = pick_triplet(2)
+    if compact_initial and compact_final:
+        initial = compact_initial
+        final = compact_final
+    else:
+        initial = {"home": pick_float(2), "draw": pick_float(3), "away": pick_float(4)}
+        final = {"home": pick_float(5), "draw": pick_float(6), "away": pick_float(7)}
     kelly = {"home": pick_float(12), "draw": pick_float(13), "away": pick_float(14)}
     payout_rate = pick_float(15)
     delta = {
@@ -1852,25 +2040,25 @@ def _find_match_id(
     time_hint: str = "",
     alias_table: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    def find_rows(date_hint_current: str) -> Dict[str, Any]:
+    def find_rows(date_hint_current: str, time_hint_current: str) -> Dict[str, Any]:
         return _find_rows_fuzzy(
             bu,
             team1,
             team2,
             date_hint=date_hint_current,
-            time_hint=time_hint,
+            time_hint=time_hint_current,
             league=league,
             alias_table=alias_table or {},
             limit=5,
         )
 
-    def find_rows_anywhere(date_hint_current: str) -> Dict[str, Any]:
+    def find_rows_anywhere(date_hint_current: str, time_hint_current: str) -> Dict[str, Any]:
         return _find_rows_anywhere_on_current_page(
             bu,
             team1,
             team2,
             date_hint=date_hint_current,
-            time_hint=time_hint,
+            time_hint=time_hint_current,
             league=league,
             alias_table=alias_table or {},
             limit=5,
@@ -1880,17 +2068,27 @@ def _find_match_id(
     if not candidate_dates:
         candidate_dates = [date_hint]
 
-    def search_with_candidates() -> Dict[str, Any]:
+    def search_with_candidates(relax_time: bool = False) -> Dict[str, Any]:
+        effective_time_hint = "" if relax_time else time_hint
         for current_date in candidate_dates:
-            found_local = find_rows(current_date)
+            found_local = find_rows(current_date, effective_time_hint)
             if isinstance(found_local, dict) and found_local.get("rows"):
                 if current_date and current_date != date_hint:
                     found_local["_matched_date_hint"] = current_date
+                if relax_time and time_hint:
+                    found_local["_matched_time_hint"] = effective_time_hint
                 return found_local
-            found_local = find_rows_anywhere(current_date)
+            # Relaxed midnight fallback should avoid broad page-wide scans; otherwise
+            # large container text can incorrectly match unrelated rows and collapse
+            # multiple matches onto the same MatchID.
+            if relax_time:
+                continue
+            found_local = find_rows_anywhere(current_date, effective_time_hint)
             if isinstance(found_local, dict) and found_local.get("rows"):
                 if current_date and current_date != date_hint:
                     found_local["_matched_date_hint"] = current_date
+                if relax_time and time_hint:
+                    found_local["_matched_time_hint"] = effective_time_hint
                 return found_local
         return {}
 
@@ -1929,6 +2127,18 @@ def _find_match_id(
         if not isinstance(found, dict) or not found.get("rows"):
             _eval_scroll_to_top(bu)
             found = search_with_candidates()
+    if (not isinstance(found, dict) or not found.get("rows")) and time_hint:
+        found = search_with_candidates(relax_time=True)
+    if not isinstance(found, dict) or not found.get("rows"):
+        cached = _find_match_id_from_schedule_cache(
+            league=league,
+            team1=team1,
+            team2=team2,
+            candidate_dates=candidate_dates,
+            alias_table=alias_table or {},
+        )
+        if isinstance(cached, dict) and cached.get("match_id"):
+            return cached
     if not isinstance(found, dict) or not found.get("rows"):
         raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
 
@@ -2083,8 +2293,8 @@ def _extract_kelly_from_history_flow(bu: BrowserUse, history_url: str) -> Dict[s
     return data
 
 
-def _extract_europe_desktop(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    url = f"https://www.okooo.com/soccer/match/{match_id}/odds/"
+def _extract_europe_mobile_alt(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
+    url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
     state_text = _open_ready(bu, url, settle_seconds=4.0)
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
@@ -2103,44 +2313,46 @@ def _extract_europe_desktop(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
 })()
 """
     )
-    data = _parse_desktop_europe_rows(row_info.get("rows") or [])
-    if not data.get("found"):
-        if row_info.get("avg_tds"):
-            data = _parse_desktop_avg_row(row_info["avg_tds"])
-            data.setdefault("parsed", True)
-            data.setdefault("company", "99家平均")
-            data.setdefault("company_mode", "average_row_fallback")
-            data.setdefault(
-                "consensus",
-                {"mode": "average_row_fallback", "company_count": 0, "filtered_company_count": 0, "companies": [], "all_companies": []},
-            )
-            data.setdefault("companies", [])
-        else:
-            data = _parse_europe_on_current_page(bu)
+    row_data = _parse_desktop_europe_rows(row_info.get("rows") or [])
+    body_data = _parse_europe_on_current_page(bu)
+    avg_data: Dict[str, Any] = {}
+    if row_info.get("avg_tds"):
+        avg_data = _parse_desktop_avg_row(row_info["avg_tds"])
+        avg_data.setdefault("parsed", True)
+        avg_data.setdefault("company", "99家平均")
+        avg_data.setdefault("company_mode", "average_row_fallback")
+        avg_data.setdefault(
+            "consensus",
+            {"mode": "average_row_fallback", "company_count": 0, "filtered_company_count": 0, "companies": [], "all_companies": []},
+        )
+        avg_data.setdefault("companies", [])
+    data = _pick_preferred_europe_result(row_data, body_data, avg_data)
+    if not data:
+        data = avg_data or body_data or row_data or {"found": False}
     data["url"] = url
-    data["_flow"] = "desktop_direct"
+    data["_flow"] = "mobile_direct_alt"
     return data
 
 
-def _extract_asian_desktop(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    url = f"https://www.okooo.com/soccer/match/{match_id}/ah/"
+def _extract_asian_mobile_alt(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
+    url = f"https://m.okooo.com/match/handicap.php?MatchID={match_id}"
     state_text = _open_ready(bu, url, settle_seconds=4.0)
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
     data = _parse_asian_on_current_page(bu)
     data["url"] = url
-    data["_flow"] = "desktop_direct"
+    data["_flow"] = "mobile_direct_alt"
     return data
 
 
-def _extract_totals_desktop(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    url = f"https://www.okooo.com/soccer/match/{match_id}/ou/"
+def _extract_totals_mobile_alt(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
+    url = f"https://m.okooo.com/match/overunder.php?MatchID={match_id}"
     state_text = _open_ready(bu, url, settle_seconds=4.0)
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
     data = _parse_totals_on_current_page(bu)
     data["url"] = url
-    data["_flow"] = "desktop_direct"
+    data["_flow"] = "mobile_direct_alt"
     return data
 
 
@@ -2241,11 +2453,7 @@ def _extract_kelly_with_fallback(match_id: str, client_factory: Callable[[str], 
 
 def _extract_europe_with_fallback(match_id: str, history_url: str, client_factory: Callable[[str], Any], session_prefix: str) -> Dict[str, Any]:
     def _prefer_consensus(data: Dict[str, Any]) -> bool:
-        if not _is_success_payload(data):
-            return False
-        if not isinstance(data, dict):
-            return False
-        return data.get("company_mode") not in {"average_row_fallback", None}
+        return _score_europe_payload(data) >= (3, 2, 2)
 
     first = _run_with_retries("europe_mobile", f"{session_prefix}_mobile", client_factory, _extract_europe, match_id)
     if _prefer_consensus(first):
@@ -2254,13 +2462,13 @@ def _extract_europe_with_fallback(match_id: str, history_url: str, client_factor
     if _prefer_consensus(second):
         second["_fallback_from"] = "mobile_direct"
         return second
-    third = _run_with_retries("europe_desktop", f"{session_prefix}_desktop", client_factory, _extract_europe_desktop, match_id)
-    if _is_success_payload(third):
+    third = _run_with_retries("europe_mobile_alt", f"{session_prefix}_mobile_alt", client_factory, _extract_europe_mobile_alt, match_id)
+    if _prefer_consensus(third):
         third["_fallback_from"] = "history_tab"
         return third
-    for candidate in (second, first):
-        if _is_success_payload(candidate):
-            return candidate
+    preferred = _pick_preferred_europe_result(third, second, first)
+    if preferred:
+        return preferred
     return third if third.get("_attempts") else (second if second.get("_attempts") else first)
 
 
@@ -2282,7 +2490,7 @@ def _extract_asian_with_fallback(match_id: str, history_url: str, client_factory
     if _prefer_consensus(second):
         second["_fallback_from"] = "mobile_direct"
         return second
-    third = _run_with_retries("asian_desktop", f"{session_prefix}_desktop", client_factory, _extract_asian_desktop, match_id)
+    third = _run_with_retries("asian_mobile_alt", f"{session_prefix}_mobile_alt", client_factory, _extract_asian_mobile_alt, match_id)
     if _is_success_payload(third):
         third["_fallback_from"] = "history_tab"
         return third
@@ -2300,7 +2508,7 @@ def _extract_totals_with_fallback(match_id: str, history_url: str, client_factor
     if _is_success_payload(second):
         second["_fallback_from"] = "mobile_direct"
         return second
-    third = _run_with_retries("totals_desktop", f"{session_prefix}_desktop", client_factory, _extract_totals_desktop, match_id)
+    third = _run_with_retries("totals_mobile_alt", f"{session_prefix}_mobile_alt", client_factory, _extract_totals_mobile_alt, match_id)
     if _is_success_payload(third):
         third["_fallback_from"] = "history_tab"
         return third
@@ -2315,7 +2523,7 @@ def _extract_kelly_full_fallback(match_id: str, history_url: str, client_factory
     if _is_success_payload(second):
         second["_fallback_from"] = "mobile_direct"
         return second
-    third = _run_with_retries("kelly_desktop", f"{session_prefix}_desktop", client_factory, _extract_europe_desktop, match_id)
+    third = _run_with_retries("kelly_mobile_alt", f"{session_prefix}_mobile_alt", client_factory, _extract_europe_mobile_alt, match_id)
     if _is_success_payload(third) and third.get("kelly"):
         return {
             "found": True,
@@ -2324,7 +2532,7 @@ def _extract_kelly_full_fallback(match_id: str, history_url: str, client_factory
             "delta": None,
             "payout_rate": third.get("payout_rate"),
             "url": third.get("url"),
-            "_flow": "desktop_odds_row",
+            "_flow": "mobile_odds_row_fallback",
             "_fallback_from": "history_tab",
             "_attempts": third.get("_attempts", []),
         }
@@ -2341,7 +2549,7 @@ def main() -> None:
         "--driver",
         choices=["browser-use", "local-chrome"],
         default="local-chrome",
-        help="抓取驱动：local-chrome 或 browser-use（默认 local-chrome，更快）",
+        help="抓取驱动：默认 local-chrome；browser-use 仅用于显式调试",
     )
     parser.add_argument(
         "--out-dir",
@@ -2366,7 +2574,7 @@ def main() -> None:
     parser.add_argument(
         "--headed",
         action="store_true",
-        help="以有头浏览器运行 browser-use。部分页面在无头模式下更容易被拦截，抓不到赛程时建议开启。",
+        help="以有头浏览器运行 browser-use（仅显式指定 browser-use 时生效）",
     )
     parser.add_argument("--chrome-port", type=int, default=9222, help="local-chrome 模式使用的 CDP 端口")
     parser.add_argument(

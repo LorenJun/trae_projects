@@ -9,6 +9,10 @@ from typing import Optional, Union
 
 PathLike = Union[str, Path]
 
+TEAMS_FILENAME_BY_LEAGUE = {
+    'world_cup': 'teams_2026.md',
+}
+
 
 @dataclass(frozen=True)
 class EuropeLeaguesPaths:
@@ -45,7 +49,8 @@ class EuropeLeaguesPaths:
         return self.runtime_dir
 
     def teams_file(self, league_code: str) -> Path:
-        return self.base_dir / league_code / 'teams_2025-26.md'
+        filename = TEAMS_FILENAME_BY_LEAGUE.get(league_code, 'teams_2025-26.md')
+        return self.base_dir / league_code / filename
 
     def runtime_file(self, filename: str) -> Path:
         self.ensure_runtime_dir()

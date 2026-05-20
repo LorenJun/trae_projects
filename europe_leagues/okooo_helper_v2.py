@@ -11,6 +11,8 @@ from typing import Dict, List, Optional
 
 from playwright.sync_api import sync_playwright
 
+from okooo_mobile_access import cache_busted_okooo_url, mobile_context_options, mobile_headers, random_mobile_profile
+
 
 class OkoooScraper:
     """澳客网赔率数据提取器"""
@@ -21,6 +23,7 @@ class OkoooScraper:
         self.browser = None
         self.context = None
         self.page = None
+        self.mobile_profile = None
         
     def _get_stealth_args(self) -> List[str]:
         """获取反检测浏览器参数"""
@@ -37,15 +40,6 @@ class OkoooScraper:
             '--window-size=1920,1080',
         ]
     
-    def _get_random_user_agent(self) -> str:
-        """获取随机用户代理"""
-        agents = [
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
-        ]
-        return random.choice(agents)
-    
     def start(self):
         """启动浏览器"""
         self.playwright = sync_playwright().start()
@@ -55,12 +49,9 @@ class OkoooScraper:
             args=self._get_stealth_args()
         )
         
-        self.context = self.browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent=self._get_random_user_agent(),
-            locale="zh-CN",
-            timezone_id="Asia/Shanghai",
-        )
+        self.mobile_profile = random_mobile_profile()
+        self.context = self.browser.new_context(**mobile_context_options(profile=self.mobile_profile))
+        self.context.set_extra_http_headers(mobile_headers(profile=self.mobile_profile))
         
         # 添加反检测脚本
         self.context.add_init_script("""
@@ -93,12 +84,16 @@ class OkoooScraper:
         Returns:
             包含赔率数据的字典
         """
-        url = f"https://www.okooo.com/soccer/match/{match_id}/odds/"
+        url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
         
         try:
             # 访问页面
             print(f"  正在访问: {url}")
-            response = self.page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            response = self.page.goto(
+                cache_busted_okooo_url(url, profile=self.mobile_profile),
+                wait_until="domcontentloaded",
+                timeout=60000,
+            )
             
             if response.status == 405:
                 print("  [WARN] 访问被阻断，尝试刷新...")

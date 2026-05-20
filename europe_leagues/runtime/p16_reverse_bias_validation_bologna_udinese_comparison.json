@@ -1,0 +1,92 @@
+{
+  "match": {
+    "league": "serie_a",
+    "date": "2026-05-17",
+    "home_team": "博洛尼亚",
+    "away_team": "乌迪内斯"
+  },
+  "expected_goals_total": 1.7248403749728447,
+  "over_under_line": 2.75,
+  "raw_top_totals": [
+    {
+      "total": "1",
+      "prob": 0.3254
+    },
+    {
+      "total": "2",
+      "prob": 0.2662
+    },
+    {
+      "total": "0",
+      "prob": 0.1566
+    }
+  ],
+  "final_top_totals": [
+    {
+      "total": "1",
+      "prob": 0.308
+    },
+    {
+      "total": "2",
+      "prob": 0.2519
+    },
+    {
+      "total": "3",
+      "prob": 0.1731
+    }
+  ],
+  "raw_buckets": {
+    "0": 0.156635,
+    "1": 0.325433,
+    "2": 0.266163,
+    "3": 0.155113,
+    "4": 0.066398,
+    "5": 0.022807,
+    "6": 0.006016,
+    "7": 0.0,
+    "7+": 0.001435
+  },
+  "final_buckets": {
+    "0": 0.148261,
+    "1": 0.308036,
+    "2": 0.251934,
+    "3": 0.173113,
+    "4": 0.078398,
+    "5": 0.029607,
+    "6": 0.008416,
+    "7": 0.0,
+    "7+": 0.002235
+  },
+  "review_total_goals_adjustment": {
+    "applied": true,
+    "signals": [
+      "review-total-goals-reduce-low-bias"
+    ],
+    "scenario_name": "",
+    "review_bias": {
+      "applied": true,
+      "signals": [
+        "review-total-goals-reduce-low-bias"
+      ],
+      "reason": "towards_high",
+      "line": 2.75,
+      "shift": 0.04,
+      "near_focus_line": true
+    }
+  },
+  "review_over_under_adjustment": {
+    "applied": true,
+    "signals": [
+      "review-ou-reduce-under-bias"
+    ],
+    "reason": "review-bias-over",
+    "line": 2.75,
+    "shift": 0.04,
+    "near_focus_line": true,
+    "bias_scope": "overall",
+    "adjusted": {
+      "over": 0.283242,
+      "under": 0.716758
+    }
+  }
+}

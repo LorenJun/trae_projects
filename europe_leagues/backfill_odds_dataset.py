@@ -20,19 +20,13 @@ from typing import Dict, List, Optional
 import requests
 from playwright.sync_api import sync_playwright
 
+from okooo_mobile_access import cache_busted_okooo_url, mobile_context_options, mobile_headers, random_mobile_profile
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DATE_START = "2026-04-18"
 DATE_END = "2026-04-20"
 DATE_TAG = f"{DATE_START}_{DATE_END}"
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    )
-}
 
 LEAGUE_CONFIG = {
     "premier_league": {"name": "英超", "competition_id": 1},
@@ -82,7 +76,6 @@ class MatchFixture:
 class OddsBackfill:
     def __init__(self) -> None:
         self.session = requests.Session()
-        self.session.headers.update(HEADERS)
 
     def fetch_league_matches(self, league_code: str) -> List[MatchFixture]:
         """从 tzuqiu.cc 获取赛程数据"""
@@ -90,7 +83,12 @@ class OddsBackfill:
         url = f"https://tzuqiu.cc/competitions/{config['competition_id']}/fixture.do"
         
         try:
-            response = self.session.get(url, timeout=25)
+            profile = random_mobile_profile()
+            response = self.session.get(
+                cache_busted_okooo_url(url, profile=profile),
+                headers=mobile_headers(profile=profile),
+                timeout=25,
+            )
             response.raise_for_status()
             page_text = response.text
         except Exception as e:
@@ -138,22 +136,21 @@ class OddsBackfill:
 
     def fetch_okooo_odds(self, match_id: str) -> Optional[Dict]:
         """使用 Playwright 从 okooo.com 获取赔率数据"""
-        url = f"https://www.okooo.com/soccer/match/{match_id}/odds/"
+        url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
         
         try:
             with sync_playwright() as p:
+                profile = random_mobile_profile()
                 browser = p.chromium.launch(headless=True)
-                context = browser.new_context(
-                    viewport={"width": 1280, "height": 800},
-                    user_agent=HEADERS["User-Agent"],
-                )
+                context = browser.new_context(**mobile_context_options(profile=profile))
+                context.set_extra_http_headers(mobile_headers(profile=profile))
                 page = context.new_page()
                 
-                page.goto(url, wait_until="networkidle", timeout=30000)
-                page.wait_for_selector("table#datatable1", timeout=10000)
+                page.goto(cache_busted_okooo_url(url, profile=profile), wait_until="networkidle", timeout=30000)
+                page.wait_for_timeout(3000)
                 
                 # 提取表格数据
-                rows = page.query_selector_all("table#datatable1 tbody tr")
+                rows = page.query_selector_all("table tbody tr")
                 
                 bookmaker_odds = {}
                 for row in rows:

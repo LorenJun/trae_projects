@@ -1,0 +1,2161 @@
+{
+  "success": true,
+  "command": "predict-match",
+  "generated_at": "2026-05-17T12:59:07.937573",
+  "runtime_profile": {
+    "persona": {
+      "persona_key": "football_actuary",
+      "persona_name": "Professional Football Betting Data Actuary",
+      "version": "unknown",
+      "purpose": "",
+      "source_file": "agents/football_actuary_persona.md",
+      "dimension_schema_version": "standard-six-v1",
+      "dimensions": [
+        "以真实数据和正式流程为基础",
+        "区分模型结论、盘口结论和综合结论",
+        "明确数据是否降级、样本是否足够、结论是否存在边界",
+        "正式输出以 teams_2025-26.md 和 prediction_system.py 主流程为准",
+        "赛后结果必须能进入准确率统计和复盘链路"
+      ]
+    },
+    "agent_roles": [
+      "data_collector",
+      "match_analyzer",
+      "odds_analyzer"
+    ],
+    "agents": [
+      {
+        "agent_key": "data_collector",
+        "agent_name": "Data Collector Agent",
+        "version": "1.2.0",
+        "purpose": "负责从正式实时源采集足球比赛所需的结构化数据，并为 collect-data / predict-match / 批量回填流程提供稳定输入",
+        "source_file": "agents/data_collector_agent.md",
+        "primary_responsibility": "第 6 维数据工程、流程自动化与策略迭代中的输入准备与质量控制"
+      },
+      {
+        "agent_key": "match_analyzer",
+        "agent_name": "Match Analyzer Agent",
+        "version": "1.2.0",
+        "purpose": "负责球队基本面、战术、历史交锋、伤停与临场上下文分析，并与真实盘口、team_context、EWMA 近况结果联动",
+        "source_file": "agents/match_analyzer_agent.md",
+        "primary_responsibility": "第 1 维足球业务分析 + 第 5 维风险控制支持中的比赛脚本解释"
+      },
+      {
+        "agent_key": "odds_analyzer",
+        "agent_name": "Odds Analyzer Agent",
+        "version": "1.2.0",
+        "purpose": "负责实时欧赔、亚值、亚值页内大小球、水位与凯利的深度分析，并对接最终 over_under 诊断字段",
+        "source_file": "agents/odds_analyzer_agent.md",
+        "primary_responsibility": "第 2 维赔率与盘口交易分析 + 第 5 维风险控制支持中的盘口风险识别"
+      }
+    ],
+    "dimensions": [
+      "以真实数据和正式流程为基础",
+      "区分模型结论、盘口结论和综合结论",
+      "明确数据是否降级、样本是否足够、结论是否存在边界",
+      "正式输出以 teams_2025-26.md 和 prediction_system.py 主流程为准",
+      "赛后结果必须能进入准确率统计和复盘链路"
+    ],
+    "dimension_schema_version": "standard-six-v1"
+  },
+  "data": {
+    "match_id": "serie_a_20260517_卡利亚里_都灵",
+    "home_team": "卡利亚里",
+    "away_team": "都灵",
+    "league_code": "serie_a",
+    "league_name": "意甲",
+    "match_date": "2026-05-17",
+    "match_time": "21:00",
+    "prediction": "主胜",
+    "confidence": 0.3931030491623397,
+    "all_probabilities": {
+      "主胜": 0.3931030491623397,
+      "平局": 0.32726791525551274,
+      "客胜": 0.2796290355821476
+    },
+    "top_scores": [
+      [
+        "0-0",
+        0.33840645287926646
+      ],
+      [
+        "1-0",
+        0.2628106011413001
+      ],
+      [
+        "1-1",
+        0.19105222858929058
+      ]
+    ],
+    "total_goals": {
+      "available": true,
+      "buckets": {
+        "0": 0.205809,
+        "1": 0.361563,
+        "2": 0.248831,
+        "3": 0.122773,
+        "4": 0.044434,
+        "5": 0.012912,
+        "6": 0.00302,
+        "7": 0.0,
+        "7+": 0.000658
+      },
+      "top_totals": [
+        {
+          "total": "1",
+          "prob": 0.3616
+        },
+        {
+          "total": "2",
+          "prob": 0.2488
+        },
+        {
+          "total": "0",
+          "prob": 0.2058
+        }
+      ],
+      "tail_bucket": "7+"
+    },
+    "expected_goals": {
+      "home": 0.7862618400000001,
+      "away": 0.6722040000000001,
+      "total": 1.4584658400000001
+    },
+    "over_under": {
+      "available": false,
+      "requires_real_market_line": true,
+      "line_source": "missing_real_line",
+      "reason": "missing_real_market_line"
+    },
+    "staking": {
+      "kelly": {
+        "available": false,
+        "odds_source": "none",
+        "odds": {
+          "home": null,
+          "draw": null,
+          "away": null
+        },
+        "probabilities": {
+          "home_win": 0.3931030491623397,
+          "draw": 0.32726791525551274,
+          "away_win": 0.2796290355821476
+        },
+        "by_outcome": {},
+        "recommended": {},
+        "reason": "missing_odds"
+      },
+      "recommended": {}
+    },
+    "league_over_under_learning": {
+      "applied": true,
+      "league_code": "serie_a",
+      "home_team": "卡利亚里",
+      "away_team": "都灵",
+      "learning": {
+        "available": true,
+        "league_code": "serie_a",
+        "sample_size": 15,
+        "lookback_days": 14,
+        "match_window": {
+          "start": "2026-05-03",
+          "end": "2026-05-16"
+        },
+        "avg_goals": 2.067,
+        "over15_rate": 0.6667,
+        "over25_rate": 0.4,
+        "over35_rate": 0.1333,
+        "btts_rate": 0.2667,
+        "clean_sheet_rate": 0.7333,
+        "goal_bins": {
+          "0": 3,
+          "1": 2,
+          "2": 4,
+          "3": 4,
+          "4_plus": 2
+        },
+        "high_samples": [
+          {
+            "date": "2026-05-12",
+            "home_team": "那不勒斯",
+            "away_team": "博洛尼亚",
+            "score": "2-3",
+            "total_goals": 5
+          },
+          {
+            "date": "2026-05-05",
+            "home_team": "罗马",
+            "away_team": "佛罗伦萨",
+            "score": "4-0",
+            "total_goals": 4
+          },
+          {
+            "date": "2026-05-10",
+            "home_team": "拉齐奥",
+            "away_team": "国际米兰",
+            "score": "0-3",
+            "total_goals": 3
+          }
+        ],
+        "low_samples": [
+          {
+            "date": "2026-05-03",
+            "home_team": "亚特兰大",
+            "away_team": "热那亚",
+            "score": "0-0",
+            "total_goals": 0
+          },
+          {
+            "date": "2026-05-03",
+            "home_team": "博洛尼亚",
+            "away_team": "卡利亚里",
+            "score": "0-0",
+            "total_goals": 0
+          },
+          {
+            "date": "2026-05-10",
+            "home_team": "佛罗伦萨",
+            "away_team": "热那亚",
+            "score": "0-0",
+            "total_goals": 0
+          }
+        ]
+      },
+      "signals": [],
+      "sample_size": 15,
+      "base_lambda": {
+        "home": 0.7,
+        "away": 0.625,
+        "total": 1.325
+      },
+      "adjusted_lambda": {
+        "home": 0.778,
+        "away": 0.695,
+        "total": 1.473
+      },
+      "league_avg_goals": 2.5,
+      "recent_avg_goals": 2.067,
+      "over25_rate": 0.4,
+      "over35_rate": 0.1333,
+      "btts_rate": 0.2667,
+      "clean_sheet_rate": 0.7333,
+      "sample_weight": 0.2,
+      "target_total_scale": 1.0
+    },
+    "strength_diff": 0.0,
+    "home_strength": {
+      "team": "卡利亚里",
+      "strength": 50.0,
+      "attack": 0.5,
+      "defense": 0.5,
+      "injured_count": 0,
+      "suspended_count": 0,
+      "key_players_available": true,
+      "available_value": 0,
+      "total_value": 0
+    },
+    "away_strength": {
+      "team": "都灵",
+      "strength": 50.0,
+      "attack": 0.5,
+      "defense": 0.5,
+      "injured_count": 0,
+      "suspended_count": 0,
+      "key_players_available": true,
+      "available_value": 0,
+      "total_value": 0
+    },
+    "upset_potential": {
+      "index": 37.5,
+      "level": "低",
+      "warning_level": "🟢",
+      "similar_cases_count": 0,
+      "factors": [
+        "历史同向反打(7次)",
+        "[战意] 主队抢分战意强于客队，需防热门方兑现不足",
+        "[战意] 弱势方存在刚性抢分需求",
+        "[战意] 压力方处于保级区或保级压力带",
+        "[战意] 弱势方抢分紧迫度更高"
+      ],
+      "risk_score_detail": {
+        "base_score": 0.0,
+        "context_score": 17.5,
+        "market_score": 0.0,
+        "knowledge_score": 20.0,
+        "total_score": 37.5,
+        "capped_score": 37.5,
+        "level": "低"
+      },
+      "risk_breakdown": {
+        "available": true,
+        "modules": {
+          "historical_patterns": {
+            "category": "knowledge",
+            "score": 20.0,
+            "triggered": true,
+            "factors": [
+              "历史同向反打(7次)"
+            ]
+          },
+          "motivation": {
+            "category": "context",
+            "score": 17.5,
+            "triggered": true,
+            "factors": [
+              "[战意] 主队抢分战意强于客队，需防热门方兑现不足",
+              "[战意] 弱势方存在刚性抢分需求",
+              "[战意] 压力方处于保级区或保级压力带",
+              "[战意] 弱势方抢分紧迫度更高"
+            ]
+          }
+        },
+        "top_drivers": [
+          "历史同向反打(7次)",
+          "[战意] 主队抢分战意强于客队，需防热门方兑现不足",
+          "[战意] 弱势方存在刚性抢分需求"
+        ],
+        "suppressors": [],
+        "summary": "情境面与知识面共同抬升冷门风险"
+      },
+      "historical_odds_reference": {
+        "available": false,
+        "league_history_count": 7,
+        "matched_feature_count": 0,
+        "similar_matches": [],
+        "summary": {
+          "sample_size": 0,
+          "result_counts": {
+            "主胜": 0,
+            "平局": 0,
+            "客胜": 0
+          },
+          "result_rates": {
+            "主胜": 0.0,
+            "平局": 0.0,
+            "客胜": 0.0
+          },
+          "cold_result_count": 0,
+          "cold_result_rate": 0.0
+        },
+        "insights": [
+          "当前未传入赔率快照，历史赔率参考已就绪但未参与匹配"
+        ]
+      },
+      "motivation_risk": {
+        "available": true,
+        "score": 17.5,
+        "supports_upset": true,
+        "favored_side": "away",
+        "pressure_side": "home",
+        "urgency_edge": 0.14,
+        "flags": [
+          "underdog_must_take_points",
+          "pressure_side_relegation",
+          "underdog_high_urgency",
+          "underdog_motivation_score_advantage",
+          "table_context_side_inferred"
+        ],
+        "factors": [
+          "主队抢分战意强于客队，需防热门方兑现不足",
+          "弱势方存在刚性抢分需求",
+          "压力方处于保级区或保级压力带",
+          "弱势方抢分紧迫度更高"
+        ]
+      },
+      "handicap_strength_mismatch": null,
+      "case_knowledge": {
+        "available": true,
+        "top_cases": [
+          {
+            "case_id": "2026-04-18_萨索洛_科莫",
+            "match_date": "2026-04-18",
+            "home_team": "萨索洛",
+            "away_team": "科莫",
+            "upset_level": "强烈爆冷",
+            "upset_type": "弱队胜强队",
+            "reason": "科莫周中意大利杯消耗大，萨索洛主场保级战意强烈。忽视了两队战意差距，赔率变化显示机构已提前防范主胜。",
+            "suggestion": "加强战意评估权重，特别是保级队的主场爆发力。赔率下降时不能盲目跟庄，需要结合基本面判断。",
+            "score": 0.294
+          },
+          {
+            "case_id": "2026-05-10_佛罗伦萨_热那亚",
+            "match_date": "2026-05-10",
+            "home_team": "佛罗伦萨",
+            "away_team": "热那亚",
+            "upset_level": "中度爆冷",
+            "upset_type": "平局大师",
+            "reason": "自动同步识别：赛前预测为主胜，实际结果为平局，比分 0-0。",
+            "suggestion": "复盘该场赛前伤停、盘口与临场变盘，必要时补充更细的人工标签。",
+            "score": 0.278
+          },
+          {
+            "case_id": "2026-05-09_卡利亚里_乌迪内斯",
+            "match_date": "2026-05-09",
+            "home_team": "卡利亚里",
+            "away_team": "乌迪内斯",
+            "upset_level": "轻度爆冷",
+            "upset_type": "弱队胜强队",
+            "reason": "自动同步识别：赛前预测为主胜，实际结果为客胜，比分 0-2。",
+            "suggestion": "复盘该场赛前伤停、盘口与临场变盘，必要时补充更细的人工标签。",
+            "score": 0.143
+          }
+        ],
+        "hint": "萨索洛vs科莫(强烈爆冷,弱队胜强队"
+      }
+    },
+    "match_intelligence": {
+      "available": true,
+      "market": {
+        "available": false,
+        "signals": [],
+        "bookmaker_psychology": {
+          "label": "unknown",
+          "reason": "",
+          "trap_side": "none",
+          "strength": 0.0
+        },
+        "capital_flow": {
+          "source": "odds_water_kelly_proxy",
+          "home": 0.0,
+          "draw": 0.0,
+          "away": 0.0,
+          "direction": "balanced",
+          "strength": 0.0
+        },
+        "market_resonance": {
+          "available": false,
+          "label": "unknown",
+          "summary": "",
+          "side_direction": "balanced",
+          "side_strength": 0.0,
+          "tempo_direction": "balanced",
+          "tempo_strength": 0.0,
+          "resonance_score": 0.0,
+          "flags": [],
+          "components": {}
+        }
+      },
+      "table": {
+        "home": {
+          "rank": 16,
+          "team": "卡利亚里",
+          "played": 11,
+          "wins": 2,
+          "draws": 3,
+          "losses": 6,
+          "gf": 8,
+          "ga": 16,
+          "gd": -8,
+          "points": 9
+        },
+        "away": {
+          "rank": 10,
+          "team": "都灵",
+          "played": 11,
+          "wins": 5,
+          "draws": 2,
+          "losses": 4,
+          "gf": 16,
+          "ga": 15,
+          "gd": 1,
+          "points": 17
+        }
+      },
+      "motivation": {
+        "home": {
+          "available": true,
+          "score": 82.0,
+          "urgency": 0.72,
+          "rank": 16,
+          "points": 9,
+          "tier": "relegation_pressure",
+          "objective": "保级缓冲",
+          "target_zone": "safety",
+          "points_gap_to_objective": 2,
+          "is_must_take_points": true,
+          "tags": [
+            "保级压力",
+            "关键分争夺"
+          ],
+          "table_row": {
+            "rank": 16,
+            "team": "卡利亚里",
+            "played": 11,
+            "wins": 2,
+            "draws": 3,
+            "losses": 6,
+            "gf": 8,
+            "ga": 16,
+            "gd": -8,
+            "points": 9
+          }
+        },
+        "away": {
+          "available": true,
+          "score": 77.0,
+          "urgency": 0.58,
+          "rank": 10,
+          "points": 17,
+          "tier": "europe_chase",
+          "objective": "冲击欧战区",
+          "target_zone": "top4",
+          "points_gap_to_objective": -3,
+          "is_must_take_points": true,
+          "tags": [
+            "冲击欧战区",
+            "中游战意一般",
+            "关键分争夺"
+          ],
+          "table_row": {
+            "rank": 10,
+            "team": "都灵",
+            "played": 11,
+            "wins": 5,
+            "draws": 2,
+            "losses": 4,
+            "gf": 16,
+            "ga": 15,
+            "gd": 1,
+            "points": 17
+          }
+        },
+        "edge": {
+          "home_minus_away": 5.0,
+          "urgency_home_minus_away": 0.14,
+          "dominant_side": "home",
+          "dominant_reason": "主队抢分战意强于客队，需防热门方兑现不足"
+        },
+        "context_flags": [
+          "home_must_take_points",
+          "away_must_take_points",
+          "underdog_must_take_points",
+          "pressure_side_relegation",
+          "underdog_high_urgency",
+          "underdog_motivation_score_advantage",
+          "table_context_side_inferred"
+        ],
+        "risk_signal": {
+          "available": true,
+          "supports_upset": true,
+          "score": 0.8123,
+          "favored_side": "away",
+          "pressure_side": "home",
+          "urgency_edge": 0.14,
+          "score_edge": 5.0,
+          "flags": [
+            "underdog_must_take_points",
+            "pressure_side_relegation",
+            "underdog_high_urgency",
+            "underdog_motivation_score_advantage",
+            "table_context_side_inferred"
+          ],
+          "summary": "主队抢分战意强于客队，需防热门方兑现不足"
+        },
+        "suggested_scores": {
+          "home": 82.0,
+          "away": 77.0
+        }
+      },
+      "team_state": {
+        "home": {
+          "recent": {
+            "matches": 5,
+            "points": 3,
+            "gf": 6,
+            "ga": 9
+          },
+          "ewma": {
+            "available": true,
+            "team": "卡利亚里",
+            "league": "serie_a",
+            "sample_size": 10,
+            "windows": {
+              "n5": 5,
+              "n10": 10
+            },
+            "ewma": {
+              "points_5": 1.543,
+              "points_10": 0.552,
+              "gf_5": 0.778,
+              "ga_5": 1.358
+            },
+            "rates": {
+              "win_rate_5": 0.4,
+              "win_rate_10": 0.2
+            },
+            "form_scale": 3,
+            "recent_matches": [
+              {
+                "date": "2026-05-09",
+                "opponent": "乌迪内斯",
+                "is_home": true,
+                "score": "0-2",
+                "team_goals": 0,
+                "opp_goals": 2,
+                "points": 0
+              },
+              {
+                "date": "2026-05-03",
+                "opponent": "博洛尼亚",
+                "is_home": false,
+                "score": "0-0",
+                "team_goals": 0,
+                "opp_goals": 0,
+                "points": 1
+              },
+              {
+                "date": "2026-04-28",
+                "opponent": "亚特兰大",
+                "is_home": true,
+                "score": "3-2",
+                "team_goals": 3,
+                "opp_goals": 2,
+                "points": 3
+              },
+              {
+                "date": "2026-04-18",
+                "opponent": "国际米兰",
+                "is_home": false,
+                "score": "3-0",
+                "team_goals": 0,
+                "opp_goals": 3,
+                "points": 0
+              },
+              {
+                "date": "2026-04-11",
+                "opponent": "克雷莫纳",
+                "is_home": true,
+                "score": "1-0",
+                "team_goals": 1,
+                "opp_goals": 0,
+                "points": 3
+              }
+            ]
+          },
+          "avg_possession": 46.6,
+          "formation": {
+            "formation": "",
+            "style": "unknown",
+            "score": 0.0
+          },
+          "last_lineup": null,
+          "key_players": [],
+          "injuries": {
+            "injured_count": 0,
+            "suspended_count": 0
+          }
+        },
+        "away": {
+          "recent": {
+            "matches": 5,
+            "points": 3,
+            "gf": 4,
+            "ga": 9
+          },
+          "ewma": {
+            "available": true,
+            "team": "都灵",
+            "league": "serie_a",
+            "sample_size": 10,
+            "windows": {
+              "n5": 5,
+              "n10": 10
+            },
+            "ewma": {
+              "points_5": 1.963,
+              "points_10": 1.947,
+              "gf_5": 1.358,
+              "ga_5": 1.025
+            },
+            "rates": {
+              "win_rate_5": 0.4,
+              "win_rate_10": 0.5
+            },
+            "form_scale": 3,
+            "recent_matches": [
+              {
+                "date": "2026-05-09",
+                "opponent": "萨索洛",
+                "is_home": true,
+                "score": "2-1",
+                "team_goals": 2,
+                "opp_goals": 1,
+                "points": 3
+              },
+              {
+                "date": "2026-05-02",
+                "opponent": "乌迪内斯",
+                "is_home": false,
+                "score": "2-0",
+                "team_goals": 0,
+                "opp_goals": 2,
+                "points": 0
+              },
+              {
+                "date": "2026-04-26",
+                "opponent": "国际米兰",
+                "is_home": true,
+                "score": "2-2",
+                "team_goals": 2,
+                "opp_goals": 2,
+                "points": 1
+              },
+              {
+                "date": "2026-04-19",
+                "opponent": "克雷莫纳",
+                "is_home": false,
+                "score": "0-0",
+                "team_goals": 0,
+                "opp_goals": 0,
+                "points": 1
+              },
+              {
+                "date": "2026-04-11",
+                "opponent": "维罗纳",
+                "is_home": true,
+                "score": "2-1",
+                "team_goals": 2,
+                "opp_goals": 1,
+                "points": 3
+              }
+            ]
+          },
+          "avg_possession": 41.6,
+          "formation": {
+            "formation": "",
+            "style": "unknown",
+            "score": 0.0
+          },
+          "last_lineup": null,
+          "key_players": [],
+          "injuries": {
+            "injured_count": 0,
+            "suspended_count": 0
+          }
+        }
+      },
+      "head_to_head": {
+        "available": false,
+        "home_wins": 0,
+        "away_wins": 0,
+        "draws": 0,
+        "matches": []
+      },
+      "signals": [
+        "主队近期状态波动较大，削弱单边兑现预期",
+        "客队近期状态波动较大，削弱单边兑现预期",
+        "双方近期状态波动较大，提升平局与冷门容错",
+        "控球倾向 卡利亚里46.6% vs 都灵41.6%",
+        "战意差异: 主队抢分战意强于客队，需防热门方兑现不足"
+      ],
+      "scenario_tags": [
+        "recent_form_home_volatility_high",
+        "recent_form_away_volatility_high",
+        "recent_form_volatility_high",
+        "motivation_upset_risk_home"
+      ],
+      "contextual_rules": {
+        "signals": [
+          "主队近期状态波动较大，削弱单边兑现预期",
+          "客队近期状态波动较大，削弱单边兑现预期",
+          "双方近期状态波动较大，提升平局与冷门容错"
+        ],
+        "scenario_tags": [
+          "recent_form_home_volatility_high",
+          "recent_form_away_volatility_high",
+          "recent_form_volatility_high",
+          "motivation_upset_risk_home"
+        ],
+        "volatility": {
+          "home": {
+            "available": true,
+            "score": 0.8575,
+            "label": "high",
+            "point_swing": 0.75,
+            "goal_swing": 0.9167,
+            "result_change_rate": 1.0
+          },
+          "away": {
+            "available": true,
+            "score": 0.5625,
+            "label": "high",
+            "point_swing": 0.5,
+            "goal_swing": 0.5,
+            "result_change_rate": 0.75
+          }
+        }
+      },
+      "quant_adjustment": {
+        "home_delta": 0.0169,
+        "away_delta": -0.0547,
+        "draw_delta": 0.0304,
+        "home_lambda_scale": 1.0101,
+        "away_lambda_scale": 0.9672,
+        "scenario_home_delta": -0.018,
+        "scenario_away_delta": -0.0117,
+        "scenario_draw_delta": 0.0223,
+        "resonance_label": "unknown",
+        "resonance_score": 0.0,
+        "resonance_prob_delta_home": 0.0,
+        "resonance_prob_delta_away": 0.0,
+        "resonance_prob_delta_draw": 0.0,
+        "resonance_ou_delta": 0.0
+      },
+      "historical_odds_reference": {
+        "available": false,
+        "summary": {
+          "sample_size": 0,
+          "result_counts": {
+            "主胜": 0,
+            "平局": 0,
+            "客胜": 0
+          },
+          "result_rates": {
+            "主胜": 0.0,
+            "平局": 0.0,
+            "客胜": 0.0
+          },
+          "cold_result_count": 0,
+          "cold_result_rate": 0.0
+        },
+        "insights": [
+          "当前未传入赔率快照，历史赔率参考已就绪但未参与匹配"
+        ]
+      },
+      "upset_case": {
+        "level": "低",
+        "index": 37.5,
+        "factors": [
+          "历史同向反打(7次)",
+          "[战意] 主队抢分战意强于客队，需防热门方兑现不足",
+          "[战意] 弱势方存在刚性抢分需求",
+          "[战意] 压力方处于保级区或保级压力带",
+          "[战意] 弱势方抢分紧迫度更高"
+        ],
+        "case_knowledge": {
+          "available": true,
+          "top_cases": [
+            {
+              "case_id": "2026-04-18_萨索洛_科莫",
+              "match_date": "2026-04-18",
+              "home_team": "萨索洛",
+              "away_team": "科莫",
+              "upset_level": "强烈爆冷",
+              "upset_type": "弱队胜强队",
+              "reason": "科莫周中意大利杯消耗大，萨索洛主场保级战意强烈。忽视了两队战意差距，赔率变化显示机构已提前防范主胜。",
+              "suggestion": "加强战意评估权重，特别是保级队的主场爆发力。赔率下降时不能盲目跟庄，需要结合基本面判断。",
+              "score": 0.294
+            },
+            {
+              "case_id": "2026-05-10_佛罗伦萨_热那亚",
+              "match_date": "2026-05-10",
+              "home_team": "佛罗伦萨",
+              "away_team": "热那亚",
+              "upset_level": "中度爆冷",
+              "upset_type": "平局大师",
+              "reason": "自动同步识别：赛前预测为主胜，实际结果为平局，比分 0-0。",
+              "suggestion": "复盘该场赛前伤停、盘口与临场变盘，必要时补充更细的人工标签。",
+              "score": 0.278
+            },
+            {
+              "case_id": "2026-05-09_卡利亚里_乌迪内斯",
+              "match_date": "2026-05-09",
+              "home_team": "卡利亚里",
+              "away_team": "乌迪内斯",
+              "upset_level": "轻度爆冷",
+              "upset_type": "弱队胜强队",
+              "reason": "自动同步识别：赛前预测为主胜，实际结果为客胜，比分 0-2。",
+              "suggestion": "复盘该场赛前伤停、盘口与临场变盘，必要时补充更细的人工标签。",
+              "score": 0.143
+            }
+          ],
+          "hint": "萨索洛vs科莫(强烈爆冷,弱队胜强队"
+        }
+      }
+    },
+    "historical_odds_reference": {
+      "available": false,
+      "league_history_count": 7,
+      "matched_feature_count": 0,
+      "similar_matches": [],
+      "summary": {
+        "sample_size": 0,
+        "result_counts": {
+          "主胜": 0,
+          "平局": 0,
+          "客胜": 0
+        },
+        "result_rates": {
+          "主胜": 0.0,
+          "平局": 0.0,
+          "客胜": 0.0
+        },
+        "cold_result_count": 0,
+        "cold_result_rate": 0.0
+      },
+      "insights": [
+        "当前未传入赔率快照，历史赔率参考已就绪但未参与匹配"
+      ]
+    },
+    "model_predictions": {
+      "poisson": {
+        "score_probs": {
+          "0-0": 0.2658029590889266,
+          "0-1": 0.16612684943057912,
+          "0-2": 0.051914640447055974,
+          "0-3": 0.010815550093136663,
+          "0-4": 0.0016899297020526035,
+          "0-5": 0.00021124121275657544,
+          "1-0": 0.18606207136224864,
+          "1-1": 0.1162887946014054,
+          "1-2": 0.03634024831293918,
+          "1-3": 0.007570885065195665,
+          "1-4": 0.0011829507914368224,
+          "1-5": 0.0001478688489296028,
+          "2-0": 0.06512172497678703,
+          "2-1": 0.04070107811049189,
+          "2-2": 0.012719086909528715,
+          "2-3": 0.0026498097728184828,
+          "2-4": 0.0004140327770028879,
+          "2-5": 5.175409712536099e-05,
+          "3-0": 0.015195069161250307,
+          "3-1": 0.009496918225781442,
+          "3-2": 0.0029677869455567002,
+          "3-3": 0.0006182889469909794,
+          "3-4": 9.660764796734051e-05,
+          "3-5": 1.2075955995917564e-05,
+          "4-0": 0.002659137103218804,
+          "4-1": 0.0016619606895117527,
+          "4-2": 0.0005193627154724226,
+          "4-3": 0.00010820056572342141,
+          "4-4": 1.6906338394284592e-05,
+          "4-5": 2.113292299285574e-06,
+          "5-0": 0.0003722791944506326,
+          "5-1": 0.00023267449653164538,
+          "5-2": 7.271078016613917e-05,
+          "5-3": 1.5148079201278998e-05,
+          "5-4": 2.3668873751998432e-06,
+          "5-5": 2.958609218999804e-07
+        },
+        "home_win": 0.3251884892937673,
+        "draw": 0.39544633174616783,
+        "away_win": 0.27922655744729147
+      },
+      "dixon_coles": {
+        "score_probs": {
+          "0-0": 0.24103644617174874,
+          "0-1": 0.17575574200023347,
+          "0-2": 0.05492366937507295,
+          "0-3": 0.011442431119806867,
+          "0-4": 0.0017878798624698228,
+          "0-5": 0.00022348498280872785,
+          "1-0": 0.1968464310402615,
+          "1-1": 0.11131196993348119,
+          "1-2": 0.03661577958338197,
+          "1-3": 0.007628287413204579,
+          "1-4": 0.0011919199083132153,
+          "1-5": 0.0001489899885391519,
+          "2-0": 0.06889625086409154,
+          "2-1": 0.04100967313338781,
+          "2-2": 0.01281552285418369,
+          "2-3": 0.0026699005946216026,
+          "2-4": 0.00041717196790962537,
+          "2-5": 5.214649598870317e-05,
+          "3-0": 0.016075791868288024,
+          "3-1": 0.009568923731123823,
+          "3-2": 0.0029902886659761946,
+          "3-3": 0.0006229768054117073,
+          "3-4": 9.734012584557925e-05,
+          "3-5": 1.2167515730697406e-05,
+          "4-0": 0.0028132635769504044,
+          "4-1": 0.0016745616529466694,
+          "4-2": 0.0005233005165458341,
+          "4-3": 0.0001090209409470488,
+          "4-4": 1.7034522022976373e-05,
+          "4-5": 2.1293152528720466e-06,
+          "5-0": 0.00039385690077305667,
+          "5-1": 0.00023443863141253373,
+          "5-2": 7.326207231641678e-05,
+          "5-3": 1.5262931732586833e-05,
+          "5-4": 2.3848330832166925e-06,
+          "5-5": 2.9810413540208656e-07
+        },
+        "home_win": 0.34122671135983657,
+        "draw": 0.3658042483909837,
+        "away_win": 0.2929690402491798,
+        "model": "Dixon-Coles"
+      },
+      "elo": {
+        "home_win": 0.5199314477654571,
+        "draw": 0.18768961288997904,
+        "away_win": 0.2923789393445639,
+        "home_rating": 2000.0,
+        "away_rating": 2000.0
+      },
+      "glicko": {
+        "home_win": 0.5199314477654571,
+        "draw": 0.18768961288997904,
+        "away_win": 0.2923789393445639,
+        "home_rating": 2000.0,
+        "away_rating": 2000.0,
+        "model": "Glicko"
+      },
+      "logistic_regression": {
+        "home_win": 0.5218272760783017,
+        "draw": 0.23776492480403344,
+        "away_win": 0.24040779911766483,
+        "model": "LogisticRegression"
+      },
+      "random_forest": {
+        "home_win": 0.35,
+        "draw": 0.3,
+        "away_win": 0.35,
+        "model": "RandomForest"
+      },
+      "xg": {
+        "home_xg": 0.6290094720000001,
+        "away_xg": 0.5377632000000001,
+        "home_win": 0.3557921205893348,
+        "draw": 0.420843962677884,
+        "away_win": 0.22326756820994684,
+        "model": "xG"
+      },
+      "bayesian": {
+        "home_win": 0.47522339561332255,
+        "draw": 0.26320064987814784,
+        "away_win": 0.26157595450852966,
+        "model": "Bayesian"
+      },
+      "expert": {
+        "home_win": 0.35,
+        "draw": 0.35,
+        "away_win": 0.3,
+        "model": "Expert"
+      },
+      "ensemble": {
+        "home_win": 0.48701726978078247,
+        "draw": 0.3369199061824536,
+        "away_win": 0.31888639974596295,
+        "model": "Ensemble"
+      }
+    },
+    "final_probabilities": {
+      "home_win": 0.3931030491623397,
+      "draw": 0.32726791525551274,
+      "away_win": 0.2796290355821476
+    },
+    "applied_model_weights": {
+      "league_code": "serie_a",
+      "league_total_predictions": 7,
+      "min_league_samples": 30,
+      "min_model_samples": 20,
+      "max_adjustment_ratio": 0.1,
+      "shrink_base": 0.8,
+      "has_enough_samples": false,
+      "model_accuracy_keys": [],
+      "base_weights": {
+        "poisson": 0.15,
+        "dixon_coles": 0.1,
+        "elo": 0.15,
+        "glicko": 0.1,
+        "logistic_regression": 0.12,
+        "random_forest": 0.1,
+        "xg": 0.1,
+        "bayesian": 0.08,
+        "expert": 0.05,
+        "ensemble": 0.05
+      },
+      "final_weights": {
+        "poisson": 0.15,
+        "dixon_coles": 0.1,
+        "elo": 0.15,
+        "glicko": 0.1,
+        "logistic_regression": 0.12,
+        "random_forest": 0.1,
+        "xg": 0.1,
+        "bayesian": 0.08,
+        "expert": 0.05,
+        "ensemble": 0.05
+      }
+    },
+    "realtime": {
+      "okooo": {
+        "attempted": true,
+        "refreshed": false,
+        "snapshot_path": "",
+        "match_id": "",
+        "driver": "local-chrome",
+        "headed": false,
+        "errors": [
+          {
+            "driver": "local-chrome",
+            "error": "refresh_snapshot failed: rc=1\nTraceback (most recent call last):\n  File \"/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py\", line 2487, in <module>\n    main()\n  File \"/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py\", line 2433, in main\n    found = _find_match_id(\n  File \"/Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py\", line 1933, in _find_match_id\n    raise RuntimeError(f\"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)\")\nRuntimeError: 未在联赛赛程中找到包含 卡利亚里 和 都灵 的比赛行(可尝试补充别名/时间)"
+          }
+        ],
+        "warnings": []
+      },
+      "context_applied": {
+        "ewma_form": {
+          "home": {
+            "available": true,
+            "team": "卡利亚里",
+            "league": "serie_a",
+            "sample_size": 10,
+            "windows": {
+              "n5": 5,
+              "n10": 10
+            },
+            "ewma": {
+              "points_5": 1.543,
+              "points_10": 0.552,
+              "gf_5": 0.778,
+              "ga_5": 1.358
+            },
+            "rates": {
+              "win_rate_5": 0.4,
+              "win_rate_10": 0.2
+            },
+            "form_scale": 3,
+            "recent_matches": [
+              {
+                "date": "2026-05-09",
+                "opponent": "乌迪内斯",
+                "is_home": true,
+                "score": "0-2",
+                "team_goals": 0,
+                "opp_goals": 2,
+                "points": 0
+              },
+              {
+                "date": "2026-05-03",
+                "opponent": "博洛尼亚",
+                "is_home": false,
+                "score": "0-0",
+                "team_goals": 0,
+                "opp_goals": 0,
+                "points": 1
+              },
+              {
+                "date": "2026-04-28",
+                "opponent": "亚特兰大",
+                "is_home": true,
+                "score": "3-2",
+                "team_goals": 3,
+                "opp_goals": 2,
+                "points": 3
+              },
+              {
+                "date": "2026-04-18",
+                "opponent": "国际米兰",
+                "is_home": false,
+                "score": "3-0",
+                "team_goals": 0,
+                "opp_goals": 3,
+                "points": 0
+              },
+              {
+                "date": "2026-04-11",
+                "opponent": "克雷莫纳",
+                "is_home": true,
+                "score": "1-0",
+                "team_goals": 1,
+                "opp_goals": 0,
+                "points": 3
+              }
+            ]
+          },
+          "away": {
+            "available": true,
+            "team": "都灵",
+            "league": "serie_a",
+            "sample_size": 10,
+            "windows": {
+              "n5": 5,
+              "n10": 10
+            },
+            "ewma": {
+              "points_5": 1.963,
+              "points_10": 1.947,
+              "gf_5": 1.358,
+              "ga_5": 1.025
+            },
+            "rates": {
+              "win_rate_5": 0.4,
+              "win_rate_10": 0.5
+            },
+            "form_scale": 3,
+            "recent_matches": [
+              {
+                "date": "2026-05-09",
+                "opponent": "萨索洛",
+                "is_home": true,
+                "score": "2-1",
+                "team_goals": 2,
+                "opp_goals": 1,
+                "points": 3
+              },
+              {
+                "date": "2026-05-02",
+                "opponent": "乌迪内斯",
+                "is_home": false,
+                "score": "2-0",
+                "team_goals": 0,
+                "opp_goals": 2,
+                "points": 0
+              },
+              {
+                "date": "2026-04-26",
+                "opponent": "国际米兰",
+                "is_home": true,
+                "score": "2-2",
+                "team_goals": 2,
+                "opp_goals": 2,
+                "points": 1
+              },
+              {
+                "date": "2026-04-19",
+                "opponent": "克雷莫纳",
+                "is_home": false,
+                "score": "0-0",
+                "team_goals": 0,
+                "opp_goals": 0,
+                "points": 1
+              },
+              {
+                "date": "2026-04-11",
+                "opponent": "维罗纳",
+                "is_home": true,
+                "score": "2-1",
+                "team_goals": 2,
+                "opp_goals": 1,
+                "points": 3
+              }
+            ]
+          }
+        },
+        "existing_snapshot_odds": {
+          "attempted": true,
+          "ok": false,
+          "reason": "snapshot_not_found",
+          "match_id": ""
+        },
+        "okooo_totals_fetch": {
+          "attempted": true,
+          "ok": false,
+          "driver_tried": "local-chrome",
+          "cmd": "/Applications/Xcode.app/Contents/Developer/usr/bin/python3 /Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py --driver local-chrome --league 意甲 --team1 卡利亚里 --team2 都灵 --date 2026-05-17 --out-dir /Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots --overwrite --time 21:00",
+          "returncode": 1,
+          "stderr_tail": "RuntimeError: 未在联赛赛程中找到包含 卡利亚里 和 都灵 的比赛行(可尝试补充别名/时间)",
+          "error": "rc=1"
+        },
+        "team_context": {
+          "attempted": true,
+          "ok": true,
+          "provider": "sofascore",
+          "home_form": 3,
+          "away_form": 3
+        },
+        "okooo_totals_fetch_last_moment": {
+          "attempted": true,
+          "ok": false,
+          "driver_tried": "local-chrome",
+          "cmd": "/Applications/Xcode.app/Contents/Developer/usr/bin/python3 /Users/bytedance/trae_projects/europe_leagues/okooo_save_snapshot.py --driver local-chrome --league 意甲 --team1 卡利亚里 --team2 都灵 --date 2026-05-17 --out-dir /Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots --overwrite --time 21:00",
+          "returncode": 1,
+          "stderr_tail": "RuntimeError: 未在联赛赛程中找到包含 卡利亚里 和 都灵 的比赛行(可尝试补充别名/时间)",
+          "error": "rc=1"
+        },
+        "review_learning": {
+          "available": true,
+          "score_bias_scope": "overall",
+          "over_under_bias_scope": "overall",
+          "league_tags": [
+            "意甲联赛-比分模板偏主胜",
+            "意甲联赛-主胜偏置",
+            "意甲联赛-大小球盘口线缺失",
+            "意甲联赛-比分模板偏平局"
+          ]
+        },
+        "match_intelligence": {
+          "available": true,
+          "signals": [
+            "主队近期状态波动较大，削弱单边兑现预期",
+            "客队近期状态波动较大，削弱单边兑现预期",
+            "双方近期状态波动较大，提升平局与冷门容错",
+            "控球倾向 卡利亚里46.6% vs 都灵41.6%",
+            "战意差异: 主队抢分战意强于客队，需防热门方兑现不足"
+          ],
+          "market_signals": []
+        },
+        "home_form": 3,
+        "away_form": 3,
+        "home_motivation": 82.0,
+        "away_motivation": 77.0,
+        "lambda_calibration": {
+          "applied": false
+        },
+        "market_ou_lambda_calibration": {
+          "applied": false,
+          "market_pressure_source": "market_signal",
+          "market_signal": {
+            "available": false,
+            "reason": "missing_ou_market"
+          },
+          "reason": "market_signal_unavailable"
+        },
+        "league_over_under_learning": {
+          "applied": true,
+          "league_code": "serie_a",
+          "home_team": "卡利亚里",
+          "away_team": "都灵",
+          "learning": {
+            "available": true,
+            "league_code": "serie_a",
+            "sample_size": 15,
+            "lookback_days": 14,
+            "match_window": {
+              "start": "2026-05-03",
+              "end": "2026-05-16"
+            },
+            "avg_goals": 2.067,
+            "over15_rate": 0.6667,
+            "over25_rate": 0.4,
+            "over35_rate": 0.1333,
+            "btts_rate": 0.2667,
+            "clean_sheet_rate": 0.7333,
+            "goal_bins": {
+              "0": 3,
+              "1": 2,
+              "2": 4,
+              "3": 4,
+              "4_plus": 2
+            },
+            "high_samples": [
+              {
+                "date": "2026-05-12",
+                "home_team": "那不勒斯",
+                "away_team": "博洛尼亚",
+                "score": "2-3",
+                "total_goals": 5
+              },
+              {
+                "date": "2026-05-05",
+                "home_team": "罗马",
+                "away_team": "佛罗伦萨",
+                "score": "4-0",
+                "total_goals": 4
+              },
+              {
+                "date": "2026-05-10",
+                "home_team": "拉齐奥",
+                "away_team": "国际米兰",
+                "score": "0-3",
+                "total_goals": 3
+              }
+            ],
+            "low_samples": [
+              {
+                "date": "2026-05-03",
+                "home_team": "亚特兰大",
+                "away_team": "热那亚",
+                "score": "0-0",
+                "total_goals": 0
+              },
+              {
+                "date": "2026-05-03",
+                "home_team": "博洛尼亚",
+                "away_team": "卡利亚里",
+                "score": "0-0",
+                "total_goals": 0
+              },
+              {
+                "date": "2026-05-10",
+                "home_team": "佛罗伦萨",
+                "away_team": "热那亚",
+                "score": "0-0",
+                "total_goals": 0
+              }
+            ]
+          },
+          "signals": [],
+          "sample_size": 15,
+          "base_lambda": {
+            "home": 0.7,
+            "away": 0.625,
+            "total": 1.325
+          },
+          "adjusted_lambda": {
+            "home": 0.778,
+            "away": 0.695,
+            "total": 1.473
+          },
+          "league_avg_goals": 2.5,
+          "recent_avg_goals": 2.067,
+          "over25_rate": 0.4,
+          "over35_rate": 0.1333,
+          "btts_rate": 0.2667,
+          "clean_sheet_rate": 0.7333,
+          "sample_weight": 0.2,
+          "target_total_scale": 1.0
+        },
+        "match_intelligence_lambda_scale": {
+          "home_lambda_scale": 1.0101,
+          "away_lambda_scale": 0.9672
+        },
+        "h2h_home_wins": 0,
+        "h2h_away_wins": 0,
+        "h2h_draws": 0,
+        "live_outcome_adjustment": {
+          "applied": false,
+          "signals": [],
+          "delta": {}
+        },
+        "review_outcome_adjustment": {
+          "applied": true,
+          "signals": [
+            "review-stratified-handicap-strength-correction",
+            "review-bias-config-floor"
+          ],
+          "reason": "applied",
+          "three_layer_evaluated": true,
+          "home_bias_gate": {
+            "qualified": false,
+            "evidence": [
+              "limited_probability_edge",
+              "limited_strength_gap"
+            ]
+          },
+          "applied_shift": {
+            "draw_shift": 0.011,
+            "away_shift": 0.016,
+            "home_shift": 0.0
+          },
+          "stratified_review": {
+            "handicap_depth_bucket": "unknown",
+            "strength_gap_bucket": "balanced",
+            "matched_key": "home:unknown",
+            "matched": {
+              "predicted_winner": "home",
+              "predicted_winner_label": "主胜",
+              "handicap_bucket": "unknown",
+              "handicap_bucket_label": "缺盘口",
+              "sample_count": 6,
+              "hit_count": 2,
+              "miss_count": 4,
+              "draw_miss_count": 1,
+              "opposite_miss_count": 3,
+              "examples": [
+                {
+                  "teams": "莱切 vs 尤文图斯",
+                  "actual_score": "0-1",
+                  "actual_winner": "客胜"
+                },
+                {
+                  "teams": "维罗纳 vs 科莫",
+                  "actual_score": "0-1",
+                  "actual_winner": "客胜"
+                },
+                {
+                  "teams": "拉齐奥 vs 国际米兰",
+                  "actual_score": "0-3",
+                  "actual_winner": "客胜"
+                },
+                {
+                  "teams": "佛罗伦萨 vs 热那亚",
+                  "actual_score": "0-0",
+                  "actual_winner": "平局"
+                }
+              ],
+              "hit_rate": 0.3333,
+              "miss_rate": 0.6667,
+              "draw_miss_rate": 0.1667,
+              "opposite_miss_rate": 0.5,
+              "recommended_draw_shift": 0.0005,
+              "recommended_upset_shift": 0.016
+            }
+          },
+          "three_layer_context": {
+            "predicted_winner": "home",
+            "predicted_outcome_label": "主胜",
+            "handicap_depth_bucket": "unknown",
+            "strength_gap_bucket": "balanced",
+            "euro_support_bucket": "unknown",
+            "scenario_name": "",
+            "asian_line": null,
+            "strength_diff": 0.0,
+            "stratified_key": "home:unknown",
+            "three_layer_key": "home:unknown:unknown"
+          },
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": true,
+            "pressure_side": "home",
+            "favored_side": "away",
+            "score": 0.8123
+          }
+        },
+        "match_intelligence_adjustment": {
+          "applied": true,
+          "source": "match_intelligence",
+          "signals": [
+            "主队近期状态波动较大，削弱单边兑现预期",
+            "客队近期状态波动较大，削弱单边兑现预期",
+            "双方近期状态波动较大，提升平局与冷门容错",
+            "控球倾向 卡利亚里46.6% vs 都灵41.6%",
+            "战意差异: 主队抢分战意强于客队，需防热门方兑现不足"
+          ],
+          "delta": {
+            "home": 0.0037,
+            "draw": 0.025,
+            "away": -0.012
+          },
+          "resonance_label": "unknown",
+          "scenario_tags": [
+            "recent_form_home_volatility_high",
+            "recent_form_away_volatility_high",
+            "recent_form_volatility_high",
+            "motivation_upset_risk_home"
+          ]
+        },
+        "over_under_guard": {
+          "available": false,
+          "requires_real_market_line": true,
+          "refined": {
+            "market_lambda_applied": false,
+            "reused_market_signal": false,
+            "market_signal_shift": null
+          },
+          "line_source": "missing_real_line",
+          "reason": "missing_real_market_line"
+        },
+        "review_over_under_adjustment": {
+          "applied": false,
+          "signals": [],
+          "reason": "over_under_unavailable"
+        },
+        "real_market_over_under_outcome_adjustment": {
+          "applied": false,
+          "source": "real_market_over_under",
+          "reason": "missing_real_market_line"
+        },
+        "draw_confirmation_guard": {
+          "applied": false,
+          "qualified": false,
+          "reason": "not_draw_top1",
+          "signals": [],
+          "evidence": []
+        },
+        "score_rerank_guard": {
+          "applied": false,
+          "reason": "invalid_over_under_payload",
+          "line": null,
+          "over": null,
+          "under": null,
+          "penalties": {}
+        },
+        "review_score_rerank": {
+          "applied": true,
+          "signals": [
+            "score-direction-filter",
+            "score-review-conservative-correction"
+          ],
+          "scenario_name": "",
+          "open_match": false,
+          "confidence": 0.3931030491623397,
+          "filtered_out_count": 3,
+          "allowed_outcomes": [
+            "主胜",
+            "平局"
+          ],
+          "double_pick": false,
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": true,
+            "pressure_side": "home",
+            "score": 17.5
+          },
+          "secondary_gap": 0.06583513390682694,
+          "secondary_probability": 0.32726791525551274,
+          "coverage_profile": {
+            "same_total_layer": false,
+            "same_goal_margin": false,
+            "all_low_templates": true,
+            "needs_expansion": true
+          },
+          "coverage_expansion_applied": false,
+          "coverage_expansion_candidate": null
+        },
+        "review_total_goals_adjustment": {
+          "applied": false,
+          "signals": [],
+          "scenario_name": "",
+          "review_bias": {
+            "applied": false,
+            "signals": [],
+            "reason": "review_total_goals_not_triggered"
+          }
+        },
+        "staking_kelly": {
+          "available": false,
+          "recommended": {}
+        },
+        "rag_lightweight_decision": {
+          "available": true,
+          "risk_bonus": 4,
+          "confidence_penalty": 0.015,
+          "scenario_tags": [
+            "upset_case_cluster"
+          ]
+        }
+      }
+    },
+    "analysis_context": {
+      "home_form": 3,
+      "away_form": 3,
+      "team_context": {
+        "ok": true,
+        "source": "sofascore",
+        "league": "serie_a",
+        "home": {
+          "ok": true,
+          "team_id": 2719,
+          "name": "Cagliari",
+          "recent": {
+            "matches": 5,
+            "points": 3,
+            "gf": 6,
+            "ga": 9
+          },
+          "avg_possession": 46.6,
+          "formations": [],
+          "last_lineup": null,
+          "key_players": [],
+          "source": "sofascore",
+          "generated_at": "2026-05-17T04:58:34.209495+00:00",
+          "diag": {
+            "attempted": true,
+            "ok": true,
+            "team_name": "卡利亚里",
+            "errors": [],
+            "resolve": {
+              "ok": true,
+              "team_id": 2719,
+              "name": "Cagliari",
+              "query": "卡利亚里",
+              "source": "cache",
+              "error": null
+            },
+            "team_id": 2719
+          }
+        },
+        "away": {
+          "ok": true,
+          "team_id": 2696,
+          "name": "Torino",
+          "recent": {
+            "matches": 5,
+            "points": 3,
+            "gf": 4,
+            "ga": 9
+          },
+          "avg_possession": 41.6,
+          "formations": [],
+          "last_lineup": null,
+          "key_players": [],
+          "source": "sofascore",
+          "generated_at": "2026-05-17T04:58:40.621821+00:00",
+          "diag": {
+            "attempted": true,
+            "ok": true,
+            "team_name": "都灵",
+            "errors": [],
+            "resolve": {
+              "ok": true,
+              "team_id": 2696,
+              "name": "Torino",
+              "query": "都灵",
+              "source": "cache",
+              "error": null
+            },
+            "team_id": 2696
+          }
+        },
+        "generated_at": "2026-05-17T04:58:40.622648+00:00"
+      },
+      "home_motivation": 82.0,
+      "away_motivation": 77.0,
+      "rag_lightweight_decision": {
+        "available": true,
+        "risk_bonus": 4,
+        "confidence_penalty": 0.015,
+        "scenario_tags": [
+          "upset_case_cluster"
+        ]
+      }
+    },
+    "retrieved_memory": {
+      "available": true,
+      "mode": "hybrid-structured-bm25-v2",
+      "summary": {
+        "retrieved_count": 11,
+        "similar_case_count": 5,
+        "market_case_count": 3,
+        "upset_case_count": 3,
+        "completed_similar_case_count": 2,
+        "home_win_rate": 0.5,
+        "draw_rate": 0.0,
+        "away_win_rate": 0.0,
+        "avg_market_total_goals": null,
+        "live_market_followup": {
+          "applied": false,
+          "reason": "no_eligible_live_market_matches",
+          "eligible_match_ids": [],
+          "comparisons": [],
+          "advice": "",
+          "recommended_action": "observe"
+        },
+        "direction_priority": {
+          "predicted_outcome": "主胜",
+          "matched_case_count": 1
+        },
+        "ou_priority": {
+          "current_ou_direction": "",
+          "matched_case_count": 0
+        },
+        "direction_ou_priority": {
+          "matched_case_count": 0,
+          "preferred_scores": [
+            "2-1",
+            "1-0",
+            "2-0"
+          ],
+          "current_score_overlap": [
+            "1-0"
+          ]
+        }
+      },
+      "similar_cases": [
+        {
+          "match_id": "serie_a_20260509_都灵_萨索洛",
+          "league_code": "serie_a",
+          "league_name": "意甲联赛",
+          "competition_stage_name": "",
+          "match_date": "2026-05-09",
+          "home_team": "都灵",
+          "away_team": "萨索洛",
+          "prediction": "主胜",
+          "confidence": 0.39118257435626663,
+          "actual_score": "2-1",
+          "actual_result": "主胜",
+          "storage_mode": "league_sot",
+          "risk_points": [
+            "历史同向反打(1次)",
+            "控球倾向 都灵41.6% vs 萨索洛47.2%",
+            "资金流向代理偏客队",
+            "三盘口整体偏客队"
+          ],
+          "predicted_ou_direction": "",
+          "ou_line": null,
+          "predicted_scores": [
+            "1-0",
+            "2-1",
+            "2-0"
+          ],
+          "case_type": "prediction_case",
+          "similarity_score": 29.0385,
+          "bm25_score": 23.7385,
+          "market_bonus": 0.0,
+          "structured_bonus": 4.9,
+          "text": "意甲联赛 | 都灵 vs 萨索洛 | 预测:主胜 | 信心:0.39118257435626663 | 候选比分:1-0/2-1/2-0 | 大小球: None | 赛果:主胜 2-1 | 风险:历史同向反打(1次) 控球倾向 都灵41.6% vs 萨索洛47.2% 资金流向代理偏客队 三盘口整体偏客队 | 错因标签:比分模板偏主胜、大小球盘口线缺失 | 联赛复盘:意甲联赛-比分模板偏主胜、意甲联赛-主胜偏置、意甲联赛-大小球盘口线缺失、意甲联赛-比分模板偏平局"
+        },
+        {
+          "match_id": "serie_a_20260517_卡利亚里_都灵",
+          "league_code": "serie_a",
+          "league_name": "意甲联赛",
+          "competition_stage_name": "",
+          "match_date": "2026-05-17",
+          "home_team": "卡利亚里",
+          "away_team": "都灵",
+          "prediction": "主胜",
+          "confidence": 0.3931030491623397,
+          "actual_score": "",
+          "actual_result": "",
+          "storage_mode": "league_sot",
+          "risk_points": [
+            "历史同向反打(7次)",
+            "[战意] 主队抢分战意强于客队，需防热门方兑现不足",
+            "[战意] 弱势方存在刚性抢分需求",
+            "[战意] 压力方处于保级区或保级压力带",
+            "[战意] 弱势方抢分紧迫度更高"
+          ],
+          "predicted_ou_direction": "",
+          "ou_line": null,
+          "predicted_scores": [
+            "0-0",
+            "1-0",
+            "1-1"
+          ],
+          "case_type": "prediction_case",
+          "similarity_score": 43.8642,
+          "bm25_score": 38.4642,
+          "market_bonus": 0.0,
+          "structured_bonus": 5.0,
+          "text": "意甲联赛 | 卡利亚里 vs 都灵 | 预测:主胜 | 信心:0.3931030491623397 | 候选比分:0-0/1-0/1-1 | 大小球: None | 赛果: | 风险:历史同向反打(7次) [战意] 主队抢分战意强于客队，需防热门方兑现不足 [战意] 弱势方存在刚性抢分需求 [战意] 压力方处于保级区或保级压力带 [战意] 弱势方抢分紧迫度更高 | 错因标签:主胜高估、比分模板偏主胜、大小球盘口线缺失 | 联赛复盘:意甲联赛-比分模板偏主胜、意甲联赛-主胜偏置、意甲联赛-大小球盘口线缺失、意甲联赛-比分模板偏平局"
+        },
+        {
+          "match_id": "1302909",
+          "league_code": "la_liga",
+          "league_name": "西甲联赛",
+          "competition_stage_name": "",
+          "match_date": "2026-05-14",
+          "home_team": "比利亚雷亚尔",
+          "away_team": "塞维利亚",
+          "prediction": "主胜",
+          "confidence": 0.39167697836699616,
+          "actual_score": "2-3",
+          "actual_result": "away",
+          "storage_mode": "league_sot",
+          "risk_points": [
+            "历史同向反打(8次)",
+            "相似赔率反向结果偏多(100%)",
+            "控球倾向 比利亚雷亚尔48.0% vs 塞维利亚55.8%",
+            "主队资金热度疑似受诱盘放大，已降权处理",
+            "庄家心理识别为诱主，抑制主队方向过热"
+          ],
+          "predicted_ou_direction": "小球",
+          "ou_line": 2.5,
+          "predicted_scores": [
+            "1-0",
+            "1-1",
+            "0-0"
+          ],
+          "case_type": "prediction_case",
+          "similarity_score": 7.3018,
+          "bm25_score": 4.0018,
+          "market_bonus": 0.0,
+          "structured_bonus": 2.9,
+          "text": "西甲联赛 | 比利亚雷亚尔 vs 塞维利亚 | 预测:主胜 | 信心:0.39167697836699616 | 候选比分:1-0/1-1/0-0 | 大小球:小球 2.5 | 赛果:away 2-3 | 风险:历史同向反打(8次) 相似赔率反向结果偏多(100%) 控球倾向 比利亚雷亚尔48.0% vs 塞维利亚55.8% 主队资金热度疑似受诱盘放大，已降权处理 庄家心理识别为诱主，抑制主队方向过热 | 错因标签:主胜高估、比分模板偏主胜 | 联赛复盘:西甲联赛-比分模板偏主胜、西甲联赛-主胜偏置、西甲联赛-大小球盘口线缺失、西甲联赛-比分模板偏平局"
+        },
+        {
+          "match_id": "1292923",
+          "league_code": "serie_a",
+          "league_name": "意甲联赛",
+          "competition_stage_name": "",
+          "match_date": "2026-05-09",
+          "home_team": "卡利亚里",
+          "away_team": "乌迪内斯",
+          "prediction": "主胜",
+          "confidence": 0.3928126480292657,
+          "actual_score": "",
+          "actual_result": "",
+          "storage_mode": "league_sot",
+          "risk_points": [
+            "历史同向反打(1次)",
+            "客队资金热度疑似受诱盘放大，已降权处理",
+            "三盘口整体偏客队",
+            "平局凯利偏低"
+          ],
+          "predicted_ou_direction": "小球",
+          "ou_line": 2.5,
+          "predicted_scores": [
+            "0-1",
+            "1-0",
+            "1-1"
+          ],
+          "case_type": "prediction_case",
+          "similarity_score": 30.1091,
+          "bm25_score": 25.1091,
+          "market_bonus": 0.0,
+          "structured_bonus": 4.6,
+          "text": "意甲联赛 | 卡利亚里 vs 乌迪内斯 | 预测:主胜 | 信心:0.3928126480292657 | 候选比分:0-1/1-0/1-1 | 大小球:小球 2.5 | 赛果: | 风险:历史同向反打(1次) 客队资金热度疑似受诱盘放大，已降权处理 三盘口整体偏客队 平局凯利偏低 | 错因标签:主胜高估、比分模板偏主胜 | 联赛复盘:意甲联赛-比分模板偏主胜、意甲联赛-主胜偏置、意甲联赛-大小球盘口线缺失、意甲联赛-比分模板偏平局"
+        },
+        {
+          "match_id": "1302894",
+          "league_code": "la_liga",
+          "league_name": "西甲联赛",
+          "competition_stage_name": "",
+          "match_date": "2026-05-09",
+          "home_team": "塞维利亚",
+          "away_team": "西班牙人",
+          "prediction": "主胜",
+          "confidence": 0.4330395276430099,
+          "actual_score": "",
+          "actual_result": "",
+          "storage_mode": "league_sot",
+          "risk_points": [
+            "历史同向反打(2次)",
+            "控球倾向 塞维利亚54.2% vs 西班牙人43.8%"
+          ],
+          "predicted_ou_direction": "小球",
+          "ou_line": 2.5,
+          "predicted_scores": [
+            "1-0",
+            "2-0"
+          ],
+          "case_type": "prediction_case",
+          "similarity_score": 6.3777,
+          "bm25_score": 3.7777,
+          "market_bonus": 0.0,
+          "structured_bonus": 2.2,
+          "text": "西甲联赛 | 塞维利亚 vs 西班牙人 | 预测:主胜 | 信心:0.4330395276430099 | 候选比分:1-0/2-0 | 大小球:小球 2.5 | 赛果: | 风险:历史同向反打(2次) 控球倾向 塞维利亚54.2% vs 西班牙人43.8% | 错因标签:主胜高估、比分模板偏主胜 | 联赛复盘:西甲联赛-比分模板偏主胜、西甲联赛-主胜偏置、西甲联赛-大小球盘口线缺失、西甲联赛-比分模板偏平局"
+        }
+      ],
+      "market_cases": [
+        {
+          "match_id": "1292923",
+          "league_code": "serie_a",
+          "league_name": "意甲联赛",
+          "competition_stage_name": "",
+          "match_date": "2026-05-09",
+          "home_team": "卡利亚里",
+          "away_team": "乌迪内斯",
+          "prediction": "主胜",
+          "confidence": 0.3928126480292657,
+          "actual_score": "",
+          "actual_result": "",
+          "storage_mode": "league_sot",
+          "risk_points": [
+            "历史同向反打(1次)",
+            "客队资金热度疑似受诱盘放大，已降权处理",
+            "三盘口整体偏客队",
+            "平局凯利偏低"
+          ],
+          "predicted_ou_direction": "小球",
+          "ou_line": 2.5,
+          "predicted_scores": [
+            "0-1",
+            "1-0",
+            "1-1"
+          ],
+          "case_type": "market_case",
+          "similarity_score": 36.3788,
+          "bm25_score": 31.2288,
+          "market_bonus": 0.0,
+          "structured_bonus": 4.6,
+          "text": "意甲联赛 | 卡利亚里 vs 乌迪内斯 | 盘口:欧赔 2.25/3.06/3.36 -> 2.72/3.17/2.68 | 亚盘 平/半 1.97/1.85 -> 平手 2.07/1.86 | 大小球 2.5 1.9667/1.81 -> 2.5 1.8967/1.8667 | 凯利 0.95/0.94/0.95 | 大小球:小球 2.5 | 赛果: | 错因标签:主胜高估、比分模板偏主胜 | 联赛复盘:意甲联赛-比分模板偏主胜、意甲联赛-主胜偏置、意甲联赛-大小球盘口线缺失、意甲联赛-比分模板偏平局"
+        },
+        {
+          "match_id": "1292923",
+          "league_code": "serie_a",
+          "league_name": "意甲",
+          "competition_stage_name": "",
+          "match_date": "2026-05-09",
+          "home_team": "卡利亚里",
+          "away_team": "乌迪内斯",
+          "prediction": "",
+          "confidence": null,
+          "actual_score": "",
+          "actual_result": "",
+          "storage_mode": "snapshot_market",
+          "risk_points": [],
+          "predicted_ou_direction": "",
+          "ou_line": 2.5,
+          "predicted_scores": [],
+          "case_type": "market_case",
+          "similarity_score": 37.3668,
+          "bm25_score": 32.2168,
+          "market_bonus": 0.0,
+          "structured_bonus": 4.6,
+          "text": "意甲 | 卡利亚里 vs 乌迪内斯 | 盘口:欧赔 2.25/3.06/3.36 -> 2.72/3.17/2.68 | 亚盘 平/半 1.97/1.85 -> 平手 2.07/1.86 | 大小球 2.5 1.9667/1.81 -> 2.5 1.8967/1.8667 | 凯利 0.95/0.94/0.95 | 大小球: 2.5 | 赛果: | 错因标签:无 | 联赛复盘:意甲-大小球盘口线缺失"
+        },
+        {
+          "match_id": "1292915",
+          "league_code": "serie_a",
+          "league_name": "意甲",
+          "competition_stage_name": "",
+          "match_date": "2026-05-09",
+          "home_team": "卡利亚里",
+          "away_team": "乌迪内斯",
+          "prediction": "",
+          "confidence": null,
+          "actual_score": "",
+          "actual_result": "",
+          "storage_mode": "snapshot_market",
+          "risk_points": [],
+          "predicted_ou_direction": "",
+          "ou_line": 2.25,
+          "predicted_scores": [],
+          "case_type": "market_case",
+          "similarity_score": 37.2218,
+          "bm25_score": 32.0718,
+          "market_bonus": 0.0,
+          "structured_bonus": 4.6,
+          "text": "意甲 | 卡利亚里 vs 乌迪内斯 | 盘口:欧赔 2.4316/3.1126/2.9095 -> 2.5844/2.9995/2.9031 | 亚盘 半球 2.3/1.53 -> 半球 2.45/1.48 | 大小球 2.25 1.9457/1.8329 -> 2.25 1.9557/1.82 | 凯利 0.95/0.95/0.95 | 大小球: 2.25 | 赛果: | 错因标签:无 | 联赛复盘:意甲-大小球盘口线缺失"
+        }
+      ],
+      "upset_cases": [
+        {
+          "match_id": "serie_a_20260517_卡利亚里_都灵",
+          "league_code": "serie_a",
+          "league_name": "意甲联赛",
+          "competition_stage_name": "",
+          "match_date": "2026-05-17",
+          "home_team": "卡利亚里",
+          "away_team": "都灵",
+          "prediction": "主胜",
+          "confidence": 0.3931030491623397,
+          "actual_score": "",
+          "actual_result": "",
+          "storage_mode": "league_sot",
+          "risk_points": [
+            "历史同向反打(7次)",
+            "[战意] 主队抢分战意强于客队，需防热门方兑现不足",
+            "[战意] 弱势方存在刚性抢分需求",
+            "[战意] 压力方处于保级区或保级压力带",
+            "[战意] 弱势方抢分紧迫度更高"
+          ],
+          "predicted_ou_direction": "",
+          "ou_line": null,
+          "predicted_scores": [
+            "0-0",
+            "1-0",
+            "1-1"
+          ],
+          "case_type": "upset_case",
+          "similarity_score": 45.9603,
+          "bm25_score": 40.6603,
+          "market_bonus": 0.0,
+          "structured_bonus": 5.0,
+          "text": "意甲联赛 | 卡利亚里 vs 都灵 | 预测:主胜 | 赛果: | 风险:历史同向反打(7次) [战意] 主队抢分战意强于客队，需防热门方兑现不足 [战意] 弱势方存在刚性抢分需求 [战意] 压力方处于保级区或保级压力带 [战意] 弱势方抢分紧迫度更高 | 错因标签:主胜高估、比分模板偏主胜、大小球盘口线缺失 | 联赛复盘:意甲联赛-比分模板偏主胜、意甲联赛-主胜偏置、意甲联赛-大小球盘口线缺失、意甲联赛-比分模板偏平局"
+        },
+        {
+          "match_id": "1292923",
+          "league_code": "serie_a",
+          "league_name": "意甲联赛",
+          "competition_stage_name": "",
+          "match_date": "2026-05-09",
+          "home_team": "卡利亚里",
+          "away_team": "乌迪内斯",
+          "prediction": "主胜",
+          "confidence": 0.3928126480292657,
+          "actual_score": "",
+          "actual_result": "",
+          "storage_mode": "league_sot",
+          "risk_points": [
+            "历史同向反打(1次)",
+            "客队资金热度疑似受诱盘放大，已降权处理",
+            "三盘口整体偏客队",
+            "平局凯利偏低"
+          ],
+          "predicted_ou_direction": "小球",
+          "ou_line": 2.5,
+          "predicted_scores": [
+            "0-1",
+            "1-0",
+            "1-1"
+          ],
+          "case_type": "upset_case",
+          "similarity_score": 32.304,
+          "bm25_score": 27.404,
+          "market_bonus": 0.0,
+          "structured_bonus": 4.6,
+          "text": "意甲联赛 | 卡利亚里 vs 乌迪内斯 | 预测:主胜 | 赛果: | 风险:历史同向反打(1次) 客队资金热度疑似受诱盘放大，已降权处理 三盘口整体偏客队 平局凯利偏低 | 错因标签:主胜高估、比分模板偏主胜 | 联赛复盘:意甲联赛-比分模板偏主胜、意甲联赛-主胜偏置、意甲联赛-大小球盘口线缺失、意甲联赛-比分模板偏平局"
+        },
+        {
+          "match_id": "serie_a_20260509_都灵_萨索洛",
+          "league_code": "serie_a",
+          "league_name": "意甲联赛",
+          "competition_stage_name": "",
+          "match_date": "2026-05-09",
+          "home_team": "都灵",
+          "away_team": "萨索洛",
+          "prediction": "主胜",
+          "confidence": 0.39118257435626663,
+          "actual_score": "2-1",
+          "actual_result": "主胜",
+          "storage_mode": "league_sot",
+          "risk_points": [
+            "历史同向反打(1次)",
+            "控球倾向 都灵41.6% vs 萨索洛47.2%",
+            "资金流向代理偏客队",
+            "三盘口整体偏客队"
+          ],
+          "predicted_ou_direction": "",
+          "ou_line": null,
+          "predicted_scores": [
+            "1-0",
+            "2-1",
+            "2-0"
+          ],
+          "case_type": "upset_case",
+          "similarity_score": 29.6777,
+          "bm25_score": 24.4777,
+          "market_bonus": 0.0,
+          "structured_bonus": 4.9,
+          "text": "意甲联赛 | 都灵 vs 萨索洛 | 预测:主胜 | 赛果:主胜 2-1 | 风险:历史同向反打(1次) 控球倾向 都灵41.6% vs 萨索洛47.2% 资金流向代理偏客队 三盘口整体偏客队 | 错因标签:比分模板偏主胜、大小球盘口线缺失 | 联赛复盘:意甲联赛-比分模板偏主胜、意甲联赛-主胜偏置、意甲联赛-大小球盘口线缺失、意甲联赛-比分模板偏平局"
+        }
+      ]
+    },
+    "retrieved_memory_explanation": "历史复盘先按主胜方向匹配1场，对应高频比分为2-1/1-0/2-0；RAG召回5场相似比赛，其中已完赛2场，结果分布为主胜50%/平局0%/客胜0%；盘口相似案例3场；爆冷风险参考3场，高频风险包括历史同向反打、三盘口共振。",
+    "live_betting_advice": "",
+    "market_snapshot": {},
+    "runtime_profile": {
+      "persona": {
+        "persona_key": "football_actuary",
+        "persona_name": "Professional Football Betting Data Actuary",
+        "version": "unknown",
+        "purpose": "",
+        "source_file": "agents/football_actuary_persona.md",
+        "dimension_schema_version": "standard-six-v1",
+        "dimensions": [
+          "以真实数据和正式流程为基础",
+          "区分模型结论、盘口结论和综合结论",
+          "明确数据是否降级、样本是否足够、结论是否存在边界",
+          "正式输出以 teams_2025-26.md 和 prediction_system.py 主流程为准",
+          "赛后结果必须能进入准确率统计和复盘链路"
+        ]
+      },
+      "agent_roles": [
+        "data_collector",
+        "match_analyzer",
+        "odds_analyzer"
+      ],
+      "agents": [
+        {
+          "agent_key": "data_collector",
+          "agent_name": "Data Collector Agent",
+          "version": "1.2.0",
+          "purpose": "负责从正式实时源采集足球比赛所需的结构化数据，并为 collect-data / predict-match / 批量回填流程提供稳定输入",
+          "source_file": "agents/data_collector_agent.md",
+          "primary_responsibility": "第 6 维数据工程、流程自动化与策略迭代中的输入准备与质量控制"
+        },
+        {
+          "agent_key": "match_analyzer",
+          "agent_name": "Match Analyzer Agent",
+          "version": "1.2.0",
+          "purpose": "负责球队基本面、战术、历史交锋、伤停与临场上下文分析，并与真实盘口、team_context、EWMA 近况结果联动",
+          "source_file": "agents/match_analyzer_agent.md",
+          "primary_responsibility": "第 1 维足球业务分析 + 第 5 维风险控制支持中的比赛脚本解释"
+        },
+        {
+          "agent_key": "odds_analyzer",
+          "agent_name": "Odds Analyzer Agent",
+          "version": "1.2.0",
+          "purpose": "负责实时欧赔、亚值、亚值页内大小球、水位与凯利的深度分析，并对接最终 over_under 诊断字段",
+          "source_file": "agents/odds_analyzer_agent.md",
+          "primary_responsibility": "第 2 维赔率与盘口交易分析 + 第 5 维风险控制支持中的盘口风险识别"
+        }
+      ],
+      "dimensions": [
+        "以真实数据和正式流程为基础",
+        "区分模型结论、盘口结论和综合结论",
+        "明确数据是否降级、样本是否足够、结论是否存在边界",
+        "正式输出以 teams_2025-26.md 和 prediction_system.py 主流程为准",
+        "赛后结果必须能进入准确率统计和复盘链路"
+      ],
+      "dimension_schema_version": "standard-six-v1"
+    },
+    "timestamp": "2026-05-17T12:59:06.519388",
+    "external_match_id": "",
+    "internal_match_id": "serie_a_20260517_卡利亚里_都灵",
+    "teams_match_id": "serie_a_20260517_卡利亚里_都灵",
+    "storage_mode": "league_sot",
+    "predicted_winner": "home",
+    "persisted": {
+      "enabled": true,
+      "archived": true,
+      "memory_updated": true,
+      "result_sync_registered": true
+    }
+  },
+  "captured_stderr": "2026-05-17 12:58:40,622 - enhanced_prediction_workflow - INFO - 开始预测: 卡利亚里 vs 都灵 (serie_a)\n2026-05-17 12:59:07,937 - enhanced_prediction_workflow - INFO - 预测完成: 卡利亚里 vs 都灵 -> 主胜 (39.3%)"
+}

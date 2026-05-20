@@ -241,7 +241,7 @@ flowchart TB
 
 | 模块 | 文件 | 当前职责 |
 |---|---|---|
-| 澳客适配 | `collectors/okooo.py` | driver 状态探测、driver chain、快照读取适配、local-chrome / browser-use 切换 |
+| 澳客适配 | `collectors/okooo.py` | driver 状态探测、快照读取适配、默认 `local-chrome` 正式链与显式 `browser-use` 调试入口 |
 | 赛程采集 | `collectors/sporttery.py` | `collect-data` 与 Harness `collect_data` 阶段的主要采集入口 |
 | SofaScore 采集 | `collectors/sofascore.py` | 球队上下文、资料补充与辅助抓取 |
 | 归一化与快照仓库 | `collectors/aliasing.py`、`collectors/odds_snapshots.py` | 队名别名归一、CSV/JSON 快照读取 |
@@ -300,7 +300,7 @@ RAG 当前真实依赖的数据源包括：
 ### 3.6 支撑脚本与测试边界
 
 仓库根目录仍然存在大量支撑脚本，它们不是主链分层的一部分，但构成当前工程现实：
-- 批处理与补数：`bulk_fetch_and_update.py`、`backfill_odds_*`、`migrate_prediction_history_to_teams_md.py`
+- 批处理与补数：`backfill_odds_*`、`migrate_prediction_history_to_teams_md.py`
 - 球员与名单更新：`batch_update_players.py`、`update_2026_players.py`、`supplement_rosters_and_numbers_from_sofascore.py`
 - 排名与数据维护：`update_standings_from_*`
 - 旧预测/旧工作流兼容：`optimized_prediction_workflow.py`、`match_predictor.py`
@@ -414,8 +414,8 @@ Harness 当前应理解为：
 - `collectors/okooo.py`：实际提供 `browser-use` / `local-chrome` 可用性判断
 
 当前 driver 策略也已经明确写入代码：
-- 默认优先 `local-chrome`
-- 不可用时回退 `browser-use`
+- 默认仅走 `local-chrome`
+- `browser-use` 只在显式指定调试时使用，不再作为正式链自动回退
 
 ---
 
@@ -500,7 +500,7 @@ europe_leagues/
   data_collector.py
   okooo_*.py
   sofascore_team_context.py
-  bulk_fetch_and_update.py
+  sync-pending-results-review / auto-sync-results
   backfill_odds_*.py
   update_*.py
   test_*.py
@@ -547,7 +547,7 @@ flowchart LR
 | 新增命令或调整参数 | `app/cli.py` | `prediction_system.py` 仅保留兼容 |
 | 新增 pipeline | `harness/football.py`、`harness/core.py` | 先定义 stage，再补 handler |
 | 调整主预测编排 | `enhanced_prediction_workflow.py`、`domain/predictor.py` | 主链入口仍集中在这里 |
-| 调整临场快照/driver | `domain/live.py`、`collectors/okooo.py` | 同时关注 `local-chrome` 和 `browser-use` |
+| 调整临场快照/driver | `domain/live.py`、`collectors/okooo.py` | 优先围绕 `local-chrome` 正式链调整；`browser-use` 仅看显式调试场景 |
 | 调整 RAG 索引与解释 | `runtime/rag_store.py`、`domain/rag.py`、`domain/postprocess.py` | 一边改索引，一边改解释文本 |
 | 调整写回与归档 | `domain/persistence.py`、`domain/writeback.py`、`storage/*` | 注意 SoT、MEMORY、runtime archive 的一致性 |
 | 调整 runtime 落盘路径 | `runtime/paths.py` | 不要在业务模块里硬编码路径 |

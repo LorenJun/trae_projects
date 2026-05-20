@@ -2,7 +2,7 @@
 
 > 当前说明：本文件是历史模板，不再作为正式主流程输出。  
 > 当前正式流程统一写回 `europe_leagues/ligue_1/teams_2025-26.md` 的赛程表备注列。  
-> 赛后结果通过 `save-result` 或 `bulk_fetch_and_update.py` 回填，统计通过 `prediction_system.py accuracy --refresh --json` 刷新。
+> 赛后结果通过 `save-result`、`auto-sync-results` 或 `sync-pending-results-review` 回填，`prediction_system.py accuracy --refresh --json` 作为显式重建入口。
 
 ## 当前正式记录方式
 

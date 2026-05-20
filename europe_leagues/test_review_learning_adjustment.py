@@ -1,14 +1,17 @@
 import json
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from domain.inference import InferencePipelineService
 from domain.intelligence import MatchIntelligenceEngine
 from domain.odds import HistoricalOddsReference, build_market_context
 from domain.postprocess import PredictionPostprocessService
+from domain.review_bias import ReviewBiasService
 from domain.rag import HybridRAGService
 from domain.review_learning import PredictionReviewLearningService
+from domain.upset import UpsetAnalyzer
 from domain.writeback import build_prediction_note, normalize_existing_prediction_note
 
 
@@ -28,9 +31,23 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
     def setUp(self):
         self.service = PredictionPostprocessService({})
 
+    @staticmethod
+    def _custom_service(outcome_override):
+        base_config = ReviewBiasService.DEFAULT_REVIEW_BIAS_CONFIG
+        merged_outcome = ReviewBiasService._deep_merge_dict(base_config.get("outcome") or {}, outcome_override)
+        custom_config = dict(base_config)
+        custom_config["outcome"] = merged_outcome
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_dir = Path(temp_dir) / "config"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_path = config_dir / "review_bias_config.json"
+            config_path.write_text(json.dumps(custom_config, ensure_ascii=False), encoding="utf-8")
+            return PredictionPostprocessService({}, base_dir=temp_dir)
+
     def test_apply_review_outcome_adjustment_reduces_home_bias(self):
         adjusted, diag = self.service.apply_review_outcome_adjustment(
             final_probabilities={"home_win": 0.56, "draw": 0.24, "away_win": 0.20},
+            league_code="premier_league",
             strength_diff=10,
             asian_handicap={"final": {"handicap_value": -0.25}},
             current_odds={"欧赔": {"final": {"home": 2.05, "draw": 3.25, "away": 3.85}}},
@@ -70,6 +87,7 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
     def test_apply_review_outcome_adjustment_supports_stratified_only_signal(self):
         adjusted, diag = self.service.apply_review_outcome_adjustment(
             final_probabilities={"home_win": 0.52, "draw": 0.26, "away_win": 0.22},
+            league_code="premier_league",
             strength_diff=22,
             asian_handicap={"final": {"handicap_value": -0.25}},
             current_odds={"欧赔": {"final": {"home": 2.08, "draw": 3.28, "away": 3.72}}},
@@ -93,6 +111,7 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
     def test_apply_review_outcome_adjustment_handles_away_shallow_market_doubt(self):
         adjusted, diag = self.service.apply_review_outcome_adjustment(
             final_probabilities={"home_win": 0.24, "draw": 0.28, "away_win": 0.48},
+            league_code="premier_league",
             strength_diff=-14,
             asian_handicap={"final": {"handicap_value": -0.25}},
             current_odds={"欧赔": {"final": {"home": 3.1, "draw": 2.95, "away": 2.88}}},
@@ -114,6 +133,7 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
     def test_apply_review_outcome_adjustment_handles_balanced_draw_guard(self):
         adjusted, diag = self.service.apply_review_outcome_adjustment(
             final_probabilities={"home_win": 0.4, "draw": 0.27, "away_win": 0.33},
+            league_code="la_liga",
             strength_diff=4,
             asian_handicap={"final": {"handicap_value": 0.0}},
             current_odds={"欧赔": {"final": {"home": 2.52, "draw": 3.02, "away": 2.88}}},
@@ -143,6 +163,7 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
     def test_apply_review_outcome_adjustment_uses_three_layer_heuristics_without_history(self):
         adjusted, diag = self.service.apply_review_outcome_adjustment(
             final_probabilities={"home_win": 0.53, "draw": 0.25, "away_win": 0.22},
+            league_code="premier_league",
             strength_diff=21,
             asian_handicap={"final": {"handicap_value": -0.25}},
             current_odds={"欧赔": {"final": {"home": 2.46, "draw": 3.08, "away": 2.84}}},
@@ -155,9 +176,139 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertLess(adjusted["home_win"], 0.53)
         self.assertGreater(adjusted["draw"], 0.25)
 
+    def test_apply_review_outcome_adjustment_premier_league_strengthens_balanced_draw_guard(self):
+        final_probabilities = {"home_win": 0.4, "draw": 0.27, "away_win": 0.33}
+        current_odds = {"欧赔": {"final": {"home": 2.52, "draw": 3.02, "away": 2.88}}}
+        asian_handicap = {"final": {"handicap_value": 0.0}}
+        review_learning = {}
+
+        premier_adjusted, premier_diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities=final_probabilities,
+            league_code="premier_league",
+            strength_diff=4,
+            asian_handicap=asian_handicap,
+            current_odds=current_odds,
+            review_learning=review_learning,
+        )
+        la_liga_adjusted, la_liga_diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities=final_probabilities,
+            league_code="la_liga",
+            strength_diff=4,
+            asian_handicap=asian_handicap,
+            current_odds=current_odds,
+            review_learning=review_learning,
+        )
+        self.assertTrue(premier_diag["applied"])
+        self.assertTrue(la_liga_diag["applied"])
+        self.assertGreater(premier_diag["applied_shift"]["draw_shift"], la_liga_diag["applied_shift"]["draw_shift"])
+        self.assertGreater(premier_adjusted["draw"], la_liga_adjusted["draw"])
+
+    def test_apply_review_outcome_adjustment_serie_a_strengthens_away_shallow_market_doubt(self):
+        final_probabilities = {"home_win": 0.24, "draw": 0.28, "away_win": 0.48}
+        current_odds = {"欧赔": {"final": {"home": 3.1, "draw": 2.95, "away": 2.88}}}
+        asian_handicap = {"final": {"handicap_value": -0.25}}
+        review_learning = {}
+
+        serie_a_adjusted, serie_a_diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities=final_probabilities,
+            league_code="serie_a",
+            strength_diff=-14,
+            asian_handicap=asian_handicap,
+            current_odds=current_odds,
+            review_learning=review_learning,
+        )
+        bundesliga_adjusted, bundesliga_diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities=final_probabilities,
+            league_code="bundesliga",
+            strength_diff=-14,
+            asian_handicap=asian_handicap,
+            current_odds=current_odds,
+            review_learning=review_learning,
+        )
+        self.assertTrue(serie_a_diag["applied"])
+        self.assertTrue(bundesliga_diag["applied"])
+        self.assertGreater(serie_a_diag["applied_shift"]["home_shift"], bundesliga_diag["applied_shift"]["home_shift"])
+        self.assertGreater(serie_a_adjusted["home_win"], bundesliga_adjusted["home_win"])
+
+    def test_apply_review_outcome_adjustment_ligue1_strengthens_away_upset_bias_from_home_favorite(self):
+        final_probabilities = {"home_win": 0.58, "draw": 0.23, "away_win": 0.19}
+        review_learning = {
+            "league_review": {
+                "league_tags": ["法甲-主胜偏置", "法甲-客胜冷门敏感度不足"],
+            }
+        }
+
+        ligue_adjusted, ligue_diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities=final_probabilities,
+            league_code="ligue_1",
+            strength_diff=20,
+            asian_handicap={"final": {"handicap_value": -0.25}},
+            current_odds={"欧赔": {"final": {"home": 2.18, "draw": 3.24, "away": 3.62}}},
+            review_learning=review_learning,
+        )
+        la_liga_adjusted, la_liga_diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities=final_probabilities,
+            league_code="la_liga",
+            strength_diff=20,
+            asian_handicap={"final": {"handicap_value": -0.25}},
+            current_odds={"欧赔": {"final": {"home": 2.18, "draw": 3.24, "away": 3.62}}},
+            review_learning=review_learning,
+        )
+        self.assertTrue(ligue_diag["applied"])
+        self.assertTrue(la_liga_diag["applied"])
+        self.assertGreater(ligue_diag["applied_shift"]["away_shift"], la_liga_diag["applied_shift"]["away_shift"])
+        self.assertGreater(ligue_adjusted["away_win"], la_liga_adjusted["away_win"])
+
+    def test_apply_review_outcome_adjustment_uses_configured_scenario_shift(self):
+        service = self._custom_service(
+            {
+                "scenario_shifts": {
+                    "balanced_draw_guard": {"draw_shift": 0.02}
+                }
+            }
+        )
+        adjusted, diag = service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.4, "draw": 0.27, "away_win": 0.33},
+            league_code="la_liga",
+            strength_diff=4,
+            asian_handicap={"final": {"handicap_value": 0.0}},
+            current_odds={"欧赔": {"final": {"home": 2.52, "draw": 3.02, "away": 2.88}}},
+            review_learning={},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["applied_shift"]["draw_shift"], 0.02)
+        self.assertGreater(adjusted["draw"], 0.27)
+
+    def test_apply_review_outcome_adjustment_uses_configured_league_tag_bias(self):
+        service = self._custom_service(
+            {
+                "league_tag_bias": {
+                    "home_bias": {"draw_shift": 0.016, "upset_shift": 0.014},
+                    "away_upset_bias": {"upset_shift": 0.014}
+                }
+            }
+        )
+        adjusted, diag = service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.58, "draw": 0.23, "away_win": 0.19},
+            league_code="premier_league",
+            strength_diff=20,
+            asian_handicap={"final": {"handicap_value": -0.25}},
+            current_odds={"欧赔": {"final": {"home": 2.12, "draw": 3.28, "away": 3.84}}},
+            review_learning={
+                "league_review": {
+                    "league_tags": ["英超-主胜偏置", "英超-客胜冷门敏感度不足"]
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["applied_shift"]["draw_shift"], 0.016)
+        self.assertEqual(diag["applied_shift"]["away_shift"], 0.014)
+        self.assertGreater(adjusted["away_win"], 0.19)
+
     def test_apply_review_outcome_adjustment_marks_three_layer_evaluated_even_without_shift(self):
         adjusted, diag = self.service.apply_review_outcome_adjustment(
             final_probabilities={"home_win": 0.34, "draw": 0.31, "away_win": 0.35},
+            league_code="la_liga",
             strength_diff=14,
             asian_handicap={"final": {"handicap_value": -0.75}},
             current_odds={"欧赔": {"final": {"home": 2.18, "draw": 3.22, "away": 3.35}}},
@@ -171,6 +322,7 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
     def test_apply_review_outcome_adjustment_keeps_marginal_home_lead_from_overcorrecting(self):
         adjusted, diag = self.service.apply_review_outcome_adjustment(
             final_probabilities={"home_win": 0.429085, "draw": 0.327522, "away_win": 0.243393},
+            league_code="la_liga",
             strength_diff=12,
             asian_handicap={"final": {"handicap_value": -0.25}},
             current_odds={"欧赔": {"final": {"home": 2.18, "draw": 3.18, "away": 3.62}}},
@@ -188,6 +340,55 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertIn("limited_strength_gap", diag["home_bias_gate"]["evidence"])
         self.assertIn("shallow_market", diag["home_bias_gate"]["evidence"])
         self.assertEqual(diag["reason"], "three_layer_evaluated_no_adjustment")
+
+    def test_apply_review_outcome_adjustment_uses_motivation_risk_to_reduce_favorite(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.54, "draw": 0.24, "away_win": 0.22},
+            league_code="serie_a",
+            strength_diff=8,
+            asian_handicap={"final": {"handicap_value": -0.25}},
+            current_odds={"欧赔": {"final": {"home": 2.32, "draw": 3.15, "away": 3.08}}},
+            review_learning={},
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 18.0,
+                        "favored_side": "home",
+                        "pressure_side": "away",
+                    }
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-motivation-risk-correction", diag["signals"])
+        self.assertLess(adjusted["home_win"], 0.54)
+        self.assertGreater(adjusted["draw"], 0.24)
+        self.assertGreater(adjusted["away_win"], 0.22)
+
+    def test_apply_review_over_under_adjustment_reduces_under_bias_near_key_line(self):
+        adjusted, diag = self.service.apply_review_over_under_adjustment(
+            over_under={"available": True, "line": 2.5, "over": 0.42, "under": 0.58},
+            league_code="bundesliga",
+            review_learning={"over_under_bias": {"recommended_over_shift": 0.04}},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-ou-reduce-under-bias", diag["signals"])
+        self.assertGreater(adjusted["over"], 0.42)
+        self.assertLess(adjusted["under"], 0.58)
+
+    def test_apply_review_over_under_adjustment_applies_under_protection_for_towards_low(self):
+        adjusted, diag = self.service.apply_review_over_under_adjustment(
+            over_under={"available": True, "line": 2.75, "over": 0.56, "under": 0.44},
+            league_code="serie_a",
+            review_learning={"over_under_bias": {"recommended_under_shift": 0.012}},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["reason"], "review-bias-under")
+        self.assertIn("review-ou-under-protection", diag["signals"])
+        self.assertLess(adjusted["over"], 0.56)
+        self.assertGreater(adjusted["under"], 0.44)
 
     def test_rerank_top_scores_applies_three_layer_score_adjustment(self):
         reranked, diag = self.service.rerank_top_scores(
@@ -495,6 +696,62 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertGreater(adjusted["buckets"]["1"], 0.12)
         self.assertLess(adjusted["buckets"]["4"], 0.17)
 
+    def test_apply_three_layer_total_goals_adjustment_uses_review_bias_config(self):
+        adjusted, diag = self.service.apply_three_layer_total_goals_adjustment(
+            {
+                "available": True,
+                "buckets": {"0": 0.08, "1": 0.17, "2": 0.26, "3": 0.2, "4": 0.14, "5": 0.08, "6": 0.04, "7+": 0.03},
+                "top_totals": [{"total": "2", "prob": 0.26}, {"total": "3", "prob": 0.2}, {"total": "1", "prob": 0.17}],
+                "tail_bucket": "7+",
+            },
+            league_code="bundesliga",
+            predicted_outcome_label="主胜",
+            strength_diff=12,
+            current_odds={"亚值": {"final": {"handicap_value": -0.25}}, "欧赔": {"final": {"home": 2.22, "draw": 3.2, "away": 3.24}}},
+            review_learning={"over_under_bias": {"recommended_over_shift": 0.04}},
+            total_lambda=2.86,
+            over_under={"available": True, "line": 2.5, "over": 0.43, "under": 0.57},
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 0.24,
+                    }
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-total-goals-reduce-low-bias", diag["signals"])
+        self.assertTrue(diag["review_bias"]["applied"])
+        self.assertLess(adjusted["buckets"]["1"], 0.17)
+        self.assertGreater(adjusted["buckets"]["3"], 0.2)
+
+    def test_apply_three_layer_total_goals_adjustment_applies_towards_low_mock_payload(self):
+        adjusted, diag = self.service.apply_three_layer_total_goals_adjustment(
+            {
+                "available": True,
+                "buckets": {"0": 0.05, "1": 0.12, "2": 0.19, "3": 0.26, "4": 0.18, "5": 0.11, "6": 0.06, "7+": 0.03},
+                "top_totals": [{"total": "3", "prob": 0.26}, {"total": "2", "prob": 0.19}, {"total": "4", "prob": 0.18}],
+                "tail_bucket": "7+",
+            },
+            league_code="premier_league",
+            predicted_outcome_label="主胜",
+            strength_diff=9,
+            current_odds={"亚值": {"final": {"handicap_value": -0.25}}, "欧赔": {"final": {"home": 2.18, "draw": 3.45, "away": 3.26}}},
+            review_learning={"over_under_bias": {"recommended_under_shift": 0.015}},
+            total_lambda=1.34,
+            over_under={"available": True, "line": 2.75, "over": 0.58, "under": 0.42},
+            match_intelligence={},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["review_bias"]["reason"], "towards_low")
+        self.assertIn("review-total-goals-under-protection", diag["signals"])
+        self.assertGreater(adjusted["buckets"]["1"], 0.12)
+        self.assertGreater(adjusted["buckets"]["2"], 0.19)
+        self.assertLess(adjusted["buckets"]["3"], 0.26)
+        self.assertLess(adjusted["buckets"]["4"], 0.18)
+
     def test_extract_over_under_market_signal_detects_over_pressure(self):
         signal = self.service.extract_over_under_market_signal(
             {
@@ -606,6 +863,64 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertEqual(context["scenario_name"], "")
 
 
+class ReviewLearningGenerationTest(unittest.TestCase):
+    def test_build_outcome_stratified_review_applies_premier_league_draw_multiplier(self):
+        service = PredictionReviewLearningService(str(Path(__file__).resolve().parent))
+        samples = [
+            {
+                "predicted_winner": "home",
+                "actual_winner": "draw" if i < 2 else "home",
+                "asian_line": -0.25,
+                "home_team": f"H{i}",
+                "away_team": f"A{i}",
+                "actual_score": "1-1" if i < 2 else "2-1",
+            }
+            for i in range(4)
+        ]
+        premier = service._build_outcome_stratified_review(samples, league_code="premier_league")
+        la_liga = service._build_outcome_stratified_review(samples, league_code="la_liga")
+        self.assertGreater(
+            premier["home:level_shallow"]["recommended_draw_shift"],
+            la_liga["home:level_shallow"]["recommended_draw_shift"],
+        )
+        self.assertGreater(
+            premier["home:level_shallow"]["learning_multiplier"]["draw"],
+            la_liga["home:level_shallow"]["learning_multiplier"]["draw"],
+        )
+
+    def test_build_three_layer_outcome_review_applies_serie_a_upset_multiplier(self):
+        service = PredictionReviewLearningService(str(Path(__file__).resolve().parent))
+        samples = [
+            {
+                "predicted_winner": "home",
+                "actual_winner": "away",
+                "asian_line": -0.25,
+                "euro_home": 2.7,
+                "euro_draw": 3.0,
+                "euro_away": 2.45,
+            },
+            {
+                "predicted_winner": "home",
+                "actual_winner": "home",
+                "asian_line": -0.25,
+                "euro_home": 2.68,
+                "euro_draw": 3.02,
+                "euro_away": 2.46,
+            },
+        ]
+        serie_a = service._build_three_layer_outcome_review(samples, league_code="serie_a")
+        bundesliga = service._build_three_layer_outcome_review(samples, league_code="bundesliga")
+        key = "home:level_shallow:market_opposes"
+        self.assertGreater(
+            serie_a[key]["recommended_upset_shift"],
+            bundesliga[key]["recommended_upset_shift"],
+        )
+        self.assertGreater(
+            serie_a[key]["learning_multiplier"]["upset"],
+            bundesliga[key]["learning_multiplier"]["upset"],
+        )
+
+
 class ReviewLearningContextSelectionTest(unittest.TestCase):
     def test_build_prediction_context_prefers_league_specific_bias(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -653,6 +968,117 @@ class ReviewLearningContextSelectionTest(unittest.TestCase):
             self.assertEqual(context["score_bias"]["recommended_low_total_penalty"], 0.032)
             self.assertEqual(context["over_under_bias"]["recommended_over_shift"], 0.026)
             self.assertEqual(context["recommendations"][:2], ["league-rec", "overall-rec"])
+
+    def test_build_prediction_context_exposes_league_learning_multipliers(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = PredictionReviewLearningService(temp_dir)
+            payload = {
+                "updated_at": "2026-05-13T00:00:00",
+                "days": 30,
+                "reviewed_sample_count": 8,
+                "learning_context": {
+                    "score_bias": {"available": True},
+                    "over_under_bias": {"available": True},
+                    "recommendations": [],
+                    "learning_multipliers": {
+                        "draw_multiplier": 1.0,
+                        "upset_multiplier": 1.0,
+                        "stratified_max_draw_shift": 0.02,
+                        "stratified_max_upset_shift": 0.016,
+                        "three_layer_max_draw_shift": 0.024,
+                        "three_layer_max_upset_shift": 0.02,
+                    },
+                    "by_league": {
+                        "premier_league": {
+                            "reviewed_sample_count": 4,
+                            "score_bias": {"available": True},
+                            "over_under_bias": {"available": True},
+                            "recommendations": [],
+                            "learning_multipliers": {
+                                "draw_multiplier": 1.18,
+                                "upset_multiplier": 1.02,
+                                "stratified_max_draw_shift": 0.024,
+                                "stratified_max_upset_shift": 0.016,
+                                "three_layer_max_draw_shift": 0.028,
+                                "three_layer_max_upset_shift": 0.02,
+                            },
+                        }
+                    },
+                },
+                "league_overview": {"premier_league": {"completed_count": 4}},
+                "outcome_stratified_review": {"overall": {}, "by_league": {"premier_league": {}}},
+                "three_layer_outcome_review": {"overall": {}, "by_league": {"premier_league": {}}},
+            }
+            service.summary_path().parent.mkdir(parents=True, exist_ok=True)
+            service.summary_path().write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            with patch.object(service, "_load_recent_league_review", return_value={}):
+                context = service.build_prediction_context(league_code="premier_league", days=30, sample_limit=12)
+            self.assertEqual(context["learning_multiplier_scope"], "league")
+            self.assertEqual(context["learning_multipliers"]["draw_multiplier"], 1.18)
+            self.assertEqual(context["learning_multipliers"]["three_layer_max_draw_shift"], 0.028)
+
+    def test_build_summary_exposes_learning_multipliers(self):
+        service = PredictionReviewLearningService(str(Path(__file__).resolve().parent))
+        with patch.object(service, "_load_completed_samples", return_value=[]):
+            payload = service.build_summary(days=30, sample_limit=12)
+        self.assertIn("learning_multipliers", payload["learning_context"])
+        self.assertEqual(payload["learning_context"]["learning_multipliers"]["draw_multiplier"], 1.0)
+
+
+class ReviewBiasServiceTest(unittest.TestCase):
+    def test_extract_motivation_risk_prefers_upset_payload(self):
+        service = ReviewBiasService({})
+        result = service.extract_motivation_risk(
+            upset_potential={"motivation_risk": {"available": True, "score": 12.0}},
+            match_intelligence={"motivation": {"risk_signal": {"available": True, "score": 0.2}}},
+        )
+        self.assertEqual(result["score"], 12.0)
+
+
+class UpsetAnalyzerExplainabilityTest(unittest.TestCase):
+    def test_assess_upset_potential_outputs_risk_breakdown_and_score_detail(self):
+        analyzer = UpsetAnalyzer(league_config={"serie_a": {"name": "意甲"}})
+        result = analyzer.assess_upset_potential(
+            home_team="卡利亚里",
+            away_team="都灵",
+            league_code="serie_a",
+            strength_diff=-12,
+            home_strength={"injured_count": 1, "key_players_available": True},
+            away_strength={"injured_count": 3, "key_players_available": False},
+            predicted_outcome="客胜",
+            confidence=0.74,
+            historical_odds_reference={
+                "available": True,
+                "summary": {
+                    "sample_size": 5,
+                    "cold_result_rate": 0.44,
+                    "result_rates": {"客胜": 0.28},
+                },
+            },
+            asian_handicap={"final": {"handicap_value": 0.25, "away_water": 1.04}},
+            european_odds={"final": {"home": 3.15, "draw": 3.0, "away": 2.28}},
+            match_intelligence={
+                "motivation": {
+                    "home": {"objective": "保级抢分", "urgency": 0.86, "is_must_take_points": True},
+                    "away": {"objective": "中游收官", "urgency": 0.42, "tier": "mid_table_flat"},
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 0.24,
+                        "favored_side": "away",
+                        "pressure_side": "home",
+                        "flags": ["pressure_side_relegation", "favorite_mid_table_flat"],
+                        "summary": "主队抢分战意强于客队",
+                    },
+                }
+            },
+        )
+        self.assertIn("risk_breakdown", result)
+        self.assertIn("risk_score_detail", result)
+        self.assertGreater(result["risk_score_detail"]["context_score"], 0.0)
+        self.assertGreater(result["risk_score_detail"]["market_score"], 0.0)
+        self.assertIn("motivation", result["risk_breakdown"]["modules"])
+        self.assertTrue(result["risk_breakdown"]["top_drivers"])
 
 
 class RagLightweightDecisionTest(unittest.TestCase):

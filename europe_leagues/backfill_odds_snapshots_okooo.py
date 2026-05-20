@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""模块说明：使用澳客数据回填历史赔率快照数据集。
+"""模块说明：使用澳客数据回填历史赔率快照数据集的兼容脚本。
 
 回填未来赛程的"即时赔率快照"，用于生成带历史相似盘路的预测报告。
 数据源: 澳客网 (okooo.com) - 使用浏览器自动化
 
-注意: 由于澳客网有严格的反爬虫机制，本脚本使用 browser-use 工具进行浏览器自动化。
+注意:
+- 本脚本是历史回填用途，不是当前正式预测链主入口。
+- 当前正式快照链默认使用 `local-chrome + iPhone Safari profile + Referer`。
+- 这里保留 `browser-use` 仅作为兼容回填实现。
 
 输出位置:
 - <league>/analysis/odds_snapshots/<start>_<end>_odds_snapshot.json
@@ -27,16 +30,10 @@ from typing import Dict, List, Optional, Tuple
 
 import requests
 
+from okooo_mobile_access import cache_busted_okooo_url, mobile_headers, random_mobile_profile
+
 
 BASE_DIR = Path(__file__).resolve().parent
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    )
-}
 
 LEAGUE_CONFIG = {
     "premier_league": {"name": "英超", "competition_id": 1, "okooo_id": 92},
@@ -88,7 +85,6 @@ class MatchFixture:
 class OddsSnapshotBackfill:
     def __init__(self) -> None:
         self.session = requests.Session()
-        self.session.headers.update(HEADERS)
         self._match_id_cache: Dict[Tuple[str, str, str], str] = {}
         self._odds_cache: Dict[str, Dict] = {}
 
@@ -97,6 +93,8 @@ class OddsSnapshotBackfill:
 
         We keep this isolated so all odds pages share consistent error handling.
         """
+        profile = random_mobile_profile()
+        url = cache_busted_okooo_url(url, profile=profile)
         try:
             subprocess.run(
                 ["browser-use", "open", url],
@@ -224,7 +222,12 @@ class OddsSnapshotBackfill:
         last_error = None
         for attempt in range(retries):
             try:
-                response = self.session.get(url, timeout=timeout)
+                profile = random_mobile_profile()
+                response = self.session.get(
+                    cache_busted_okooo_url(url, profile=profile),
+                    headers=mobile_headers(profile=profile),
+                    timeout=timeout,
+                )
                 response.raise_for_status()
                 if encoding:
                     return response.content.decode(encoding, "ignore")

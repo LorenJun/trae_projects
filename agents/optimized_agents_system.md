@@ -1,7 +1,7 @@
 # 足球预测多Agent系统优化方案
 
-> 当前说明：本文是多 Agent 优化方案稿。当前仓库的正式执行链路已收敛为 `prediction_system.py`、`EnhancedPredictor`、`HybridRAGService`、`okooo_*`、`bulk_fetch_and_update.py` 和 `harness/football.py`。  
-> 阅读本文时，请以“联赛 SoT + runtime-only 双路径写回”为正式口径，并以 `collect-data -> predict-match/predict-schedule -> save-result/accuracy` 为正式流程基线。
+> 当前说明：本文是多 Agent 优化方案稿。当前仓库的正式执行链路已收敛为 `prediction_system.py`（发现入口）、`app/cli.py`（真实命令实现）、`domain/predictor.py`、`enhanced_prediction_workflow.py`、`domain/persistence.py`、`runtime/result_sync.py` 与 `harness/football.py`。  
+> 阅读本文时，请以“联赛 SoT + runtime-only 双路径写回”为正式口径，并以 `collect-data -> predict-match/predict-schedule -> save-result/auto-sync-results/sync-pending-results-review` 为正式流程基线。
 
 ## 系统概览
 
@@ -14,8 +14,8 @@
 - 批量预测：`prediction_system.py predict-schedule --json`
 - Harness 编排：`prediction_system.py harness-run --pipeline match_prediction --json`
 - 单场回填：`prediction_system.py save-result --json`
-- 批量回填：`bulk_fetch_and_update.py`
-- 准确率统计：`prediction_system.py accuracy --refresh --json`
+- 批量回填：`prediction_system.py auto-sync-results --json` / `sync-pending-results-review --days-back ... --limit ... --json`
+- 准确率统计：`prediction_system.py accuracy --refresh --json`（显式重建）
 
 ---
 

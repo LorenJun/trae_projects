@@ -180,8 +180,6 @@ class OddsSnapshotRepository:
     def _external_snapshot_dirs(self, league_code: str) -> List[str]:
         aliases = LEAGUE_EXTERNAL_SNAPSHOT_ALIASES.get(league_code, [league_code] if league_code else [''])
         dirs = [os.path.join(self.base_dir, '.okooo-scraper', 'snapshots', alias) for alias in aliases if alias]
-        dirs.append(os.path.join(self.base_dir, 'okooo_snapshots'))
-        dirs.extend(os.path.join(self.base_dir, 'okooo_snapshots', alias) for alias in aliases if alias)
         seen = set()
         out: List[str] = []
         for item in dirs:

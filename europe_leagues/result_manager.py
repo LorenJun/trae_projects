@@ -39,6 +39,7 @@ LEAGUE_NAMES = {
     'europa_league': '欧联',
     'champions_league': '欧冠',
     'conference_league': '欧协联',
+    'world_cup': '世界杯',
 }
 
 LEAGUE_SHORT_NAMES = {
@@ -50,6 +51,7 @@ LEAGUE_SHORT_NAMES = {
     'europa_league': '欧联',
     'champions_league': '欧冠',
     'conference_league': '欧协联',
+    'world_cup': '世界杯',
 }
 
 COMPETITION_ALIASES = {
@@ -2324,24 +2326,23 @@ class ResultManager:
                     target_home = self._normalize_team_name(target_league, str(pred.get('home_team') or ''))
                     target_away = self._normalize_team_name(target_league, str(pred.get('away_team') or ''))
                     target_date = str(pred.get('match_date') or '').strip()
-                    fallback_candidates = []
+                    exact_candidates = []
                     for entry in archive.values():
                         if not isinstance(entry, dict):
                             continue
                         entry_league = str(entry.get('league') or '').strip()
                         entry_home = self._normalize_team_name(entry_league, str(entry.get('home_team') or ''))
                         entry_away = self._normalize_team_name(entry_league, str(entry.get('away_team') or ''))
-                        if entry_league != target_league or entry_home != target_home or entry_away != target_away:
-                            continue
                         entry_date = str(entry.get('match_date') or '').strip()
-                        try:
-                            date_gap = abs((datetime.strptime(entry_date, '%Y-%m-%d') - datetime.strptime(target_date, '%Y-%m-%d')).days)
-                        except Exception:
-                            date_gap = 999
-                        fallback_candidates.append((date_gap, entry))
-                    if fallback_candidates:
-                        fallback_candidates.sort(key=lambda item: item[0])
-                        archived_pred = fallback_candidates[0][1]
+                        if (
+                            entry_league == target_league
+                            and entry_date == target_date
+                            and entry_home == target_home
+                            and entry_away == target_away
+                        ):
+                            exact_candidates.append(entry)
+                    if len(exact_candidates) == 1:
+                        archived_pred = exact_candidates[0]
 
                 if archived_pred:
                     archived_score = str(archived_pred.get('actual_score') or archived_pred.get('score_text') or '').strip()

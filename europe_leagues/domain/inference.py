@@ -1261,10 +1261,12 @@ class InferencePipelineService:
         realtime['context_applied']['live_outcome_adjustment'] = live_adj_diag
         final_prob, review_outcome_diag = self.postprocess_service.apply_review_outcome_adjustment(
             final_probabilities=final_prob,
+            league_code=league_code,
             strength_diff=strength_diff,
             asian_handicap=asian_handicap,
             current_odds=current_odds,
             review_learning=review_learning,
+            match_intelligence=match_intelligence,
         )
         realtime['context_applied']['review_outcome_adjustment'] = review_outcome_diag
         if isinstance(review_outcome_diag, dict) and review_outcome_diag.get('applied'):
@@ -1281,6 +1283,13 @@ class InferencePipelineService:
             realtime_context_applied=realtime['context_applied'],
         )
         realtime['context_applied']['over_under_guard'] = over_under_diag
+        over_under, review_ou_diag = self.postprocess_service.apply_review_over_under_adjustment(
+            over_under=over_under,
+            league_code=league_code,
+            review_learning=review_learning,
+            match_intelligence=match_intelligence,
+        )
+        realtime['context_applied']['review_over_under_adjustment'] = review_ou_diag
         final_prob, real_ou_outcome_diag = self.apply_real_totals_outcome_adjustment(
             final_prob=final_prob,
             current_odds=current_odds,
@@ -1331,6 +1340,7 @@ class InferencePipelineService:
         top_scores, review_score_diag = self.postprocess_service.rerank_top_scores(
             top_scores,
             main_prediction,
+            league_code=league_code,
             ranked_probabilities=ranked_probabilities,
             home_lambda=home_lambda,
             away_lambda=away_lambda,
@@ -1339,6 +1349,8 @@ class InferencePipelineService:
             confidence=confidence,
             current_odds=current_odds,
             review_learning=review_learning,
+            match_intelligence=match_intelligence,
+            upset_potential=upset_potential,
             return_diag=True,
             limit=3,
         )
@@ -1346,11 +1358,14 @@ class InferencePipelineService:
         total_goals = self.postprocess_service.compute_total_goals_distribution(score_result.get('score_probs', {}), max_bucket=7)
         total_goals, review_total_goals_diag = self.postprocess_service.apply_three_layer_total_goals_adjustment(
             total_goals,
+            league_code=league_code,
             predicted_outcome_label=main_prediction,
             strength_diff=strength_diff,
             current_odds=current_odds,
             review_learning=review_learning,
             total_lambda=home_lambda + away_lambda,
+            over_under=over_under,
+            match_intelligence=match_intelligence,
         )
         realtime['context_applied']['review_total_goals_adjustment'] = review_total_goals_diag
 

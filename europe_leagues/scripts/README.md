@@ -5,7 +5,7 @@
 ## 赛程更新
 - 当前正式赛程/比分更新以各联赛 `teams_2025-26.md` 为 SoT（比分列只在“已完赛”写 `x-y`，未完赛统一为 `-`）
 - 单场预测后的正式写回入口是 `python3 prediction_system.py predict-match ...` / `predict-schedule ...`
-- 赛后回填入口是 `python3 prediction_system.py save-result ...`、`auto-sync-results ...`、`result-sync-daemon ...`，批量脚本可用仓库根目录 `bulk_fetch_and_update.py`
+- 赛后回填入口是 `python3 prediction_system.py save-result ...`、`auto-sync-results ...`、`result-sync-daemon ...`、`sync-pending-results-review ...`
 - 不再引用不存在的 `update_schedules_from_500.py`
 
 ## 球员数据更新

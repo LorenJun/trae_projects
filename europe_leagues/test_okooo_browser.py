@@ -9,6 +9,8 @@ sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent / '
 
 from playwright.sync_api import sync_playwright
 
+from okooo_mobile_access import cache_busted_okooo_url, mobile_context_options, mobile_headers, random_mobile_profile
+
 def parse_handicap(handicap_text: str):
     """解析盘口文本为数值"""
     if not handicap_text:
@@ -78,6 +80,7 @@ def fetch_okooo_odds(match_id: str):
     ouzhi_url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
     
     with sync_playwright() as p:
+        profile = random_mobile_profile()
         # 启动浏览器
         browser = p.chromium.launch(
             headless=True,
@@ -89,12 +92,8 @@ def fetch_okooo_odds(match_id: str):
         )
         
         # 创建上下文 - 使用移动端 User-Agent
-        context = browser.new_context(
-            viewport={'width': 390, 'height': 844},
-            user_agent='Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-            locale='zh-CN',
-            timezone_id='Asia/Shanghai',
-        )
+        context = browser.new_context(**mobile_context_options(profile=profile))
+        context.set_extra_http_headers(mobile_headers(profile=profile))
         
         # 添加反检测脚本
         context.add_init_script("""
@@ -113,7 +112,7 @@ def fetch_okooo_odds(match_id: str):
             print(f"[INFO] 访问欧赔页面: {ouzhi_url}")
             
             # 访问欧赔页面
-            response = page.goto(ouzhi_url, wait_until='networkidle', timeout=30000)
+            response = page.goto(cache_busted_okooo_url(ouzhi_url, profile=profile), wait_until='networkidle', timeout=30000)
             print(f"[INFO] 页面状态: {response.status if response else 'Unknown'}")
             
             # 等待页面加载
@@ -193,7 +192,7 @@ def fetch_okooo_odds(match_id: str):
                 yazhi_url = f"https://m.okooo.com/match/handicap.php?MatchID={match_id}"
                 print(f"\n[INFO] 访问亚盘页面: {yazhi_url}")
                 
-                page.goto(yazhi_url, wait_until='networkidle', timeout=30000)
+                page.goto(cache_busted_okooo_url(yazhi_url, profile=profile), wait_until='networkidle', timeout=30000)
                 page.wait_for_timeout(5000)
                 
                 page_content = page.content()

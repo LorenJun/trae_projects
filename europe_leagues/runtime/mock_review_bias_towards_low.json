@@ -1,0 +1,64 @@
+{
+  "scenario": "towards_low",
+  "purpose": "Validate reverse total-goals protection when market over side is stronger but model total-goals buckets need to be pulled back towards low totals.",
+  "conditions": {
+    "near_focus_line": true,
+    "over_prob_gt_under_prob": true,
+    "line": 2.75,
+    "expected_goals_total": 1.34
+  },
+  "over_under": {
+    "available": true,
+    "line": 2.75,
+    "over": 0.58,
+    "under": 0.42
+  },
+  "review_learning": {
+    "over_under_bias_scope": "mock",
+    "over_under_bias": {
+      "recommended_under_shift": 0.015
+    }
+  },
+  "total_goals": {
+    "available": true,
+    "tail_bucket": "7+",
+    "top_totals": [
+      {
+        "total": "3",
+        "prob": 0.26
+      },
+      {
+        "total": "2",
+        "prob": 0.19
+      },
+      {
+        "total": "4",
+        "prob": 0.18
+      }
+    ],
+    "buckets": {
+      "0": 0.05,
+      "1": 0.12,
+      "2": 0.19,
+      "3": 0.26,
+      "4": 0.18,
+      "5": 0.11,
+      "6": 0.06,
+      "7+": 0.03
+    }
+  },
+  "expected_behavior": {
+    "review_over_under_adjustment": {
+      "reason": "review-bias-under",
+      "signal": "review-ou-under-protection"
+    },
+    "review_total_goals_adjustment": {
+      "reason": "towards_low",
+      "signal": "review-total-goals-under-protection"
+    },
+    "bucket_shift": {
+      "increase": ["1", "2", "0"],
+      "decrease": ["3", "4", "5", "6", "7+"]
+    }
+  }
+}

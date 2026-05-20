@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
-import sys
 from glob import glob
 from typing import Any, Dict, List, Optional, Tuple
 
 from collectors.okooo import build_okooo_driver_chain
 from collectors.okooo import describe_unavailable_okooo_drivers
+from collectors.okooo import refresh_snapshot as refresh_okooo_snapshot
+from collectors.okooo import snapshot_matches_request
 from runtime.cache import PredictionCache
 from runtime.memory_samples import load_prediction_memory_samples
 
@@ -153,8 +153,6 @@ def external_snapshot_root(base_dir: str) -> str:
 def external_snapshot_dirs(base_dir: str, league_code: str) -> List[str]:
     aliases = EXTERNAL_SNAPSHOT_DIR_ALIASES.get(league_code, [league_code] if league_code else [''])
     dirs = [os.path.join(external_snapshot_root(base_dir), alias) for alias in aliases if alias]
-    dirs.append(os.path.join(base_dir, 'okooo_snapshots'))
-    dirs.extend(os.path.join(base_dir, 'okooo_snapshots', alias) for alias in aliases if alias)
     seen = set()
     result = []
     for item in dirs:
@@ -198,6 +196,7 @@ def resolve_over_under_line(
 def auto_fetch_okooo_totals_if_needed(
     *,
     base_dir: str,
+    league_code: str,
     league_name: str,
     match_date: str,
     home_team: str,
@@ -224,12 +223,10 @@ def auto_fetch_okooo_totals_if_needed(
     except Exception:
         pass
 
-    if not league_name:
+    if not league_name or not league_code:
         diag['skipped'] = 'unknown league'
         return current_odds, diag
 
-    script = os.path.join(base_dir, 'okooo_save_snapshot.py')
-    out_dir = external_snapshot_root(base_dir)
     drivers = build_okooo_driver_chain(okooo_driver)
 
     diag['attempted'] = True
@@ -242,42 +239,37 @@ def auto_fetch_okooo_totals_if_needed(
             return current_odds, diag
         last_error = None
         for driver in drivers:
-            cmd = [
-                sys.executable,
-                script,
-                '--driver', str(driver),
-                '--league', str(league_name),
-                '--team1', str(home_team),
-                '--team2', str(away_team),
-                '--date', str(match_date),
-                '--out-dir', str(out_dir),
-                '--overwrite',
-            ]
-            if match_time:
-                cmd.extend(['--time', str(match_time)])
-            if match_id:
-                cmd.extend(['--match-id', str(match_id)])
-            if bool(okooo_headed) and driver == 'browser-use':
-                cmd.append('--headed')
-
             diag['driver_tried'] = driver
-            diag['cmd'] = ' '.join(str(x) for x in cmd)
-            proc = subprocess.run(cmd, cwd=os.path.dirname(script), capture_output=True, text=True, timeout=240)
-            diag['returncode'] = proc.returncode
-            if proc.stdout:
-                diag['stdout_tail'] = proc.stdout.strip().splitlines()[-1][-200:]
-            if proc.stderr:
-                diag['stderr_tail'] = proc.stderr.strip().splitlines()[-1][-200:]
-            if proc.returncode != 0:
-                last_error = f'rc={proc.returncode}'
+            diag['used_refresh_snapshot'] = True
+            diag['match_id_supplied'] = bool(match_id)
+            refreshed = refresh_okooo_snapshot(
+                base_dir,
+                league_code,
+                home_team,
+                away_team,
+                match_date,
+                driver=driver,
+                match_id=str(match_id or ''),
+                headed=bool(okooo_headed),
+                match_time=match_time or '',
+            )
+            if not refreshed:
+                last_error = 'snapshot_not_found'
                 continue
 
-            out_path = (proc.stdout or '').strip().splitlines()[-1].strip()
-            if not out_path or not os.path.exists(out_path):
-                last_error = 'snapshot path missing'
+            out_path, payload = refreshed
+            if not snapshot_matches_request(
+                payload,
+                home_team=home_team,
+                away_team=away_team,
+                match_date=match_date,
+            ):
+                last_error = 'snapshot payload mismatch'
+                diag['payload_match_id'] = str(payload.get('match_id') or '') if isinstance(payload, dict) else ''
+                diag['payload_home_team'] = str(payload.get('home_team') or payload.get('team1') or '') if isinstance(payload, dict) else ''
+                diag['payload_away_team'] = str(payload.get('away_team') or payload.get('team2') or '') if isinstance(payload, dict) else ''
                 continue
 
-            payload = json.loads(open(out_path, 'r', encoding='utf-8').read())
             totals = payload.get('大小球') if isinstance(payload, dict) else None
             if not isinstance(totals, dict) or not totals.get('found'):
                 last_error = 'totals not found in snapshot'

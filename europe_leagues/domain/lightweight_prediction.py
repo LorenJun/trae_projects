@@ -574,11 +574,21 @@ def capture_okooo_snapshot(
 ) -> Dict[str, Any]:
     resolved_match_id = str(match_id or "").strip()
     if not resolved_match_id:
-        from okooo_match_finder import OkoooMatchFinder
+        from okooo_save_snapshot import _candidate_date_hints, _find_match_id_from_schedule_cache, _load_alias_table
 
-        resolved_match_id = str(OkoooMatchFinder().find_match_id(home_team, away_team, league_name) or "").strip()
+        cached = _find_match_id_from_schedule_cache(
+            league=league_name,
+            team1=home_team,
+            team2=away_team,
+            candidate_dates=_candidate_date_hints(match_date, match_time),
+            alias_table=_load_alias_table(),
+        )
+        resolved_match_id = str(cached.get("match_id") or "").strip()
         if not resolved_match_id:
-            raise RuntimeError(f"未能定位 MatchID: {league_name} {home_team} vs {away_team}")
+            raise RuntimeError(
+                f"未能从赛程缓存定位 MatchID: {league_name} {home_team} vs {away_team}；"
+                "请先运行 collect-data 或 okooo_fetch_daily_schedule.py，或显式传入 --match-id"
+            )
 
     script_path = Path(base_dir) / "okooo_save_snapshot.py"
     out_dir = Path(base_dir) / ".okooo-scraper" / "snapshots" / "runtime_only"

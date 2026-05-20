@@ -1,0 +1,136 @@
+{
+  "success": true,
+  "command": "predict-schedule",
+  "generated_at": "2026-05-17T19:36:52.120837",
+  "runtime_profile": {
+    "persona": {
+      "persona_key": "football_actuary",
+      "persona_name": "Professional Football Betting Data Actuary",
+      "version": "unknown",
+      "purpose": "",
+      "source_file": "agents/football_actuary_persona.md",
+      "dimension_schema_version": "standard-six-v1",
+      "dimensions": [
+        "以真实数据和正式流程为基础",
+        "区分模型结论、盘口结论和综合结论",
+        "明确数据是否降级、样本是否足够、结论是否存在边界",
+        "正式输出以 teams_2025-26.md 和 prediction_system.py 主流程为准",
+        "赛后结果必须能进入准确率统计和复盘链路"
+      ]
+    },
+    "agent_roles": [
+      "data_collector",
+      "match_analyzer",
+      "odds_analyzer"
+    ],
+    "agents": [
+      {
+        "agent_key": "data_collector",
+        "agent_name": "Data Collector Agent",
+        "version": "1.2.0",
+        "purpose": "负责从正式实时源采集足球比赛所需的结构化数据，并为 collect-data / predict-match / 批量回填流程提供稳定输入",
+        "source_file": "agents/data_collector_agent.md",
+        "primary_responsibility": "第 6 维数据工程、流程自动化与策略迭代中的输入准备与质量控制"
+      },
+      {
+        "agent_key": "match_analyzer",
+        "agent_name": "Match Analyzer Agent",
+        "version": "1.2.0",
+        "purpose": "负责球队基本面、战术、历史交锋、伤停与临场上下文分析，并与真实盘口、team_context、EWMA 近况结果联动",
+        "source_file": "agents/match_analyzer_agent.md",
+        "primary_responsibility": "第 1 维足球业务分析 + 第 5 维风险控制支持中的比赛脚本解释"
+      },
+      {
+        "agent_key": "odds_analyzer",
+        "agent_name": "Odds Analyzer Agent",
+        "version": "1.2.0",
+        "purpose": "负责实时欧赔、亚值、亚值页内大小球、水位与凯利的深度分析，并对接最终 over_under 诊断字段",
+        "source_file": "agents/odds_analyzer_agent.md",
+        "primary_responsibility": "第 2 维赔率与盘口交易分析 + 第 5 维风险控制支持中的盘口风险识别"
+      }
+    ],
+    "dimensions": [
+      "以真实数据和正式流程为基础",
+      "区分模型结论、盘口结论和综合结论",
+      "明确数据是否降级、样本是否足够、结论是否存在边界",
+      "正式输出以 teams_2025-26.md 和 prediction_system.py 主流程为准",
+      "赛后结果必须能进入准确率统计和复盘链路"
+    ],
+    "dimension_schema_version": "standard-six-v1"
+  },
+  "data": [
+    {
+      "league": "la_liga",
+      "league_name": "西甲",
+      "match_date": "2026-05-18",
+      "teams_file": "/Users/bytedance/trae_projects/europe_leagues/la_liga/teams_2025-26.md",
+      "updated": true,
+      "prediction_count": 1,
+      "accuracy_refreshed": true,
+      "persisted": {
+        "enabled": true,
+        "archived": false,
+        "memory_updated": false,
+        "result_sync_registered": false,
+        "batch_mode": true
+      },
+      "runtime_profile": {
+        "persona": {
+          "persona_key": "football_actuary",
+          "persona_name": "Professional Football Betting Data Actuary",
+          "version": "unknown",
+          "purpose": "",
+          "source_file": "agents/football_actuary_persona.md",
+          "dimension_schema_version": "standard-six-v1",
+          "dimensions": [
+            "以真实数据和正式流程为基础",
+            "区分模型结论、盘口结论和综合结论",
+            "明确数据是否降级、样本是否足够、结论是否存在边界",
+            "正式输出以 teams_2025-26.md 和 prediction_system.py 主流程为准",
+            "赛后结果必须能进入准确率统计和复盘链路"
+          ]
+        },
+        "agent_roles": [
+          "data_collector",
+          "match_analyzer",
+          "odds_analyzer"
+        ],
+        "agents": [
+          {
+            "agent_key": "data_collector",
+            "agent_name": "Data Collector Agent",
+            "version": "1.2.0",
+            "purpose": "负责从正式实时源采集足球比赛所需的结构化数据，并为 collect-data / predict-match / 批量回填流程提供稳定输入",
+            "source_file": "agents/data_collector_agent.md",
+            "primary_responsibility": "第 6 维数据工程、流程自动化与策略迭代中的输入准备与质量控制"
+          },
+          {
+            "agent_key": "match_analyzer",
+            "agent_name": "Match Analyzer Agent",
+            "version": "1.2.0",
+            "purpose": "负责球队基本面、战术、历史交锋、伤停与临场上下文分析，并与真实盘口、team_context、EWMA 近况结果联动",
+            "source_file": "agents/match_analyzer_agent.md",
+            "primary_responsibility": "第 1 维足球业务分析 + 第 5 维风险控制支持中的比赛脚本解释"
+          },
+          {
+            "agent_key": "odds_analyzer",
+            "agent_name": "Odds Analyzer Agent",
+            "version": "1.2.0",
+            "purpose": "负责实时欧赔、亚值、亚值页内大小球、水位与凯利的深度分析，并对接最终 over_under 诊断字段",
+            "source_file": "agents/odds_analyzer_agent.md",
+            "primary_responsibility": "第 2 维赔率与盘口交易分析 + 第 5 维风险控制支持中的盘口风险识别"
+          }
+        ],
+        "dimensions": [
+          "以真实数据和正式流程为基础",
+          "区分模型结论、盘口结论和综合结论",
+          "明确数据是否降级、样本是否足够、结论是否存在边界",
+          "正式输出以 teams_2025-26.md 和 prediction_system.py 主流程为准",
+          "赛后结果必须能进入准确率统计和复盘链路"
+        ],
+        "dimension_schema_version": "standard-six-v1"
+      }
+    }
+  ],
+  "captured_stderr": "2026-05-17 19:36:50,820 - enhanced_prediction_workflow - INFO - 开始预测: 毕尔巴鄂竞技 vs 奥萨苏纳 (la_liga)\n2026-05-17 19:36:51,082 - enhanced_prediction_workflow - INFO - 预测完成: 毕尔巴鄂竞技 vs 奥萨苏纳 -> 平局 (35.5%)\n2026-05-17 19:36:51,082 - enhanced_prediction_workflow - INFO - 已更新 teams 文件: /Users/bytedance/trae_projects/europe_leagues/la_liga/teams_2025-26.md\n2026-05-17 19:36:52,120 - enhanced_prediction_workflow - INFO - 批量预测已刷新准确率统计"
+}

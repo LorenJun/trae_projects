@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 MATCH_DURATION_HOURS = 2
 RESULT_SYNC_DELAY_HOURS = 2
 DEFAULT_FALLBACK_KICKOFF = "23:59"
-FALLBACK_MATCH_ID_PREFIXES = ("premier_league_", "la_liga_", "serie_a_", "bundesliga_", "ligue_1_")
+FALLBACK_MATCH_ID_PREFIXES = ("premier_league_", "la_liga_", "serie_a_", "bundesliga_", "ligue_1_", "world_cup_")
 
 LEAGUE_NAME_MAP = {
     "premier_league": "英超",
@@ -29,9 +29,10 @@ LEAGUE_NAME_MAP = {
     "europa_league": "欧联",
     "champions_league": "欧冠",
     "conference_league": "欧协联",
+    "world_cup": "世界杯",
 }
 
-LEAGUE_SOT_CODES = ("premier_league", "la_liga", "serie_a", "bundesliga", "ligue_1")
+LEAGUE_SOT_CODES = ("premier_league", "la_liga", "serie_a", "bundesliga", "ligue_1", "world_cup")
 
 
 def result_sync_registry_path(base_dir: Optional[str] = None):
@@ -122,16 +123,45 @@ def _teams_names_match(
     )
 
 
-def _lookup_teams_row(base_dir: Optional[str], teams_match_id: str) -> Optional[Dict[str, str]]:
-    league_code, match_date, home_team, away_team = _parse_teams_match_id(teams_match_id)
-    if not all((league_code, match_date, home_team, away_team)):
-        return None
+def _row_payload(
+    league_code: str,
+    row_date: str,
+    row_time: str,
+    row_home: str,
+    row_score: str,
+    row_away: str,
+    row_note: str,
+) -> Dict[str, str]:
+    return {
+        "league_code": league_code,
+        "match_date": row_date,
+        "match_time": row_time,
+        "home_team": row_home,
+        "away_team": row_away,
+        "score_text": row_score,
+        "note": row_note,
+    }
+
+
+def _find_matching_teams_rows(
+    base_dir: Optional[str],
+    league_code: str,
+    match_date: str,
+    home_team: str,
+    away_team: str,
+) -> Tuple[List[Dict[str, str]], str]:
+    if not all((league_code, home_team, away_team)):
+        return [], "teams_row_missing"
     store = TeamsMarkdownStore(base_dir)
     alias_map = load_team_alias_map(base_dir)
     try:
         lines = store.read_lines(league_code)
     except Exception:
-        return None
+        return [], "teams_row_missing"
+
+    exact_matches: List[Dict[str, str]] = []
+    nearby_matches: List[Tuple[int, Dict[str, str]]] = []
+    wanted_dt, _ = _parse_kickoff(match_date, "")
     for line in lines:
         if not line.strip().startswith("|"):
             continue
@@ -139,22 +169,92 @@ def _lookup_teams_row(base_dir: Optional[str], teams_match_id: str) -> Optional[
         if len(cols) != 6:
             continue
         row_date, row_time, row_home, row_score, row_away, row_note = cols
-        if row_date != match_date:
-            continue
         if not _teams_names_match(league_code, row_home, home_team, alias_map=alias_map):
             continue
         if not _teams_names_match(league_code, row_away, away_team, alias_map=alias_map):
             continue
-        return {
-            "league_code": league_code,
-            "match_date": row_date,
-            "match_time": row_time,
-            "home_team": row_home,
-            "away_team": row_away,
-            "score_text": row_score,
-            "note": row_note,
-        }
-    return None
+        row = _row_payload(league_code, row_date, row_time, row_home, row_score, row_away, row_note)
+        if row_date == match_date:
+            exact_matches.append(row)
+            continue
+        row_dt, _ = _parse_kickoff(row_date, row_time)
+        if not wanted_dt or not row_dt:
+            continue
+        delta_days = abs((row_dt.date() - wanted_dt.date()).days)
+        if delta_days <= 1:
+            nearby_matches.append((delta_days, row))
+
+    if len(exact_matches) == 1:
+        return exact_matches, "teams_row_exact"
+    if len(exact_matches) > 1:
+        return [], "teams_row_ambiguous"
+    if len(nearby_matches) == 1:
+        return [nearby_matches[0][1]], "teams_row_nearby_unique"
+    if len(nearby_matches) > 1:
+        return [], "teams_row_ambiguous"
+    return [], "teams_row_missing"
+
+
+def _lookup_teams_row(base_dir: Optional[str], teams_match_id: str) -> Optional[Dict[str, str]]:
+    league_code, match_date, home_team, away_team = _parse_teams_match_id(teams_match_id)
+    if not all((league_code, match_date, home_team, away_team)):
+        return None
+    rows, _ = _find_matching_teams_rows(base_dir, league_code, match_date, home_team, away_team)
+    return rows[0] if len(rows) == 1 else None
+
+
+def _parse_finished_score_text(score_text: str) -> Optional[Tuple[int, int]]:
+    match = re.match(r"^\s*(\d{1,2})\s*[-:]\s*(\d{1,2})\s*$", str(score_text or ""))
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _build_finished_result_from_teams_row(row: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(row, dict):
+        return None
+    parsed_score = _parse_finished_score_text(str(row.get("score_text") or ""))
+    if not parsed_score:
+        return None
+    home_score, away_score = parsed_score
+    return {
+        "league_code": str(row.get("league_code") or ""),
+        "date": str(row.get("match_date") or ""),
+        "home_team": str(row.get("home_team") or ""),
+        "away_team": str(row.get("away_team") or ""),
+        "home_score": home_score,
+        "away_score": away_score,
+        "status": "已结束",
+        "source": "teams_markdown_finished",
+    }
+
+
+def _can_retry_mismatch_entry(entry: Dict[str, Any]) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    league_code = str(entry.get("league_code") or "").strip()
+    if league_code not in LEAGUE_SOT_CODES:
+        return False
+    teams_match_id = str(entry.get("teams_match_id") or entry.get("match_id") or "").strip()
+    if teams_match_id:
+        return True
+    return all(
+        str(entry.get(field) or "").strip()
+        for field in ("match_date", "home_team", "away_team")
+    )
+
+
+def _resolve_finished_result_from_teams(base_dir: Optional[str], entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    teams_match_id = str(entry.get("teams_match_id") or entry.get("match_id") or "").strip()
+    row = _lookup_teams_row(base_dir, teams_match_id) if teams_match_id else None
+    if not row:
+        league_code = str(entry.get("league_code") or "").strip()
+        match_date = str(entry.get("match_date") or "").strip()
+        home_team = str(entry.get("home_team") or "").strip()
+        away_team = str(entry.get("away_team") or "").strip()
+        rows, _ = _find_matching_teams_rows(base_dir, league_code, match_date, home_team, away_team)
+        row = rows[0] if len(rows) == 1 else None
+    return _build_finished_result_from_teams_row(row)
 
 
 def _apply_schedule_to_entry(entry: Dict[str, Any], match_date: str, match_time: str) -> bool:
@@ -182,6 +282,32 @@ def _apply_schedule_to_entry(entry: Dict[str, Any], match_date: str, match_time:
     return changed
 
 
+def _build_teams_match_id_from_row(row: Dict[str, str]) -> str:
+    league_code = str(row.get("league_code") or "").strip()
+    match_date = str(row.get("match_date") or "").strip().replace("-", "")
+    home_team = str(row.get("home_team") or "").strip()
+    away_team = str(row.get("away_team") or "").strip()
+    if not all((league_code, match_date, home_team, away_team)):
+        return ""
+    return f"{league_code}_{match_date}_{home_team}_{away_team}".strip("_")
+
+
+def _apply_row_to_entry(entry: Dict[str, Any], row: Dict[str, str]) -> bool:
+    changed = False
+    if str(entry.get("league_code") or "") != row["league_code"]:
+        entry["league_code"] = row["league_code"]
+        changed = True
+    if str(entry.get("home_team") or "") != row["home_team"]:
+        entry["home_team"] = row["home_team"]
+        changed = True
+    if str(entry.get("away_team") or "") != row["away_team"]:
+        entry["away_team"] = row["away_team"]
+        changed = True
+    if _apply_schedule_to_entry(entry, row["match_date"], row["match_time"]):
+        changed = True
+    return changed
+
+
 def _refresh_registry_schedule_from_teams(
     base_dir: Optional[str],
     registry: Dict[str, Dict[str, Any]],
@@ -194,19 +320,47 @@ def _refresh_registry_schedule_from_teams(
         row = _lookup_teams_row(base_dir, teams_match_id)
         if not row:
             continue
-        if str(entry.get("league_code") or "") != row["league_code"]:
-            entry["league_code"] = row["league_code"]
-            changed = True
-        if str(entry.get("home_team") or "") != row["home_team"]:
-            entry["home_team"] = row["home_team"]
-            changed = True
-        if str(entry.get("away_team") or "") != row["away_team"]:
-            entry["away_team"] = row["away_team"]
-            changed = True
-        if _apply_schedule_to_entry(entry, row["match_date"], row["match_time"]):
+        if _apply_row_to_entry(entry, row):
             changed = True
         registry[key] = entry
     return changed
+
+
+def _recanonicalize_registry_entry_from_teams(
+    base_dir: Optional[str],
+    key: str,
+    entry: Dict[str, Any],
+) -> Tuple[str, Dict[str, Any], str, bool]:
+    if not isinstance(entry, dict):
+        return key, entry, "teams_row_missing", False
+    teams_match_id = str(entry.get("teams_match_id") or entry.get("match_id") or "").strip()
+    row = _lookup_teams_row(base_dir, teams_match_id)
+    reason = "teams_row_exact"
+    if not row:
+        league_code = str(entry.get("league_code") or "").strip()
+        match_date = str(entry.get("match_date") or "").strip()
+        home_team = str(entry.get("home_team") or "").strip()
+        away_team = str(entry.get("away_team") or "").strip()
+        rows, reason = _find_matching_teams_rows(base_dir, league_code, match_date, home_team, away_team)
+        if len(rows) != 1:
+            return key, entry, reason, False
+        row = rows[0]
+    updated_entry = dict(entry)
+    changed = _apply_row_to_entry(updated_entry, row)
+    canonical_teams_match_id = _build_teams_match_id_from_row(row)
+    if canonical_teams_match_id and str(updated_entry.get("teams_match_id") or "") != canonical_teams_match_id:
+        updated_entry["teams_match_id"] = canonical_teams_match_id
+        changed = True
+    new_key = key
+    if _looks_like_teams_match_id(key):
+        new_key = canonical_teams_match_id or key
+        if str(updated_entry.get("match_id") or "") != new_key:
+            updated_entry["match_id"] = new_key
+            changed = True
+    elif not str(updated_entry.get("match_id") or "").strip() and canonical_teams_match_id:
+        updated_entry["match_id"] = canonical_teams_match_id
+        changed = True
+    return new_key, updated_entry, reason, changed
 
 
 def _get_prediction_field(payload: Dict[str, Any], *field_names: str) -> Any:
@@ -289,6 +443,16 @@ def _merge_registry_entry(primary: Dict[str, Any], secondary: Dict[str, Any]) ->
         except Exception:
             return None
 
+    def _schedule_dt(entry: Dict[str, Any]) -> Optional[datetime]:
+        kickoff = _iso_dt(entry.get("kickoff_at"))
+        if kickoff:
+            return kickoff
+        due = _iso_dt(entry.get("due_at"))
+        if due:
+            return due
+        parsed, _ = _parse_kickoff(str(entry.get("match_date") or ""), str(entry.get("match_time") or ""))
+        return parsed
+
     merged = dict(secondary)
     merged.update(primary)
     merged["check_count"] = max(int(primary.get("check_count") or 0), int(secondary.get("check_count") or 0))
@@ -300,10 +464,10 @@ def _merge_registry_entry(primary: Dict[str, Any], secondary: Dict[str, Any]) ->
         merged["last_error"] = str(secondary.get("last_error") or "")
     if secondary.get("status") == "completed" and secondary.get("result_synced_at"):
         merged["status"] = "completed"
-    primary_due = _iso_dt(primary.get("due_at"))
-    secondary_due = _iso_dt(secondary.get("due_at"))
+    primary_schedule = _schedule_dt(primary)
+    secondary_schedule = _schedule_dt(secondary)
     schedule_source = primary
-    if secondary_due and (not primary_due or secondary_due < primary_due):
+    if secondary_schedule and (not primary_schedule or secondary_schedule > primary_schedule):
         schedule_source = secondary
     for field in (
         "league_code",
@@ -720,22 +884,28 @@ def _fetch_match_by_match_id(
     return None
 
 
-def _match_finished_item(entry: Dict[str, Any], finished: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    wanted_id = str(entry.get("external_match_id") or entry.get("match_id") or "").strip()
+def _result_matches_entry(entry: Dict[str, Any], item: Dict[str, Any]) -> bool:
+    if not isinstance(entry, dict) or not isinstance(item, dict):
+        return False
     league_code = str(entry.get("league_code") or "").strip()
     alias_map = load_team_alias_map(None)
     wanted_home = str(entry.get("home_team") or "").strip()
     wanted_away = str(entry.get("away_team") or "").strip()
+    return _teams_names_match(league_code, str(item.get("home_team") or ""), wanted_home, alias_map=alias_map) and _teams_names_match(
+        league_code,
+        str(item.get("away_team") or ""),
+        wanted_away,
+        alias_map=alias_map,
+    )
+
+
+def _match_finished_item(entry: Dict[str, Any], finished: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    wanted_id = str(entry.get("external_match_id") or entry.get("match_id") or "").strip()
     for item in finished:
-        if _teams_names_match(league_code, str(item.get("home_team") or ""), wanted_home, alias_map=alias_map) and _teams_names_match(
-            league_code,
-            str(item.get("away_team") or ""),
-            wanted_away,
-            alias_map=alias_map,
-        ):
+        if _result_matches_entry(entry, item):
             return item
     for item in finished:
-        if wanted_id and str(item.get("match_id") or "").strip() == wanted_id:
+        if wanted_id and str(item.get("match_id") or "").strip() == wanted_id and _result_matches_entry(entry, item):
             return item
     return None
 
@@ -754,7 +924,10 @@ def sync_due_prediction_results(
     for match_id, entry in registry.items():
         if not isinstance(entry, dict):
             continue
-        if entry.get("status") == "completed":
+        status = str(entry.get("status") or "").strip()
+        if status == "completed":
+            continue
+        if status == "mismatch" and not _can_retry_mismatch_entry(entry):
             continue
         due_at = str(entry.get("due_at") or "").strip()
         if not due_at:
@@ -784,33 +957,77 @@ def sync_due_prediction_results(
     fetch_cache: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
     updates: List[Dict[str, Any]] = []
 
-    for match_id, entry in due_entries:
+    for original_match_id, original_entry in due_entries:
+        match_id = original_match_id
+        entry = dict(original_entry)
+        rekeyed = False
+        new_key, entry, recanonicalize_reason, recanonicalized = _recanonicalize_registry_entry_from_teams(base_dir, match_id, entry)
+        if recanonicalized:
+            registry_changed = True
+        if new_key != match_id:
+            prior = registry.get(new_key)
+            if isinstance(prior, dict):
+                entry = _merge_registry_entry(entry, prior)
+            registry.pop(match_id, None)
+            match_id = new_key
+            rekeyed = True
+            registry_changed = True
+        registry[match_id] = entry
+
         teams_match_id = str(entry.get("teams_match_id") or "").strip()
         entry["check_count"] = int(entry.get("check_count") or 0) + 1
         entry["last_checked_at"] = current_time.isoformat()
-        if match_id in existing_results or (teams_match_id and teams_match_id in existing_results):
-            entry["status"] = "completed"
-            entry["result_synced_at"] = current_time.isoformat()
-            entry["last_error"] = ""
-            updates.append({"match_id": match_id, "updated": False, "reason": "already_completed"})
-            registry[match_id] = entry
-            continue
 
-        key = (str(entry.get("league_code") or ""), str(entry.get("match_date") or ""))
-        if key not in fetch_cache:
-            fetch_cache[key] = _fetch_finished_matches(*key)
-        matched = _match_finished_item(entry, fetch_cache[key])
+        matched = _resolve_finished_result_from_teams(base_dir, entry)
         if not matched:
+            external_mismatch = False
             matched = _fetch_match_by_match_id(
                 base_dir,
                 str(entry.get("league_code") or ""),
                 str(entry.get("match_date") or ""),
                 str(entry.get("external_match_id") or ""),
             )
+            if matched and not _result_matches_entry(entry, matched):
+                matched = None
+                external_mismatch = True
+
+            if not matched:
+                key = (str(entry.get("league_code") or ""), str(entry.get("match_date") or ""))
+                if key not in fetch_cache:
+                    fetch_cache[key] = _fetch_finished_matches(*key)
+                matched = _match_finished_item(entry, fetch_cache[key])
+        else:
+            external_mismatch = False
+
+        if not matched and (match_id in existing_results or (teams_match_id and teams_match_id in existing_results)):
+            entry["status"] = "completed"
+            entry["result_synced_at"] = current_time.isoformat()
+            entry["last_error"] = ""
+            updates.append({
+                "match_id": match_id,
+                "updated": False,
+                "reason": "already_completed",
+                "rekeyed": rekeyed,
+            })
+            registry[match_id] = entry
+            continue
+
         if not matched:
-            entry["status"] = "pending"
-            entry["last_error"] = "result_not_available_yet"
-            updates.append({"match_id": match_id, "updated": False, "reason": "not_finished_or_not_found"})
+            mismatch_reason = ""
+            if recanonicalize_reason in {"teams_row_missing", "teams_row_ambiguous"}:
+                mismatch_reason = recanonicalize_reason
+            elif external_mismatch:
+                mismatch_reason = "external_match_id_team_mismatch"
+            elif recanonicalized or recanonicalize_reason.startswith("teams_row_"):
+                mismatch_reason = "result_not_found_after_recanonicalization"
+            if mismatch_reason:
+                entry["status"] = "mismatch"
+                entry["last_error"] = mismatch_reason
+                updates.append({"match_id": match_id, "updated": False, "reason": mismatch_reason, "rekeyed": rekeyed})
+            else:
+                entry["status"] = "pending"
+                entry["last_error"] = "result_not_available_yet"
+                updates.append({"match_id": match_id, "updated": False, "reason": "not_finished_or_not_found", "rekeyed": rekeyed})
             registry[match_id] = entry
             continue
 
@@ -844,23 +1061,25 @@ def sync_due_prediction_results(
                     "actual_score": result.get("actual_score"),
                     "home_team": entry.get("home_team"),
                     "away_team": entry.get("away_team"),
+                    "rekeyed": rekeyed,
                 }
             )
         except Exception as exc:
             entry["status"] = "pending"
             entry["last_error"] = str(exc)
-            updates.append({"match_id": match_id, "updated": False, "reason": str(exc)})
+            updates.append({"match_id": match_id, "updated": False, "reason": str(exc), "rekeyed": rekeyed})
         registry[match_id] = entry
 
     if registry_changed or due_entries:
         _save_registry(base_dir, registry)
     updated_count = sum(1 for item in updates if item.get("updated"))
+    pending_count = sum(1 for item in updates if not item.get("updated") and registry.get(item.get("match_id"), {}).get("status") == "pending")
     return {
         "checked_at": current_time.isoformat(),
         "registry_migration": registry_migration,
         "due_count": len(due_entries),
         "updated_count": updated_count,
-        "pending_count": len(due_entries) - updated_count,
+        "pending_count": pending_count,
         "updates": updates,
     }
 

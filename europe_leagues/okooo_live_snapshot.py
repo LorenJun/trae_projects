@@ -34,9 +34,6 @@ def snapshots_root(base_dir: str) -> str:
 def list_snapshot_dirs(base_dir: str, league_code: str) -> list[str]:
     aliases = LEAGUE_SNAPSHOT_DIR_ALIASES.get(league_code, [league_code] if league_code else [""])
     dirs = [os.path.join(snapshots_root(base_dir), alias) for alias in aliases if alias]
-    # legacy compat
-    dirs.append(os.path.join(base_dir, "okooo_snapshots"))
-    dirs.extend(os.path.join(base_dir, "okooo_snapshots", alias) for alias in aliases if alias)
     # de-dup
     out = []
     seen = set()

@@ -35,6 +35,8 @@ def _prediction_memory_key_to_match_id(memory_key: str) -> Optional[str]:
 
 
 def _extract_prediction_memory_entries(content: str, limit: int) -> List[Dict[str, str]]:
+    from domain.persistence import PredictionPersistenceService
+
     marker = re.search(
         r'<!-- prediction-memory:start -->\n(?P<body>.*?)<!-- prediction-memory:end -->',
         content,
@@ -43,13 +45,21 @@ def _extract_prediction_memory_entries(content: str, limit: int) -> List[Dict[st
     if not marker:
         return []
     entries: List[Dict[str, str]] = []
-    for raw_line in marker.group('body').splitlines():
-        line = raw_line.strip()
-        if not line.startswith('- ['):
+    for block in PredictionPersistenceService._extract_memory_entry_lines(marker.group('body')):
+        normalized = PredictionPersistenceService._unescape_memory_entry_text(block)
+        lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+        if not lines:
             continue
-        memory_key = line.split(']', 1)[0][3:]
-        memory_id_match = re.search(r'记忆ID:\s*([^|]+)', line)
-        memory_id = str(memory_id_match.group(1) or '').strip() if memory_id_match else ''
+        first_line = lines[0]
+        if not first_line.startswith('- ['):
+            continue
+        memory_key = first_line.split(']', 1)[0][3:]
+        memory_id = ''
+        for line in lines[1:]:
+            memory_id_match = re.search(r'记忆ID:\s*([^|]+?)(?=\s*\||$)', line)
+            if memory_id_match:
+                memory_id = str(memory_id_match.group(1) or '').strip()
+                break
         entries.append({'memory_key': memory_key, 'memory_id': memory_id})
         if len(entries) >= limit:
             break

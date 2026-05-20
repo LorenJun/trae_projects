@@ -9,12 +9,34 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from runtime.paths import get_default_paths
+from domain.review_bias import ReviewBiasService
 
 
 class PredictionReviewLearningService:
     def __init__(self, base_dir: Optional[str] = None):
         self.base_dir = base_dir
         self.paths = get_default_paths(base_dir)
+        self.review_bias = ReviewBiasService({}, base_dir)
+
+    @staticmethod
+    def _bounded_multiplier(value: Any, default: float = 1.0) -> float:
+        try:
+            numeric = float(value)
+        except Exception:
+            return float(default)
+        return max(0.85, min(1.3, numeric))
+
+    def _league_learning_bias(self, league_code: Optional[str]) -> Dict[str, float]:
+        outcome_bias = self.review_bias.section("outcome", league_code)
+        learning_cfg = outcome_bias.get("learning_multipliers") if isinstance(outcome_bias.get("learning_multipliers"), dict) else {}
+        return {
+            "draw_multiplier": self._bounded_multiplier(learning_cfg.get("draw_multiplier"), 1.0),
+            "upset_multiplier": self._bounded_multiplier(learning_cfg.get("upset_multiplier"), 1.0),
+            "stratified_max_draw_shift": max(0.0, float(learning_cfg.get("stratified_max_draw_shift") or 0.02)),
+            "stratified_max_upset_shift": max(0.0, float(learning_cfg.get("stratified_max_upset_shift") or 0.016)),
+            "three_layer_max_draw_shift": max(0.0, float(learning_cfg.get("three_layer_max_draw_shift") or 0.024)),
+            "three_layer_max_upset_shift": max(0.0, float(learning_cfg.get("three_layer_max_upset_shift") or 0.02)),
+        }
 
     def summary_path(self):
         return self.paths.runtime_file("prediction_review_learning.json")
@@ -233,7 +255,7 @@ class PredictionReviewLearningService:
                 return "balanced_match_deep_away_line"
         return ""
 
-    def _build_outcome_stratified_review(self, samples: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _build_outcome_stratified_review(self, samples: List[Dict[str, Any]], league_code: Optional[str] = None) -> Dict[str, Any]:
         depth_names = {
             "level_ball": "平手盘",
             "level_shallow": "平半/半球浅盘",
@@ -284,6 +306,7 @@ class PredictionReviewLearningService:
                         }
                     )
 
+        learning_bias = self._league_learning_bias(league_code)
         result: Dict[str, Any] = {}
         for key, bucket in grouped.items():
             sample_count = int(bucket["sample_count"])
@@ -293,17 +316,27 @@ class PredictionReviewLearningService:
             bucket["draw_miss_rate"] = round(int(bucket["draw_miss_count"]) / sample_count, 4) if sample_count else 0.0
             bucket["opposite_miss_rate"] = round(int(bucket["opposite_miss_count"]) / sample_count, 4) if sample_count else 0.0
             if bucket["predicted_winner"] in {"home", "away"} and sample_count >= 3:
-                draw_shift = min(0.02, max(0.0, bucket["draw_miss_rate"] - 0.16) * 0.08)
-                upset_shift = min(0.016, max(0.0, bucket["opposite_miss_rate"] - 0.1) * 0.08)
+                draw_shift = min(
+                    learning_bias["stratified_max_draw_shift"],
+                    max(0.0, bucket["draw_miss_rate"] - 0.16) * 0.08 * learning_bias["draw_multiplier"],
+                )
+                upset_shift = min(
+                    learning_bias["stratified_max_upset_shift"],
+                    max(0.0, bucket["opposite_miss_rate"] - 0.1) * 0.08 * learning_bias["upset_multiplier"],
+                )
             else:
                 draw_shift = 0.0
                 upset_shift = 0.0
             bucket["recommended_draw_shift"] = round(draw_shift, 4)
             bucket["recommended_upset_shift"] = round(upset_shift, 4)
+            bucket["learning_multiplier"] = {
+                "draw": learning_bias["draw_multiplier"],
+                "upset": learning_bias["upset_multiplier"],
+            }
             result[key] = bucket
         return result
 
-    def _build_three_layer_outcome_review(self, samples: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _build_three_layer_outcome_review(self, samples: List[Dict[str, Any]], league_code: Optional[str] = None) -> Dict[str, Any]:
         grouped: Dict[str, Dict[str, Any]] = {}
         euro_support_labels = {
             "strong_support": "欧赔强支持",
@@ -353,6 +386,7 @@ class PredictionReviewLearningService:
                 elif actual_winner in {"home", "away"} and actual_winner != predicted_winner:
                     bucket["opposite_miss_count"] += 1
 
+        learning_bias = self._league_learning_bias(league_code)
         result: Dict[str, Any] = {}
         for key, bucket in grouped.items():
             sample_count = int(bucket["sample_count"])
@@ -363,14 +397,24 @@ class PredictionReviewLearningService:
             draw_shift = 0.0
             upset_shift = 0.0
             if sample_count >= 2 and bucket["predicted_winner"] in {"home", "away"}:
-                draw_shift = min(0.024, max(0.0, bucket["draw_miss_rate"] - 0.15) * 0.09)
-                upset_shift = min(0.02, max(0.0, bucket["opposite_miss_rate"] - 0.1) * 0.09)
+                draw_shift = min(
+                    learning_bias["three_layer_max_draw_shift"],
+                    max(0.0, bucket["draw_miss_rate"] - 0.15) * 0.09 * learning_bias["draw_multiplier"],
+                )
+                upset_shift = min(
+                    learning_bias["three_layer_max_upset_shift"],
+                    max(0.0, bucket["opposite_miss_rate"] - 0.1) * 0.09 * learning_bias["upset_multiplier"],
+                )
                 if bucket["euro_support_bucket"] in {"draw_guarded", "soft_support"}:
-                    draw_shift = min(0.026, draw_shift + 0.004)
+                    draw_shift = min(learning_bias["three_layer_max_draw_shift"] + 0.004, draw_shift + 0.004)
                 if bucket["euro_support_bucket"] == "market_opposes":
-                    upset_shift = min(0.022, upset_shift + 0.006)
+                    upset_shift = min(learning_bias["three_layer_max_upset_shift"] + 0.004, upset_shift + 0.006)
             bucket["recommended_draw_shift"] = round(draw_shift, 4)
             bucket["recommended_upset_shift"] = round(upset_shift, 4)
+            bucket["learning_multiplier"] = {
+                "draw": learning_bias["draw_multiplier"],
+                "upset": learning_bias["upset_multiplier"],
+            }
             result[key] = bucket
         return result
 
@@ -670,6 +714,7 @@ class PredictionReviewLearningService:
     def build_summary(self, *, days: int = 30, sample_limit: int = 12) -> Dict[str, Any]:
         completed = self._load_completed_samples(days=days)
         reviewed = completed[: max(1, int(sample_limit or 12))]
+        overall_learning_multipliers = self._league_learning_bias(None)
         learning_bundle = self._build_learning_context_bundle(reviewed)
         score_bias = learning_bundle["score_bias"]
         ou_bias = learning_bundle["over_under_bias"]
@@ -681,10 +726,12 @@ class PredictionReviewLearningService:
         league_three_layer_outcome_review: Dict[str, Dict[str, Any]] = {}
         for league_code in sorted({str(sample.get("league") or "").strip() for sample in completed if str(sample.get("league") or "").strip()}):
             league_outcome_stratified_review[league_code] = self._build_outcome_stratified_review(
-                [sample for sample in completed if str(sample.get("league") or "").strip() == league_code]
+                [sample for sample in completed if str(sample.get("league") or "").strip() == league_code],
+                league_code=league_code,
             )
             league_three_layer_outcome_review[league_code] = self._build_three_layer_outcome_review(
-                [sample for sample in completed if str(sample.get("league") or "").strip() == league_code]
+                [sample for sample in completed if str(sample.get("league") or "").strip() == league_code],
+                league_code=league_code,
             )
 
         league_overview: Dict[str, Dict[str, Any]] = {}
@@ -730,6 +777,7 @@ class PredictionReviewLearningService:
                 "score_bias": league_bundle["score_bias"],
                 "over_under_bias": league_bundle["over_under_bias"],
                 "recommendations": list(league_bundle["recommendations"]),
+                "learning_multipliers": self._league_learning_bias(league_code),
             }
 
         reviewed_preview = [
@@ -760,6 +808,7 @@ class PredictionReviewLearningService:
                 "score_bias": score_bias,
                 "over_under_bias": ou_bias,
                 "recommendations": recommendations,
+                "learning_multipliers": overall_learning_multipliers,
                 "by_league": learning_context_by_league,
             },
             "league_overview": league_overview,
@@ -813,6 +862,9 @@ class PredictionReviewLearningService:
         selected_three_layer_review = three_layer_league or three_layer_overall
         learning_by_league = learning_context.get("by_league") if isinstance(learning_context.get("by_league"), dict) else {}
         league_learning_bundle = learning_by_league.get(league_code) if isinstance(learning_by_league.get(league_code), dict) else {}
+        overall_learning_multipliers = learning_context.get("learning_multipliers") if isinstance(learning_context.get("learning_multipliers"), dict) else self._league_learning_bias(None)
+        league_learning_multipliers = league_learning_bundle.get("learning_multipliers") if isinstance(league_learning_bundle.get("learning_multipliers"), dict) else {}
+        selected_learning_multipliers = league_learning_multipliers or overall_learning_multipliers
         recommendations = list(league_learning_bundle.get("recommendations") or []) + list(learning_context.get("recommendations") or [])
         overall_score_bias = learning_context.get("score_bias") if isinstance(learning_context.get("score_bias"), dict) else {}
         overall_ou_bias = learning_context.get("over_under_bias") if isinstance(learning_context.get("over_under_bias"), dict) else {}
@@ -890,6 +942,8 @@ class PredictionReviewLearningService:
             "three_layer_outcome_review": selected_three_layer_review,
             "score_bias": score_bias,
             "over_under_bias": ou_bias,
+            "learning_multipliers": selected_learning_multipliers,
+            "learning_multiplier_scope": "league" if league_learning_multipliers else "overall",
             "score_bias_scope": "league" if use_league_score_bias else "overall",
             "over_under_bias_scope": "league" if use_league_ou_bias else "overall",
             "recommendations": deduped_recommendations[:5],

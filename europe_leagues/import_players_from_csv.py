@@ -8,7 +8,7 @@ Why CSV:
 - User provides a CSV/JSON export; we convert it into the project's players schema.
 
 CSV columns (header required):
-- league_code: premier_league / la_liga / bundesliga / serie_a / ligue_1  (optional if --league is given)
+- league_code: premier_league / la_liga / bundesliga / serie_a / ligue_1 / world_cup  (optional if --league is given)
 - team: team name in Chinese, must match existing `<league>/players/<team>.json` filename
 - player_name: required
 - player_name_cn: optional, preferred display name in Chinese; if present,
@@ -42,6 +42,7 @@ LEAGUE_NAME_CN = {
     "bundesliga": "德甲",
     "serie_a": "意甲",
     "ligue_1": "法甲",
+    "world_cup": "世界杯",
 }
 
 
@@ -149,7 +150,17 @@ def import_csv(csv_path: Path, league_override: Optional[str]) -> Dict[str, int]
                     p["expected_return"] = expected_return
 
                 # Keep optional extra fields if present in CSV
-                for extra_key in ("number", "height_cm", "foot", "minutes", "starts"):
+                for extra_key in (
+                    "number",
+                    "height_cm",
+                    "foot",
+                    "minutes",
+                    "starts",
+                    "club",
+                    "caps",
+                    "announcement_date",
+                    "source",
+                ):
                     if extra_key in r and _to_str(r.get(extra_key)):
                         p[extra_key] = _to_str(r.get(extra_key))
 

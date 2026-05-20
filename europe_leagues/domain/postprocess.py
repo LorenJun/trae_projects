@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from domain.review_bias import ReviewBiasService
 from domain.review_learning import PredictionReviewLearningService
 
 
@@ -17,8 +18,9 @@ OUTCOME_LABELS = (
 
 
 class PredictionPostprocessService:
-    def __init__(self, league_config: Dict[str, Dict[str, Any]]):
+    def __init__(self, league_config: Dict[str, Dict[str, Any]], base_dir: Optional[str] = None):
         self.league_config = league_config
+        self.review_bias = ReviewBiasService(league_config, base_dir)
 
     @staticmethod
     def _safe_float(value: Any) -> Optional[float]:
@@ -290,6 +292,21 @@ class PredictionPostprocessService:
             pass
         return over_under
 
+    def apply_review_over_under_adjustment(
+        self,
+        *,
+        over_under: Dict[str, Any],
+        league_code: Optional[str],
+        review_learning: Optional[Dict[str, Any]],
+        match_intelligence: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        return self.review_bias.apply_review_over_under_adjustment(
+            over_under=over_under,
+            league_code=league_code,
+            review_learning=review_learning,
+            match_intelligence=match_intelligence,
+        )
+
     @staticmethod
     def build_retrieved_memory_explanation(retrieved_memory: Optional[Dict[str, Any]]) -> str:
         memory = retrieved_memory if isinstance(retrieved_memory, dict) else {}
@@ -555,14 +572,26 @@ class PredictionPostprocessService:
             'three_layer_key': f'{predicted_winner}:{handicap_depth_bucket}:{euro_support_bucket}' if predicted_winner else '',
         }
 
+    @staticmethod
+    def _outcome_shift_value(block: Optional[Dict[str, Any]], key: str) -> float:
+        if not isinstance(block, dict):
+            return 0.0
+        try:
+            return max(0.0, float(block.get(key) or 0.0))
+        except Exception:
+            return 0.0
+
     def apply_review_outcome_adjustment(
         self,
         *,
         final_probabilities: Dict[str, float],
+        league_code: Optional[str],
         strength_diff: Any,
         asian_handicap: Optional[Dict[str, Any]],
         current_odds: Optional[Dict[str, Any]],
         review_learning: Optional[Dict[str, Any]],
+        match_intelligence: Optional[Dict[str, Any]] = None,
+        upset_potential: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, float], Dict[str, Any]]:
         probabilities = self._normalize_prob_triplet(final_probabilities or {})
         ranked = sorted(probabilities.items(), key=lambda item: item[1], reverse=True)
@@ -584,6 +613,10 @@ class PredictionPostprocessService:
         three_layer_review = learning.get('three_layer_outcome_review') if isinstance(learning.get('three_layer_outcome_review'), dict) else {}
         matched_stratified = stratified_review.get(context.get('stratified_key')) if isinstance(stratified_review.get(context.get('stratified_key')), dict) else {}
         matched_three_layer = three_layer_review.get(context.get('three_layer_key')) if isinstance(three_layer_review.get(context.get('three_layer_key')), dict) else {}
+        outcome_bias = self.review_bias.section('outcome', league_code)
+        context_floors = outcome_bias.get('context_floors') if isinstance(outcome_bias.get('context_floors'), dict) else {}
+        league_tag_bias = outcome_bias.get('league_tag_bias') if isinstance(outcome_bias.get('league_tag_bias'), dict) else {}
+        scenario_shifts = outcome_bias.get('scenario_shifts') if isinstance(outcome_bias.get('scenario_shifts'), dict) else {}
         signals: List[str] = []
         draw_shift = 0.0
         away_shift = 0.0
@@ -592,7 +625,11 @@ class PredictionPostprocessService:
         runner_up = float(sorted((value for key, value in probabilities.items() if key != top_key), reverse=True)[0] if len(probabilities) > 1 else 0.0)
         top_lead = top_prob - runner_up
         home_bias_gate = {'qualified': False, 'evidence': []}
-        if top_key == 'home_win' and '主胜偏置' in ' '.join(str(item) for item in (league_review.get('league_tags') or [])):
+        league_tags_text = ' '.join(str(item) for item in (league_review.get('league_tags') or []))
+        home_bias_cfg = league_tag_bias.get('home_bias') if isinstance(league_tag_bias.get('home_bias'), dict) else {}
+        draw_bias_cfg = league_tag_bias.get('draw_bias') if isinstance(league_tag_bias.get('draw_bias'), dict) else {}
+        away_upset_bias_cfg = league_tag_bias.get('away_upset_bias') if isinstance(league_tag_bias.get('away_upset_bias'), dict) else {}
+        if top_key == 'home_win' and '主胜偏置' in league_tags_text:
             if top_lead < 0.14:
                 home_bias_gate['evidence'].append('limited_probability_edge')
             if context.get('strength_diff') is None or abs(float(context.get('strength_diff') or 0.0)) < 14:
@@ -602,14 +639,14 @@ class PredictionPostprocessService:
             if top_lead >= 0.18:
                 home_bias_gate['qualified'] = True
             if home_bias_gate['qualified']:
-                draw_shift = max(draw_shift, 0.01)
-                away_shift = max(away_shift, 0.008)
+                draw_shift = max(draw_shift, self._outcome_shift_value(home_bias_cfg, 'draw_shift'))
+                away_shift = max(away_shift, self._outcome_shift_value(home_bias_cfg, 'upset_shift'))
                 signals.append('review-home-bias-correction')
-        if '平局防守不足' in ' '.join(str(item) for item in (league_review.get('league_tags') or [])) and top_key in {'home_win', 'away_win'}:
-            draw_shift = max(draw_shift, 0.01)
+        if '平局防守不足' in league_tags_text and top_key in {'home_win', 'away_win'}:
+            draw_shift = max(draw_shift, self._outcome_shift_value(draw_bias_cfg, 'draw_shift'))
             signals.append('review-draw-gap-correction')
-        if '客胜冷门敏感度不足' in ' '.join(str(item) for item in (league_review.get('league_tags') or [])) and top_key == 'home_win':
-            away_shift = max(away_shift, 0.008)
+        if '客胜冷门敏感度不足' in league_tags_text and top_key == 'home_win':
+            away_shift = max(away_shift, self._outcome_shift_value(away_upset_bias_cfg, 'upset_shift'))
             signals.append('review-away-upset-correction')
         if matched_stratified:
             draw_shift = max(draw_shift, float(matched_stratified.get('recommended_draw_shift') or 0.0))
@@ -625,22 +662,66 @@ class PredictionPostprocessService:
                 away_shift = max(away_shift, float(matched_three_layer.get('recommended_upset_shift') or 0.0))
             elif top_key == 'away_win':
                 home_shift = max(home_shift, float(matched_three_layer.get('recommended_upset_shift') or 0.0))
-        if context.get('scenario_name'):
-            signals.append(f"review-scenario-{context.get('scenario_name')}")
+        matched_floor = context_floors.get(context.get('stratified_key')) if isinstance(context_floors.get(context.get('stratified_key')), dict) else {}
+        matched_three_layer_floor = context_floors.get(context.get('three_layer_key')) if isinstance(context_floors.get(context.get('three_layer_key')), dict) else {}
+        for floor in (matched_floor, matched_three_layer_floor):
+            if not floor:
+                continue
+            draw_shift = max(draw_shift, float(floor.get('draw_shift') or 0.0))
+            if top_key == 'home_win':
+                away_shift = max(away_shift, float(floor.get('upset_shift') or 0.0))
+            elif top_key == 'away_win':
+                home_shift = max(home_shift, float(floor.get('upset_shift') or 0.0))
+            if float(floor.get('draw_shift') or 0.0) > 0 or float(floor.get('upset_shift') or 0.0) > 0:
+                signals.append('review-bias-config-floor')
+        scenario_name = context.get('scenario_name')
+        if scenario_name:
+            signals.append(f"review-scenario-{scenario_name}")
         heuristic_applied = False
-        if context.get('scenario_name') == 'strong_home_shallow_line' and top_key == 'home_win':
-            draw_shift = max(draw_shift, 0.012)
-            away_shift = max(away_shift, 0.008)
+        scenario_cfg = scenario_shifts.get(scenario_name) if isinstance(scenario_shifts.get(scenario_name), dict) else {}
+        if scenario_name == 'strong_home_shallow_line' and top_key == 'home_win':
+            draw_shift = max(draw_shift, self._outcome_shift_value(scenario_cfg, 'draw_shift'))
+            away_shift = max(away_shift, self._outcome_shift_value(scenario_cfg, 'upset_shift'))
             heuristic_applied = not bool(matched_three_layer)
-        elif context.get('scenario_name') == 'away_shallow_market_doubt' and top_key == 'away_win':
-            draw_shift = max(draw_shift, 0.014)
-            home_shift = max(home_shift, 0.008)
+        elif scenario_name == 'away_shallow_market_doubt' and top_key == 'away_win':
+            draw_shift = max(draw_shift, self._outcome_shift_value(scenario_cfg, 'draw_shift'))
+            home_shift = max(home_shift, self._outcome_shift_value(scenario_cfg, 'home_shift'))
             heuristic_applied = not bool(matched_three_layer)
-        elif context.get('scenario_name') == 'balanced_draw_guard' and top_key in {'home_win', 'away_win'}:
-            draw_shift = max(draw_shift, 0.014)
+        elif scenario_name == 'balanced_draw_guard' and top_key in {'home_win', 'away_win'}:
+            draw_shift = max(draw_shift, self._outcome_shift_value(scenario_cfg, 'draw_shift'))
             heuristic_applied = not bool(matched_three_layer)
         if heuristic_applied:
             signals.append('review-three-layer-heuristic')
+
+        motivation_risk = self.review_bias.extract_motivation_risk(
+            upset_potential=upset_potential,
+            match_intelligence=match_intelligence,
+        )
+        motivation_bias_cfg = outcome_bias.get('motivation_risk') if isinstance(outcome_bias.get('motivation_risk'), dict) else {}
+        if motivation_bias_cfg.get('enabled', True) and isinstance(motivation_risk, dict) and motivation_risk.get('available'):
+            risk_score = float(motivation_risk.get('score') or 0.0)
+            supports_upset = bool(motivation_risk.get('supports_upset'))
+            pressure_side = str(motivation_risk.get('pressure_side') or '').strip()
+            favored_side = str(motivation_risk.get('favored_side') or '').strip()
+            min_score = float(motivation_bias_cfg.get('min_score') or 8.0)
+            side_key_map = {'home': 'home_win', 'away': 'away_win'}
+            if supports_upset and risk_score >= min_score and side_key_map.get(favored_side) == top_key:
+                draw_shift = max(
+                    draw_shift,
+                    min(
+                        float(motivation_bias_cfg.get('max_draw_shift') or 0.02),
+                        float(motivation_bias_cfg.get('base_draw_shift') or 0.006) + risk_score * 0.0005,
+                    ),
+                )
+                side_shift = min(
+                    float(motivation_bias_cfg.get('max_side_shift') or 0.024),
+                    float(motivation_bias_cfg.get('base_side_shift') or 0.008) + risk_score * 0.0008,
+                )
+                if pressure_side == 'away':
+                    away_shift = max(away_shift, side_shift)
+                elif pressure_side == 'home':
+                    home_shift = max(home_shift, side_shift)
+                signals.append('review-motivation-risk-correction')
         adjusted = dict(probabilities)
         if top_key == 'home_win':
             adjusted = self._shift_from_side_to_targets(adjusted, from_key='home_win', draw_shift=draw_shift, away_shift=away_shift)
@@ -652,6 +733,11 @@ class PredictionPostprocessService:
             'reason': 'applied' if adjusted != probabilities else 'three_layer_evaluated_no_adjustment',
             'three_layer_evaluated': True,
             'home_bias_gate': home_bias_gate,
+            'applied_shift': {
+                'draw_shift': round(float(draw_shift), 4),
+                'away_shift': round(float(away_shift), 4),
+                'home_shift': round(float(home_shift), 4),
+            },
             'stratified_review': {
                 'handicap_depth_bucket': context.get('handicap_depth_bucket'),
                 'strength_gap_bucket': context.get('strength_gap_bucket'),
@@ -659,6 +745,13 @@ class PredictionPostprocessService:
                 'matched': matched_stratified,
             },
             'three_layer_context': context,
+            'motivation_risk': {
+                'available': bool(isinstance(motivation_risk, dict) and motivation_risk.get('available')),
+                'supports_upset': bool(isinstance(motivation_risk, dict) and motivation_risk.get('supports_upset')),
+                'pressure_side': str(motivation_risk.get('pressure_side') or '') if isinstance(motivation_risk, dict) else '',
+                'favored_side': str(motivation_risk.get('favored_side') or '') if isinstance(motivation_risk, dict) else '',
+                'score': float(motivation_risk.get('score') or 0.0) if isinstance(motivation_risk, dict) else 0.0,
+            },
         }
         return adjusted, diag
 
@@ -875,6 +968,7 @@ class PredictionPostprocessService:
         top_scores: List[Tuple[str, float]],
         predicted_outcome_label: str,
         *,
+        league_code: Optional[str] = None,
         ranked_probabilities: Optional[List[Tuple[str, float]]] = None,
         home_lambda: float,
         away_lambda: float,
@@ -883,6 +977,8 @@ class PredictionPostprocessService:
         confidence: float,
         current_odds: Optional[Dict[str, Any]],
         review_learning: Optional[Dict[str, Any]],
+        match_intelligence: Optional[Dict[str, Any]] = None,
+        upset_potential: Optional[Dict[str, Any]] = None,
         return_diag: bool = False,
         limit: int = 3,
     ) -> Any:
@@ -911,6 +1007,26 @@ class PredictionPostprocessService:
             secondary_label = str(ranked_outcomes[1][0]).strip()
             if secondary_label and secondary_label not in allowed_outcomes:
                 allowed_outcomes.append(secondary_label)
+        motivation_risk: Dict[str, Any] = {}
+        if isinstance(upset_potential, dict) and isinstance(upset_potential.get('motivation_risk'), dict):
+            motivation_risk = upset_potential.get('motivation_risk') or {}
+        elif isinstance(match_intelligence, dict):
+            motivation = match_intelligence.get('motivation') if isinstance(match_intelligence.get('motivation'), dict) else {}
+            if isinstance(motivation.get('risk_signal'), dict):
+                motivation_risk = motivation.get('risk_signal') or {}
+        score_bias_cfg = self.review_bias.section('score', league_code)
+        motivation_side_map = {'home': '主胜', 'away': '客胜'}
+        motivation_pressure_label = motivation_side_map.get(str(motivation_risk.get('pressure_side') or '').strip(), '')
+        motivation_min_score = float(score_bias_cfg.get('motivation_risk_min_score') or 8.0)
+        if (
+            motivation_pressure_label
+            and bool(motivation_risk.get('supports_upset'))
+            and float(motivation_risk.get('score') or 0.0) >= motivation_min_score
+        ):
+            if '平局' not in allowed_outcomes:
+                allowed_outcomes.append('平局')
+            if motivation_pressure_label not in allowed_outcomes:
+                allowed_outcomes.append(motivation_pressure_label)
         directional_scores = [
             (score, prob)
             for score, prob in scores
@@ -928,7 +1044,13 @@ class PredictionPostprocessService:
         line = self._safe_float((over_under or {}).get('line')) if isinstance(over_under, dict) else None
         over_prob = self._safe_float((over_under or {}).get('over')) if isinstance(over_under, dict) else None
         under_prob = self._safe_float((over_under or {}).get('under')) if isinstance(over_under, dict) else None
-        open_match = bool((line is not None and line >= 2.75) or (over_prob is not None and under_prob is not None and over_prob > under_prob) or (home_lambda + away_lambda >= 2.8))
+        open_match_total_threshold = float(score_bias_cfg.get('open_match_total_threshold') or 2.8)
+        strong_open_match_total_threshold = float(score_bias_cfg.get('strong_open_match_total_threshold') or max(3.0, open_match_total_threshold))
+        open_match = bool(
+            (line is not None and line >= 2.75)
+            or (over_prob is not None and under_prob is not None and over_prob > under_prob)
+            or (home_lambda + away_lambda >= open_match_total_threshold)
+        )
         signals: List[str] = []
         filtered_out_count = len(scores) - len(directional_scores)
         if filtered_out_count > 0:
@@ -941,19 +1063,46 @@ class PredictionPostprocessService:
                     adjusted[score] *= factor
             signals.append('score-three-layer-strong_home_shallow_line')
         low_total_penalty = float(score_bias.get('recommended_low_total_penalty') or 0.0)
+        home_open_template = score_bias_cfg.get('home_open_template') if isinstance(score_bias_cfg.get('home_open_template'), dict) else {}
+        away_open_template = score_bias_cfg.get('away_open_template') if isinstance(score_bias_cfg.get('away_open_template'), dict) else {}
+        draw_open_template = score_bias_cfg.get('draw_open_template') if isinstance(score_bias_cfg.get('draw_open_template'), dict) else {}
         if predicted_outcome_label == '主胜' and open_match:
-            for score, factor in {
-                '1-0': max(0.78, 0.88 - low_total_penalty),
-                '2-0': max(0.84, 0.94 - low_total_penalty * 0.5),
-                '2-1': 1.07 + low_total_penalty,
-                '3-1': 1.05 + low_total_penalty * 0.7,
-                '3-0': 0.94,
-            }.items():
+            home_template = {
+                '1-0': max(0.76, float(home_open_template.get('1-0') or 0.88) - low_total_penalty),
+                '2-0': max(0.84, float(home_open_template.get('2-0') or 0.94) - low_total_penalty * 0.5),
+                '2-1': float(home_open_template.get('2-1') or 1.07) + low_total_penalty,
+                '3-1': float(home_open_template.get('3-1') or 1.05) + low_total_penalty * 0.7,
+                '3-0': float(home_open_template.get('3-0') or 0.94),
+            }
+            if home_lambda + away_lambda >= strong_open_match_total_threshold:
+                home_template['3-0'] = max(home_template['3-0'], 1.04)
+                home_template['3-1'] = max(home_template['3-1'], 1.14)
+            for score, factor in home_template.items():
+                if score in adjusted:
+                    adjusted[score] *= factor
+            signals.append('score-template-cap')
+        if predicted_outcome_label == '客胜' and open_match:
+            away_template = {
+                '0-1': max(0.76, float(away_open_template.get('0-1') or 0.88) - low_total_penalty),
+                '0-2': max(0.84, float(away_open_template.get('0-2') or 0.95) - low_total_penalty * 0.4),
+                '1-2': float(away_open_template.get('1-2') or 1.07) + low_total_penalty,
+                '1-3': float(away_open_template.get('1-3') or 1.05) + low_total_penalty * 0.7,
+                '0-3': float(away_open_template.get('0-3') or 0.96),
+            }
+            if home_lambda + away_lambda >= strong_open_match_total_threshold:
+                away_template['0-3'] = max(away_template['0-3'], 1.04)
+                away_template['1-3'] = max(away_template['1-3'], 1.14)
+            for score, factor in away_template.items():
                 if score in adjusted:
                     adjusted[score] *= factor
             signals.append('score-template-cap')
         if predicted_outcome_label == '平局' and open_match:
-            for score, factor in {'0-0': 0.82, '1-1': 0.9, '2-2': 1.14, '3-3': 1.04}.items():
+            for score, factor in {
+                '0-0': float(draw_open_template.get('0-0') or 0.82),
+                '1-1': float(draw_open_template.get('1-1') or 0.9),
+                '2-2': float(draw_open_template.get('2-2') or 1.14),
+                '3-3': float(draw_open_template.get('3-3') or 1.04),
+            }.items():
                 if score in adjusted:
                     adjusted[score] *= factor
             signals.append('score-template-cap')
@@ -1032,6 +1181,12 @@ class PredictionPostprocessService:
             'filtered_out_count': filtered_out_count,
             'allowed_outcomes': allowed_outcomes,
             'double_pick': double_pick,
+            'motivation_risk': {
+                'available': bool(isinstance(motivation_risk, dict) and motivation_risk.get('available')),
+                'supports_upset': bool(isinstance(motivation_risk, dict) and motivation_risk.get('supports_upset')),
+                'pressure_side': str(motivation_risk.get('pressure_side') or '') if isinstance(motivation_risk, dict) else '',
+                'score': float(motivation_risk.get('score') or 0.0) if isinstance(motivation_risk, dict) else 0.0,
+            },
             'secondary_gap': secondary_gap,
             'secondary_probability': secondary_probability,
             'coverage_profile': {
@@ -1051,11 +1206,14 @@ class PredictionPostprocessService:
         self,
         total_goals: Dict[str, Any],
         *,
+        league_code: Optional[str] = None,
         predicted_outcome_label: str,
         strength_diff: Any,
         current_odds: Optional[Dict[str, Any]],
         review_learning: Optional[Dict[str, Any]],
         total_lambda: float,
+        over_under: Optional[Dict[str, Any]] = None,
+        match_intelligence: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if not isinstance(total_goals, dict) or not total_goals.get('available'):
             return total_goals, {'applied': False, 'reason': 'unavailable_total_goals'}
@@ -1076,6 +1234,22 @@ class PredictionPostprocessService:
             buckets['1'] = buckets.get('1', 0.0) + take * 0.7
             buckets['2'] = buckets.get('2', 0.0) + take * 0.3
             signals.append('total-goals-three-layer-draw_market_balance')
+        adjusted_payload = dict(total_goals)
+        adjusted_payload['buckets'] = {key: float(value) for key, value in buckets.items()}
+        adjusted_payload['top_totals'] = total_goals.get('top_totals') or []
+        adjusted_payload, review_bias_diag = self.review_bias.apply_review_total_goals_adjustment(
+            total_goals=adjusted_payload,
+            league_code=league_code,
+            review_learning=review_learning,
+            over_under=over_under,
+            match_intelligence=match_intelligence,
+        )
+        if isinstance(review_bias_diag, dict) and review_bias_diag.get('applied'):
+            buckets = {
+                str(key): float(value or 0.0)
+                for key, value in (adjusted_payload.get('buckets') or {}).items()
+            }
+            signals.extend(review_bias_diag.get('signals') or [])
         total = sum(buckets.values())
         if total > 0:
             for key in list(buckets.keys()):
@@ -1088,6 +1262,7 @@ class PredictionPostprocessService:
             'applied': bool(signals),
             'signals': signals,
             'scenario_name': context.get('scenario_name'),
+            'review_bias': review_bias_diag,
         }
         return adjusted, diag
 

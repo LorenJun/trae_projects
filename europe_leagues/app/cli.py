@@ -595,7 +595,7 @@ def get_openclaw_dependency_report():
         "openclaw_full_ready": python_ok and not missing_dependencies,
         "bootstrap_commands": install_commands,
         "okooo_driver_status": driver_status,
-        "preferred_okooo_driver": "local-chrome" if driver_status["local-chrome"]["available"] else "browser-use",
+        "preferred_okooo_driver": "local-chrome",
         "chrome_path": DEFAULT_CHROME_PATH,
     }
 
@@ -1372,15 +1372,15 @@ def run_openclaw_health_check(args):
         report["browser_use_python_module_available"] = bool(driver_status["browser-use"]["module_available"])
         report["browser_use_cli_available"] = bool(driver_status["browser-use"]["cli_available"])
         report["local_chrome_available"] = bool(driver_status["local-chrome"]["available"])
-        report["preferred_okooo_driver"] = "local-chrome" if driver_status["local-chrome"]["available"] else "browser-use"
+        report["preferred_okooo_driver"] = "local-chrome"
         report["league_codes"] = list(LEAGUE_CONFIG.keys())
         report["scrapers"] = [scraper.name for scraper in collector.scrapers]
         report["openclaw_dependency_report"] = get_openclaw_dependency_report()
-        if not driver_status["browser-use"]["available"]:
+        if not driver_status["local-chrome"]["available"]:
             report["recommended_action"] = {
-                "owner": "openclaw",
-                "reason": f"browser-use 不完整可用：{driver_status['browser-use']['reason']}；预测主链将优先使用 local-chrome",
-                "install_command": f"bash {os.path.join(PROJECT_ROOT, 'scripts', 'setup_openclaw_env.sh')}",
+                "owner": "local-chrome",
+                "reason": f"local-chrome 不可用：{driver_status['local-chrome']['reason']}；当前正式预测链默认依赖 local-chrome",
+                "install_command": "请先安装/修复本机 Google Chrome，并确认远程调试可用",
             }
         if driver_status["local-chrome"]["available"]:
             report["driver_hint"] = "已检测到 local-chrome 可用，主预测链默认优先走 local-chrome 以减少等待时间"
@@ -1604,16 +1604,6 @@ def build_parser():
 
     subparsers = parser.add_subparsers(title="子命令", dest="command")
 
-    parser_enhanced = subparsers.add_parser("enhanced", help="[legacy] 运行增强版预测系统")
-    parser_enhanced.add_argument("-l", "--league", help="指定联赛代码")
-    parser_enhanced.add_argument("-d", "--days", type=int, default=3, help="预测天数（默认3）")
-
-    subparsers.add_parser("original", help="[legacy] 运行原始版预测系统")
-    subparsers.add_parser("ml-test", help="[legacy] 测试机器学习模型")
-    subparsers.add_parser("results", help="[legacy] 结果管理交互式菜单")
-    subparsers.add_parser("show-accuracy", help="[legacy] 显示准确率统计")
-    subparsers.add_parser("update-accuracy", help="[legacy] 更新准确率统计")
-
     parser_list = subparsers.add_parser("list-leagues", help="列出联赛，适合自动化调用")
     add_json_flag(parser_list)
 
@@ -1624,8 +1614,8 @@ def build_parser():
     parser_predict_match.add_argument("--date", required=True, help="比赛日期 YYYY-MM-DD")
     parser_predict_match.add_argument("--match-id", default="", help="澳客 MatchID（可选；不传则自动搜索）")
     parser_predict_match.add_argument("--league-hint", default="", help="澳客联赛提示（可选，例如 西甲/英超）")
-    parser_predict_match.add_argument("--okooo-driver", default="local-chrome", help="刷新澳客快照的 driver（默认 local-chrome，更快；不可用时再回退）")
-    parser_predict_match.add_argument("--okooo-headed", action="store_true", help="browser-use 以有头模式运行（仅 browser-use 生效，更稳但更慢）")
+    parser_predict_match.add_argument("--okooo-driver", default="local-chrome", help="刷新澳客快照的 driver（默认 local-chrome；browser-use 仅显式调试时使用）")
+    parser_predict_match.add_argument("--okooo-headed", action="store_true", help="browser-use 以有头模式运行（仅显式指定 browser-use 时生效）")
     parser_predict_match.add_argument("--time", dest="match_time", default="", help="比赛时间 HH:MM（用于赛程精准定位）")
     parser_predict_match.add_argument("--no-refresh-odds", action="store_true", help="不刷新澳客实时赔率（仅使用本地/空赔率）")
     parser_predict_match.add_argument("--context-file", default="", help="补充信息 JSON 文件（战术/战意/首发/临场等）")
@@ -1639,8 +1629,8 @@ def build_parser():
     parser_predict_match_lite.add_argument("--away-team", required=True, help="客队名称")
     parser_predict_match_lite.add_argument("--date", required=True, help="比赛日期 YYYY-MM-DD")
     parser_predict_match_lite.add_argument("--match-id", default="", help="澳客 MatchID（可选；不传则由快照脚本自行定位）")
-    parser_predict_match_lite.add_argument("--okooo-driver", default="local-chrome", help="抓取澳客快照的 driver（默认 local-chrome）")
-    parser_predict_match_lite.add_argument("--okooo-headed", action="store_true", help="browser-use 以有头模式运行（更稳但更慢）")
+    parser_predict_match_lite.add_argument("--okooo-driver", default="local-chrome", help="抓取澳客快照的 driver（默认 local-chrome；browser-use 仅显式调试时使用）")
+    parser_predict_match_lite.add_argument("--okooo-headed", action="store_true", help="browser-use 以有头模式运行（仅显式指定 browser-use 时生效）")
     parser_predict_match_lite.add_argument("--time", dest="match_time", default="", help="比赛时间 HH:MM（用于赛程精准定位）")
     parser_predict_match_lite.add_argument("--no-write", action="store_true", help="只输出预测结果，不写入 MEMORY.md")
     add_json_flag(parser_predict_match_lite)
@@ -1770,6 +1760,53 @@ def build_parser():
 
 
 def main():
+    legacy_command = sys.argv[1] if len(sys.argv) > 1 else ""
+    if legacy_command in {"enhanced", "original", "ml-test", "results", "show-accuracy", "update-accuracy"}:
+        os.chdir(EUROPE_LEAGUES_ROOT)
+        if legacy_command == "enhanced":
+            legacy_parser = argparse.ArgumentParser(add_help=False)
+            legacy_parser.add_argument("-l", "--league", help="指定联赛代码")
+            legacy_parser.add_argument("-d", "--days", type=int, default=3, help="预测天数（默认3）")
+            legacy_args = legacy_parser.parse_args(sys.argv[2:])
+            print_header()
+            run_enhanced_system(legacy_args.league, legacy_args.days)
+            return
+        if legacy_command == "original":
+            print_header()
+            run_original_system()
+            return
+        if legacy_command == "ml-test":
+            print_header()
+            run_ml_test()
+            return
+        if legacy_command == "results":
+            print_header()
+            from result_manager import interactive_update
+
+            interactive_update()
+            return
+        if legacy_command == "show-accuracy":
+            print_header()
+            from result_manager import ResultManager, print_accuracy_report
+
+            manager = ResultManager()
+            try:
+                with open(manager.accuracy_file, "r", encoding="utf-8") as f:
+                    stats = json.load(f)
+                    print_accuracy_report(stats)
+            except Exception:
+                stats = manager.update_accuracy_stats()
+                print_accuracy_report(stats)
+            return
+        if legacy_command == "update-accuracy":
+            print_header()
+            from result_manager import ResultManager, print_accuracy_report
+
+            manager = ResultManager()
+            stats = manager.update_accuracy_stats()
+            print_accuracy_report(stats)
+            return
+
     parser = build_parser()
     args = parser.parse_args()
 
@@ -1780,40 +1817,7 @@ def main():
         show_interactive_menu()
         return
 
-    if args.command == "enhanced":
-        print_header()
-        run_enhanced_system(args.league, args.days)
-    elif args.command == "original":
-        print_header()
-        run_original_system()
-    elif args.command == "ml-test":
-        print_header()
-        run_ml_test()
-    elif args.command == "results":
-        print_header()
-        from result_manager import interactive_update
-
-        interactive_update()
-    elif args.command == "show-accuracy":
-        print_header()
-        from result_manager import ResultManager, print_accuracy_report
-
-        manager = ResultManager()
-        try:
-            with open(manager.accuracy_file, "r", encoding="utf-8") as f:
-                stats = json.load(f)
-                print_accuracy_report(stats)
-        except Exception:
-            stats = manager.update_accuracy_stats()
-            print_accuracy_report(stats)
-    elif args.command == "update-accuracy":
-        print_header()
-        from result_manager import ResultManager, print_accuracy_report
-
-        manager = ResultManager()
-        stats = manager.update_accuracy_stats()
-        print_accuracy_report(stats)
-    elif args.command == "list-leagues":
+    if args.command == "list-leagues":
         run_openclaw_list_leagues(args.json)
     elif args.command == "predict-match":
         run_openclaw_predict_match(args)
