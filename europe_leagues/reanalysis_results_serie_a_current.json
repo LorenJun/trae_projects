@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-24T11:29:24.535479",
+  "generated_at": "2026-05-24T19:02:24.920674",
   "scope": {
     "league": "serie_a",
     "days": 30,
@@ -8,32 +8,32 @@
   },
   "summary": {
     "replayed_matches": 3,
-    "baseline_win_hits": 1,
-    "replay_win_hits": 1,
+    "baseline_win_hits": 2,
+    "replay_win_hits": 2,
     "baseline_score_hits": 1,
     "replay_score_hits": 1,
-    "baseline_away_predictions": 1,
-    "replay_away_predictions": 1,
+    "baseline_away_predictions": 2,
+    "replay_away_predictions": 2,
     "baseline_top1_1_0": 0,
-    "replay_top1_1_0": 1,
-    "baseline_home_to_away_errors": 2,
-    "replay_home_to_away_errors": 0,
+    "replay_top1_1_0": 0,
+    "baseline_home_to_away_errors": 1,
+    "replay_home_to_away_errors": 1,
     "baseline_home_to_draw_errors": 0,
     "replay_home_to_draw_errors": 0,
-    "improved_matches": 1,
-    "regressed_matches": 1,
+    "improved_matches": 0,
+    "regressed_matches": 0,
     "snapshot_backed_matches": 3,
     "blocked_predictions": 0,
     "baseline_confusion": {
-      "home->away": 2,
-      "away->away": 1
+      "home->away": 1,
+      "away->away": 2
     },
     "replay_confusion": {
-      "draw->away": 2,
-      "away->away": 1
+      "home->away": 1,
+      "away->away": 2
     },
-    "baseline_win_accuracy": 33.33,
-    "replay_win_accuracy": 33.33,
+    "baseline_win_accuracy": 66.67,
+    "replay_win_accuracy": 66.67,
     "baseline_score_accuracy": 33.33,
     "replay_score_accuracy": 33.33,
     "skipped_matches": 6
@@ -42,119 +42,37 @@
     "serie_a": {
       "summary": {
         "replayed_matches": 3,
-        "baseline_win_hits": 1,
-        "replay_win_hits": 1,
+        "baseline_win_hits": 2,
+        "replay_win_hits": 2,
         "baseline_score_hits": 1,
         "replay_score_hits": 1,
-        "baseline_away_predictions": 1,
-        "replay_away_predictions": 1,
+        "baseline_away_predictions": 2,
+        "replay_away_predictions": 2,
         "baseline_top1_1_0": 0,
-        "replay_top1_1_0": 1,
-        "baseline_home_to_away_errors": 2,
-        "replay_home_to_away_errors": 0,
+        "replay_top1_1_0": 0,
+        "baseline_home_to_away_errors": 1,
+        "replay_home_to_away_errors": 1,
         "baseline_home_to_draw_errors": 0,
         "replay_home_to_draw_errors": 0,
-        "improved_matches": 1,
-        "regressed_matches": 1,
+        "improved_matches": 0,
+        "regressed_matches": 0,
         "snapshot_backed_matches": 3,
         "blocked_predictions": 0,
         "baseline_confusion": {
-          "home->away": 2,
-          "away->away": 1
+          "home->away": 1,
+          "away->away": 2
         },
         "replay_confusion": {
-          "draw->away": 2,
-          "away->away": 1
+          "home->away": 1,
+          "away->away": 2
         },
-        "baseline_win_accuracy": 33.33,
-        "replay_win_accuracy": 33.33,
+        "baseline_win_accuracy": 66.67,
+        "replay_win_accuracy": 66.67,
         "baseline_score_accuracy": 33.33,
         "replay_score_accuracy": 33.33,
         "skipped_matches": 6
       },
       "changed_preview": [
-        {
-          "match_id": "serie_a_20260509_卡利亚里_乌迪内斯",
-          "league": "serie_a",
-          "match_date": "2026-05-09",
-          "teams": "卡利亚里 vs 乌迪内斯",
-          "actual_score": "0-2",
-          "actual_winner": "客胜",
-          "baseline_predicted_winner": "主胜",
-          "replay_predicted_winner": "平局",
-          "baseline_top_scores": [
-            "0-0",
-            "1-0"
-          ],
-          "replay_top_scores": [
-            "0-0",
-            "1-0"
-          ],
-          "review_outcome_signals": [
-            "review-scenario-balanced_draw_guard",
-            "review-three-layer-heuristic"
-          ],
-          "draw_guard_signals": [
-            "draw_confirmation_gap_weak",
-            "draw_market_not_confirmed"
-          ],
-          "score_rerank_signals": [
-            "score-direction-filter",
-            "score-double-pick",
-            "score-market-low-tempo-guard",
-            "score-market-shallow-cap"
-          ],
-          "baseline_win_hit": false,
-          "replay_win_hit": false,
-          "improved": false,
-          "regressed": false
-        },
-        {
-          "match_id": "serie_a_20260510_莱切_尤文图斯",
-          "league": "serie_a",
-          "match_date": "2026-05-10",
-          "teams": "莱切 vs 尤文图斯",
-          "actual_score": "0-1",
-          "actual_winner": "客胜",
-          "baseline_predicted_winner": "主胜",
-          "replay_predicted_winner": "客胜",
-          "baseline_top_scores": [
-            "0-1",
-            "1-1"
-          ],
-          "replay_top_scores": [
-            "0-0",
-            "0-1"
-          ],
-          "review_outcome_signals": [
-            "review-stratified-handicap-strength-correction",
-            "review-bias-config-floor",
-            "review-narrow-away-bump"
-          ],
-          "draw_guard_signals": [
-            "draw_market_not_confirmed",
-            "away_upset_draw_confirmation_override",
-            "market_opposed_home_draw_confirmation_override",
-            "market_opposed_home_draw_excess_boost",
-            "narrow_away_strong_redirect_boost",
-            "away_upset_draw_excess_boost",
-            "market_opposed_redirect_draw_to_home",
-            "narrow_away_strong_redirect",
-            "away_upset_redirect_draw_to_away"
-          ],
-          "score_rerank_signals": [
-            "score-direction-filter",
-            "score-double-pick",
-            "score-template-cap",
-            "score-market-low-tempo-guard",
-            "score-review-conservative-correction",
-            "score-review-coverage-expansion"
-          ],
-          "baseline_win_hit": false,
-          "replay_win_hit": true,
-          "improved": true,
-          "regressed": false
-        },
         {
           "match_id": "serie_a_20260512_那不勒斯_博洛尼亚",
           "league": "serie_a",
@@ -163,119 +81,47 @@
           "actual_score": "2-3",
           "actual_winner": "客胜",
           "baseline_predicted_winner": "客胜",
-          "replay_predicted_winner": "平局",
+          "replay_predicted_winner": "客胜",
           "baseline_top_scores": [
-            "0-1",
             "0-0",
+            "1-1",
             "1-0",
             "2-0"
           ],
           "replay_top_scores": [
-            "1-0",
-            "0-0"
+            "0-1",
+            "1-2"
           ],
           "review_outcome_signals": [
-            "review-league-serie-a-soft-draw-away-blocked-home-top"
+            "review-league-serie-a-draw-to-away-relief",
+            "review-league-serie-a-soft-draw-away-entry",
+            "review-league-serie-a-upset-knowledge-retry"
           ],
           "draw_guard_signals": [
-            "draw_market_not_confirmed"
+            "draw_market_not_confirmed",
+            "serie_a_soft_draw_confirmation_override",
+            "serie_a_upset_knowledge_draw_confirmation_override",
+            "serie_a_upset_knowledge_draw_excess_boost",
+            "serie_a_soft_low_risk_draw_excess_boost",
+            "serie_a_soft_draw_excess_boost",
+            "serie_a_soft_low_risk_full_redirect",
+            "serie_a_soft_redirect_draw_to_away",
+            "away_upset_redirect_draw_to_away"
           ],
           "score_rerank_signals": [
             "score-direction-filter",
-            "score-double-pick",
-            "score-market-low-tempo-guard"
+            "score-market-low-tempo-guard",
+            "score-review-conservative-correction"
           ],
           "baseline_win_hit": true,
-          "replay_win_hit": false,
+          "replay_win_hit": true,
           "improved": false,
-          "regressed": true
+          "regressed": false
         }
       ]
     }
   },
   "changed_preview": [
-    {
-      "match_id": "serie_a_20260509_卡利亚里_乌迪内斯",
-      "league": "serie_a",
-      "match_date": "2026-05-09",
-      "teams": "卡利亚里 vs 乌迪内斯",
-      "actual_score": "0-2",
-      "actual_winner": "客胜",
-      "baseline_predicted_winner": "主胜",
-      "replay_predicted_winner": "平局",
-      "baseline_top_scores": [
-        "0-0",
-        "1-0"
-      ],
-      "replay_top_scores": [
-        "0-0",
-        "1-0"
-      ],
-      "review_outcome_signals": [
-        "review-scenario-balanced_draw_guard",
-        "review-three-layer-heuristic"
-      ],
-      "draw_guard_signals": [
-        "draw_confirmation_gap_weak",
-        "draw_market_not_confirmed"
-      ],
-      "score_rerank_signals": [
-        "score-direction-filter",
-        "score-double-pick",
-        "score-market-low-tempo-guard",
-        "score-market-shallow-cap"
-      ],
-      "baseline_win_hit": false,
-      "replay_win_hit": false,
-      "improved": false,
-      "regressed": false
-    },
-    {
-      "match_id": "serie_a_20260510_莱切_尤文图斯",
-      "league": "serie_a",
-      "match_date": "2026-05-10",
-      "teams": "莱切 vs 尤文图斯",
-      "actual_score": "0-1",
-      "actual_winner": "客胜",
-      "baseline_predicted_winner": "主胜",
-      "replay_predicted_winner": "客胜",
-      "baseline_top_scores": [
-        "0-1",
-        "1-1"
-      ],
-      "replay_top_scores": [
-        "0-0",
-        "0-1"
-      ],
-      "review_outcome_signals": [
-        "review-stratified-handicap-strength-correction",
-        "review-bias-config-floor",
-        "review-narrow-away-bump"
-      ],
-      "draw_guard_signals": [
-        "draw_market_not_confirmed",
-        "away_upset_draw_confirmation_override",
-        "market_opposed_home_draw_confirmation_override",
-        "market_opposed_home_draw_excess_boost",
-        "narrow_away_strong_redirect_boost",
-        "away_upset_draw_excess_boost",
-        "market_opposed_redirect_draw_to_home",
-        "narrow_away_strong_redirect",
-        "away_upset_redirect_draw_to_away"
-      ],
-      "score_rerank_signals": [
-        "score-direction-filter",
-        "score-double-pick",
-        "score-template-cap",
-        "score-market-low-tempo-guard",
-        "score-review-conservative-correction",
-        "score-review-coverage-expansion"
-      ],
-      "baseline_win_hit": false,
-      "replay_win_hit": true,
-      "improved": true,
-      "regressed": false
-    },
     {
       "match_id": "serie_a_20260512_那不勒斯_博洛尼亚",
       "league": "serie_a",
@@ -284,32 +130,42 @@
       "actual_score": "2-3",
       "actual_winner": "客胜",
       "baseline_predicted_winner": "客胜",
-      "replay_predicted_winner": "平局",
+      "replay_predicted_winner": "客胜",
       "baseline_top_scores": [
-        "0-1",
         "0-0",
+        "1-1",
         "1-0",
         "2-0"
       ],
       "replay_top_scores": [
-        "1-0",
-        "0-0"
+        "0-1",
+        "1-2"
       ],
       "review_outcome_signals": [
-        "review-league-serie-a-soft-draw-away-blocked-home-top"
+        "review-league-serie-a-draw-to-away-relief",
+        "review-league-serie-a-soft-draw-away-entry",
+        "review-league-serie-a-upset-knowledge-retry"
       ],
       "draw_guard_signals": [
-        "draw_market_not_confirmed"
+        "draw_market_not_confirmed",
+        "serie_a_soft_draw_confirmation_override",
+        "serie_a_upset_knowledge_draw_confirmation_override",
+        "serie_a_upset_knowledge_draw_excess_boost",
+        "serie_a_soft_low_risk_draw_excess_boost",
+        "serie_a_soft_draw_excess_boost",
+        "serie_a_soft_low_risk_full_redirect",
+        "serie_a_soft_redirect_draw_to_away",
+        "away_upset_redirect_draw_to_away"
       ],
       "score_rerank_signals": [
         "score-direction-filter",
-        "score-double-pick",
-        "score-market-low-tempo-guard"
+        "score-market-low-tempo-guard",
+        "score-review-conservative-correction"
       ],
       "baseline_win_hit": true,
-      "replay_win_hit": false,
+      "replay_win_hit": true,
       "improved": false,
-      "regressed": true
+      "regressed": false
     }
   ],
   "matches": [
@@ -350,24 +206,24 @@
         "score_hit": false
       },
       "replay": {
-        "predicted_winner": "平局",
-        "predicted_winner_key": "draw",
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
         "predicted_scores": [
           "0-0",
           "1-0"
         ],
         "predicted_scores_top1": "0-0",
         "final_probabilities": {
-          "home_win": 0.3536492568391412,
-          "draw": 0.3674509373020386,
-          "away_win": 0.27889980585882024
+          "home_win": 0.374632617533292,
+          "draw": 0.3670606145611023,
+          "away_win": 0.2583067679056058
         },
         "all_probabilities": {
-          "平局": 0.3674509373020386,
-          "主胜": 0.3536492568391412,
-          "客胜": 0.27889980585882024
+          "主胜": 0.374632617533292,
+          "平局": 0.3670606145611023,
+          "客胜": 0.2583067679056058
         },
-        "confidence": 0.3674509373020386,
+        "confidence": 0.374632617533292,
         "prediction_blocked": false,
         "blocked_reason": "",
         "review_outcome_adjustment": {
@@ -421,24 +277,10 @@
         },
         "draw_confirmation_guard": {
           "applied": false,
-          "qualified": true,
-          "reason": "draw_confirmation_passed",
-          "signals": [
-            "draw_confirmation_gap_weak",
-            "draw_market_not_confirmed"
-          ],
-          "evidence": [
-            "under_supports_draw",
-            "double_volatility_supports_draw"
-          ],
-          "top_gap": 0.013802,
-          "draw_market_gap": 0.5033,
-          "ou_line": 2.25,
-          "ou_under_edge": 0.4274,
-          "volatility": {
-            "home": "high",
-            "away": "high"
-          }
+          "qualified": false,
+          "reason": "not_draw_top1",
+          "signals": [],
+          "evidence": []
         },
         "review_score_rerank": {
           "applied": true,
@@ -446,15 +288,16 @@
             "score-direction-filter",
             "score-double-pick",
             "score-market-low-tempo-guard",
-            "score-market-shallow-cap"
+            "score-market-shallow-cap",
+            "score-review-conservative-correction"
           ],
           "scenario_name": "balanced_draw_guard",
           "open_match": false,
-          "confidence": 0.3674509373020386,
+          "confidence": 0.374632617533292,
           "filtered_out_count": 3,
           "allowed_outcomes": [
-            "平局",
-            "主胜"
+            "主胜",
+            "平局"
           ],
           "double_pick": true,
           "motivation_risk": {
@@ -463,8 +306,8 @@
             "pressure_side": "home",
             "score": 14.22
           },
-          "secondary_gap": 0.01380168046289737,
-          "secondary_probability": 0.3536492568391412,
+          "secondary_gap": 0.00757200297218974,
+          "secondary_probability": 0.3670606145611023,
           "coverage_profile": {
             "same_total_layer": false,
             "same_goal_margin": false,
@@ -497,21 +340,18 @@
         "match_id": "1292919"
       },
       "baseline": {
-        "predicted_winner": "主胜",
-        "predicted_winner_key": "home",
+        "predicted_winner": "客胜",
+        "predicted_winner_key": "away",
         "predicted_scores": [
-          "0-1",
-          "1-1"
+          "0-0",
+          "0-1"
         ],
-        "predicted_scores_top1": "0-1",
-        "predicted_ou": {
-          "side": "小",
-          "line": 2.75
-        },
+        "predicted_scores_top1": "0-0",
+        "predicted_ou": null,
         "actual_score": "0-1",
         "actual_winner": "客胜",
         "actual_winner_key": "away",
-        "win_hit": false,
+        "win_hit": true,
         "score_hit": true
       },
       "replay": {
@@ -523,16 +363,16 @@
         ],
         "predicted_scores_top1": "0-0",
         "final_probabilities": {
-          "home_win": 0.3156017112095434,
-          "draw": 0.3263209648491651,
-          "away_win": 0.3580773239412915
+          "home_win": 0.3335700867964777,
+          "draw": 0.33046688832571347,
+          "away_win": 0.33596302487780877
         },
         "all_probabilities": {
-          "客胜": 0.3580773239412915,
-          "平局": 0.3263209648491651,
-          "主胜": 0.3156017112095434
+          "客胜": 0.33596302487780877,
+          "主胜": 0.3335700867964777,
+          "平局": 0.33046688832571347
         },
-        "confidence": 0.3580773239412915,
+        "confidence": 0.33596302487780877,
         "prediction_blocked": false,
         "blocked_reason": "",
         "review_outcome_adjustment": {
@@ -633,31 +473,29 @@
           "signals": [
             "draw_market_not_confirmed",
             "away_upset_draw_confirmation_override",
-            "market_opposed_home_draw_confirmation_override",
-            "market_opposed_home_draw_excess_boost",
             "narrow_away_strong_redirect_boost",
             "away_upset_draw_excess_boost",
-            "market_opposed_redirect_draw_to_home",
             "narrow_away_strong_redirect",
-            "away_upset_redirect_draw_to_away"
+            "away_upset_redirect_draw_to_away",
+            "away_upset_near_tie_trim"
           ],
           "evidence": [
             "draw_prob_clear_lead"
           ],
-          "top_gap": 0.064799,
+          "top_gap": 0.045224,
           "draw_market_gap": 1.56,
           "ou_line": 2.75,
-          "ou_under_edge": 0.4236,
+          "ou_under_edge": 0.4299,
           "volatility": {
             "home": "medium",
             "away": "low"
           },
-          "shift": 0.052,
+          "shift": 0.048,
           "favored_side": "away_win",
           "adjusted_probabilities": {
-            "home_win": 0.315602,
-            "draw": 0.326321,
-            "away_win": 0.358077
+            "home_win": 0.33357,
+            "draw": 0.330467,
+            "away_win": 0.335963
           }
         },
         "review_score_rerank": {
@@ -672,7 +510,7 @@
           ],
           "scenario_name": "",
           "open_match": true,
-          "confidence": 0.3580773239412915,
+          "confidence": 0.33596302487780877,
           "filtered_out_count": 3,
           "allowed_outcomes": [
             "客胜",
@@ -685,8 +523,8 @@
             "pressure_side": "home",
             "score": 15.68
           },
-          "secondary_gap": 0.031756359092126374,
-          "secondary_probability": 0.3263209648491651,
+          "secondary_gap": 0.002392938081331064,
+          "secondary_probability": 0.3335700867964777,
           "coverage_profile": {
             "same_total_layer": false,
             "same_goal_margin": false,
@@ -722,12 +560,12 @@
         "predicted_winner": "客胜",
         "predicted_winner_key": "away",
         "predicted_scores": [
-          "0-1",
           "0-0",
+          "1-1",
           "1-0",
           "2-0"
         ],
-        "predicted_scores_top1": "0-1",
+        "predicted_scores_top1": "0-0",
         "predicted_ou": {
           "side": "小",
           "line": 2.5
@@ -739,42 +577,44 @@
         "score_hit": false
       },
       "replay": {
-        "predicted_winner": "平局",
-        "predicted_winner_key": "draw",
+        "predicted_winner": "客胜",
+        "predicted_winner_key": "away",
         "predicted_scores": [
-          "1-0",
-          "0-0"
+          "0-1",
+          "1-2"
         ],
-        "predicted_scores_top1": "1-0",
+        "predicted_scores_top1": "0-1",
         "final_probabilities": {
-          "home_win": 0.3622434699257033,
-          "draw": 0.40064657682267907,
-          "away_win": 0.2371099532516177
+          "home_win": 0.2960668835226015,
+          "draw": 0.28310540887761837,
+          "away_win": 0.42082770759978017
         },
         "all_probabilities": {
-          "平局": 0.40064657682267907,
-          "主胜": 0.3622434699257033,
-          "客胜": 0.2371099532516177
+          "客胜": 0.42082770759978017,
+          "主胜": 0.2960668835226015,
+          "平局": 0.28310540887761837
         },
-        "confidence": 0.40064657682267907,
+        "confidence": 0.42082770759978017,
         "prediction_blocked": false,
         "blocked_reason": "",
         "review_outcome_adjustment": {
-          "applied": false,
+          "applied": true,
           "signals": [
-            "review-league-serie-a-soft-draw-away-blocked-home-top"
+            "review-league-serie-a-draw-to-away-relief",
+            "review-league-serie-a-soft-draw-away-entry",
+            "review-league-serie-a-upset-knowledge-retry"
           ],
-          "reason": "three_layer_evaluated_no_adjustment",
+          "reason": "applied",
           "three_layer_evaluated": true,
           "home_bias_gate": {
             "qualified": false,
             "evidence": []
           },
           "applied_shift": {
-            "draw_shift": 0.0,
-            "away_shift": 0.0,
+            "draw_shift": 0.012,
+            "away_shift": 0.046,
             "home_shift": 0.0,
-            "draw_to_away_relief": 0.0,
+            "draw_to_away_relief": 0.046,
             "draw_to_away_trim": 0.0
           },
           "stratified_review": {
@@ -801,61 +641,76 @@
             "pressure_side": "away",
             "favored_side": "home",
             "score": 3.0
-          }
+          },
+          "retry_from_full_upset_knowledge": true
         },
         "draw_confirmation_guard": {
-          "applied": false,
-          "qualified": true,
-          "reason": "draw_confirmation_passed",
+          "applied": true,
+          "qualified": false,
+          "reason": "draw_confirmation_failed_shifted",
           "signals": [
-            "draw_market_not_confirmed"
+            "draw_market_not_confirmed",
+            "serie_a_soft_draw_confirmation_override",
+            "serie_a_upset_knowledge_draw_confirmation_override",
+            "serie_a_upset_knowledge_draw_excess_boost",
+            "serie_a_soft_low_risk_draw_excess_boost",
+            "serie_a_soft_draw_excess_boost",
+            "serie_a_soft_low_risk_full_redirect",
+            "serie_a_soft_redirect_draw_to_away",
+            "away_upset_redirect_draw_to_away"
           ],
           "evidence": [
             "under_supports_draw"
           ],
-          "top_gap": 0.038403,
+          "top_gap": 0.030278,
           "draw_market_gap": 2.5056,
           "ou_line": 2.5,
-          "ou_under_edge": 0.3574,
+          "ou_under_edge": 0.3638,
           "volatility": {
             "home": "high",
             "away": "medium"
+          },
+          "shift": 0.084,
+          "favored_side": "away_win",
+          "adjusted_probabilities": {
+            "home_win": 0.296067,
+            "draw": 0.283105,
+            "away_win": 0.420828
           }
         },
         "review_score_rerank": {
           "applied": true,
           "signals": [
             "score-direction-filter",
-            "score-double-pick",
-            "score-market-low-tempo-guard"
+            "score-market-low-tempo-guard",
+            "score-review-conservative-correction"
           ],
           "scenario_name": "",
           "open_match": false,
-          "confidence": 0.40064657682267907,
-          "filtered_out_count": 2,
+          "confidence": 0.42082770759978017,
+          "filtered_out_count": 6,
           "allowed_outcomes": [
-            "平局",
-            "主胜"
+            "客胜"
           ],
-          "double_pick": true,
+          "double_pick": false,
           "motivation_risk": {
             "available": true,
             "supports_upset": false,
             "pressure_side": "away",
             "score": 3.0
           },
-          "secondary_gap": 0.03840310689697579,
-          "secondary_probability": 0.3622434699257033,
+          "secondary_gap": 0.12476082407717864,
+          "secondary_probability": 0.2960668835226015,
           "coverage_profile": {
             "same_total_layer": false,
-            "same_goal_margin": false,
+            "same_goal_margin": true,
             "all_low_templates": true,
             "needs_expansion": true
           },
           "coverage_expansion_applied": false,
           "coverage_expansion_candidate": null
         },
-        "win_hit": false,
+        "win_hit": true,
         "score_hit": false
       }
     }

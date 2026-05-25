@@ -1,0 +1,311 @@
+{
+  "generated_at": "2026-05-22T19:27:23.544236",
+  "scope": {
+    "league": null,
+    "days": 30,
+    "limit": 1,
+    "allow_missing_snapshot": false
+  },
+  "summary": {
+    "replayed_matches": 1,
+    "baseline_win_hits": 0,
+    "replay_win_hits": 0,
+    "baseline_score_hits": 0,
+    "replay_score_hits": 0,
+    "baseline_away_predictions": 0,
+    "replay_away_predictions": 0,
+    "baseline_top1_1_0": 0,
+    "replay_top1_1_0": 1,
+    "baseline_home_to_away_errors": 0,
+    "replay_home_to_away_errors": 0,
+    "baseline_home_to_draw_errors": 0,
+    "replay_home_to_draw_errors": 1,
+    "improved_matches": 0,
+    "regressed_matches": 0,
+    "snapshot_backed_matches": 1,
+    "blocked_predictions": 0,
+    "baseline_confusion": {
+      "unknown": 1
+    },
+    "replay_confusion": {
+      "home->draw": 1
+    },
+    "baseline_win_accuracy": 0.0,
+    "replay_win_accuracy": 0.0,
+    "baseline_score_accuracy": 0.0,
+    "replay_score_accuracy": 0.0,
+    "skipped_matches": 1
+  },
+  "league_summaries": {
+    "premier_league": {
+      "summary": {
+        "replayed_matches": 1,
+        "baseline_win_hits": 0,
+        "replay_win_hits": 0,
+        "baseline_score_hits": 0,
+        "replay_score_hits": 0,
+        "baseline_away_predictions": 0,
+        "replay_away_predictions": 0,
+        "baseline_top1_1_0": 0,
+        "replay_top1_1_0": 1,
+        "baseline_home_to_away_errors": 0,
+        "replay_home_to_away_errors": 0,
+        "baseline_home_to_draw_errors": 0,
+        "replay_home_to_draw_errors": 1,
+        "improved_matches": 0,
+        "regressed_matches": 0,
+        "snapshot_backed_matches": 1,
+        "blocked_predictions": 0,
+        "baseline_confusion": {
+          "unknown": 1
+        },
+        "replay_confusion": {
+          "home->draw": 1
+        },
+        "baseline_win_accuracy": 0.0,
+        "replay_win_accuracy": 0.0,
+        "baseline_score_accuracy": 0.0,
+        "replay_score_accuracy": 0.0,
+        "skipped_matches": 1
+      },
+      "changed_preview": [
+        {
+          "match_id": "premier_league_20260423_伯恩茅斯_利兹联",
+          "league": "premier_league",
+          "match_date": "2026-04-23",
+          "teams": "伯恩茅斯 vs 利兹联",
+          "actual_score": "2-2",
+          "actual_winner": "平局",
+          "baseline_predicted_winner": "",
+          "replay_predicted_winner": "主胜",
+          "baseline_top_scores": [],
+          "replay_top_scores": [
+            "1-0",
+            "2-0"
+          ],
+          "review_outcome_signals": [
+            "review-bias-config-floor"
+          ],
+          "draw_guard_signals": [],
+          "score_rerank_signals": [
+            "score-direction-filter",
+            "score-fragile-home-template-rebalance",
+            "score-template-cap",
+            "score-review-conservative-correction"
+          ],
+          "baseline_win_hit": false,
+          "replay_win_hit": false,
+          "improved": false,
+          "regressed": false
+        }
+      ]
+    }
+  },
+  "changed_preview": [
+    {
+      "match_id": "premier_league_20260423_伯恩茅斯_利兹联",
+      "league": "premier_league",
+      "match_date": "2026-04-23",
+      "teams": "伯恩茅斯 vs 利兹联",
+      "actual_score": "2-2",
+      "actual_winner": "平局",
+      "baseline_predicted_winner": "",
+      "replay_predicted_winner": "主胜",
+      "baseline_top_scores": [],
+      "replay_top_scores": [
+        "1-0",
+        "2-0"
+      ],
+      "review_outcome_signals": [
+        "review-bias-config-floor"
+      ],
+      "draw_guard_signals": [],
+      "score_rerank_signals": [
+        "score-direction-filter",
+        "score-fragile-home-template-rebalance",
+        "score-template-cap",
+        "score-review-conservative-correction"
+      ],
+      "baseline_win_hit": false,
+      "replay_win_hit": false,
+      "improved": false,
+      "regressed": false
+    }
+  ],
+  "matches": [
+    {
+      "match_id": "premier_league_20260423_伯恩茅斯_利兹联",
+      "league": "premier_league",
+      "league_name": "英超联赛",
+      "match_date": "2026-04-23",
+      "match_time": "03:00",
+      "home_team": "伯恩茅斯",
+      "away_team": "利兹联",
+      "snapshot": {
+        "available": true,
+        "snapshot_path": "/Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots/premier_league/伯恩茅斯vs利兹联.json",
+        "match_id": "1296064"
+      },
+      "baseline": {
+        "predicted_winner": "",
+        "predicted_winner_key": "",
+        "predicted_scores": [],
+        "predicted_scores_top1": "",
+        "predicted_ou": null,
+        "actual_score": "2-2",
+        "actual_winner": "平局",
+        "actual_winner_key": "draw",
+        "win_hit": false,
+        "score_hit": false
+      },
+      "replay": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "1-0",
+          "2-0"
+        ],
+        "predicted_scores_top1": "1-0",
+        "final_probabilities": {
+          "home_win": 0.40111961796572987,
+          "draw": 0.33019998718519006,
+          "away_win": 0.26868039484908024
+        },
+        "all_probabilities": {
+          "主胜": 0.40111961796572987,
+          "平局": 0.33019998718519006,
+          "客胜": 0.26868039484908024
+        },
+        "confidence": 0.40111961796572987,
+        "prediction_blocked": false,
+        "blocked_reason": "",
+        "review_outcome_adjustment": {
+          "applied": true,
+          "signals": [
+            "review-bias-config-floor"
+          ],
+          "reason": "applied",
+          "three_layer_evaluated": true,
+          "home_bias_gate": {
+            "qualified": false,
+            "evidence": [
+              "limited_probability_edge",
+              "limited_strength_gap"
+            ]
+          },
+          "applied_shift": {
+            "draw_shift": 0.02,
+            "away_shift": 0.016,
+            "home_shift": 0.0,
+            "draw_to_away_relief": 0.0,
+            "draw_to_away_trim": 0.0
+          },
+          "stratified_review": {
+            "handicap_depth_bucket": "level_medium",
+            "strength_gap_bucket": "balanced",
+            "matched_key": "home:level_medium",
+            "matched": {
+              "predicted_winner": "home",
+              "predicted_winner_label": "主胜",
+              "handicap_bucket": "level_medium",
+              "handicap_bucket_label": "半球至半一",
+              "sample_count": 1,
+              "hit_count": 0,
+              "miss_count": 1,
+              "draw_miss_count": 1,
+              "opposite_miss_count": 0,
+              "examples": [
+                {
+                  "teams": "热刺 vs 利兹联",
+                  "actual_score": "1-1",
+                  "actual_winner": "平局"
+                }
+              ],
+              "hit_rate": 0.0,
+              "miss_rate": 1.0,
+              "draw_miss_rate": 1.0,
+              "opposite_miss_rate": 0.0,
+              "recommended_draw_shift": 0.0,
+              "recommended_upset_shift": 0.0,
+              "learning_multiplier": {
+                "draw": 1.18,
+                "upset": 1.02
+              }
+            }
+          },
+          "three_layer_context": {
+            "predicted_winner": "home",
+            "predicted_outcome_label": "主胜",
+            "handicap_depth_bucket": "level_medium",
+            "strength_gap_bucket": "balanced",
+            "euro_support_bucket": "strong_support",
+            "scenario_name": "",
+            "asian_line": -0.5,
+            "strength_diff": 0.0,
+            "stratified_key": "home:level_medium",
+            "three_layer_key": "home:level_medium:strong_support"
+          },
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "away",
+            "favored_side": "home",
+            "score": 3.0
+          }
+        },
+        "draw_confirmation_guard": {
+          "applied": false,
+          "qualified": false,
+          "reason": "not_draw_top1",
+          "signals": [],
+          "evidence": []
+        },
+        "review_score_rerank": {
+          "applied": true,
+          "signals": [
+            "score-direction-filter",
+            "score-fragile-home-template-rebalance",
+            "score-template-cap",
+            "score-review-conservative-correction"
+          ],
+          "scenario_name": "",
+          "open_match": true,
+          "confidence": 0.40111961796572987,
+          "filtered_out_count": 1,
+          "allowed_outcomes": [
+            "主胜"
+          ],
+          "double_pick": false,
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "away",
+            "score": 3.0
+          },
+          "secondary_gap": 0.07091963078053981,
+          "secondary_probability": 0.33019998718519006,
+          "coverage_profile": {
+            "same_total_layer": false,
+            "same_goal_margin": false,
+            "all_low_templates": true,
+            "needs_expansion": true
+          },
+          "coverage_expansion_applied": false,
+          "coverage_expansion_candidate": null
+        },
+        "win_hit": false,
+        "score_hit": false
+      }
+    }
+  ],
+  "skipped": [
+    {
+      "match_id": "premier_league_20260423_伯恩利_曼城",
+      "league": "premier_league",
+      "match_date": "2026-04-23",
+      "home_team": "伯恩利",
+      "away_team": "曼城",
+      "reason": "missing_snapshot"
+    }
+  ]
+}

@@ -25,6 +25,7 @@ from domain.team_strength import TeamStrengthService
 from domain.upset import UpsetAnalyzer
 from domain.writeback import TeamsWritebackGateway
 from runtime.paths import get_default_paths
+from collectors.aliasing import load_team_alias_map, normalize_team_name
 
 # 添加项目路径
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -54,6 +55,83 @@ ROUND_HEADER_RE = re.compile(r"^### 第(\d+)轮(?:（收官轮）)?\s*$")
 TABLE_ROW_RE = re.compile(
     r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*(.*?)\s*\|\s*$"
 )
+DATE_TOKEN_RE = re.compile(r"\b\d{1,2}-\d{1,2}\b")
+
+
+def validate_schedule_cache_payload(
+    payload: Any,
+    *,
+    league_code: str,
+    match_date: str,
+    alias_map: Optional[Dict[str, Dict[str, str]]] = None,
+) -> Dict[str, Any]:
+    status = {
+        'status': 'invalid',
+        'reason': 'invalid_payload',
+        'matches': [],
+    }
+    if not isinstance(payload, dict):
+        return status
+
+    payload_date = str(payload.get('date') or '').strip()
+    if payload_date and payload_date != match_date:
+        status['reason'] = 'payload_date_mismatch'
+        return status
+
+    date_click = payload.get('date_click')
+    if isinstance(date_click, dict) and date_click.get('clicked') is False:
+        status['reason'] = 'date_click_failed'
+        return status
+
+    raw_matches = payload.get('matches')
+    if not isinstance(raw_matches, list) or not raw_matches:
+        status['reason'] = 'missing_matches'
+        return status
+
+    requested_tokens = set()
+    match = re.match(r'^(\d{4})-(\d{2})-(\d{2})$', str(match_date or '').strip())
+    if match:
+        requested_tokens = {f"{match.group(2)}-{match.group(3)}", f"{int(match.group(2))}-{int(match.group(3))}"}
+
+    normalized_matches = []
+    seen_keys = set()
+    aliases = alias_map or {}
+    for row in raw_matches:
+        if not isinstance(row, dict):
+            continue
+        home_team = str(row.get('home_team') or '').strip()
+        away_team = str(row.get('away_team') or '').strip()
+        if not home_team or not away_team:
+            continue
+        raw_text = str(row.get('raw_text') or '').strip()
+        embedded_tokens = set(DATE_TOKEN_RE.findall(raw_text))
+        if embedded_tokens and requested_tokens and embedded_tokens.isdisjoint(requested_tokens):
+            continue
+        normalized_home = normalize_team_name(league_code, home_team, aliases) or home_team
+        normalized_away = normalize_team_name(league_code, away_team, aliases) or away_team
+        key = (normalized_home, normalized_away)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        normalized_matches.append(
+            {
+                'home_team': home_team,
+                'away_team': away_team,
+                'match_time': str(row.get('kickoff_time') or row.get('time') or '').strip(),
+                'match_id': str(row.get('match_id') or '').strip(),
+                'current_odds': None,
+                '_source': 'okooo_schedule',
+            }
+        )
+
+    if not normalized_matches:
+        status['reason'] = 'no_valid_rows'
+        return status
+
+    status['status'] = 'valid'
+    status['reason'] = 'ok'
+    status['matches'] = normalized_matches
+    return status
 
 
 def _configure_logger() -> None:
@@ -157,8 +235,8 @@ class DynamicWeightAdjuster:
         self.history_file = history_file
         self.accuracy_history = self._load_history()
         # 调权保护机制：样本不足时避免“乱调”
-        self.min_league_samples = 30          # 联赛样本量门槛
-        self.min_model_samples = 20           # 子模型 n 门槛（低于则不参与调权）
+        self.min_league_samples = 8           # 联赛样本量门槛
+        self.min_model_samples = 8            # 子模型 n 门槛（低于则不参与调权）
         self.max_adjustment_ratio = 0.10      # 每次调权最大偏离默认权重比例（±10%）
         self.shrink_base = 0.8                # 收缩到默认权重：new = base*shrink + adj*(1-shrink)
     
@@ -191,6 +269,7 @@ class DynamicWeightAdjuster:
         league_acc = by_league[league_code]
         total_predictions = int(league_acc.get('total_predictions', 0) or 0)
         model_accuracy: Dict[str, float] = league_acc.get('model_accuracy', {}) or {}
+        league_weight_factor = float(league_acc.get('league_weight_factor', 1.0) or 1.0)
 
         # 1) 联赛样本量门槛：不足则直接返回默认权重
         if total_predictions < self.min_league_samples:
@@ -223,10 +302,17 @@ class DynamicWeightAdjuster:
             capped[model_name] = min(max(target, lo), hi)
         capped = self._normalize_weights(capped)
 
-        # 4) 收缩：向默认权重回归
-        shrink = float(self.shrink_base)
+        # 4) 联赛准确率越高，越允许偏离默认权重；反之更快收缩回默认权重
+        sample_scale = min(1.0, total_predictions / max(float(self.min_league_samples), 1.0))
+        deviation_scale = max(0.35, min(1.10, sample_scale * league_weight_factor))
+        target = {
+            model_name: base_weights[model_name] + (capped[model_name] - base_weights[model_name]) * deviation_scale
+            for model_name in base_weights
+        }
+        # 5) 收缩：向默认权重回归
+        shrink = min(max(float(self.shrink_base) + max(0.0, 1.0 - league_weight_factor) * 0.35, 0.65), 0.95)
         final = {
-            model_name: base_weights[model_name] * shrink + capped[model_name] * (1.0 - shrink)
+            model_name: base_weights[model_name] * shrink + target[model_name] * (1.0 - shrink)
             for model_name in base_weights
         }
         return self._normalize_weights(final)
@@ -238,6 +324,7 @@ class DynamicWeightAdjuster:
         league_acc = by_league.get(league_code, {}) if isinstance(by_league, dict) else {}
         total_predictions = int(league_acc.get('total_predictions', 0) or 0)
         model_accuracy = league_acc.get('model_accuracy', {}) or {}
+        league_weight_factor = float(league_acc.get('league_weight_factor', 1.0) or 1.0)
 
         final = self.get_adjusted_weights(league_code)
         has_enough_samples = total_predictions >= self.min_league_samples
@@ -250,7 +337,14 @@ class DynamicWeightAdjuster:
             'max_adjustment_ratio': self.max_adjustment_ratio,
             'shrink_base': self.shrink_base,
             'has_enough_samples': has_enough_samples,
+            'league_weight_factor': round(league_weight_factor, 4),
+            'confidence_adjustment': float(league_acc.get('confidence_adjustment', 0.0) or 0.0),
+            'weight_reason': str(league_acc.get('weight_reason') or '').strip(),
+            'league_win_accuracy': float(league_acc.get('win_accuracy', 0.0) or 0.0),
+            'league_score_accuracy': float(league_acc.get('score_accuracy', 0.0) or 0.0),
+            'league_ou_accuracy': float(league_acc.get('ou_accuracy', 0.0) or 0.0),
             'model_accuracy_keys': sorted([k for k in model_accuracy.keys() if k in base_weights]),
+            'top_weight_drivers': league_acc.get('top_weight_drivers', []) or [],
             'base_weights': base_weights,
             'final_weights': final,
         }
@@ -312,6 +406,32 @@ class EnhancedPredictor:
     @staticmethod
     def _normalize_probs(p: Dict[str, float]) -> Dict[str, float]:
         return PredictionPostprocessService.normalize_probs(p)
+
+    @staticmethod
+    def _refresh_cached_confidence(result: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(result, dict):
+            return result
+        final_probabilities = result.get('final_probabilities') if isinstance(result.get('final_probabilities'), dict) else {}
+        raw_confidence = max(
+            [float(value or 0.0) for value in final_probabilities.values()],
+            default=float(result.get('confidence') or 0.0),
+        )
+        applied_weights = (
+            result.get('applied_model_weights')
+            if isinstance(result.get('applied_model_weights'), dict)
+            else result.get('applied_weights')
+        )
+        adjusted_confidence, confidence_diag = InferencePipelineService._calibrate_confidence_with_league_learning(
+            confidence=raw_confidence,
+            applied_weights=applied_weights if isinstance(applied_weights, dict) else {},
+        )
+        result['confidence'] = adjusted_confidence
+        realtime = result.get('realtime') if isinstance(result.get('realtime'), dict) else {}
+        context_applied = realtime.get('context_applied') if isinstance(realtime.get('context_applied'), dict) else {}
+        context_applied['league_confidence_adjustment'] = confidence_diag
+        realtime['context_applied'] = context_applied
+        result['realtime'] = realtime
+        return result
 
     def _compute_total_goals_distribution(
         self,
@@ -499,42 +619,10 @@ class EnhancedPredictor:
     def _get_matches_from_odds_snapshots(self, league_code: str, match_date: str) -> List[Dict]:
         return self.snapshot_repository.get_matches_from_odds_snapshots(league_code, match_date)
 
-    def _load_schedule_matches(self, league_code: str, match_date: str) -> List[Dict[str, Any]]:
+    def _load_teams_markdown_matches(self, league_code: str, match_date: str) -> List[Dict[str, Any]]:
         matches: List[Dict[str, Any]] = []
         seen_keys = set()
-
-        schedule_path = self.paths.schedules_dir / league_code / f"{match_date}.json"
-        if schedule_path.exists():
-            try:
-                payload = json.loads(schedule_path.read_text(encoding='utf-8'))
-            except Exception:
-                payload = {}
-            raw_matches = payload.get('matches') if isinstance(payload, dict) else None
-            if isinstance(raw_matches, list):
-                for row in raw_matches:
-                    if not isinstance(row, dict):
-                        continue
-                    home_team = str(row.get('home_team') or '').strip()
-                    away_team = str(row.get('away_team') or '').strip()
-                    if not home_team or not away_team:
-                        continue
-                    key = (home_team, away_team)
-                    if key in seen_keys:
-                        continue
-                    seen_keys.add(key)
-                    matches.append(
-                        {
-                            'home_team': home_team,
-                            'away_team': away_team,
-                            'match_time': str(row.get('kickoff_time') or row.get('time') or '').strip(),
-                            'match_id': str(row.get('match_id') or '').strip(),
-                            'current_odds': None,
-                            '_source': 'okooo_schedule',
-                        }
-                    )
-            if matches:
-                return matches
-
+        alias_map = getattr(self, 'team_alias_map', None) or load_team_alias_map(self.base_dir)
         teams_path = self.paths.teams_file(league_code)
         if not teams_path.exists():
             return []
@@ -563,7 +651,9 @@ class EnhancedPredictor:
                 in_target_round = False
                 continue
             in_target_round = True
-            key = (home_team, away_team)
+            normalized_home = normalize_team_name(league_code, home_team, alias_map) or home_team
+            normalized_away = normalize_team_name(league_code, away_team, alias_map) or away_team
+            key = (normalized_home, normalized_away)
             if key in seen_keys:
                 continue
             seen_keys.add(key)
@@ -577,6 +667,35 @@ class EnhancedPredictor:
                 }
             )
         return matches if in_target_round or matches else []
+
+    def _load_schedule_matches(self, league_code: str, match_date: str) -> Dict[str, Any]:
+        schedule_path = self.paths.schedules_dir / league_code / f"{match_date}.json"
+        alias_map = getattr(self, 'team_alias_map', None) or load_team_alias_map(self.base_dir)
+        if schedule_path.exists():
+            try:
+                payload = json.loads(schedule_path.read_text(encoding='utf-8'))
+            except Exception:
+                payload = None
+            validation = validate_schedule_cache_payload(
+                payload,
+                league_code=league_code,
+                match_date=match_date,
+                alias_map=alias_map,
+            )
+            if validation['status'] == 'valid':
+                return validation
+            teams_matches = self._load_teams_markdown_matches(league_code, match_date)
+            return {
+                'status': 'invalid',
+                'reason': validation['reason'],
+                'matches': teams_matches,
+            }
+
+        return {
+            'status': 'missing',
+            'reason': 'schedule_cache_missing',
+            'matches': self._load_teams_markdown_matches(league_code, match_date),
+        }
 
     @staticmethod
     def _to_float(value: Any) -> Optional[float]:
@@ -628,6 +747,7 @@ class EnhancedPredictor:
         cached = self.cache.get('predict_match', cache_params)
         if cached:
             logger.info(f"使用缓存预测: {home_team} vs {away_team}")
+            cached = self._refresh_cached_confidence(cached)
             if persist:
                 return self.persistence_service.prepare_cached_prediction(cached, self.runtime_profile, league_code)
             if 'runtime_profile' not in cached:
@@ -770,11 +890,16 @@ class EnhancedPredictor:
         write_teams: bool = True,
     ) -> Dict[str, Any]:
         """生成预测并按批次决定是否写回 teams 与刷新统计。"""
+        schedule_load_status = 'provided'
+        schedule_load_reason = 'provided_matches'
         if not matches:
-            matches = self._load_schedule_matches(league_code, match_date)
+            schedule_load = self._load_schedule_matches(league_code, match_date)
+            schedule_load_status = str(schedule_load.get('status') or 'missing')
+            schedule_load_reason = str(schedule_load.get('reason') or '')
+            matches = list(schedule_load.get('matches') or [])
             if matches:
                 matches = self.snapshot_repository.fill_missing_current_odds(league_code, match_date, matches)
-            else:
+            elif schedule_load_status == 'missing':
                 matches = self.snapshot_repository.get_matches_from_odds_snapshots(league_code, match_date)
                 if not matches:
                     matches = self.snapshot_repository.get_matches_from_odds_history(league_code, match_date)
@@ -792,6 +917,8 @@ class EnhancedPredictor:
                 'teams_updated': False,
                 'prediction_count': 0,
                 'accuracy_refreshed': False,
+                'schedule_source_status': schedule_load_status,
+                'schedule_source_reason': schedule_load_reason,
                 'persisted': {
                     'enabled': bool(persist),
                     'archived': False,
@@ -814,6 +941,8 @@ class EnhancedPredictor:
                 home_team=home,
                 away_team=away,
                 current_odds=current_odds,
+                match_time=match_time,
+                match_id=match_id,
             )
 
             pred = self.predict_match(
@@ -861,6 +990,8 @@ class EnhancedPredictor:
             'teams_updated': teams_updated,
             'prediction_count': len(predictions),
             'accuracy_refreshed': bool(batch_summary.get('accuracy_refreshed')),
+            'schedule_source_status': schedule_load_status,
+            'schedule_source_reason': schedule_load_reason,
             'persisted': batch_summary.get('persisted') or {
                 'enabled': bool(persist),
                 'archived': False,

@@ -556,6 +556,8 @@ class DataCollector:
     def _load_okooo_schedule(self, league: str, date: str) -> List[Dict]:
         """Load (or fetch) okooo daily schedule JSON and return matches."""
         try:
+            from enhanced_prediction_workflow import validate_schedule_cache_payload
+
             league_cn = {
                 'premier_league': '英超',
                 'la_liga': '西甲',
@@ -587,6 +589,15 @@ class DataCollector:
                     schedule_path = Path(out_lines[-1].strip())
 
             payload = json.loads(schedule_path.read_text(encoding="utf-8"))
+            validation = validate_schedule_cache_payload(
+                payload,
+                league_code=league,
+                match_date=date,
+                alias_map=getattr(self, "_team_alias_map", None),
+            )
+            if validation.get("status") != "valid":
+                return []
+
             matches = payload.get("matches") if isinstance(payload, dict) else None
             if not isinstance(matches, list):
                 return []

@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import sys
+from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -21,6 +22,7 @@ from runtime.memory_samples import sync_prediction_memory_samples
 from runtime.paths import get_default_paths
 from runtime.rag_store import sync_rag_index
 from storage import AccuracyStatsStore, PredictionArchiveStore, TeamsMarkdownStore
+from domain.writeback import build_prediction_note, normalize_existing_prediction_note, update_teams_md_prediction_notes
 
 # 配置日志
 logging.basicConfig(
@@ -75,6 +77,80 @@ PREDICTED_WINNER_TEXT = {
 
 class ResultManager:
     """结果管理器，维护联赛 SoT、runtime-only 归档与统一准确率统计。"""
+
+    @staticmethod
+    def _clamp(value: float, lower: float, upper: float) -> float:
+        return max(lower, min(upper, value))
+
+    @classmethod
+    def _shrink_metric(cls, value: float, sample_ratio: float, neutral: float = 0.5) -> float:
+        clipped = cls._clamp(value, 0.0, 1.0)
+        return cls._clamp(neutral + (clipped - neutral) * sample_ratio, 0.0, 1.0)
+
+    @classmethod
+    def _build_league_accuracy_profile(
+        cls,
+        *,
+        total_predictions: int,
+        win_accuracy: float,
+        score_accuracy: float,
+        ou_accuracy: float,
+        total_ou_predictions: int,
+        baseline: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        baseline = baseline if isinstance(baseline, dict) else {}
+        baseline_win = float(baseline.get('win_accuracy', 55.0) or 55.0)
+        baseline_score = float(baseline.get('score_accuracy', 25.0) or 25.0)
+        baseline_ou = float(baseline.get('ou_accuracy', 55.0) or 55.0)
+        sample_ratio = cls._clamp(total_predictions / 20.0, 0.0, 1.0)
+        ou_sample_ratio = cls._clamp(total_ou_predictions / 12.0, 0.0, 1.0)
+
+        win_ratio = cls._shrink_metric(win_accuracy / 100.0, sample_ratio)
+        score_ratio = cls._shrink_metric(score_accuracy / 100.0, sample_ratio)
+        ou_ratio = cls._shrink_metric(ou_accuracy / 100.0, ou_sample_ratio or sample_ratio)
+
+        weighted_delta = (
+            ((win_accuracy - baseline_win) / 100.0) * 0.55
+            + ((score_accuracy - baseline_score) / 100.0) * 0.20
+            + ((ou_accuracy - baseline_ou) / 100.0) * 0.25
+        )
+        confidence_ratio = cls._clamp(0.35 + sample_ratio * 0.65, 0.35, 1.0)
+        league_weight_factor = cls._clamp(1.0 + weighted_delta * confidence_ratio * 0.35, 0.92, 1.08)
+        confidence_adjustment = cls._clamp(weighted_delta * confidence_ratio * 0.08, -0.04, 0.04)
+
+        model_accuracy = {
+            'poisson': cls._clamp(win_ratio * 0.18 + score_ratio * 0.52 + ou_ratio * 0.30, 0.0, 1.0),
+            'dixon_coles': cls._clamp(win_ratio * 0.20 + score_ratio * 0.56 + ou_ratio * 0.24, 0.0, 1.0),
+            'elo': cls._clamp(win_ratio * 0.62 + score_ratio * 0.18 + ou_ratio * 0.20, 0.0, 1.0),
+            'glicko': cls._clamp(win_ratio * 0.58 + score_ratio * 0.20 + ou_ratio * 0.22, 0.0, 1.0),
+            'logistic_regression': cls._clamp(win_ratio * 0.50 + score_ratio * 0.22 + ou_ratio * 0.28, 0.0, 1.0),
+            'random_forest': cls._clamp(win_ratio * 0.46 + score_ratio * 0.24 + ou_ratio * 0.30, 0.0, 1.0),
+            'xg': cls._clamp(win_ratio * 0.18 + score_ratio * 0.37 + ou_ratio * 0.45, 0.0, 1.0),
+            'bayesian': cls._clamp(win_ratio * 0.45 + score_ratio * 0.25 + ou_ratio * 0.30, 0.0, 1.0),
+            'expert': cls._clamp(win_ratio * 0.40 + score_ratio * 0.25 + ou_ratio * 0.35, 0.0, 1.0),
+            'ensemble': cls._clamp(win_ratio * 0.46 + score_ratio * 0.24 + ou_ratio * 0.30, 0.0, 1.0),
+        }
+        top_drivers = sorted(model_accuracy.items(), key=lambda item: item[1], reverse=True)[:3]
+        if league_weight_factor >= 1.02:
+            reason = '联赛近30天命中率高于全局基线，放大联赛学习调权'
+        elif league_weight_factor <= 0.98:
+            reason = '联赛近30天命中率低于全局基线，收缩回默认权重'
+        else:
+            reason = '联赛近30天命中率接近全局基线，维持轻度调权'
+        return {
+            'league_weight_factor': round(league_weight_factor, 4),
+            'confidence_adjustment': round(confidence_adjustment, 4),
+            'accuracy_sample_ratio': round(sample_ratio, 4),
+            'baseline_win_accuracy': round(baseline_win, 2),
+            'baseline_score_accuracy': round(baseline_score, 2),
+            'baseline_ou_accuracy': round(baseline_ou, 2),
+            'model_accuracy': {key: round(value, 4) for key, value in model_accuracy.items()},
+            'top_weight_drivers': [
+                {'model': model_name, 'score': round(score, 4)}
+                for model_name, score in top_drivers
+            ],
+            'weight_reason': reason,
+        }
 
     def __init__(self, base_dir: Optional[str] = None):
         self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
@@ -549,6 +625,44 @@ class ResultManager:
         }
         return mapping.get(str(value or '').strip())
 
+    def _note_from_archive_entry(self, entry: Dict[str, Any]) -> str:
+        if not isinstance(entry, dict):
+            return ''
+        full_prediction = entry.get('full_prediction') if isinstance(entry.get('full_prediction'), dict) else {}
+        top_scores = entry.get('top_scores') if isinstance(entry.get('top_scores'), list) else []
+        over_under = entry.get('over_under') if isinstance(entry.get('over_under'), dict) else {}
+        prediction_payload = {
+            'prediction': entry.get('prediction') or full_prediction.get('prediction') or '',
+            'confidence': entry.get('confidence') if entry.get('confidence') is not None else full_prediction.get('confidence'),
+            'top_scores': top_scores or full_prediction.get('top_scores') or [],
+            'over_under': over_under or full_prediction.get('over_under') or {},
+            'upset_potential': entry.get('upset_potential') if isinstance(entry.get('upset_potential'), dict) else full_prediction.get('upset_potential') or {},
+            'applied_model_weights': full_prediction.get('applied_model_weights') if isinstance(full_prediction.get('applied_model_weights'), dict) else {},
+            'match_id': entry.get('external_match_id') or entry.get('match_id') or full_prediction.get('match_id') or '',
+            'external_match_id': entry.get('external_match_id') or full_prediction.get('match_id') or '',
+            'internal_match_id': entry.get('match_id') or entry.get('internal_match_id') or full_prediction.get('internal_match_id') or '',
+            'teams_match_id': entry.get('teams_match_id') or full_prediction.get('teams_match_id') or '',
+        }
+        return normalize_existing_prediction_note(build_prediction_note(prediction_payload))
+
+    def _restore_prediction_note_from_archive(self, note: str, archive_entry: Optional[Dict[str, Any]]) -> str:
+        base_note = str(note or '').strip()
+        if self._parse_predicted_winner(base_note) in PREDICTED_WINNER_TEXT:
+            return base_note
+        if not isinstance(archive_entry, dict):
+            return base_note
+        rebuilt = self._note_from_archive_entry(archive_entry)
+        if not rebuilt:
+            return base_note
+        status_prefix = ''
+        if base_note.startswith('已完赛'):
+            status_prefix = '已完赛；'
+        elif base_note.startswith('已结束'):
+            status_prefix = '已结束；'
+        replay_match = re.search(r'(复盘[:：].*)$', base_note)
+        replay_suffix = f'；{replay_match.group(1).strip()}' if replay_match else ''
+        return f'{status_prefix}{rebuilt}{replay_suffix}'.strip('；')
+
     @staticmethod
     def _normalize_predicted_ou_value(predicted_ou: Any) -> Optional[Dict[str, object]]:
         if not isinstance(predicted_ou, dict):
@@ -836,6 +950,8 @@ class ResultManager:
         for row in self._iter_teams_rows():
             if not self._within_days(str(row.get('match_date') or ''), days):
                 continue
+            archived = archive_lookup.get(str(row.get('match_id') or '').strip())
+            restored_note = self._restore_prediction_note_from_archive(str(row.get('note') or ''), archived)
             row_sample = {
                 'match_id': str(row.get('match_id') or '').strip(),
                 'league': row.get('league'),
@@ -846,14 +962,13 @@ class ResultManager:
                 'away_team': row.get('away_team'),
                 'actual_score': re.sub(r'\s+', '', str(row.get('score_text') or '').strip()),
                 'actual_winner': self._parse_score_to_winner(str(row.get('score_text') or '')),
-                'predicted_winner': self._parse_predicted_winner(str(row.get('note') or '')),
-                'predicted_scores': self._parse_predicted_scores(str(row.get('note') or '')),
-                'predicted_ou': self._parse_predicted_ou(str(row.get('note') or '')),
+                'predicted_winner': self._parse_predicted_winner(restored_note),
+                'predicted_scores': self._parse_predicted_scores(restored_note),
+                'predicted_ou': self._parse_predicted_ou(restored_note),
                 'storage_mode': 'league_sot',
                 'line_source': 'unknown',
                 'source_presence': ['teams_sot'],
             }
-            archived = archive_lookup.get(str(row.get('match_id') or '').strip())
             if archived:
                 self._merge_accuracy_sample(
                     row_sample,
@@ -2474,7 +2589,13 @@ class ResultManager:
             'errors': errors
         }
 
-    def calculate_accuracy(self, league: Optional[str] = None, days: int = 30, ou_report: Optional[Dict[str, Any]] = None) -> Dict:
+    def calculate_accuracy(
+        self,
+        league: Optional[str] = None,
+        days: int = 30,
+        ou_report: Optional[Dict[str, Any]] = None,
+        baseline: Optional[Dict[str, Any]] = None,
+    ) -> Dict:
         """计算预测胜负准确率。"""
         total = 0
         correct = 0
@@ -2482,20 +2603,14 @@ class ResultManager:
         correct_score = 0
         total_ou = 0
         correct_ou = 0
-        cutoff = datetime.now().timestamp() - (days * 86400)
+        samples = self._build_unified_prediction_samples(days=days)
 
-        for row in self._iter_teams_rows():
-            if league and row['league'] != league:
+        for sample in samples.values():
+            if league and str(sample.get('league') or '') != league:
                 continue
-            try:
-                match_ts = datetime.fromisoformat(row['match_date']).timestamp()
-                if match_ts < cutoff:
-                    continue
-            except Exception:
-                pass
 
-            predicted_winner = self._parse_predicted_winner(row['note'])
-            actual_winner = self._parse_score_to_winner(row['score_text']) if re.match(r'^\d+\s*-\s*\d+$', row['score_text'] or '') else None
+            predicted_winner = sample.get('predicted_winner')
+            actual_winner = sample.get('actual_winner')
             if predicted_winner not in PREDICTED_WINNER_TEXT or actual_winner not in PREDICTED_WINNER_TEXT:
                 continue
 
@@ -2503,32 +2618,16 @@ class ResultManager:
             if predicted_winner == actual_winner:
                 correct += 1
 
-            # Score accuracy: hit if actual score is within top-2 predicted scores.
-            predicted_scores = self._parse_predicted_scores(row['note'])
+            predicted_scores = [
+                re.sub(r'\s+', '', str(score).strip())
+                for score in (sample.get('predicted_scores') or [])
+                if str(score).strip()
+            ]
             if predicted_scores:
                 total_score += 1
-                actual_score = re.sub(r'\s+', '', (row['score_text'] or '').strip())
+                actual_score = re.sub(r'\s+', '', str(sample.get('actual_score') or '').strip())
                 if actual_score in predicted_scores:
                     correct_score += 1
-
-            # Over/Under accuracy: based on note line (normally 2.5 to avoid push).
-            ou = self._parse_predicted_ou(row['note'])
-            if ou and isinstance(ou.get('line'), (int, float)) and ou.get('side') in ('大', '小'):
-                try:
-                    hs, as_ = [int(x.strip()) for x in (row['score_text'] or '').split('-')]
-                    total_goals = hs + as_
-                except Exception:
-                    total_goals = None
-                if isinstance(total_goals, int):
-                    line = float(ou['line'])
-                    side = ou['side']
-                    # Push handling: if total_goals equals the line exactly, do not count.
-                    if abs(total_goals - line) < 1e-9:
-                        continue
-                    total_ou += 1
-                    actual_side = '大' if total_goals > line else '小'
-                    if actual_side == side:
-                        correct_ou += 1
 
         accuracy = (correct / total * 100) if total > 0 else 0
         score_acc = (correct_score / total_score * 100) if total_score > 0 else 0
@@ -2538,6 +2637,14 @@ class ResultManager:
         total_ou = int(ou_overall.get('sample_count', total_ou) or 0)
         correct_ou = int(ou_overall.get('hit_count', correct_ou) or 0)
         ou_acc = float(ou_overall.get('hit_rate', ou_acc) or 0.0)
+        accuracy_profile = self._build_league_accuracy_profile(
+            total_predictions=total,
+            win_accuracy=accuracy,
+            score_accuracy=score_acc,
+            ou_accuracy=ou_acc,
+            total_ou_predictions=total_ou,
+            baseline=baseline,
+        )
         return {
             'league': league,
             'total_predictions': total,
@@ -2551,24 +2658,474 @@ class ResultManager:
             'ou_accuracy': round(ou_acc, 2),
             'ou_push_excluded': int(ou_overall.get('push_count', 0) or 0),
             'ou_scope': 'unified_prediction_sources',
-            'model_accuracy': {},
+            'win_scope': 'unified_prediction_sources',
+            'score_scope': 'unified_prediction_sources',
+            'model_accuracy': accuracy_profile.get('model_accuracy', {}),
+            'league_weight_factor': accuracy_profile.get('league_weight_factor', 1.0),
+            'confidence_adjustment': accuracy_profile.get('confidence_adjustment', 0.0),
+            'accuracy_sample_ratio': accuracy_profile.get('accuracy_sample_ratio', 0.0),
+            'baseline_win_accuracy': accuracy_profile.get('baseline_win_accuracy', 0.0),
+            'baseline_score_accuracy': accuracy_profile.get('baseline_score_accuracy', 0.0),
+            'baseline_ou_accuracy': accuracy_profile.get('baseline_ou_accuracy', 0.0),
+            'top_weight_drivers': accuracy_profile.get('top_weight_drivers', []),
+            'weight_reason': accuracy_profile.get('weight_reason', ''),
             'calculated_at': datetime.now().isoformat(),
             'days': days
+        }
+
+    def _iter_reanalysis_result_files(self) -> List[str]:
+        files: List[str] = []
+        global_path = os.path.join(self.base_dir, 'reanalysis_results.json')
+        if os.path.exists(global_path):
+            files.append(global_path)
+        for league_code in LEAGUE_NAMES.keys():
+            for suffix in ('', '_current'):
+                candidate = os.path.join(self.base_dir, f'reanalysis_results_{league_code}{suffix}.json')
+                if os.path.exists(candidate):
+                    files.append(candidate)
+        return files
+
+    @staticmethod
+    def _reanalysis_generated_sort_key(file_path: str, payload: Dict[str, Any]) -> float:
+        generated_at = str(payload.get('generated_at') or '').strip()
+        if generated_at:
+            try:
+                return datetime.fromisoformat(generated_at).timestamp()
+            except Exception:
+                pass
+        try:
+            return os.path.getmtime(file_path)
+        except Exception:
+            return 0.0
+
+    @staticmethod
+    def _normalize_reanalysis_summary(summary: Dict[str, Any], *, league: Optional[str], source_file: str, generated_at: str) -> Dict[str, Any]:
+        replayed_matches = int(summary.get('replayed_matches', 0) or 0)
+        replay_win_hits = int(summary.get('replay_win_hits', 0) or 0)
+        replay_score_hits = int(summary.get('replay_score_hits', 0) or 0)
+        return {
+            'league': league,
+            'total_predictions': replayed_matches,
+            'correct_predictions': replay_win_hits,
+            'win_accuracy': round(float(summary.get('replay_win_accuracy', 0.0) or 0.0), 2),
+            'total_score_predictions': replayed_matches,
+            'correct_score_predictions': replay_score_hits,
+            'score_accuracy': round(float(summary.get('replay_score_accuracy', 0.0) or 0.0), 2),
+            'baseline_win_accuracy': round(float(summary.get('baseline_win_accuracy', 0.0) or 0.0), 2),
+            'baseline_score_accuracy': round(float(summary.get('baseline_score_accuracy', 0.0) or 0.0), 2),
+            'baseline_away_predictions': int(summary.get('baseline_away_predictions', 0) or 0),
+            'replay_away_predictions': int(summary.get('replay_away_predictions', 0) or 0),
+            'baseline_home_to_away_errors': int(summary.get('baseline_home_to_away_errors', 0) or 0),
+            'replay_home_to_away_errors': int(summary.get('replay_home_to_away_errors', 0) or 0),
+            'baseline_home_to_draw_errors': int(summary.get('baseline_home_to_draw_errors', 0) or 0),
+            'replay_home_to_draw_errors': int(summary.get('replay_home_to_draw_errors', 0) or 0),
+            'improved_matches': int(summary.get('improved_matches', 0) or 0),
+            'regressed_matches': int(summary.get('regressed_matches', 0) or 0),
+            'blocked_predictions': int(summary.get('blocked_predictions', 0) or 0),
+            'snapshot_backed_matches': int(summary.get('snapshot_backed_matches', 0) or 0),
+            'win_scope': 'current_model_replay',
+            'score_scope': 'current_model_replay',
+            'generated_at': generated_at,
+            'source_file': os.path.basename(source_file),
+        }
+
+    @staticmethod
+    def _build_reanalysis_delta_summary(overall: Dict[str, Any], by_league: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        baseline_win_accuracy = round(float(overall.get('baseline_win_accuracy', 0.0) or 0.0), 2)
+        replay_win_accuracy = round(float(overall.get('win_accuracy', 0.0) or 0.0), 2)
+        baseline_score_accuracy = round(float(overall.get('baseline_score_accuracy', 0.0) or 0.0), 2)
+        replay_score_accuracy = round(float(overall.get('score_accuracy', 0.0) or 0.0), 2)
+        by_league_delta: List[Dict[str, Any]] = []
+        for league_code, payload in (by_league or {}).items():
+            if not isinstance(payload, dict):
+                continue
+            baseline_league_win = round(float(payload.get('baseline_win_accuracy', 0.0) or 0.0), 2)
+            replay_league_win = round(float(payload.get('win_accuracy', 0.0) or 0.0), 2)
+            by_league_delta.append(
+                {
+                    'league': league_code,
+                    'baseline_win_accuracy': baseline_league_win,
+                    'replay_win_accuracy': replay_league_win,
+                    'win_accuracy_delta': round(replay_league_win - baseline_league_win, 2),
+                    'total_predictions': int(payload.get('total_predictions', 0) or 0),
+                    'correct_predictions': int(payload.get('correct_predictions', 0) or 0),
+                    'improved_matches': int(payload.get('improved_matches', 0) or 0),
+                    'regressed_matches': int(payload.get('regressed_matches', 0) or 0),
+                }
+            )
+        by_league_delta.sort(
+            key=lambda item: (
+                -float(item.get('win_accuracy_delta', 0.0) or 0.0),
+                -int(item.get('improved_matches', 0) or 0),
+                item.get('league') or '',
+            )
+        )
+        return {
+            'baseline_win_accuracy': baseline_win_accuracy,
+            'replay_win_accuracy': replay_win_accuracy,
+            'win_accuracy_delta': round(replay_win_accuracy - baseline_win_accuracy, 2),
+            'baseline_score_accuracy': baseline_score_accuracy,
+            'replay_score_accuracy': replay_score_accuracy,
+            'score_accuracy_delta': round(replay_score_accuracy - baseline_score_accuracy, 2),
+            'baseline_away_predictions': int(overall.get('baseline_away_predictions', 0) or 0),
+            'replay_away_predictions': int(overall.get('replay_away_predictions', 0) or 0),
+            'away_prediction_delta': int(overall.get('replay_away_predictions', 0) or 0) - int(overall.get('baseline_away_predictions', 0) or 0),
+            'baseline_home_to_away_errors': int(overall.get('baseline_home_to_away_errors', 0) or 0),
+            'replay_home_to_away_errors': int(overall.get('replay_home_to_away_errors', 0) or 0),
+            'home_to_away_error_delta': int(overall.get('replay_home_to_away_errors', 0) or 0) - int(overall.get('baseline_home_to_away_errors', 0) or 0),
+            'baseline_home_to_draw_errors': int(overall.get('baseline_home_to_draw_errors', 0) or 0),
+            'replay_home_to_draw_errors': int(overall.get('replay_home_to_draw_errors', 0) or 0),
+            'home_to_draw_error_delta': int(overall.get('replay_home_to_draw_errors', 0) or 0) - int(overall.get('baseline_home_to_draw_errors', 0) or 0),
+            'top_win_accuracy_improvements': by_league_delta[:5],
+        }
+
+    def build_reanalysis_report(self) -> Dict[str, Any]:
+        selected_by_league: Dict[str, Dict[str, Any]] = {}
+        selected_global: Optional[Dict[str, Any]] = None
+
+        for file_path in self._iter_reanalysis_result_files():
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    payload = json.load(f)
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            summary = payload.get('summary') if isinstance(payload.get('summary'), dict) else None
+            if not isinstance(summary, dict):
+                continue
+            scope = payload.get('scope') if isinstance(payload.get('scope'), dict) else {}
+            league = str(scope.get('league') or '').strip() or None
+            generated_at = str(payload.get('generated_at') or '').strip()
+            sort_key = self._reanalysis_generated_sort_key(file_path, payload)
+            normalized = self._normalize_reanalysis_summary(
+                summary,
+                league=league,
+                source_file=file_path,
+                generated_at=generated_at,
+            )
+            candidate = {
+                'sort_key': sort_key,
+                'summary': normalized,
+            }
+            if league:
+                current = selected_by_league.get(league)
+                if current is None or sort_key >= float(current.get('sort_key', 0.0) or 0.0):
+                    selected_by_league[league] = candidate
+            else:
+                if selected_global is None or sort_key >= float(selected_global.get('sort_key', 0.0) or 0.0):
+                    selected_global = candidate
+
+        by_league = {
+            league: payload['summary']
+            for league, payload in sorted(selected_by_league.items())
+        }
+        selected_files = [item.get('source_file', '') for item in by_league.values() if isinstance(item, dict)]
+
+        if by_league:
+            total_predictions = sum(int(item.get('total_predictions', 0) or 0) for item in by_league.values())
+            correct_predictions = sum(int(item.get('correct_predictions', 0) or 0) for item in by_league.values())
+            total_score_predictions = sum(int(item.get('total_score_predictions', 0) or 0) for item in by_league.values())
+            correct_score_predictions = sum(int(item.get('correct_score_predictions', 0) or 0) for item in by_league.values())
+            baseline_away_predictions = sum(int(item.get('baseline_away_predictions', 0) or 0) for item in by_league.values())
+            replay_away_predictions = sum(int(item.get('replay_away_predictions', 0) or 0) for item in by_league.values())
+            baseline_home_to_away_errors = sum(int(item.get('baseline_home_to_away_errors', 0) or 0) for item in by_league.values())
+            replay_home_to_away_errors = sum(int(item.get('replay_home_to_away_errors', 0) or 0) for item in by_league.values())
+            baseline_home_to_draw_errors = sum(int(item.get('baseline_home_to_draw_errors', 0) or 0) for item in by_league.values())
+            replay_home_to_draw_errors = sum(int(item.get('replay_home_to_draw_errors', 0) or 0) for item in by_league.values())
+            improved_matches = sum(int(item.get('improved_matches', 0) or 0) for item in by_league.values())
+            regressed_matches = sum(int(item.get('regressed_matches', 0) or 0) for item in by_league.values())
+            blocked_predictions = sum(int(item.get('blocked_predictions', 0) or 0) for item in by_league.values())
+            snapshot_backed_matches = sum(int(item.get('snapshot_backed_matches', 0) or 0) for item in by_league.values())
+            overall = {
+                'league': None,
+                'total_predictions': total_predictions,
+                'correct_predictions': correct_predictions,
+                'win_accuracy': round(correct_predictions / total_predictions * 100, 2) if total_predictions > 0 else 0.0,
+                'total_score_predictions': total_score_predictions,
+                'correct_score_predictions': correct_score_predictions,
+                'score_accuracy': round(correct_score_predictions / total_score_predictions * 100, 2) if total_score_predictions > 0 else 0.0,
+                'baseline_win_accuracy': round(
+                    sum(float(item.get('baseline_win_accuracy', 0.0) or 0.0) * int(item.get('total_predictions', 0) or 0) for item in by_league.values()) / total_predictions,
+                    2,
+                ) if total_predictions > 0 else 0.0,
+                'baseline_score_accuracy': round(
+                    sum(float(item.get('baseline_score_accuracy', 0.0) or 0.0) * int(item.get('total_score_predictions', 0) or 0) for item in by_league.values()) / total_score_predictions,
+                    2,
+                ) if total_score_predictions > 0 else 0.0,
+                'baseline_away_predictions': baseline_away_predictions,
+                'replay_away_predictions': replay_away_predictions,
+                'baseline_home_to_away_errors': baseline_home_to_away_errors,
+                'replay_home_to_away_errors': replay_home_to_away_errors,
+                'baseline_home_to_draw_errors': baseline_home_to_draw_errors,
+                'replay_home_to_draw_errors': replay_home_to_draw_errors,
+                'improved_matches': improved_matches,
+                'regressed_matches': regressed_matches,
+                'blocked_predictions': blocked_predictions,
+                'snapshot_backed_matches': snapshot_backed_matches,
+                'win_scope': 'current_model_replay',
+                'score_scope': 'current_model_replay',
+                'generated_at': max((str(item.get('generated_at') or '') for item in by_league.values()), default=''),
+                'source_file': 'aggregated_per_league',
+            }
+            return {
+                'available': True,
+                'scope': 'current_model_replay',
+                'overall': overall,
+                'by_league': by_league,
+                'delta_summary': self._build_reanalysis_delta_summary(overall, by_league),
+                'generated_from': {
+                    'mode': 'latest_per_league_files',
+                    'files': selected_files,
+                },
+            }
+
+        if selected_global is not None:
+            overall = dict(selected_global['summary'])
+            selected_files.append(overall.get('source_file', ''))
+            return {
+                'available': True,
+                'scope': 'current_model_replay',
+                'overall': overall,
+                'by_league': {},
+                'delta_summary': self._build_reanalysis_delta_summary(overall, {}),
+                'generated_from': {
+                    'mode': 'latest_global_file',
+                    'files': [file_name for file_name in selected_files if file_name],
+                },
+            }
+
+        return {
+            'available': False,
+            'scope': 'current_model_replay',
+            'overall': {},
+            'by_league': {},
+            'delta_summary': {},
+            'generated_from': {
+                'mode': 'none',
+                'files': [],
+            },
+        }
+
+    @staticmethod
+    def _reanalysis_prediction_text(predicted_winner_key: str) -> str:
+        return PREDICTED_WINNER_TEXT.get(str(predicted_winner_key or '').strip(), '')
+
+    @staticmethod
+    def _reanalysis_prediction_payload(match_payload: Dict[str, Any], *, source_file: str, generated_at: str) -> Dict[str, Any]:
+        replay = match_payload.get('replay') if isinstance(match_payload.get('replay'), dict) else {}
+        baseline = match_payload.get('baseline') if isinstance(match_payload.get('baseline'), dict) else {}
+        predicted_winner_key = str(replay.get('predicted_winner_key') or '').strip()
+        prediction_text = ResultManager._reanalysis_prediction_text(predicted_winner_key)
+        final_probabilities = replay.get('final_probabilities') if isinstance(replay.get('final_probabilities'), dict) else {}
+        all_probabilities = replay.get('all_probabilities') if isinstance(replay.get('all_probabilities'), dict) else {}
+        confidence = replay.get('confidence')
+        try:
+            confidence = float(confidence)
+        except Exception:
+            confidence = 0.0
+        payload = {
+            'match_id': str(match_payload.get('match_id') or '').strip(),
+            'external_match_id': str(((match_payload.get('snapshot') or {}).get('match_id') or '')).strip(),
+            'teams_match_id': str(match_payload.get('match_id') or '').strip(),
+            'league': str(match_payload.get('league') or '').strip(),
+            'league_name': str(match_payload.get('league_name') or '').strip(),
+            'match_date': str(match_payload.get('match_date') or '').strip(),
+            'match_time': str(match_payload.get('match_time') or '').strip(),
+            'home_team': str(match_payload.get('home_team') or '').strip(),
+            'away_team': str(match_payload.get('away_team') or '').strip(),
+            'prediction': prediction_text,
+            'predicted_winner': predicted_winner_key,
+            'predicted_scores': list(replay.get('predicted_scores') or []),
+            'confidence': confidence,
+            'final_probabilities': deepcopy(final_probabilities),
+            'all_probabilities': deepcopy(all_probabilities),
+            'top_scores': [[score, 0.0] for score in list(replay.get('predicted_scores') or [])],
+            'full_prediction': {
+                'match_id': str(match_payload.get('match_id') or '').strip(),
+                'league_code': str(match_payload.get('league') or '').strip(),
+                'league_name': str(match_payload.get('league_name') or '').strip(),
+                'match_date': str(match_payload.get('match_date') or '').strip(),
+                'match_time': str(match_payload.get('match_time') or '').strip(),
+                'home_team': str(match_payload.get('home_team') or '').strip(),
+                'away_team': str(match_payload.get('away_team') or '').strip(),
+                'prediction': prediction_text,
+                'predicted_winner': predicted_winner_key,
+                'confidence': confidence,
+                'top_scores': [[score, 0.0] for score in list(replay.get('predicted_scores') or [])],
+                'final_probabilities': deepcopy(final_probabilities),
+                'all_probabilities': deepcopy(all_probabilities),
+                'applied_from_reanalysis': True,
+                'reanalysis_source_file': os.path.basename(source_file),
+                'reanalysis_generated_at': generated_at,
+                'reanalysis_baseline_predicted_winner': str(baseline.get('predicted_winner_key') or '').strip(),
+            },
+            'applied_from_reanalysis': True,
+            'reanalysis_source_file': os.path.basename(source_file),
+            'reanalysis_generated_at': generated_at,
+            'reanalysis_baseline_predicted_winner': str(baseline.get('predicted_winner_key') or '').strip(),
+            'storage_mode': str(match_payload.get('storage_mode') or '').strip() or 'league_sot',
+        }
+        return payload
+
+    def apply_reanalysis_predictions(
+        self,
+        *,
+        league: str = '',
+        input_path: str = '',
+        match_ids: Optional[List[str]] = None,
+        only_improved: bool = False,
+        dry_run: bool = False,
+        refresh_accuracy: bool = False,
+        update_completed: bool = True,
+    ) -> Dict[str, Any]:
+        league = str(league or '').strip()
+        explicit_input = str(input_path or '').strip()
+        source_file = explicit_input or (
+            os.path.join(self.base_dir, f'reanalysis_results_{league}.json') if league else os.path.join(self.base_dir, 'reanalysis_results.json')
+        )
+        if not os.path.exists(source_file):
+            raise FileNotFoundError(f'找不到 replay 文件: {source_file}')
+        with open(source_file, 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+        matches = payload.get('matches') if isinstance(payload.get('matches'), list) else []
+        generated_at = str(payload.get('generated_at') or '').strip()
+        selected_match_ids = {str(item).strip() for item in (match_ids or []) if str(item).strip()}
+        candidates: List[Dict[str, Any]] = []
+        applied: List[Dict[str, Any]] = []
+        skipped: List[Dict[str, Any]] = []
+        for match_payload in matches:
+            if not isinstance(match_payload, dict):
+                continue
+            match_id = str(match_payload.get('match_id') or '').strip()
+            match_league = str(match_payload.get('league') or '').strip()
+            baseline = match_payload.get('baseline') if isinstance(match_payload.get('baseline'), dict) else {}
+            replay = match_payload.get('replay') if isinstance(match_payload.get('replay'), dict) else {}
+            if league and match_league != league:
+                continue
+            if selected_match_ids and match_id not in selected_match_ids:
+                continue
+            if not all(str(match_payload.get(key) or '').strip() for key in ('match_date', 'home_team', 'away_team')):
+                skipped.append({'match_id': match_id, 'status': 'skipped', 'reason': 'missing_identity_fields'})
+                continue
+            if only_improved and not (bool(replay.get('win_hit')) and not bool(baseline.get('win_hit'))):
+                skipped.append({'match_id': match_id, 'status': 'skipped', 'reason': 'not_improved'})
+                continue
+            replay_winner = str(replay.get('predicted_winner_key') or '').strip()
+            if replay_winner not in PREDICTED_WINNER_TEXT:
+                skipped.append({'match_id': match_id, 'status': 'skipped', 'reason': 'missing_replay_prediction'})
+                continue
+            prediction_payload = self._reanalysis_prediction_payload(match_payload, source_file=source_file, generated_at=generated_at)
+            teams_match_id = self._find_existing_teams_match_id(
+                match_league,
+                str(match_payload.get('match_date') or '').strip(),
+                str(match_payload.get('home_team') or '').strip(),
+                str(match_payload.get('away_team') or '').strip(),
+            )
+            if teams_match_id:
+                prediction_payload['teams_match_id'] = teams_match_id
+                prediction_payload['match_id'] = teams_match_id
+                prediction_payload['storage_mode'] = 'league_sot'
+            else:
+                prediction_payload['teams_match_id'] = ''
+                prediction_payload['storage_mode'] = 'runtime_only'
+                prediction_payload['match_id'] = self._runtime_only_match_id(
+                    prediction_payload.get('external_match_id', ''),
+                    match_league,
+                    str(match_payload.get('match_date') or '').strip(),
+                    str(match_payload.get('home_team') or '').strip(),
+                    str(match_payload.get('away_team') or '').strip(),
+                )
+            prediction_payload['full_prediction']['match_id'] = prediction_payload['match_id']
+            prediction_payload['full_prediction']['teams_match_id'] = prediction_payload['teams_match_id']
+            prediction_payload['full_prediction']['external_match_id'] = prediction_payload.get('external_match_id', '')
+            preview = {
+                'match_id': prediction_payload['match_id'],
+                'league': match_league,
+                'teams': f"{match_payload.get('home_team')} vs {match_payload.get('away_team')}",
+                'baseline_predicted_winner': str(baseline.get('predicted_winner') or '').strip(),
+                'replay_predicted_winner': str(replay.get('predicted_winner') or '').strip(),
+                'archive_write': True,
+                'teams_write': bool(prediction_payload.get('teams_match_id')),
+            }
+            candidates.append(preview)
+            if dry_run:
+                applied.append({**preview, 'status': 'dry_run'})
+                continue
+            archive_entry = {
+                'match_id': prediction_payload['match_id'],
+                'external_match_id': prediction_payload.get('external_match_id', ''),
+                'internal_match_id': prediction_payload['match_id'],
+                'teams_match_id': prediction_payload.get('teams_match_id', ''),
+                'league': prediction_payload['league'],
+                'league_name': prediction_payload['league_name'],
+                'match_date': prediction_payload['match_date'],
+                'match_time': prediction_payload['match_time'],
+                'home_team': prediction_payload['home_team'],
+                'away_team': prediction_payload['away_team'],
+                'prediction': prediction_payload['prediction'],
+                'predicted_winner': prediction_payload['predicted_winner'],
+                'predicted_scores': prediction_payload['predicted_scores'],
+                'top_scores': prediction_payload['top_scores'],
+                'confidence': prediction_payload['confidence'],
+                'storage_mode': prediction_payload['storage_mode'],
+                'note': normalize_existing_prediction_note(build_prediction_note(prediction_payload)),
+                'full_prediction': prediction_payload['full_prediction'],
+                'applied_from_reanalysis': True,
+                'reanalysis_source_file': prediction_payload['reanalysis_source_file'],
+                'reanalysis_generated_at': prediction_payload['reanalysis_generated_at'],
+                'reanalysis_baseline_predicted_winner': prediction_payload['reanalysis_baseline_predicted_winner'],
+                'archived_at': datetime.now().isoformat(),
+            }
+            self._archive_prediction(archive_entry)
+            teams_updated = 0
+            if prediction_payload.get('teams_match_id'):
+                teams_updated = update_teams_md_prediction_notes(
+                    self._teams_md_path(match_league),
+                    [prediction_payload],
+                    match_date=prediction_payload['match_date'],
+                    update_completed=update_completed,
+                )
+            applied.append({
+                **preview,
+                'status': 'applied',
+                'teams_updated': teams_updated,
+            })
+        accuracy_refresh = self.update_accuracy_stats() if refresh_accuracy and not dry_run else None
+        return {
+            'source_file': source_file,
+            'generated_at': generated_at,
+            'league': league or None,
+            'dry_run': dry_run,
+            'only_improved': only_improved,
+            'candidate_count': len(candidates),
+            'applied_count': sum(1 for item in applied if item.get('status') in {'applied', 'dry_run'}),
+            'skipped_count': len(skipped),
+            'candidates': candidates,
+            'applied': applied,
+            'skipped': skipped,
+            'accuracy_refresh': accuracy_refresh,
         }
 
     def update_accuracy_stats(self):
         """更新准确率统计。"""
         overall_ou_report = self.calculate_over_under_report(days=30)
+        overall_accuracy = self.calculate_accuracy(ou_report=overall_ou_report)
         stats = {
-            'overall': self.calculate_accuracy(ou_report=overall_ou_report),
+            'overall': overall_accuracy,
             'by_league': {},
             'over_under_report': overall_ou_report,
+            'reanalysis_report': self.build_reanalysis_report(),
             'last_updated': datetime.now().isoformat()
         }
 
         for league_code in LEAGUE_NAMES.keys():
             league_ou_report = self.calculate_over_under_report(days=30, league=league_code)
-            stats['by_league'][league_code] = self.calculate_accuracy(league=league_code, ou_report=league_ou_report)
+            stats['by_league'][league_code] = self.calculate_accuracy(
+                league=league_code,
+                ou_report=league_ou_report,
+                baseline=overall_accuracy,
+            )
 
         self.accuracy_store.save(stats)
 

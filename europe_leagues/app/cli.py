@@ -63,6 +63,34 @@ def run_quietly(func):
     return result, stdout_buffer.getvalue(), stderr_buffer.getvalue()
 
 
+def cleanup_invalid_schedule_cache_files():
+    schedules_root = Path(EUROPE_LEAGUES_ROOT) / ".okooo-scraper" / "schedules"
+    deleted_files = []
+    if not schedules_root.exists():
+        return {"deleted_count": 0, "deleted_files": deleted_files}
+
+    for file_path in schedules_root.rglob("*.json"):
+        try:
+            payload = json.loads(file_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        date_click = payload.get("date_click")
+        if not isinstance(date_click, dict) or date_click.get("clicked") is not False:
+            continue
+        try:
+            file_path.unlink()
+        except OSError:
+            continue
+        try:
+            deleted_files.append(str(file_path.relative_to(EUROPE_LEAGUES_ROOT)))
+        except ValueError:
+            deleted_files.append(str(file_path))
+
+    return {"deleted_count": len(deleted_files), "deleted_files": deleted_files}
+
+
 FORMAL_COMMANDS = (
     "list-leagues",
     "predict-match",
@@ -74,6 +102,7 @@ FORMAL_COMMANDS = (
     "auto-sync-results",
     "result-sync-daemon",
     "accuracy",
+    "apply-reanalysis",
     "sync-pending-results-review",
     "build-season-master-review",
     "refresh-repo-docs",
@@ -108,6 +137,7 @@ COMMAND_AGENT_ROLES = {
     "auto-sync-results": ["result_tracker"],
     "result-sync-daemon": ["result_tracker"],
     "accuracy": ["result_tracker"],
+    "apply-reanalysis": ["result_tracker"],
     "sync-pending-results-review": ["result_tracker"],
     "build-season-master-review": ["result_tracker"],
     "refresh-repo-docs": ["result_tracker"],
@@ -894,6 +924,7 @@ def run_openclaw_predict_schedule(args):
         updates = []
         runtime_profile = get_command_runtime_profile("predict-schedule")
         persist = not bool(getattr(args, "no_write", False))
+        cache_cleanup = cleanup_invalid_schedule_cache_files()
 
         for league_code in leagues:
             for day_offset in range(args.days):
@@ -936,10 +967,12 @@ def run_openclaw_predict_schedule(args):
                         "prediction_count": prediction_count,
                         "accuracy_refreshed": accuracy_refreshed,
                         "persisted": persisted,
+                        "schedule_source_status": report.get("schedule_source_status") if isinstance(report, dict) else None,
+                        "schedule_source_reason": report.get("schedule_source_reason") if isinstance(report, dict) else None,
                         "runtime_profile": runtime_profile,
                     }
                 )
-        return updates
+        return {"updates": updates, "schedule_cache_cleanup": cache_cleanup}
 
     if args.json:
         result, captured_stdout, captured_stderr = run_quietly(_execute)
@@ -949,8 +982,12 @@ def run_openclaw_predict_schedule(args):
         )
         return
 
-    updates = _execute()
+    result = _execute()
+    cleanup = result["schedule_cache_cleanup"]
+    updates = result["updates"]
     print("📅 预测写回结果:")
+    if cleanup["deleted_count"]:
+        print(f"已删除 {cleanup['deleted_count']} 个无效赛程缓存")
     for item in updates:
         status = "已更新" if item["updated"] else "无数据"
         print(f"- {item['league_name']} {item['match_date']}: {status}")
@@ -1112,6 +1149,34 @@ def run_openclaw_accuracy(args):
     overall = stats["overall"]
     print(f"总体准确率: {overall['win_accuracy']}% ({overall['correct_predictions']}/{overall['total_predictions']})")
     print(f"统一大小球准确率: {overall.get('ou_accuracy', 0)}% ({overall.get('correct_ou_predictions', 0)}/{overall.get('total_ou_predictions', 0)})")
+    reanalysis_report = stats.get("reanalysis_report") or {}
+    replay_overall = reanalysis_report.get("overall") if isinstance(reanalysis_report, dict) else {}
+    replay_by_league = reanalysis_report.get("by_league") if isinstance(reanalysis_report, dict) else {}
+    replay_delta = reanalysis_report.get("delta_summary") if isinstance(reanalysis_report, dict) else {}
+    if reanalysis_report.get("available") and isinstance(replay_overall, dict) and replay_overall:
+        print(
+            f"当前模型重放胜平负准确率: {replay_overall.get('win_accuracy', 0)}% "
+            f"({replay_overall.get('correct_predictions', 0)}/{replay_overall.get('total_predictions', 0)})"
+        )
+        if isinstance(replay_delta, dict) and replay_delta:
+            print(
+                f"  基线对比: {replay_delta.get('baseline_win_accuracy', 0)}% -> {replay_delta.get('replay_win_accuracy', 0)}% "
+                f"({replay_delta.get('win_accuracy_delta', 0):+}pt)"
+            )
+        if isinstance(replay_by_league, dict) and replay_by_league:
+            top_improvements = replay_delta.get("top_win_accuracy_improvements") if isinstance(replay_delta, dict) else []
+            if isinstance(top_improvements, list) and top_improvements:
+                for item in top_improvements[:5]:
+                    print(
+                        f"  - {item.get('league')}: {item.get('baseline_win_accuracy', 0)}% -> {item.get('replay_win_accuracy', 0)}% "
+                        f"({item.get('win_accuracy_delta', 0):+}pt)"
+                    )
+            else:
+                for league_code, payload in list(replay_by_league.items())[:5]:
+                    print(
+                        f"  - {league_code}: {payload.get('win_accuracy', 0)}% "
+                        f"({payload.get('correct_predictions', 0)}/{payload.get('total_predictions', 0)})"
+                    )
     ou_report = stats.get("over_under_report") or {}
     by_line_source = ou_report.get("by_line_source") or {}
     if by_line_source:
@@ -1123,6 +1188,33 @@ def run_openclaw_accuracy(args):
             )
 
 
+def run_openclaw_apply_reanalysis(args):
+    def _execute():
+        from result_manager import ResultManager
+
+        manager = ResultManager()
+        result = manager.apply_reanalysis_predictions(
+            league=str(getattr(args, "league", "") or "").strip(),
+            input_path=str(getattr(args, "input", "") or "").strip(),
+            match_ids=list(getattr(args, "match_id", []) or []),
+            only_improved=bool(getattr(args, "only_improved", False)),
+            dry_run=bool(getattr(args, "dry_run", False)),
+            refresh_accuracy=bool(getattr(args, "refresh_accuracy", False)),
+        )
+        if isinstance(result, dict):
+            result.setdefault("runtime_profile", get_command_runtime_profile("apply-reanalysis"))
+        return result
+
+    if args.json:
+        result, captured_stdout, captured_stderr = run_quietly(_execute)
+        emit_response(
+            build_json_result("apply-reanalysis", result, captured_stdout, captured_stderr),
+            as_json=True,
+        )
+        return
+
+    result = _execute()
+    print(f"replay apply: applied={result.get('applied_count', 0)} skipped={result.get('skipped_count', 0)}")
 def run_openclaw_rag_rebuild(args):
     def _execute():
         from domain.rag import HybridRAGService
@@ -1672,6 +1764,15 @@ def build_parser():
     parser_accuracy.add_argument("--refresh", action="store_true", help="重新计算准确率")
     add_json_flag(parser_accuracy)
 
+    parser_apply_reanalysis = subparsers.add_parser("apply-reanalysis", help="将 replay 预测显式写回正式统计数据源")
+    parser_apply_reanalysis.add_argument("--league", default="", help="联赛代码")
+    parser_apply_reanalysis.add_argument("--input", default="", help="reanalysis 结果文件路径")
+    parser_apply_reanalysis.add_argument("--match-id", action="append", default=[], help="只 apply 指定比赛 ID，可重复传参")
+    parser_apply_reanalysis.add_argument("--only-improved", action="store_true", help="仅应用 baseline 错而 replay 对的场次")
+    parser_apply_reanalysis.add_argument("--dry-run", action="store_true", help="仅预览候选，不写入")
+    parser_apply_reanalysis.add_argument("--refresh-accuracy", action="store_true", help="apply 后刷新官方准确率")
+    add_json_flag(parser_apply_reanalysis)
+
     parser_sync_review = subparsers.add_parser("sync-pending-results-review", help="一键执行待回填检查、结果刷新与复盘总结更新")
     parser_sync_review.add_argument("--days-back", type=int, default=30, help="向前查询的天数")
     parser_sync_review.add_argument("--limit", type=int, default=20, help="单次最多处理的到期比赛数")
@@ -1756,6 +1857,17 @@ def build_parser():
     parser_harness_run.add_argument("--refresh", action="store_true", help="result_recording 后刷新准确率")
     add_json_flag(parser_harness_run)
 
+    legacy_help = {
+        "enhanced": "[legacy] 运行增强版交互流程",
+        "original": "[legacy] 运行原始交互流程",
+        "ml-test": "[legacy] 运行机器学习测试流程",
+        "results": "[legacy] 进入赛果交互更新流程",
+        "show-accuracy": "[legacy] 显示准确率报告",
+        "update-accuracy": "[legacy] 刷新并显示准确率报告",
+    }
+    for command in LEGACY_COMMANDS:
+        subparsers.add_parser(command, help=legacy_help[command], description=legacy_help[command])
+
     return parser
 
 
@@ -1837,6 +1949,8 @@ def main():
         run_openclaw_result_sync_daemon(args)
     elif args.command == "accuracy":
         run_openclaw_accuracy(args)
+    elif args.command == "apply-reanalysis":
+        run_openclaw_apply_reanalysis(args)
     elif args.command == "sync-pending-results-review":
         run_openclaw_sync_pending_results_review(args)
     elif args.command == "build-season-master-review":

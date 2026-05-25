@@ -39,6 +39,7 @@ from runtime.memory_samples import sync_prediction_memory_samples
 from runtime.paths import get_default_paths
 from runtime.rag_store import sync_rag_index
 from runtime.result_sync import LEAGUE_SOT_CODES, register_prediction_result_sync
+from storage.accuracy import AccuracyStatsStore
 from storage.teams_md import TeamsMarkdownStore
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,22 @@ LEAGUE_DISPLAY_NAMES = {
 
 NON_SOT_COMPETITION_KEYWORDS = ('杯', '欧冠', '欧联', '欧协联', '亚冠', '淘汰赛', '半决赛', '决赛')
 MEMORY_ACCURACY_PREFIX = '> 滚动预测准确率：'
+MEMORY_PENDING_SECTION_TITLE = '未完赛'
+MEMORY_COMPLETED_SECTION_TITLE = '已完赛'
+MEMORY_SECTION_ORDER = (
+    MEMORY_PENDING_SECTION_TITLE,
+    MEMORY_COMPLETED_SECTION_TITLE,
+)
+MEMORY_FIELD_ORDER = (
+    'prediction',
+    'market',
+    'risk',
+    'learning',
+    'rag',
+    'status',
+    'result',
+    'meta',
+)
 
 
 @dataclass(frozen=True)
@@ -94,6 +111,7 @@ class PredictionPersistenceService:
         self.cache = cache
         self.result_manager = result_manager
         self.team_alias_map = load_team_alias_map(base_dir)
+        self.accuracy_store = AccuracyStatsStore(base_dir)
 
     def memory_file_path(self) -> str:
         return str(self.paths.memory_file)
@@ -152,36 +170,103 @@ class PredictionPersistenceService:
                     out.append(f'  ◦ 盘口: {chunk}')
             return out or ['  ◦ 盘口: 盘口变化待补齐']
 
+        def normalize_meta_line(text: str) -> str:
+            body = str(text or '').strip().lstrip('· ').strip()
+            if not body:
+                return ''
+            ordered_meta: list[str] = []
+            extracted_ranges: list[tuple[int, int]] = []
+
+            def extract_field(label: str) -> str:
+                pattern = rf'{re.escape(label)}:\s*(.+?)(?=\s*\|\s*(?:MatchID|记忆ID|更新时间):|$)'
+                match = re.search(pattern, body)
+                if not match:
+                    return ''
+                extracted_ranges.append(match.span())
+                return f'{label}: {str(match.group(1) or "").strip()}'
+
+            match_id_part = extract_field('MatchID')
+            memory_id_part = extract_field('记忆ID')
+            updated_part = extract_field('更新时间')
+            if match_id_part:
+                ordered_meta.append(match_id_part)
+            if memory_id_part:
+                ordered_meta.append(memory_id_part)
+            if updated_part:
+                ordered_meta.append(updated_part)
+            remainder_parts: list[str] = []
+            cursor = 0
+            for start, end in sorted(extracted_ranges):
+                prefix = body[cursor:start]
+                remainder_parts.extend(part.strip() for part in prefix.split('|') if part.strip())
+                cursor = end
+            suffix = body[cursor:]
+            remainder_parts.extend(part.strip() for part in suffix.split('|') if part.strip())
+            for part in remainder_parts:
+                if part not in ordered_meta:
+                    ordered_meta.append(part)
+            return f"  · {' | '.join(ordered_meta)}" if ordered_meta else ''
+
         lines = [line.rstrip() for line in normalized.splitlines() if line.strip()]
         if len(lines) > 1:
-            rebuilt = [lines[0].strip()]
+            title_line = lines[0].strip()
+            prediction_line = ''
+            market_lines: list[str] = []
+            risk_line = ''
+            learning_line = ''
+            rag_line = ''
+            status_line = ''
+            result_line = ''
+            meta_line = ''
+            extra_lines: list[str] = []
             for line in lines[1:]:
                 stripped = line.strip()
-                if stripped.startswith('盘口:'):
-                    rebuilt.extend(market_lines_from_text(stripped.replace('盘口:', '', 1).strip()))
+                if stripped.startswith('预测:'):
+                    prediction_line = stripped if stripped.startswith('  ') else f'  {stripped}'
+                elif stripped.startswith('盘口:'):
+                    market_lines.extend(market_lines_from_text(stripped.replace('盘口:', '', 1).strip()))
                 elif stripped.startswith('◦ '):
-                    rebuilt.append(stripped if stripped.startswith('  ') else f'  {stripped}')
+                    market_lines.append(stripped if stripped.startswith('  ') else f'  {stripped}')
                 elif stripped.startswith('风险:') or stripped.startswith('▲ 风险:'):
                     risk_text = stripped.replace('▲ 风险:', '', 1).replace('风险:', '', 1).strip()
-                    rebuilt.append(f'  ▲ 风险: {risk_text}')
+                    risk_line = f'  ▲ 风险: {risk_text}'
+                elif stripped.startswith('联赛学习:') or stripped.startswith('◆ 联赛学习:'):
+                    learning_text = stripped.replace('◆ 联赛学习:', '', 1).replace('联赛学习:', '', 1).strip()
+                    learning_line = f'  ◆ 联赛学习: {learning_text}'
                 elif stripped.startswith('RAG记忆:') or stripped.startswith('◆ RAG记忆:'):
                     rag_text = stripped.replace('◆ RAG记忆:', '', 1).replace('RAG记忆:', '', 1).strip()
-                    rebuilt.append(f'  ◆ RAG记忆: {rag_text}')
+                    rag_line = f'  ◆ RAG记忆: {rag_text}'
+                elif stripped.startswith('状态:') or stripped.startswith('■ 状态:'):
+                    status_text = stripped.replace('■ 状态:', '', 1).replace('状态:', '', 1).strip()
+                    status_line = f'  ■ 状态: {status_text}'
                 elif stripped.startswith('赛果:') or stripped.startswith('■ 赛果:'):
                     result_text = stripped.replace('■ 赛果:', '', 1).replace('赛果:', '', 1).strip()
                     result_body, _, remainder = result_text.partition('|')
                     result_line = f'  ■ 赛果: {result_body.strip()}'
-                    if result_line not in rebuilt:
-                        rebuilt.append(result_line)
                     remainder = remainder.strip()
                     if remainder:
-                        meta_line = f'  · {remainder.lstrip("· ").strip()}'
-                        if meta_line not in rebuilt:
-                            rebuilt.append(meta_line)
+                        meta_line = normalize_meta_line(remainder)
                 elif '记忆ID:' in stripped or '更新时间:' in stripped:
-                    rebuilt.append(f'  · {stripped.lstrip("· ").strip()}')
+                    meta_line = normalize_meta_line(stripped)
                 else:
-                    rebuilt.append(stripped if stripped.startswith('  ') else f'  {stripped}')
+                    extra_lines.append(stripped if stripped.startswith('  ') else f'  {stripped}')
+            rebuilt = [title_line]
+            if prediction_line:
+                rebuilt.append(prediction_line)
+            rebuilt.extend(market_lines)
+            if risk_line:
+                rebuilt.append(risk_line)
+            if learning_line:
+                rebuilt.append(learning_line)
+            if rag_line:
+                rebuilt.append(rag_line)
+            rebuilt.extend(extra_lines)
+            if status_line:
+                rebuilt.append(status_line)
+            if result_line:
+                rebuilt.append(result_line)
+            if meta_line:
+                rebuilt.append(meta_line)
             return '\n'.join(rebuilt)
 
         parts = [part.strip() for part in normalized.split(' | ') if part.strip()]
@@ -199,6 +284,7 @@ class PredictionPersistenceService:
         over_under = ''
         market_parts: list[str] = []
         risk = ''
+        learning = ''
         rag = ''
         result = ''
         memory_id = ''
@@ -216,12 +302,15 @@ class PredictionPersistenceService:
                 collecting_market = True
                 market_parts = [part.replace('盘口:', '', 1).strip()]
             elif collecting_market and not any(
-                part.startswith(prefix) for prefix in ('风险:', 'RAG记忆:', '赛果:', '记忆ID:', '更新时间:')
+                part.startswith(prefix) for prefix in ('风险:', '联赛学习:', 'RAG记忆:', '赛果:', '记忆ID:', '更新时间:')
             ):
                 market_parts.append(part)
             elif part.startswith('风险:'):
                 collecting_market = False
                 risk = part
+            elif part.startswith('联赛学习:'):
+                collecting_market = False
+                learning = part
             elif part.startswith('RAG记忆:'):
                 collecting_market = False
                 rag = part
@@ -248,6 +337,8 @@ class PredictionPersistenceService:
             rebuilt_lines.extend(market_lines_from_text(' | '.join(market_parts)))
         if risk:
             rebuilt_lines.append(f"  ▲ {risk}")
+        if learning:
+            rebuilt_lines.append(f"  ◆ {learning}")
         if rag:
             rebuilt_lines.append(f"  ◆ {rag}")
         if result:
@@ -261,6 +352,68 @@ class PredictionPersistenceService:
         if meta_parts:
             rebuilt_lines.append(f"  · {' | '.join(meta_parts)}")
         return '\n'.join(rebuilt_lines)
+
+    @classmethod
+    def _memory_entry_field_kind(cls, line: str) -> str:
+        stripped = cls._unescape_memory_entry_text(line).strip()
+        if stripped.startswith('- ['):
+            return 'title'
+        if stripped.startswith('预测:'):
+            return 'prediction'
+        if stripped.startswith('◦ ') or stripped.startswith('盘口:'):
+            return 'market'
+        if stripped.startswith('▲ 风险:') or stripped.startswith('风险:'):
+            return 'risk'
+        if stripped.startswith('◆ 联赛学习:') or stripped.startswith('联赛学习:'):
+            return 'learning'
+        if stripped.startswith('◆ RAG记忆:') or stripped.startswith('RAG记忆:'):
+            return 'rag'
+        if stripped.startswith('■ 状态:') or stripped.startswith('状态:'):
+            return 'status'
+        if stripped.startswith('■ 赛果:') or stripped.startswith('赛果:'):
+            return 'result'
+        if stripped.startswith('· ') or '记忆ID:' in stripped or '更新时间:' in stripped:
+            return 'meta'
+        return 'other'
+
+    @classmethod
+    def _validate_memory_entry_field_order(cls, entry: str) -> tuple[bool, list[str]]:
+        lines = [line.rstrip() for line in cls._unescape_memory_entry_text(entry).splitlines() if line.strip()]
+        if not lines:
+            return True, []
+        issues: list[str] = []
+        expected_index = {name: idx for idx, name in enumerate(MEMORY_FIELD_ORDER)}
+        seen_kinds: list[str] = []
+        last_index = -1
+        has_prediction = False
+        has_meta = False
+        has_status = False
+        has_result = False
+        for line in lines[1:]:
+            kind = cls._memory_entry_field_kind(line)
+            if kind in ('title', 'other'):
+                continue
+            if kind == 'prediction':
+                has_prediction = True
+            if kind == 'meta':
+                has_meta = True
+            if kind == 'status':
+                has_status = True
+            if kind == 'result':
+                has_result = True
+            if kind in expected_index:
+                current_index = expected_index[kind]
+                if current_index < last_index:
+                    issues.append(f'字段顺序错误: {kind} 出现在 {seen_kinds[-1]} 之后')
+                last_index = max(last_index, current_index)
+                seen_kinds.append(kind)
+        if not has_prediction:
+            issues.append('缺少预测字段')
+        if not has_meta:
+            issues.append('缺少元信息字段')
+        if has_status and has_result:
+            issues.append('状态字段与赛果字段不能同时存在')
+        return not issues, issues
 
     @staticmethod
     def _build_memory_accuracy_summary(entry_lines: list[str]) -> str:
@@ -326,18 +479,74 @@ class PredictionPersistenceService:
         )
 
     @staticmethod
+    def _format_weight_changes(base_weights: Dict[str, Any], final_weights: Dict[str, Any]) -> str:
+        deltas = []
+        for model_name, final_value in (final_weights or {}).items():
+            try:
+                final_weight = float(final_value)
+                base_weight = float((base_weights or {}).get(model_name, final_weight))
+            except Exception:
+                continue
+            delta = final_weight - base_weight
+            if abs(delta) < 0.003:
+                continue
+            deltas.append((abs(delta), model_name, base_weight, final_weight))
+        if not deltas:
+            return '默认权重附近'
+        top_changes = sorted(deltas, reverse=True)[:2]
+        return ', '.join(
+            f'{model_name} {base_weight:.1%}->{final_weight:.1%}'
+            for _, model_name, base_weight, final_weight in top_changes
+        )
+
+    @classmethod
+    def _format_league_learning_summary(cls, result: Dict[str, Any]) -> str:
+        applied_weights = result.get('applied_weights') if isinstance(result.get('applied_weights'), dict) else {}
+        if not applied_weights:
+            return ''
+        total_predictions = int(applied_weights.get('league_total_predictions', 0) or 0)
+        if total_predictions <= 0:
+            return ''
+        win_accuracy = float(applied_weights.get('league_win_accuracy', 0.0) or 0.0)
+        score_accuracy = float(applied_weights.get('league_score_accuracy', 0.0) or 0.0)
+        ou_accuracy = float(applied_weights.get('league_ou_accuracy', 0.0) or 0.0)
+        league_weight_factor = float(applied_weights.get('league_weight_factor', 1.0) or 1.0)
+        base_weights = applied_weights.get('base_weights') if isinstance(applied_weights.get('base_weights'), dict) else {}
+        final_weights = applied_weights.get('final_weights') if isinstance(applied_weights.get('final_weights'), dict) else {}
+        change_summary = cls._format_weight_changes(base_weights, final_weights)
+        reason = str(applied_weights.get('weight_reason') or '').strip()
+        accuracy_summary = (
+            f'样本{total_predictions} | 胜平负{win_accuracy:.1f}%/比分{score_accuracy:.1f}%/大小球{ou_accuracy:.1f}%'
+        )
+        weight_summary = f'联赛权重{league_weight_factor:.3f} | 调权:{change_summary}'
+        return f'{accuracy_summary} | {weight_summary}' + (f' | {reason}' if reason else '')
+
+    @staticmethod
     def _memory_entry_is_completed(entry: str) -> bool:
         text = PredictionPersistenceService._unescape_memory_entry_text(entry)
         return '赛果:' in text or '■ 赛果:' in text
 
     @classmethod
     def render_prediction_memory_block(cls, entry_lines: list[str], start_marker: str, end_marker: str) -> str:
-        normalized_entries = [cls._normalize_memory_entry_layout(entry) for entry in entry_lines if str(entry or '').strip()]
+        normalized_entries = []
+        for entry in entry_lines:
+            if not str(entry or '').strip():
+                continue
+            normalized_entry = cls._normalize_memory_entry_layout(entry)
+            is_valid, issues = cls._validate_memory_entry_field_order(normalized_entry)
+            if not is_valid:
+                first_line = normalized_entry.splitlines()[0].strip() if normalized_entry.splitlines() else '<empty>'
+                logger.warning('滚动记忆字段顺序校验失败: %s | %s', first_line, '; '.join(issues))
+            normalized_entries.append(normalized_entry)
         summary_line = cls._build_memory_accuracy_summary(normalized_entries)
         body_lines = [summary_line, '']
         if normalized_entries:
             pending_entries = [entry for entry in normalized_entries if not cls._memory_entry_is_completed(entry)]
             completed_entries = [entry for entry in normalized_entries if cls._memory_entry_is_completed(entry)]
+            entries_by_section = {
+                MEMORY_PENDING_SECTION_TITLE: pending_entries,
+                MEMORY_COMPLETED_SECTION_TITLE: completed_entries,
+            }
 
             def append_group(title: str, entries: list[str]) -> None:
                 if not entries:
@@ -349,10 +558,15 @@ class PredictionPersistenceService:
                     if idx != len(entries) - 1:
                         body_lines.append('')
 
-            append_group('未完赛', pending_entries)
-            if pending_entries and completed_entries:
-                body_lines.append('')
-            append_group('已完赛', completed_entries)
+            rendered_sections = 0
+            for section_title in MEMORY_SECTION_ORDER:
+                section_entries = entries_by_section.get(section_title) or []
+                if not section_entries:
+                    continue
+                if rendered_sections > 0:
+                    body_lines.append('')
+                append_group(section_title, section_entries)
+                rendered_sections += 1
         else:
             body_lines = [summary_line]
         return start_marker + '\n' + '\n'.join(body_lines) + '\n' + end_marker
@@ -852,6 +1066,7 @@ class PredictionPersistenceService:
         actual_score = str(result.get('actual_score') or '').strip()
         actual_result = {'home': '主胜', 'away': '客胜', 'draw': '平局'}.get(actual_winner, '')
         rag_explanation = str(result.get('retrieved_memory_explanation') or '').replace('|', '/').strip()
+        league_learning_summary = self._format_league_learning_summary(result)
         external_match_id = str(
             result.get('match_id')
             or result.get('external_match_id')
@@ -865,6 +1080,8 @@ class PredictionPersistenceService:
         ]
         entry_lines.extend(self.format_memory_market_lines(result))
         entry_lines.append(f'  ▲ 风险: {risk_summary}')
+        if league_learning_summary:
+            entry_lines.append(f'  ◆ 联赛学习: {league_learning_summary}')
         if rag_explanation:
             entry_lines.append(f'  ◆ RAG记忆: {rag_explanation}')
 
@@ -877,6 +1094,35 @@ class PredictionPersistenceService:
         meta_parts.append(f'更新时间: {updated_at}')
         entry_lines.append(f"  · {' | '.join(meta_parts)}")
         return '\n'.join(entry_lines)
+
+    def _inject_league_learning_from_accuracy_store(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(result, dict):
+            return {}
+        if isinstance(result.get('applied_weights'), dict) and result.get('applied_weights'):
+            return result
+        league_code = str(result.get('league_code') or result.get('league') or '').strip()
+        if not league_code:
+            return result
+        accuracy_payload = self.accuracy_store.load()
+        by_league = accuracy_payload.get('by_league') if isinstance(accuracy_payload.get('by_league'), dict) else {}
+        league_stats = by_league.get(league_code) if isinstance(by_league, dict) else None
+        if not isinstance(league_stats, dict) or not league_stats:
+            return result
+        enriched = dict(result)
+        enriched['applied_weights'] = {
+            'league_code': league_code,
+            'league_total_predictions': int(league_stats.get('total_predictions', 0) or 0),
+            'league_weight_factor': float(league_stats.get('league_weight_factor', 1.0) or 1.0),
+            'confidence_adjustment': float(league_stats.get('confidence_adjustment', 0.0) or 0.0),
+            'weight_reason': str(league_stats.get('weight_reason') or '').strip(),
+            'league_win_accuracy': float(league_stats.get('win_accuracy', 0.0) or 0.0),
+            'league_score_accuracy': float(league_stats.get('score_accuracy', 0.0) or 0.0),
+            'league_ou_accuracy': float(league_stats.get('ou_accuracy', 0.0) or 0.0),
+            'top_weight_drivers': league_stats.get('top_weight_drivers', []) or [],
+            'base_weights': {},
+            'final_weights': {},
+        }
+        return enriched
 
     def update_prediction_memory(self, result: Dict[str, Any]) -> None:
         memory_path = self.memory_file_path()
@@ -894,6 +1140,7 @@ class PredictionPersistenceService:
             with open(memory_path, 'r', encoding='utf-8') as f:
                 content = f.read()
 
+            result = self._inject_league_learning_from_accuracy_store(result)
             entry = self.format_memory_prediction_entry(result)
             entry_key_bodies, memory_ids = self._memory_identity_aliases(result)
             entry_prefixes = {f'- [{body}]' for body in entry_key_bodies if body}

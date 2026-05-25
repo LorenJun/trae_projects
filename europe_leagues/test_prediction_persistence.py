@@ -2,11 +2,12 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from domain.live import LiveRefreshService
 from domain.persistence import PredictionPersistenceService
-from enhanced_prediction_workflow import EnhancedPredictor
+from enhanced_prediction_workflow import EnhancedPredictor, validate_schedule_cache_payload
 from import_players_from_csv import import_csv
 from runtime.memory_samples import build_prediction_memory_samples
 from runtime.paths import EuropeLeaguesPaths
@@ -150,7 +151,11 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
                 return []
 
         class DummyLiveRefreshService:
+            def __init__(self):
+                self.calls = []
+
             def refresh_report_match_odds(self, **kwargs):
+                self.calls.append(kwargs)
                 return kwargs["current_odds"] or {}
 
         class DummyPersistenceService:
@@ -197,7 +202,7 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
         predictor.persistence_service = DummyPersistenceService()
         predictor.writeback = DummyWriteback()
         predictor.predict_match = fake_predict_match
-        predictor._load_schedule_matches = lambda _league_code, _match_date: []
+        predictor._load_schedule_matches = lambda _league_code, _match_date: {"status": "missing", "reason": "schedule_cache_missing", "matches": []}
 
         with patch("enhanced_prediction_workflow.os.path.exists", return_value=True):
             report = predictor.generate_prediction_report(
@@ -209,6 +214,8 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
 
         self.assertEqual(len(predict_calls), 1)
         self.assertFalse(predict_calls[0]["persist"])
+        self.assertEqual(predictor.live_refresh_service.calls[0]["match_id"], "")
+        self.assertEqual(predictor.live_refresh_service.calls[0]["match_time"], "")
         self.assertEqual(predictor.writeback.calls, [("path", "premier_league"), ("write_batch", "premier_league", "2026-05-16", 1)])
         self.assertEqual(predictor.persistence_service.batch_calls, [("premier_league", 1)])
         self.assertTrue(report["teams_updated"])
@@ -275,7 +282,7 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
             "away_team": away_team,
             "prediction": "主胜",
         }
-        predictor._load_schedule_matches = lambda _league_code, _match_date: []
+        predictor._load_schedule_matches = lambda _league_code, _match_date: {"status": "missing", "reason": "schedule_cache_missing", "matches": []}
 
         with patch("enhanced_prediction_workflow.os.path.exists", return_value=True):
             report = predictor.generate_prediction_report(
@@ -334,7 +341,7 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
         predictor.persistence_service = DummyPersistenceService()
         predictor.writeback = DummyWriteback()
         predictor.predict_match = fake_predict_match
-        predictor._load_schedule_matches = lambda _league_code, _match_date: []
+        predictor._load_schedule_matches = lambda _league_code, _match_date: {"status": "missing", "reason": "schedule_cache_missing", "matches": []}
 
         with patch("enhanced_prediction_workflow.os.path.exists", return_value=True):
             report = predictor.generate_prediction_report(
@@ -428,10 +435,14 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
         predictor.persistence_service = DummyPersistenceService()
         predictor.writeback = DummyWriteback()
         predictor.predict_match = fake_predict_match
-        predictor._load_schedule_matches = lambda _league_code, _match_date: [
-            {"home_team": f"主队{i}", "away_team": f"客队{i}", "match_time": f"0{i}:00", "match_id": f"m{i}"}
-            for i in range(1, 11)
-        ]
+        predictor._load_schedule_matches = lambda _league_code, _match_date: {
+            "status": "valid",
+            "reason": "ok",
+            "matches": [
+                {"home_team": f"主队{i}", "away_team": f"客队{i}", "match_time": f"0{i}:00", "match_id": f"m{i}"}
+                for i in range(1, 11)
+            ],
+        }
 
         with patch("enhanced_prediction_workflow.os.path.exists", return_value=True):
             report = predictor.generate_prediction_report(
@@ -482,10 +493,11 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            matches = predictor._load_schedule_matches("la_liga", "2026-05-18")
+            result = predictor._load_schedule_matches("la_liga", "2026-05-18")
 
+        self.assertEqual(result["status"], "valid")
         self.assertEqual(
-            matches,
+            result["matches"],
             [
                 {
                     "home_team": "巴塞罗那",
@@ -512,6 +524,7 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
             predictor = EnhancedPredictor.__new__(EnhancedPredictor)
             predictor.base_dir = str(base_dir)
             predictor.paths = EuropeLeaguesPaths.from_base_dir(base_dir)
+            predictor.team_alias_map = {}
             teams_dir = base_dir / "la_liga"
             teams_dir.mkdir(parents=True, exist_ok=True)
             predictor.paths.teams_file("la_liga").write_text(
@@ -534,10 +547,11 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            matches = predictor._load_schedule_matches("la_liga", "2026-05-18")
+            result = predictor._load_schedule_matches("la_liga", "2026-05-18")
 
+        self.assertEqual(result["status"], "missing")
         self.assertEqual(
-            matches,
+            result["matches"],
             [
                 {
                     "home_team": "埃尔切",
@@ -555,6 +569,158 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
                 },
             ],
         )
+
+    def test_load_schedule_matches_invalid_cache_uses_teams_markdown_only(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir).resolve()
+            predictor = EnhancedPredictor.__new__(EnhancedPredictor)
+            predictor.base_dir = str(base_dir)
+            predictor.paths = EuropeLeaguesPaths.from_base_dir(base_dir)
+            predictor.team_alias_map = {
+                "premier_league": {
+                    "布伦特": "布伦特福德",
+                    "维拉": "阿斯顿维拉",
+                }
+            }
+            schedule_dir = predictor.paths.schedules_dir / "premier_league"
+            schedule_dir.mkdir(parents=True, exist_ok=True)
+            (schedule_dir / "2026-05-24.json").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-05-24",
+                        "date_click": {"clicked": False},
+                        "matches": [
+                            {"home_team": "利物浦", "away_team": "布伦特", "raw_text": "第1轮 利物浦 完 4:2 伯恩茅斯"}
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            predictor.paths.teams_file("premier_league").parent.mkdir(parents=True, exist_ok=True)
+            predictor.paths.teams_file("premier_league").write_text(
+                "\n".join(
+                    [
+                        "### 第38轮（收官轮）",
+                        "| 日期 | 时间 | 主队 | 比分 | 客队 | 备注 |",
+                        "|-----|------|-----|------|-----|------|",
+                        "| 2026-05-24 | 23:00 | 利物浦 | - | 布伦特福德 | 进行中 |",
+                        "| 2026-05-24 | 23:00 | 曼城 | - | 阿斯顿维拉 | 进行中 |",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = predictor._load_schedule_matches("premier_league", "2026-05-24")
+
+        self.assertEqual(result["status"], "invalid")
+        self.assertEqual(result["reason"], "date_click_failed")
+        self.assertEqual(
+            result["matches"],
+            [
+                {
+                    "home_team": "利物浦",
+                    "away_team": "布伦特福德",
+                    "match_time": "23:00",
+                    "current_odds": None,
+                    "_source": "teams_markdown",
+                },
+                {
+                    "home_team": "曼城",
+                    "away_team": "阿斯顿维拉",
+                    "match_time": "23:00",
+                    "current_odds": None,
+                    "_source": "teams_markdown",
+                },
+            ],
+        )
+
+    def test_validate_schedule_cache_payload_rejects_embedded_date_mismatch_rows(self):
+        result = validate_schedule_cache_payload(
+            {
+                "date": "2026-05-24",
+                "date_click": {"clicked": True},
+                "matches": [
+                    {"home_team": "利物浦", "away_team": "布伦特福德", "raw_text": "05-23 利物浦 vs 布伦特福德"}
+                ],
+            },
+            league_code="premier_league",
+            match_date="2026-05-24",
+            alias_map={},
+        )
+
+        self.assertEqual(result["status"], "invalid")
+        self.assertEqual(result["reason"], "no_valid_rows")
+
+    def test_generate_prediction_report_invalid_cache_does_not_use_weaker_fallbacks(self):
+        predictor = EnhancedPredictor.__new__(EnhancedPredictor)
+
+        class DummySnapshotRepository:
+            def __init__(self):
+                self.fill_calls = []
+                self.snapshot_calls = 0
+                self.history_calls = 0
+
+            def get_matches_from_odds_snapshots(self, league_code, match_date):
+                self.snapshot_calls += 1
+                return [{"home_team": "错误快照", "away_team": "不应使用", "current_odds": {}}]
+
+            def get_matches_from_odds_history(self, league_code, match_date):
+                self.history_calls += 1
+                return [{"home_team": "错误历史", "away_team": "不应使用", "current_odds": {}}]
+
+            def fill_missing_current_odds(self, league_code, match_date, matches):
+                self.fill_calls.append((league_code, match_date, len(matches)))
+                return matches
+
+        class DummyReportingService:
+            def get_sample_matches(self, league_code):
+                raise AssertionError("sample matches should not be used when invalid cache is present")
+
+        class DummyLiveRefreshService:
+            def refresh_report_match_odds(self, **kwargs):
+                return kwargs["current_odds"] or {}
+
+        predictor.snapshot_repository = DummySnapshotRepository()
+        predictor.reporting_service = DummyReportingService()
+        predictor.live_refresh_service = DummyLiveRefreshService()
+        predictor.persistence_service = SimpleNamespace(
+            persist_prediction_batch=lambda predictions, league_code: {
+                "prediction_count": len(predictions),
+                "accuracy_refreshed": True,
+                "persisted": {"enabled": True, "archived": False, "memory_updated": True, "result_sync_registered": True},
+            }
+        )
+        predictor.writeback = SimpleNamespace(
+            teams_file_path=lambda league_code: "/tmp/premier_league_teams.md",
+            write_predictions=lambda league_code, match_date, predictions: len(predictions),
+        )
+        predictor.predict_match = lambda home_team, away_team, league_code, match_date, **kwargs: {
+            "home_team": home_team,
+            "away_team": away_team,
+            "prediction": "主胜",
+        }
+        predictor._load_schedule_matches = lambda _league_code, _match_date: {
+            "status": "invalid",
+            "reason": "date_click_failed",
+            "matches": [],
+        }
+
+        with patch("enhanced_prediction_workflow.os.path.exists", return_value=True):
+            report = predictor.generate_prediction_report(
+                "premier_league",
+                "2026-05-24",
+                persist=True,
+                write_teams=True,
+            )
+
+        self.assertEqual(report["prediction_count"], 0)
+        self.assertEqual(report["schedule_source_status"], "invalid")
+        self.assertEqual(report["schedule_source_reason"], "date_click_failed")
+        self.assertEqual(predictor.snapshot_repository.snapshot_calls, 0)
+        self.assertEqual(predictor.snapshot_repository.history_calls, 0)
+        self.assertEqual(predictor.snapshot_repository.fill_calls, [])
 
     def test_predict_match_writes_single_league_sot_prediction_to_teams_file(self):
         predictor = EnhancedPredictor.__new__(EnhancedPredictor)
@@ -968,6 +1134,68 @@ class PredictionMemoryCleanupTest(unittest.TestCase):
         self.assertIn("巴塞罗那 vs 皇家贝蒂斯", content)
         self.assertIn("MatchID: 1302913", content)
         self.assertNotIn("MatchID: la_liga_20260518_巴塞罗那_皇家贝蒂斯", content)
+
+    def test_update_prediction_memory_includes_league_learning_summary_from_accuracy_store(self):
+        self.memory_path.write_text(
+            "\n".join(
+                [
+                    "# Test Memory",
+                    "",
+                    "<!-- prediction-memory:start -->",
+                    "> 滚动预测准确率： 暂无已完赛样本",
+                    "",
+                    "#### 未完赛",
+                    "",
+                    "<!-- prediction-memory:end -->",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        runtime_dir = self.base_dir / ".okooo-scraper" / "runtime"
+        (runtime_dir / "accuracy_stats.json").write_text(
+            json.dumps(
+                {
+                    "overall": {},
+                    "by_league": {
+                        "la_liga": {
+                            "total_predictions": 18,
+                            "win_accuracy": 61.1,
+                            "score_accuracy": 27.8,
+                            "ou_accuracy": 58.3,
+                            "league_weight_factor": 1.031,
+                            "confidence_adjustment": 0.012,
+                            "weight_reason": "联赛近30天命中率高于全局基线，放大联赛学习调权",
+                            "top_weight_drivers": [{"model": "elo", "score": 0.61}],
+                        }
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        service = PredictionPersistenceService(base_dir=str(self.base_dir), cache=None, result_manager=None)
+        service.update_prediction_memory(
+            {
+                "league_code": "la_liga",
+                "league_name": "西甲",
+                "match_date": "2026-05-19",
+                "home_team": "皇家社会",
+                "away_team": "比利亚雷亚尔",
+                "prediction": "平局",
+                "confidence": 0.44,
+                "top_scores": [("1-1", 0.2), ("0-0", 0.1)],
+                "over_under": {"available": False, "reason": "missing_real_market_line"},
+            }
+        )
+
+        content = self.memory_path.read_text(encoding="utf-8")
+        self.assertIn("◆ 联赛学习:", content)
+        self.assertIn("样本18", content)
+        self.assertIn("联赛权重1.031", content)
+        self.assertIn("放大联赛学习调权", content)
 
     def test_update_prediction_memory_keeps_same_teams_on_different_dates(self):
         self.memory_path.write_text(

@@ -202,6 +202,7 @@ class LiveRefreshService:
                     match_id=mid,
                     headed=bool(okooo_headed),
                     match_time=match_time or '',
+                    strict_identity=True,
                 )
                 if not refreshed:
                     continue
@@ -220,6 +221,24 @@ class LiveRefreshService:
                             'payload_match_id': str(payload.get('match_id') or ''),
                             'payload_home_team': str(payload.get('home_team') or payload.get('team1') or ''),
                             'payload_away_team': str(payload.get('away_team') or payload.get('team2') or ''),
+                        }
+                    )
+                    continue
+                existing_match_id = str((current_odds or {}).get('match_id') or realtime['okooo'].get('match_id') or '').strip()
+                payload_match_id = str(payload.get('match_id') or '').strip()
+                if (
+                    existing_match_id
+                    and payload_match_id
+                    and payload_match_id != existing_match_id
+                    and self._has_real_totals_line(current_odds)
+                ):
+                    realtime['okooo']['errors'].append(
+                        {
+                            'driver': driver,
+                            'error': 'snapshot_match_id_conflict',
+                            'existing_match_id': existing_match_id,
+                            'payload_match_id': payload_match_id,
+                            'snapshot_path': path or '',
                         }
                     )
                     continue
@@ -332,7 +351,7 @@ class LiveRefreshService:
             okooo_driver=okooo_driver,
             okooo_headed=okooo_headed,
             match_time=match_time,
-            match_id=match_id,
+            match_id=str(realtime.get('okooo', {}).get('match_id') or match_id or ''),
         )
         current_odds = self.ensure_totals_if_needed(
             league_code=league_code,
@@ -406,14 +425,16 @@ class LiveRefreshService:
         prefer_existing: bool = False,
         okooo_driver: str = 'local-chrome',
         okooo_headed: bool = False,
+        match_time: str = '',
+        match_id: str = '',
     ) -> Optional[Dict[str, Any]]:
         if os.environ.get('OKOOO_REFRESH_LIVE', '1') == '0' or not home_team or not away_team:
             return current_odds
         if prefer_existing and self._has_market_content(current_odds):
             return current_odds
-        match_id = ''
-        if isinstance(current_odds, dict):
-            match_id = str(current_odds.get('match_id') or '')
+        resolved_match_id = str(match_id or '')
+        if not resolved_match_id and isinstance(current_odds, dict):
+            resolved_match_id = str(current_odds.get('match_id') or '')
         for driver in build_okooo_driver_chain(okooo_driver):
             try:
                 refreshed = refresh_okooo_snapshot(
@@ -423,8 +444,10 @@ class LiveRefreshService:
                     away_team,
                     match_date,
                     driver=driver,
-                    match_id=match_id,
+                    match_id=resolved_match_id,
                     headed=bool(okooo_headed),
+                    match_time=match_time or '',
+                    strict_identity=True,
                 )
                 if not refreshed:
                     continue

@@ -70,6 +70,7 @@ def _apply_handicap_adjustment(
     handicap_value: Optional[float],
     home_water: Optional[float],
     away_water: Optional[float],
+    risk_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, float]:
     home = float(probabilities.get("home_win") or 0.0)
     draw = float(probabilities.get("draw") or 0.0)
@@ -103,17 +104,68 @@ def _apply_handicap_adjustment(
         elif away_water >= 2.05:
             shift += 0.015
 
-    if abs(shift) < 1e-9:
+    risk_factors = [str(item) for item in ((risk_summary or {}).get("factors") or []) if str(item).strip()]
+    shallow_home = handicap_value is not None and -0.35 <= float(handicap_value) <= 0.0
+    shallow_away = handicap_value is not None and 0.0 <= float(handicap_value) <= 0.35
+    draw_risk_signal = any("平" in item for item in risk_factors)
+    away_risk_signal = any("客队不败" in item or "欧赔走弱主队" in item for item in risk_factors)
+    home_risk_signal = any("主队" in item and "阻力" in item for item in risk_factors)
+    protective_draw_shift = 0.0
+    protective_away_shift = 0.0
+    protective_home_shift = 0.0
+    if shift > 0 and shallow_home:
+        if home_water is not None and home_water >= 2.0:
+            shift -= 0.012
+            protective_draw_shift += 0.004
+            protective_away_shift += 0.008
+        if draw_risk_signal:
+            shift -= 0.008
+            protective_draw_shift += 0.008
+        if away_risk_signal:
+            shift -= 0.01
+            protective_draw_shift += 0.004
+            protective_away_shift += 0.01
+    elif shift < 0 and shallow_away:
+        if away_water is not None and away_water >= 2.0:
+            shift += 0.012
+            protective_draw_shift += 0.004
+            protective_home_shift += 0.008
+        if draw_risk_signal:
+            shift += 0.008
+            protective_draw_shift += 0.008
+        if home_risk_signal:
+            shift += 0.01
+            protective_draw_shift += 0.004
+            protective_home_shift += 0.01
+
+    if abs(shift) < 1e-9 and protective_draw_shift <= 0 and protective_away_shift <= 0 and protective_home_shift <= 0:
         return probabilities
 
     if shift > 0:
         home += shift
         draw = max(draw - shift * 0.45, 0.02)
         away = max(away - shift * 0.55, 0.02)
-    else:
+    elif shift < 0:
         away += abs(shift)
         draw = max(draw - abs(shift) * 0.45, 0.02)
         home = max(home - abs(shift) * 0.55, 0.02)
+
+    if protective_draw_shift > 0 or protective_away_shift > 0:
+        available_home = max(0.0, home - 0.02)
+        take = min(available_home, protective_draw_shift + protective_away_shift)
+        if take > 0:
+            scale = take / max(protective_draw_shift + protective_away_shift, 1e-9)
+            home -= take
+            draw += protective_draw_shift * scale
+            away += protective_away_shift * scale
+    if protective_draw_shift > 0 or protective_home_shift > 0:
+        available_away = max(0.0, away - 0.02)
+        take = min(available_away, protective_draw_shift + protective_home_shift)
+        if take > 0:
+            scale = take / max(protective_draw_shift + protective_home_shift, 1e-9)
+            away -= take
+            draw += protective_draw_shift * scale
+            home += protective_home_shift * scale
     return _normalize_triplet(home, draw, away)
 
 
@@ -361,6 +413,7 @@ def _pick_top_scores(
     ou_line: Optional[float],
     over_prob: Optional[float],
     under_prob: Optional[float],
+    risk_summary: Optional[Dict[str, Any]] = None,
     include_diag: bool = False,
 ) -> Any:
     line = float(ou_line) if isinstance(ou_line, (int, float)) else 2.5
@@ -382,6 +435,31 @@ def _pick_top_scores(
         key=lambda item: item[1],
         reverse=True,
     )
+    risk_factors = [str(item) for item in ((risk_summary or {}).get("factors") or []) if str(item).strip()]
+    probability_gap = abs(float(probabilities.get("home_win") or 0.0) - float(probabilities.get("away_win") or 0.0))
+    fragile_home_guard = bool(
+        prediction == "主胜"
+        and sum(
+            int(flag)
+            for flag in (
+                handicap_value is not None and -0.35 <= float(handicap_value) <= 0.0,
+                probability_gap <= 0.16,
+                over_prob is not None and under_prob is not None and float(over_prob) >= float(under_prob) - 0.03,
+                any("平" in item for item in risk_factors),
+                any("客队不败" in item or "欧赔走弱主队" in item for item in risk_factors),
+            )
+        ) >= 2
+    )
+    if fragile_home_guard:
+        adjusted_scores = dict(ranked_scores)
+        for score, factor in {"1-0": 0.78, "2-0": 0.88, "2-1": 1.12, "1-1": 1.1, "1-2": 1.08}.items():
+            if score in adjusted_scores:
+                adjusted_scores[score] *= factor
+        if under_prob is not None and over_prob is not None and float(under_prob) - float(over_prob) >= 0.06:
+            for score, factor in {"1-0": 1.06, "1-1": 1.03, "1-2": 0.92}.items():
+                if score in adjusted_scores:
+                    adjusted_scores[score] *= factor
+        ranked_scores = sorted(adjusted_scores.items(), key=lambda item: item[1], reverse=True)
     ranked_scores, score_guard_diag = _apply_under_three_score_penalty(
         ranked_scores,
         line,
@@ -395,6 +473,10 @@ def _pick_top_scores(
         confidence = 0.2 - index * 0.025 - max(0.0, top_score - value) * 0.03
         results.append([score, round(_clamp(confidence, 0.08, 0.24), 4)])
     if include_diag:
+        if fragile_home_guard:
+            score_guard_diag = dict(score_guard_diag)
+            score_guard_diag.setdefault("signals", [])
+            score_guard_diag["signals"] = list(dict.fromkeys([*score_guard_diag.get("signals", []), "lightweight-fragile-home-template-rebalance"]))
         return results, score_guard_diag
     return results
 
@@ -498,11 +580,13 @@ def build_lightweight_prediction_result(
         euro_final.get("draw"),
         euro_final.get("away"),
     )
+    preliminary_risk = _build_risk_summary(snapshot, probabilities)
     probabilities = _apply_handicap_adjustment(
         probabilities,
         _safe_float(asian_final.get("handicap_value")),
         _safe_float(asian_final.get("home_water")),
         _safe_float(asian_final.get("away_water")),
+        risk_summary=preliminary_risk,
     )
     label_probs = _label_probs(probabilities)
     prediction = max(label_probs.items(), key=lambda item: item[1])[0]
@@ -515,6 +599,7 @@ def build_lightweight_prediction_result(
     handicap_value = _safe_float(asian_final.get("handicap_value"))
     home_water = _safe_float(asian_final.get("home_water"))
     away_water = _safe_float(asian_final.get("away_water"))
+    risk = _build_risk_summary(snapshot, probabilities)
     top_scores, score_rerank_guard = _pick_top_scores(
         prediction,
         probabilities=probabilities,
@@ -524,9 +609,9 @@ def build_lightweight_prediction_result(
         ou_line=_safe_float(ou_line),
         over_prob=_safe_float(over_prob),
         under_prob=_safe_float(under_prob),
+        risk_summary=risk,
         include_diag=True,
     )
-    risk = _build_risk_summary(snapshot, probabilities)
     league_code = _league_code_from_name(league_name, league_code)
 
     return {

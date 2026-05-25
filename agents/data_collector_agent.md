@@ -126,13 +126,13 @@ purpose: "负责从正式实时源采集足球比赛所需的结构化数据，�
    ↓
 3. 从赛程 JSON 中定位 match_id / kickoff_time / history_url
    ↓
-4. 若存在简称差异，结合 okooo_team_aliases.json 修正
+4. 若联赛页停在错误月份，优先依赖脚本自动翻月；若存在简称差异，结合 okooo_team_aliases.json 修正
    ↓
-5. 需要显式快照时调用 okooo_save_snapshot.py 抓实时快照
+5. 需要显式快照时调用 okooo_save_snapshot.py 抓实时快照，并按日期 + 主客队 + 时间精确锁定比赛
    ↓
-6. 检查赛程或快照内是否包含：match_id / 欧赔 / 亚值 / 大小球 / 凯利 / 状态
+6. 检查赛程或快照内是否包含：match_id / 欧赔 / 亚值 / 大小球 / 凯利 / 状态，并确认未发生错误比赛串场
    ↓
-7. 输出结构化数据，交给预测流程、Harness 或批量回填流程使用
+7. 输出结构化数据，交给预测流程、Harness 或批量回填流程使用；正式预测链会继续执行快照注水与盘口补抓
 ```
 
 ## 推荐命令
@@ -141,7 +141,7 @@ purpose: "负责从正式实时源采集足球比赛所需的结构化数据，�
 
 ```bash
 cd /Users/bytedance/trae_projects
-python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026-04-28
+python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026-05-24
 ```
 
 ### 2. 用 MatchID 直接抓快照
@@ -151,11 +151,11 @@ cd /Users/bytedance/trae_projects
 python3 europe_leagues/okooo_save_snapshot.py \
   --driver local-chrome \
   --league 英超 \
-  --team1 曼联 \
-  --team2 布伦特福德 \
-  --date 2026-04-28 \
-  --time 03:00 \
-  --match-id 1296070 \
+  --team1 伯恩利 \
+  --team2 狼队 \
+  --date 2026-05-24 \
+  --time 23:00 \
+  --match-id 1296105 \
   --out-dir /Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots \
   --overwrite
 ```
@@ -164,7 +164,7 @@ python3 europe_leagues/okooo_save_snapshot.py \
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py collect-data --league premier_league --date 2026-04-28 --json
+python3 prediction_system.py collect-data --league premier_league --date 2026-05-24 --json
 ```
 
 ### 4. 批量赛果更新入口（供结果追踪链路调用）
@@ -226,6 +226,8 @@ python3 prediction_system.py sync-pending-results-review --days-back 30 --limit 
 - `match_id` 正确
 - `kickoff_time` 正确或可缺省
 - 若名称不一致，已处理简称映射
+- 若联赛页默认月份不对，已完成自动翻月并命中目标日期分组
+- 同日多场相近开球时间下，未误中其它比赛
 
 ### 2. 快照完整性验证
 
@@ -235,6 +237,7 @@ python3 prediction_system.py sync-pending-results-review --days-back 30 --limit 
 - `亚值`
 - `大小球`
 - `凯利`
+- 快照身份与请求一致：`match_id + 主客队 + match_date` 可互相校验
 
 ### 3. 大小球专项验证
 
@@ -250,12 +253,12 @@ python3 prediction_system.py sync-pending-results-review --days-back 30 --limit 
 ```json
 {
   "match_info": {
-    "date": "2026-04-28",
-    "time": "03:00",
-    "home_team": "曼联",
-    "away_team": "布伦特福德",
+    "date": "2026-05-24",
+    "time": "23:00",
+    "home_team": "伯恩利",
+    "away_team": "狼队",
     "league": "英超",
-    "match_id": "1296070",
+    "match_id": "1296105",
     "status": "待进行"
   },
   "current_odds": {

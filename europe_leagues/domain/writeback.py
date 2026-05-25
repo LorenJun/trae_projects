@@ -259,9 +259,11 @@ def update_teams_md_prediction_notes(
     teams_path: str,
     predictions: List[Dict[str, Any]],
     match_date: Optional[str] = None,
+    update_completed: bool = False,
 ) -> int:
     try:
-        lines = open(teams_path, 'r', encoding='utf-8').read().splitlines(True)
+        with open(teams_path, 'r', encoding='utf-8') as f:
+            lines = f.read().splitlines(True)
     except Exception:
         return 0
 
@@ -291,10 +293,15 @@ def update_teams_md_prediction_notes(
         prediction = prediction_index.get((date, _normalize_team_name(home), _normalize_team_name(away)))
         current_note = normalize_existing_prediction_note(note)
 
-        if prediction and not re.match(r'^\d+\s*-\s*\d+$', score or ''):
+        score_completed = bool(re.match(r'^\d+\s*-\s*\d+$', score or ''))
+        if prediction and (update_completed or not score_completed):
             merged = strip_existing_prediction_fragments(current_note).rstrip('；; ').strip()
+            replay_suffix_match = re.search(r'(复盘[:：].*)$', current_note)
+            replay_suffix = replay_suffix_match.group(1).strip() if replay_suffix_match else ''
             pred_note = build_prediction_note(prediction)
             current_note = f'{merged}；{pred_note}' if merged else pred_note
+            if replay_suffix and replay_suffix not in current_note:
+                current_note = f'{current_note}；{replay_suffix}'
             current_note = normalize_existing_prediction_note(current_note)
 
         if current_note == note:

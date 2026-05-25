@@ -208,8 +208,9 @@ trae_projects/
 
 - 优先走 `prediction_system.py predict-match`
 - 由 `app/cli.py` -> `DomainPredictor` -> `EnhancedPredictor` 调度真实主链
-- 自动拉实时快照并处理大小球补抓
+- 自动拉实时快照、预测前注水并处理大小球补抓
 - 使用真实大小球盘口线
+- 支持赛程自动翻月、日期分组匹配与严格身份校验后的盘口回流
 - 输出终版结论、必要诊断字段和 `runtime_profile`
 
 触发关键词：比赛预测、单场分析、predict-match、football-match-analysis
@@ -219,26 +220,26 @@ trae_projects/
 临场数据更新与滚动记忆管理技能：
 
 - 获取临场数据（首发阵容、伤停更新、赔率变化）
-- 生成【临场更新】版预测说明，避免重复堆叠旧结论
-- 使用【临场更新】标记区分初始预测 vs 临场更新
-- 必须包含"调整说明"解释预测变化的逻辑
+- 通过 `collect-data -> 可选快照刷新 -> predict-match` 生成临场更新结论
+- 对比原预测与新预测，避免重复堆叠旧结论
+- 必须包含“调整说明”，解释是方向改变、置信度改变还是比分排序改变
 - 五大联赛优先遵守 `teams_2025-26.md` 写回，欧战/杯赛再走 `MEMORY.md` 与 runtime-only 归档
 
 标准格式：
 ```markdown
-【临场更新】预测: 主胜 (52.0%) | 比分: 2-1 > 1-0 > 1-1 | 大小球: 小球 2.75 | 亚盘: 赫罗纳-0.5
+【临场更新】预测: 平局 (41.0%) | 比分: 1-1 > 0-0 | 大小球: 小 2.75 | 盘口倾向: 狼队方向但三盘口背离
 ◦ 临场分析依据:
   - 首发阵容: [...]
   - 伤停更新: ...
-  - 赔率变化: 主胜2.13→1.99(↓0.14)
-  - 调整说明: 原预测主胜(39.7%)→临场提升为主胜(52%)，赔率走势+亚盘升盘确认信心
+  - 赔率变化: 欧赔与亚值偏客队，但大小球与凯利抬升平局容错
+  - 调整说明: 原预测偏客胜 -> 临场修正为平局优先，原因是真实盘口回流后出现三盘口背离
 ```
 
 推荐执行路径：
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py collect-data --league la_liga --date 2026-05-15 --json
-python3 prediction_system.py predict-match --league la_liga --home-team 赫罗纳 --away-team 皇家社会 --date 2026-05-15 --json
+python3 prediction_system.py collect-data --league premier_league --date 2026-05-24 --json
+python3 prediction_system.py predict-match --league premier_league --home-team 伯恩利 --away-team 狼队 --date 2026-05-24 --time 23:00 --json
 ```
 
 触发关键词：临场更新、首发阵容、赔率变化、live-update
@@ -251,21 +252,22 @@ python3 prediction_system.py predict-match --league la_liga --home-team 赫罗�
 - 解决球队简称、日期歧义、时间歧义
 - 获取 `match_id`
 - 为后续实时快照抓取、批量采集与预测流程提供稳定输入
+- 已支持自动翻月、按当天分组抽取比赛、精确锁定目标行与快照身份校验
 
 推荐命令：
 ```bash
 # 正式入口优先
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py collect-data --league premier_league --date 2026-04-28 --json
+python3 prediction_system.py collect-data --league premier_league --date 2026-05-24 --json
 
 # 需要显式赛程 / 快照调试时再用 support 脚本
 # 抓某天联赛赛程
-python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026-04-28
+python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026-05-24
 
 # 用 MatchID 直接抓快照
 python3 europe_leagues/okooo_save_snapshot.py \
-  --driver local-chrome --league 英超 --team1 曼联 --team2 布伦特福德 \
-  --date 2026-04-28 --time 03:00 --match-id 1296070 --overwrite
+  --driver local-chrome --league 英超 --team1 伯恩利 --team2 狼队 \
+  --date 2026-05-24 --time 23:00 --match-id 1296105 --overwrite
 ```
 
 触发关键词：澳客、okooo、match-finder、match_id、赛程抓取
@@ -501,35 +503,35 @@ Step 8: 赛后回填真实比分，并由结果闭环自动刷新胜负/比分/�
 
 ```bash
 cd /Users/bytedance/trae_projects
-python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026-04-28
+python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026-05-24
 ```
 
 ### 抓实时快照
 
 ```bash
 cd /Users/bytedance/trae_projects
-python3 europe_leagues/okooo_save_snapshot.py --driver local-chrome --league 英超 --team1 曼联 --team2 布伦特福德 --date 2026-04-28 --time 03:00 --match-id 1296070 --overwrite
+python3 europe_leagues/okooo_save_snapshot.py --driver local-chrome --league 英超 --team1 伯恩利 --team2 狼队 --date 2026-05-24 --time 23:00 --match-id 1296105 --overwrite
 ```
 
 ### 跑单场预测
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py predict-match --league premier_league --home-team 曼联 --away-team 布伦特福德 --date 2026-04-28 --json
+python3 prediction_system.py predict-match --league premier_league --home-team 伯恩利 --away-team 狼队 --date 2026-05-24 --time 23:00 --json
 ```
 
 ### 批量预测
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py predict-schedule --league premier_league --date 2026-04-28 --days 1 --json
+python3 prediction_system.py predict-schedule --league premier_league --date 2026-05-24 --days 1 --json
 ```
 
 ### Harness 入口
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py harness-run --pipeline match_prediction --league premier_league --date 2026-04-28 --home-team 曼联 --away-team 布伦特福德 --json
+python3 prediction_system.py harness-run --pipeline match_prediction --league premier_league --date 2026-05-24 --home-team 伯恩利 --away-team 狼队 --time 23:00 --json
 ```
 
 ### 批量结果回填

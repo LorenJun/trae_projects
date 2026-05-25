@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from enhanced_prediction_workflow import EnhancedPredictor
 from domain.inference import InferencePipelineService
 from domain.intelligence import MatchIntelligenceEngine
 from domain.odds import HistoricalOddsReference, build_market_context
@@ -202,6 +203,8 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertTrue(la_liga_diag["applied"])
         self.assertGreater(premier_diag["applied_shift"]["draw_shift"], la_liga_diag["applied_shift"]["draw_shift"])
         self.assertGreater(premier_adjusted["draw"], la_liga_adjusted["draw"])
+        self.assertGreater(premier_diag["applied_shift"]["away_shift"], la_liga_diag["applied_shift"]["away_shift"])
+        self.assertGreater(premier_adjusted["away_win"], la_liga_adjusted["away_win"])
 
     def test_apply_review_outcome_adjustment_serie_a_strengthens_away_shallow_market_doubt(self):
         final_probabilities = {"home_win": 0.24, "draw": 0.28, "away_win": 0.48}
@@ -258,6 +261,95 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertTrue(la_liga_diag["applied"])
         self.assertGreater(ligue_diag["applied_shift"]["away_shift"], la_liga_diag["applied_shift"]["away_shift"])
         self.assertGreater(ligue_adjusted["away_win"], la_liga_adjusted["away_win"])
+
+    def test_apply_review_outcome_adjustment_ligue1_adds_narrow_home_away_relief(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.387, "draw": 0.343, "away_win": 0.27},
+            league_code="ligue_1",
+            strength_diff=0,
+            asian_handicap={"final": {"handicap_value": -0.25}},
+            current_odds={"欧赔": {"final": {"home": 2.04, "draw": 3.36, "away": 3.58}}},
+            review_learning={},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-league-ligue1-home-away-relief", diag["signals"])
+        self.assertGreaterEqual(diag["applied_shift"]["away_shift"], 0.021)
+        self.assertGreater(adjusted["away_win"], 0.28)
+        self.assertLess(adjusted["away_win"], adjusted["home_win"])
+
+    def test_apply_review_outcome_adjustment_ligue1_trims_narrow_home_edge_into_away(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.404058104763599, "draw": 0.3310465390392664, "away_win": 0.26489535619713464},
+            league_code="ligue_1",
+            strength_diff=0,
+            asian_handicap={"final": {"handicap_value": -0.75}},
+            current_odds={
+                "欧赔": {"final": {"home": 1.74, "draw": 4.1, "away": 4.08}},
+                "大小球": {
+                    "initial": {"over": 1.985, "line": 3.0, "under": 1.8525},
+                    "final": {"over": 1.89, "line": 3.0, "under": 1.9233},
+                },
+            },
+            review_learning={},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-league-ligue1-home-away-relief", diag["signals"])
+        self.assertIn("review-league-ligue1-home-edge-trim", diag["signals"])
+        self.assertGreater(diag["applied_shift"]["draw_to_away_trim"], 0.0)
+        self.assertGreaterEqual(diag["applied_shift"]["away_shift"], 0.056)
+        self.assertGreater(adjusted["away_win"], adjusted["home_win"])
+        self.assertGreater(adjusted["away_win"], adjusted["draw"])
+
+    def test_apply_review_outcome_adjustment_la_liga_retains_low_tempo_level_ball_draw_shape(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.41317541496053667, "draw": 0.3545388278072925, "away_win": 0.23228575723217095},
+            league_code="la_liga",
+            strength_diff=0,
+            asian_handicap={"final": {"handicap_value": 0.0}},
+            current_odds={
+                "欧赔": {"final": {"home": 2.4839, "draw": 3.2008, "away": 2.8466}},
+                "大小球": {
+                    "initial": {"line": 2.75, "over": 2.02, "under": 1.8},
+                    "final": {"line": 2.5, "over": 2.08, "under": 1.76},
+                },
+            },
+            review_learning={},
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": True,
+                    "score": 14.22,
+                    "favored_side": "home",
+                    "pressure_side": "away",
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-fragile-home-favorite-correction", diag["signals"])
+        self.assertIn("review-league-la-liga-low-tempo-draw-retention", diag["signals"])
+        self.assertGreater(adjusted["draw"], adjusted["home_win"])
+        self.assertGreater(adjusted["away_win"], 0.26)
+
+    def test_apply_review_outcome_adjustment_la_liga_retains_medium_home_draw_shape(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.4012317581582923, "draw": 0.3217074983205519, "away_win": 0.27706074352115586},
+            league_code="la_liga",
+            strength_diff=0,
+            asian_handicap={"final": {"handicap_value": -0.5}},
+            current_odds={
+                "欧赔": {"final": {"home": 1.9874, "draw": 3.6782, "away": 3.3744}},
+                "大小球": {
+                    "initial": {"line": 2.75, "over": 1.95, "under": 1.95},
+                    "final": {"line": 2.75, "over": 1.91, "under": 1.99},
+                },
+            },
+            review_learning={},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-bias-config-floor", diag["signals"])
+        self.assertIn("review-league-la-liga-medium-home-draw-retention", diag["signals"])
+        self.assertGreater(adjusted["draw"], adjusted["home_win"])
+        self.assertGreater(adjusted["away_win"], 0.29)
 
     def test_apply_review_outcome_adjustment_uses_configured_scenario_shift(self):
         service = self._custom_service(
@@ -367,6 +459,617 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertGreater(adjusted["draw"], 0.24)
         self.assertGreater(adjusted["away_win"], 0.22)
 
+    def test_apply_review_outcome_adjustment_triggers_fragile_home_favorite_correction(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.46, "draw": 0.28, "away_win": 0.26},
+            league_code="premier_league",
+            strength_diff=12,
+            asian_handicap={"final": {"handicap_value": -0.25}},
+            current_odds={"欧赔": {"final": {"home": 2.42, "draw": 3.08, "away": 2.86}}},
+            review_learning={},
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": True,
+                    "score": 10.0,
+                    "favored_side": "home",
+                    "pressure_side": "away",
+                },
+                "handicap_strength_mismatch": {"mismatch_detected": True, "mismatch_level": "中"},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-fragile-home-favorite-correction", diag["signals"])
+        self.assertLess(adjusted["home_win"], 0.46)
+        self.assertGreater(adjusted["away_win"], 0.28)
+        self.assertGreater(adjusted["away_win"], adjusted["draw"] - 0.02)
+        self.assertIn("away_motivation_pressure", diag["home_bias_gate"]["evidence"])
+        self.assertIn("handicap_strength_mismatch", diag["home_bias_gate"]["evidence"])
+
+    def test_apply_review_outcome_adjustment_triggers_fragile_home_favorite_correction_for_away_supported_home_pressure_case(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.39, "draw": 0.33, "away_win": 0.28},
+            league_code="serie_a",
+            strength_diff=0,
+            asian_handicap={"final": {"handicap_value": 0.0}},
+            current_odds={"欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}}},
+            review_learning={},
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": True,
+                    "score": 14.22,
+                    "favored_side": "away",
+                    "pressure_side": "home",
+                },
+                "handicap_strength_mismatch": {"mismatch_detected": False},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-fragile-home-favorite-correction", diag["signals"])
+        self.assertIn("away_motivation_pressure", diag["home_bias_gate"]["evidence"])
+        self.assertGreater(diag["applied_shift"]["away_shift"], 0.02)
+        self.assertLess(adjusted["home_win"], 0.39)
+        self.assertGreater(adjusted["away_win"], 0.30)
+
+    def test_apply_review_outcome_adjustment_keeps_strong_supported_home_favorite_stable(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.59, "draw": 0.23, "away_win": 0.18},
+            league_code="premier_league",
+            strength_diff=24,
+            asian_handicap={"final": {"handicap_value": -1.0}},
+            current_odds={"欧赔": {"final": {"home": 1.72, "draw": 3.9, "away": 5.0}}},
+            review_learning={},
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": False,
+                    "score": 4.0,
+                    "favored_side": "home",
+                    "pressure_side": "away",
+                },
+                "handicap_strength_mismatch": {"mismatch_detected": False},
+            },
+        )
+        self.assertNotIn("review-fragile-home-favorite-correction", diag["signals"])
+        self.assertLess(diag["applied_shift"]["away_shift"], 0.03)
+        self.assertGreater(adjusted["home_win"], 0.54)
+
+    def test_apply_review_outcome_adjustment_adds_narrow_away_bump_for_known_home_overcall_bucket(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.43, "draw": 0.29, "away_win": 0.28},
+            league_code="serie_a",
+            strength_diff=6,
+            asian_handicap={"final": {}},
+            current_odds={"欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}}},
+            review_learning={
+                "outcome_stratified_review": {
+                    "home:unknown": {
+                        "sample_count": 7,
+                        "miss_rate": 0.57,
+                        "recommended_draw_shift": 0.0,
+                        "recommended_upset_shift": 0.02,
+                    }
+                }
+            },
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 15.6,
+                        "favored_side": "away",
+                        "pressure_side": "home",
+                    }
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-narrow-away-bump", diag["signals"])
+        self.assertGreaterEqual(diag["applied_shift"]["away_shift"], 0.025)
+        self.assertGreater(adjusted["away_win"], 0.30)
+
+    def test_apply_review_outcome_adjustment_skips_narrow_away_bump_when_draw_guarded(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.43, "draw": 0.29, "away_win": 0.28},
+            league_code="serie_a",
+            strength_diff=6,
+            asian_handicap={"final": {"handicap_value": -0.5}},
+            current_odds={"欧赔": {"final": {"home": 2.48, "draw": 2.54, "away": 2.62}}},
+            review_learning={},
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 15.6,
+                        "favored_side": "away",
+                        "pressure_side": "home",
+                    }
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertNotIn("review-narrow-away-bump", diag["signals"])
+        self.assertLess(diag["applied_shift"]["away_shift"], 0.025)
+
+    def test_apply_review_outcome_adjustment_trims_draw_into_away_for_narrow_near_tie(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.41, "draw": 0.303, "away_win": 0.287},
+            league_code="serie_a",
+            strength_diff=6,
+            asian_handicap={"final": {}},
+            current_odds={"欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}}},
+            review_learning={
+                "outcome_stratified_review": {
+                    "home:unknown": {
+                        "sample_count": 7,
+                        "miss_rate": 0.57,
+                        "recommended_draw_shift": 0.0,
+                        "recommended_upset_shift": 0.02,
+                    }
+                }
+            },
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 15.6,
+                        "favored_side": "away",
+                        "pressure_side": "home",
+                    }
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-narrow-away-bump", diag["signals"])
+        self.assertIn("review-narrow-away-near-tie-trim", diag["signals"])
+        self.assertGreater(diag["applied_shift"]["draw_to_away_trim"], 0.0)
+        self.assertGreater(adjusted["away_win"], adjusted["draw"])
+
+    def test_apply_review_outcome_adjustment_skips_near_tie_trim_when_under_supports_draw(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.41, "draw": 0.303, "away_win": 0.287},
+            league_code="serie_a",
+            strength_diff=6,
+            asian_handicap={"final": {}},
+            current_odds={
+                "欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}},
+                "大小球": {
+                    "initial": {"line": 2.5, "over": 1.96, "under": 1.84},
+                    "final": {"line": 2.25, "over": 2.06, "under": 1.76},
+                },
+            },
+            review_learning={
+                "outcome_stratified_review": {
+                    "home:unknown": {
+                        "sample_count": 7,
+                        "miss_rate": 0.57,
+                        "recommended_draw_shift": 0.0,
+                        "recommended_upset_shift": 0.02,
+                    }
+                }
+            },
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 15.6,
+                        "favored_side": "away",
+                        "pressure_side": "home",
+                    }
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-narrow-away-bump", diag["signals"])
+        self.assertNotIn("review-narrow-away-near-tie-trim", diag["signals"])
+        self.assertEqual(diag["applied_shift"]["draw_to_away_trim"], 0.0)
+        self.assertGreater(adjusted["draw"], adjusted["away_win"])
+
+    def test_apply_review_outcome_adjustment_relaxes_premier_league_fragile_home_into_draw(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.3744446917, "draw": 0.3328760689, "away_win": 0.2926792393},
+            league_code="premier_league",
+            strength_diff=7,
+            asian_handicap={"final": {"handicap_value": -0.25}},
+            current_odds={"欧赔": {"final": {"home": 2.58, "draw": 3.38, "away": 2.74}}},
+            review_learning={},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-league-premier-home-draw-relief", diag["signals"])
+        self.assertGreater(diag["applied_shift"]["draw_shift"], 0.024)
+        self.assertGreater(adjusted["draw"], adjusted["home_win"])
+        self.assertGreater(diag["applied_shift"]["away_shift"], 0.02)
+
+    def test_apply_review_outcome_adjustment_adds_premier_league_away_support_for_strong_upset_signal(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.4066487870, "draw": 0.3425485029, "away_win": 0.2508027101},
+            league_code="premier_league",
+            strength_diff=0,
+            asian_handicap={"final": {"handicap_value": 0.0}},
+            current_odds={"欧赔": {"final": {"home": 2.38, "draw": 3.34, "away": 3.04}}},
+            review_learning={},
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 14.22,
+                        "favored_side": "away",
+                        "pressure_side": "home",
+                    }
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-league-premier-home-draw-relief", diag["signals"])
+        self.assertIn("review-league-premier-away-upset-support", diag["signals"])
+        self.assertGreaterEqual(diag["applied_shift"]["away_shift"], 0.026)
+        self.assertGreater(adjusted["away_win"], 0.26)
+
+    def test_apply_review_outcome_adjustment_adds_premier_league_balanced_away_floor_without_strong_upset_signal(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.3901655340, "draw": 0.3128176575, "away_win": 0.2970168084},
+            league_code="premier_league",
+            strength_diff=0,
+            asian_handicap={"final": {}},
+            current_odds={"欧赔": {"final": {"home": 2.72, "draw": 3.16, "away": 2.88}}},
+            review_learning={
+                "outcome_stratified_review": {
+                    "home:unknown": {
+                        "sample_count": 10,
+                        "miss_rate": 0.8,
+                        "recommended_draw_shift": 0.024,
+                        "recommended_upset_shift": 0.0082,
+                    }
+                }
+            },
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": False,
+                        "score": 3.0,
+                        "favored_side": "home",
+                        "pressure_side": "away",
+                    }
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-league-premier-home-draw-relief", diag["signals"])
+        self.assertIn("review-league-premier-balanced-away-floor", diag["signals"])
+        self.assertGreaterEqual(diag["applied_shift"]["away_shift"], 0.024)
+        self.assertGreater(adjusted["away_win"], 0.30)
+
+    def test_apply_review_outcome_adjustment_premier_league_follows_through_from_draw_to_away(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.397, "draw": 0.327, "away_win": 0.276},
+            league_code="premier_league",
+            strength_diff=2,
+            asian_handicap={"final": {"handicap_value": 0.0}},
+            current_odds={"欧赔": {"final": {"home": 2.58, "draw": 3.16, "away": 2.94}}},
+            review_learning={},
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 13.4,
+                        "favored_side": "away",
+                        "pressure_side": "home",
+                    }
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-league-premier-home-draw-relief", diag["signals"])
+        self.assertIn("review-league-premier-away-upset-support", diag["signals"])
+        self.assertIn("review-league-premier-away-follow-through", diag["signals"])
+        self.assertGreater(diag["applied_shift"]["draw_to_away_trim"], 0.0)
+        self.assertGreater(adjusted["away_win"], 0.32)
+
+    def test_apply_review_outcome_adjustment_premier_league_keeps_draw_above_away_when_gap_is_tiny(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.392, "draw": 0.333, "away_win": 0.275},
+            league_code="premier_league",
+            strength_diff=0,
+            asian_handicap={"final": {}},
+            current_odds={"欧赔": {"final": {"home": 2.54, "draw": 3.42, "away": 2.82}}},
+            review_learning={
+                "outcome_stratified_review": {
+                    "home:unknown": {
+                        "sample_count": 10,
+                        "miss_rate": 0.8,
+                        "recommended_draw_shift": 0.024,
+                        "recommended_upset_shift": 0.0082,
+                    }
+                }
+            },
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 15.68,
+                        "favored_side": "away",
+                        "pressure_side": "home",
+                    }
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-league-premier-home-draw-relief", diag["signals"])
+        self.assertIn("review-league-premier-away-upset-support", diag["signals"])
+        self.assertNotIn("review-league-premier-away-follow-through", diag["signals"])
+        self.assertEqual(diag["applied_shift"]["draw_to_away_trim"], 0.0)
+        self.assertGreater(adjusted["draw"], adjusted["away_win"])
+        self.assertGreater(adjusted["away_win"], 0.30)
+
+    def test_apply_review_outcome_adjustment_premier_league_does_not_only_raise_draw(self):
+        premier_adjusted, premier_diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.403, "draw": 0.319, "away_win": 0.278},
+            league_code="premier_league",
+            strength_diff=2,
+            asian_handicap={"final": {"handicap_value": 0.0}},
+            current_odds={"欧赔": {"final": {"home": 2.66, "draw": 3.18, "away": 2.92}}},
+            review_learning={},
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 12.6,
+                        "favored_side": "away",
+                        "pressure_side": "home",
+                    }
+                }
+            },
+        )
+        la_liga_adjusted, la_liga_diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.403, "draw": 0.319, "away_win": 0.278},
+            league_code="la_liga",
+            strength_diff=2,
+            asian_handicap={"final": {"handicap_value": 0.0}},
+            current_odds={"欧赔": {"final": {"home": 2.66, "draw": 3.18, "away": 2.92}}},
+            review_learning={},
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 12.6,
+                        "favored_side": "away",
+                        "pressure_side": "home",
+                    }
+                }
+            },
+        )
+        self.assertTrue(premier_diag["applied"])
+        self.assertTrue(la_liga_diag["applied"])
+        self.assertGreater(premier_diag["applied_shift"]["away_shift"], la_liga_diag["applied_shift"]["away_shift"])
+        self.assertGreater(premier_adjusted["away_win"], la_liga_adjusted["away_win"])
+        self.assertGreater(premier_adjusted["away_win"], 0.30)
+
+    def test_apply_review_outcome_adjustment_relaxes_serie_a_draw_into_away(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.3336958657, "draw": 0.3732840088, "away_win": 0.2930201256},
+            league_code="serie_a",
+            strength_diff=5,
+            asian_handicap={"final": {"handicap_value": 0.0}},
+            current_odds={"欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}}},
+            review_learning={},
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 15.6,
+                        "favored_side": "away",
+                        "pressure_side": "home",
+                    }
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-league-serie-a-draw-to-away-relief", diag["signals"])
+        self.assertGreater(diag["applied_shift"]["draw_to_away_relief"], 0.0)
+        self.assertGreater(adjusted["away_win"], adjusted["draw"])
+
+    def test_apply_review_outcome_adjustment_promotes_serie_a_draw_guarded_home_case_into_narrow_fragility_entry(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.4112078931, "draw": 0.3037017170, "away_win": 0.2850903899},
+            league_code="serie_a",
+            strength_diff=0,
+            asian_handicap={"final": {"handicap_value": -0.5}},
+            current_odds={
+                "欧赔": {"final": {"home": 2.5844, "draw": 2.9995, "away": 2.9031}},
+                "大小球": {
+                    "initial": {"line": 2.25, "over": 1.9457, "under": 1.8329},
+                    "final": {"line": 2.25, "over": 1.9557, "under": 1.82},
+                },
+            },
+            review_learning={},
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": True,
+                    "score": 14.22,
+                    "favored_side": "away",
+                    "pressure_side": "home",
+                },
+                "handicap_strength_mismatch": {"mismatch_detected": False},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-league-serie-a-home-draw-guard-entry", diag["signals"])
+        self.assertIn("review-league-serie-a-home-draw-guard-near-tie", diag["signals"])
+        self.assertNotIn("review-league-serie-a-draw-to-away-relief", diag["signals"])
+        self.assertGreaterEqual(diag["applied_shift"]["away_shift"], 0.03)
+        self.assertGreater(adjusted["away_win"], 0.2850903899)
+
+    def test_apply_review_outcome_adjustment_skips_serie_a_draw_relief_when_under_supports_draw(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.3336958657, "draw": 0.3732840088, "away_win": 0.2930201256},
+            league_code="serie_a",
+            strength_diff=5,
+            asian_handicap={"final": {"handicap_value": 0.0}},
+            current_odds={
+                "欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}},
+                "大小球": {
+                    "initial": {"line": 2.5, "over": 1.96, "under": 1.84},
+                    "final": {"line": 2.25, "over": 2.06, "under": 1.76},
+                },
+            },
+            review_learning={},
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 15.6,
+                        "favored_side": "away",
+                        "pressure_side": "home",
+                    }
+                }
+            },
+        )
+        self.assertFalse(diag["applied"])
+        self.assertNotIn("review-league-serie-a-draw-to-away-relief", diag["signals"])
+        self.assertEqual(diag["applied_shift"]["draw_to_away_relief"], 0.0)
+        self.assertAlmostEqual(adjusted["draw"], 0.3732840088)
+
+    def test_apply_review_outcome_adjustment_allows_serie_a_draw_relief_from_under_water_drop_without_upset_support(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.3330668835, "draw": 0.3731054089, "away_win": 0.2938277076},
+            league_code="serie_a",
+            strength_diff=0,
+            asian_handicap={"final": {"handicap_value": 0.0}},
+            current_odds={
+                "欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}},
+                "大小球": {
+                    "initial": {"line": 2.5, "over": 1.8944, "under": 1.88},
+                    "final": {"line": 2.5, "over": 1.9144, "under": 1.8511},
+                },
+            },
+            review_learning={},
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": False,
+                        "score": 3.0,
+                        "favored_side": "home",
+                        "pressure_side": "away",
+                    }
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-league-serie-a-draw-to-away-relief", diag["signals"])
+        self.assertGreater(diag["applied_shift"]["draw_to_away_relief"], 0.0)
+        self.assertGreater(adjusted["away_win"], 0.28)
+
+    def test_apply_review_outcome_adjustment_opens_serie_a_soft_draw_into_away_without_under_water_drop(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.3540668835, "draw": 0.4011054089, "away_win": 0.2448277076},
+            league_code="serie_a",
+            strength_diff=0,
+            asian_handicap={"final": {"handicap_value": -0.75}},
+            current_odds={
+                "欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}},
+                "大小球": {
+                    "initial": {"line": 2.5, "over": 1.92, "under": 1.82},
+                    "final": {"line": 2.5, "over": 1.95, "under": 1.8},
+                },
+            },
+            review_learning={},
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": False,
+                        "score": 3.0,
+                        "favored_side": "home",
+                        "pressure_side": "away",
+                    }
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-league-serie-a-draw-to-away-relief", diag["signals"])
+        self.assertIn("review-league-serie-a-soft-draw-away-entry", diag["signals"])
+        self.assertGreater(diag["applied_shift"]["draw_to_away_relief"], 0.0)
+        self.assertGreater(adjusted["away_win"], 0.28)
+
+    def test_apply_review_outcome_adjustment_blocks_serie_a_soft_draw_relief_when_home_would_remain_top(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.359, "draw": 0.4011054089, "away_win": 0.2448277076},
+            league_code="serie_a",
+            strength_diff=0,
+            asian_handicap={"final": {"handicap_value": -0.75}},
+            current_odds={
+                "欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}},
+                "大小球": {
+                    "initial": {"line": 2.5, "over": 1.92, "under": 1.82},
+                    "final": {"line": 2.5, "over": 1.95, "under": 1.8},
+                },
+            },
+            review_learning={},
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": False,
+                        "score": 3.0,
+                        "favored_side": "home",
+                        "pressure_side": "away",
+                    }
+                }
+            },
+        )
+        self.assertFalse(diag["applied"])
+        self.assertNotIn("review-league-serie-a-draw-to-away-relief", diag["signals"])
+        self.assertIn("review-league-serie-a-soft-draw-away-blocked-home-top", diag["signals"])
+        self.assertEqual(diag["applied_shift"]["draw_to_away_relief"], 0.0)
+        self.assertAlmostEqual(adjusted["home_win"], 0.3572377047841074)
+        self.assertAlmostEqual(adjusted["draw"], 0.39913642242876574)
+        self.assertAlmostEqual(adjusted["away_win"], 0.24362587278712694)
+
+    def test_apply_review_outcome_adjustment_opens_serie_a_home_draw_guard_near_tie_case(self):
+        adjusted, diag = self.service.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.3786026988, "draw": 0.3509137509, "away_win": 0.2704835503},
+            league_code="serie_a",
+            strength_diff=0,
+            asian_handicap={"final": {"handicap_value": -0.5}},
+            current_odds={
+                "欧赔": {"final": {"home": 2.5844, "draw": 2.9995, "away": 2.9031}},
+                "大小球": {
+                    "initial": {"line": 2.25, "over": 1.9457, "under": 1.8329},
+                    "final": {"line": 2.25, "over": 1.9557, "under": 1.82},
+                },
+            },
+            review_learning={},
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": True,
+                    "score": 14.22,
+                    "favored_side": "away",
+                    "pressure_side": "home",
+                },
+                "handicap_strength_mismatch": {"mismatch_detected": False},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-league-serie-a-home-draw-guard-entry", diag["signals"])
+        self.assertIn("review-league-serie-a-home-draw-guard-near-tie", diag["signals"])
+        self.assertGreaterEqual(diag["applied_shift"]["away_shift"], 0.03)
+        self.assertGreater(adjusted["away_win"], 0.29)
+
     def test_apply_review_over_under_adjustment_reduces_under_bias_near_key_line(self):
         adjusted, diag = self.service.apply_review_over_under_adjustment(
             over_under={"available": True, "line": 2.5, "over": 0.42, "under": 0.58},
@@ -452,6 +1155,274 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertTrue(diag["applied"])
         self.assertIn("score-template-cap", diag["signals"])
         self.assertEqual(reranked[0][0], "2-2")
+
+    def test_rerank_top_scores_breaks_deep_favorite_draw_templates_towards_home_relief(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-1", 0.24), ("1-0", 0.22), ("2-0", 0.2), ("0-0", 0.18), ("2-1", 0.16)],
+            "平局",
+            ranked_probabilities=[("平局", 0.4449), ("主胜", 0.3244), ("客胜", 0.2306)],
+            home_lambda=1.76,
+            away_lambda=1.18,
+            over_under={"over": 0.2213, "under": 0.7787, "line": 3.0},
+            strength_diff=0,
+            confidence=0.4449,
+            current_odds={"亚值": {"final": {"handicap_value": -1.5}}, "欧赔": {"final": {"home": 1.66, "draw": 4.988, "away": 4.79}}},
+            review_learning={},
+            match_intelligence={
+                "motivation": {
+                    "risk_signal": {
+                        "available": True,
+                        "supports_upset": True,
+                        "score": 14.22,
+                        "favored_side": "away",
+                        "pressure_side": "home",
+                    }
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-deep-home-draw-relief", diag["signals"])
+        self.assertIn("主胜", diag["allowed_outcomes"])
+        self.assertNotEqual(reranked[0][0], "1-1")
+        self.assertIn(reranked[0][0], {"1-0", "2-0"})
+
+    def test_rerank_top_scores_rebalances_fragile_home_templates(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-0", 0.22), ("2-0", 0.2), ("2-1", 0.19), ("1-1", 0.17), ("1-2", 0.1)],
+            "主胜",
+            ranked_probabilities=[("主胜", 0.46), ("平局", 0.31), ("客胜", 0.23)],
+            home_lambda=1.68,
+            away_lambda=1.14,
+            over_under={"over": 0.54, "under": 0.46, "line": 2.75},
+            strength_diff=11,
+            confidence=0.46,
+            current_odds={"亚值": {"final": {"handicap_value": -0.25}}, "欧赔": {"final": {"home": 2.44, "draw": 3.08, "away": 2.9}}},
+            review_learning={},
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": True,
+                    "score": 10.0,
+                    "pressure_side": "away",
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-fragile-home-template-rebalance", diag["signals"])
+        self.assertNotEqual(reranked[0][0], "1-0")
+        self.assertTrue(any(score in {"2-1", "1-1", "1-2"} for score, _ in reranked[:2]))
+        self.assertNotIn("1-0", [score for score, _ in reranked[:2]])
+
+    def test_rerank_top_scores_keeps_draw_direction_for_non_deep_draw_with_away_motivation(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-1", 0.24), ("0-1", 0.22), ("0-0", 0.2), ("1-0", 0.18), ("1-2", 0.16)],
+            "平局",
+            ranked_probabilities=[("平局", 0.43), ("客胜", 0.31), ("主胜", 0.26)],
+            home_lambda=1.31,
+            away_lambda=1.19,
+            over_under={"over": 0.47, "under": 0.53, "line": 2.5},
+            strength_diff=-2,
+            confidence=0.43,
+            current_odds={"亚值": {"final": {"handicap_value": 0.0}}, "欧赔": {"final": {"home": 2.66, "draw": 3.02, "away": 2.72}}},
+            review_learning={},
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": True,
+                    "score": 12.0,
+                    "favored_side": "away",
+                    "pressure_side": "away",
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertNotIn("score-deep-home-draw-relief", diag["signals"])
+        self.assertNotIn("客胜", diag["allowed_outcomes"])
+        self.assertEqual(reranked[0][0], "1-1")
+
+    def test_rerank_top_scores_keeps_low_tempo_home_template_when_under_supported(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-0", 0.24), ("2-0", 0.21), ("2-1", 0.19), ("1-1", 0.18), ("1-2", 0.08)],
+            "主胜",
+            ranked_probabilities=[("主胜", 0.45), ("平局", 0.33), ("客胜", 0.22)],
+            home_lambda=1.42,
+            away_lambda=0.94,
+            over_under={"over": 0.43, "under": 0.57, "line": 2.5},
+            strength_diff=9,
+            confidence=0.45,
+            current_odds={"亚值": {"final": {"handicap_value": -0.25}}, "欧赔": {"final": {"home": 2.38, "draw": 3.02, "away": 3.12}}},
+            review_learning={},
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": True,
+                    "score": 10.0,
+                    "pressure_side": "away",
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertNotIn("score-fragile-home-template-rebalance", diag["signals"])
+        self.assertEqual(reranked[0][0], "1-0")
+
+    def test_rerank_top_scores_promotes_away_scores_for_serie_a_draw_guarded_away_relief(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-0", 0.24), ("0-0", 0.22), ("0-1", 0.2), ("0-2", 0.18), ("1-2", 0.16), ("1-1", 0.14)],
+            "客胜",
+            league_code="serie_a",
+            ranked_probabilities=[("客胜", 0.3091), ("平局", 0.3037), ("主胜", 0.2872)],
+            home_lambda=0.92,
+            away_lambda=1.08,
+            over_under={"over": 0.44, "under": 0.56, "line": 2.25},
+            strength_diff=0,
+            confidence=0.3091,
+            current_odds={
+                "亚值": {"final": {"handicap_value": -0.5}},
+                "欧赔": {"final": {"home": 2.5844, "draw": 2.9995, "away": 2.9031}},
+                "大小球": {
+                    "initial": {"line": 2.25, "over": 1.9457, "under": 1.8329},
+                    "final": {"line": 2.25, "over": 1.9557, "under": 1.82},
+                },
+            },
+            review_learning={
+                "score_bias": {
+                    "available": True,
+                    "coverage_expansion_rate": 0.42,
+                    "recommended_score_coverage_expansion": 0.05,
+                }
+            },
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": True,
+                    "score": 14.22,
+                    "favored_side": "away",
+                    "pressure_side": "home",
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-serie-a-away-relief-template-rebalance", diag["signals"])
+        self.assertEqual(diag["allowed_outcomes"], ["客胜", "平局"])
+        self.assertEqual(reranked[0][0], "0-1")
+        self.assertIn("0-1", [score for score, _ in reranked[:2]])
+        self.assertNotIn("1-0", [score for score, _ in reranked[:2]])
+        self.assertNotEqual(reranked[0][0], "0-0")
+
+    def test_rerank_top_scores_preserves_low_tempo_templates_without_serie_a_away_relief(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("0-0", 0.24), ("0-1", 0.22), ("1-1", 0.2), ("0-2", 0.17), ("1-2", 0.13)],
+            "客胜",
+            league_code="serie_a",
+            ranked_probabilities=[("客胜", 0.3091), ("平局", 0.3037), ("主胜", 0.2872)],
+            home_lambda=0.92,
+            away_lambda=1.08,
+            over_under={"over": 0.44, "under": 0.56, "line": 2.25},
+            strength_diff=0,
+            confidence=0.3091,
+            current_odds={
+                "亚值": {"final": {"handicap_value": -0.5}},
+                "欧赔": {"final": {"home": 2.5844, "draw": 2.9995, "away": 2.9031}},
+                "大小球": {
+                    "initial": {"line": 2.25, "over": 1.9457, "under": 1.8329},
+                    "final": {"line": 2.25, "over": 1.9557, "under": 1.82},
+                },
+            },
+            review_learning={},
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": False,
+                    "score": 6.0,
+                    "favored_side": "away",
+                    "pressure_side": "home",
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertNotIn("score-serie-a-away-relief-template-rebalance", diag["signals"])
+        self.assertNotIn("score-serie-a-soft-away-template-rebalance", diag["signals"])
+        self.assertEqual(reranked[0][0], "0-0")
+
+    def test_rerank_top_scores_rebalances_serie_a_soft_away_templates_without_changing_direction_pool(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-0", 0.24), ("2-0", 0.21), ("0-1", 0.2), ("1-1", 0.19), ("0-2", 0.17), ("1-2", 0.16)],
+            "客胜",
+            league_code="serie_a",
+            ranked_probabilities=[("客胜", 0.3533), ("主胜", 0.3515), ("平局", 0.2952)],
+            home_lambda=1.34,
+            away_lambda=1.31,
+            over_under={"over": 0.3181, "under": 0.6819, "line": 2.5},
+            strength_diff=0,
+            confidence=0.3533,
+            current_odds={
+                "亚值": {"final": {"handicap_value": -0.75}},
+                "欧赔": {"final": {"home": 1.5377, "draw": 4.0433, "away": 6.1386}},
+            },
+            review_learning={},
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": False,
+                    "score": 3.0,
+                    "favored_side": "home",
+                    "pressure_side": "away",
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-serie-a-soft-away-template-rebalance", diag["signals"])
+
+    def test_rerank_top_scores_adds_away_coverage_for_serie_a_soft_draw_case(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-0", 0.29), ("0-0", 0.2), ("2-0", 0.18), ("1-1", 0.17), ("0-1", 0.14), ("0-2", 0.11), ("1-2", 0.09)],
+            "平局",
+            league_code="serie_a",
+            ranked_probabilities=[("平局", 0.4006), ("主胜", 0.3622), ("客胜", 0.2371)],
+            home_lambda=0.95,
+            away_lambda=0.88,
+            over_under={"over": 0.3213, "under": 0.6787, "line": 2.5},
+            strength_diff=0,
+            confidence=0.4006,
+            current_odds={
+                "亚值": {"final": {"handicap_value": -0.75}},
+                "欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}},
+                "大小球": {
+                    "initial": {"line": 2.5, "over": 1.92, "under": 1.82},
+                    "final": {"line": 2.5, "over": 1.95, "under": 1.8},
+                },
+            },
+            review_learning={
+                "score_bias": {
+                    "available": True,
+                    "coverage_expansion_rate": 0.42,
+                    "recommended_score_coverage_expansion": 0.05,
+                }
+            },
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": False,
+                    "score": 3.0,
+                    "favored_side": "home",
+                    "pressure_side": "away",
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-serie-a-soft-draw-coverage-rebalance", diag["signals"])
+        self.assertEqual(diag["allowed_outcomes"], ["平局", "客胜"])
+        self.assertIn("score-serie-a-soft-draw-coverage-priority", diag["signals"])
+        self.assertTrue(any(score in {"0-1", "0-2", "1-2"} for score, _ in reranked))
+        self.assertNotIn("1-0", [score for score, _ in reranked[:2]])
 
     def test_rerank_top_scores_filters_scores_that_conflict_with_prediction_direction(self):
         reranked, diag = self.service.rerank_top_scores(
@@ -677,6 +1648,205 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertEqual(diag["allowed_outcomes"], ["主胜", "平局"])
         self.assertTrue(any(score == "1-1" for score, _ in reranked))
 
+    def test_rerank_top_scores_allows_serie_a_soft_away_coverage_expansion(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-0", 0.2082), ("0-0", 0.1404), ("2-0", 0.1282), ("1-1", 0.1110), ("0-1", 0.1016), ("2-1", 0.0727), ("3-0", 0.0526), ("1-2", 0.0355)],
+            "客胜",
+            league_code="serie_a",
+            ranked_probabilities=[("客胜", 0.3533), ("主胜", 0.3515), ("平局", 0.2952)],
+            home_lambda=0.92,
+            away_lambda=0.91,
+            over_under={"over": 0.3181, "under": 0.6819, "line": 2.5},
+            strength_diff=0,
+            confidence=0.3533,
+            current_odds={"亚值": {"final": {"handicap_value": -0.75}}, "欧赔": {"final": {"home": 1.5377, "draw": 4.0433, "away": 6.1386}}},
+            review_learning={},
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": False,
+                    "score": 3.0,
+                    "favored_side": "home",
+                    "pressure_side": "away",
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-serie-a-soft-away-template-rebalance", diag["signals"])
+        self.assertTrue(diag["coverage_expansion_applied"])
+        self.assertIn(diag["coverage_expansion_candidate"], {"0-1", "1-2", "0-2"})
+        self.assertEqual(reranked[0][0], "0-1")
+        self.assertTrue(any(score in {"1-2", "0-2"} for score, _ in reranked[:2]))
+
+    def test_rerank_top_scores_prioritizes_open_home_coverage_for_premier_league(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-0", 0.181646), ("2-0", 0.138971), ("1-1", 0.107004), ("0-0", 0.105014), ("2-1", 0.085276), ("0-1", 0.075759), ("3-0", 0.070882), ("3-1", 0.041694)],
+            "主胜",
+            league_code="premier_league",
+            ranked_probabilities=[("主胜", 0.41), ("平局", 0.38), ("客胜", 0.21)],
+            home_lambda=1.93,
+            away_lambda=0.97,
+            over_under={"over": 0.57, "under": 0.43, "line": 2.75},
+            strength_diff=12,
+            confidence=0.4,
+            current_odds={"亚值": {"final": {"handicap_value": -0.25}}, "欧赔": {"final": {"home": 2.18, "draw": 3.28, "away": 3.44}}},
+            review_learning={
+                "score_bias": {
+                    "available": True,
+                    "coverage_expansion_rate": 0.44,
+                    "recommended_score_coverage_expansion": 0.04,
+                    "recommended_home_goal_boost": 0.04,
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-home-open-coverage-priority", diag["signals"])
+        self.assertTrue(diag["coverage_expansion_applied"])
+        self.assertIn(diag["coverage_expansion_candidate"], {"3-0", "3-1"})
+        self.assertEqual(reranked[0][0], "2-1")
+        self.assertTrue(any(score in {"3-0", "3-1"} for score, _ in reranked[:2]))
+        self.assertNotIn("1-1", [score for score, _ in reranked[:2]])
+
+    def test_rerank_top_scores_replaces_draw_template_with_open_home_coverage_for_premier_league(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-0", 0.181646), ("2-0", 0.138971), ("1-1", 0.107004), ("0-0", 0.105014), ("2-1", 0.085276), ("0-1", 0.075759), ("3-0", 0.070882), ("3-1", 0.041694)],
+            "主胜",
+            league_code="premier_league",
+            ranked_probabilities=[("主胜", 0.38), ("平局", 0.37), ("客胜", 0.25)],
+            home_lambda=1.9,
+            away_lambda=1.0,
+            over_under={"over": 0.56, "under": 0.44, "line": 2.75},
+            strength_diff=10,
+            confidence=0.38,
+            current_odds={"亚值": {"final": {"handicap_value": -0.25}}, "欧赔": {"final": {"home": 2.2, "draw": 3.24, "away": 3.46}}},
+            review_learning={
+                "score_bias": {
+                    "available": True,
+                    "coverage_expansion_rate": 0.44,
+                    "recommended_score_coverage_expansion": 0.04,
+                    "recommended_home_goal_boost": 0.04,
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-home-open-coverage-priority", diag["signals"])
+        self.assertEqual([score for score, _ in reranked], ["2-1", "3-0"])
+        self.assertNotIn("1-1", [score for score, _ in reranked])
+
+    def test_rerank_top_scores_prefers_clean_sheet_ceiling_in_very_deep_premier_league_home_win(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-0", 0.18), ("2-0", 0.13), ("1-1", 0.109), ("0-0", 0.108), ("2-1", 0.084), ("0-1", 0.079), ("3-0", 0.05), ("3-1", 0.07)],
+            "主胜",
+            league_code="premier_league",
+            ranked_probabilities=[("主胜", 0.395), ("平局", 0.361), ("客胜", 0.244)],
+            home_lambda=2.0,
+            away_lambda=1.02,
+            over_under={"over": 0.42, "under": 0.58, "line": 3.5},
+            strength_diff=14,
+            confidence=0.395,
+            current_odds={"亚值": {"final": {"handicap_value": -1.5}}, "欧赔": {"final": {"home": 1.46, "draw": 4.9, "away": 6.9}}},
+            review_learning={
+                "score_bias": {
+                    "available": True,
+                    "coverage_expansion_rate": 0.44,
+                    "recommended_score_coverage_expansion": 0.04,
+                    "recommended_home_goal_boost": 0.04,
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-home-open-clean-sheet-preference", diag["signals"])
+        self.assertIn("score-home-open-coverage-priority", diag["signals"])
+        self.assertEqual([score for score, _ in reranked[:2]], ["2-1", "3-0"])
+        self.assertNotIn("1-1", [score for score, _ in reranked[:2]])
+
+    def test_rerank_top_scores_retains_zero_zero_for_premier_league_draw_guard(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-0", 0.18), ("1-1", 0.16), ("0-0", 0.15), ("2-1", 0.13), ("0-1", 0.11)],
+            "平局",
+            league_code="premier_league",
+            ranked_probabilities=[("平局", 0.3523), ("主胜", 0.3406), ("客胜", 0.3071)],
+            home_lambda=1.52,
+            away_lambda=1.43,
+            over_under={"over": 0.27735, "under": 0.72265, "line": 3.0},
+            strength_diff=0,
+            confidence=0.3523,
+            current_odds={"亚值": {"final": {"handicap_value": -0.5}}, "欧赔": {"final": {"home": 2.08, "draw": 4.04, "away": 3.22}}},
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": True,
+                    "pressure_side": "home",
+                    "favored_side": "away",
+                    "score": 15.68,
+                }
+            },
+            review_learning={"score_bias": {"available": True, "coverage_expansion_rate": 0.4, "recommended_score_coverage_expansion": 0.04}},
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-premier-draw-zero-zero-retention", diag["signals"])
+        self.assertEqual([score for score, _ in reranked[:2]], ["1-1", "0-0"])
+        self.assertNotIn("1-0", [score for score, _ in reranked[:2]])
+
+    def test_rerank_top_scores_retains_premier_league_home_ceiling_for_low_tempo_learning_case(self):
+        reranked, diag = self.service.rerank_top_scores(
+            [("1-0", 0.26), ("2-1", 0.23), ("2-0", 0.2), ("3-1", 0.16), ("3-2", 0.09), ("1-1", 0.06)],
+            "主胜",
+            league_code="premier_league",
+            ranked_probabilities=[("主胜", 0.4008), ("平局", 0.3346), ("客胜", 0.2646)],
+            home_lambda=1.3149,
+            away_lambda=1.1879,
+            over_under={
+                "over": 0.4628,
+                "under": 0.5372,
+                "line": 2.5,
+                "league_learning": {
+                    "recent_avg_goals": 2.95,
+                    "over25_rate": 0.65,
+                    "over35_rate": 0.35,
+                    "btts_rate": 0.6,
+                },
+                "market": {
+                    "initial": {"line": 3.25},
+                    "final": {"line": 2.5},
+                },
+            },
+            strength_diff=0,
+            confidence=0.4008,
+            current_odds={"亚值": {"final": {"handicap_value": None}}, "欧赔": {"final": {"home": 2.6936, "draw": 3.3649, "away": 2.5574}}},
+            upset_potential={
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": False,
+                    "pressure_side": "away",
+                    "favored_side": "home",
+                    "score": 3.0,
+                }
+            },
+            review_learning={
+                "score_bias": {
+                    "available": True,
+                    "conservative_home_win_rate": 0.46,
+                    "low_total_underestimate_rate": 0.5,
+                    "home_goal_ceiling_underestimate_rate": 0.42,
+                    "recommended_home_goal_boost": 0.04,
+                    "recommended_low_total_penalty": 0.025,
+                }
+            },
+            return_diag=True,
+            limit=3,
+        )
+        self.assertIn("score-market-low-tempo-guard", diag["signals"])
+        self.assertIn("score-review-conservative-correction", diag["signals"])
+        self.assertIn("score-premier-home-ceiling-retention", diag["signals"])
+        self.assertEqual([score for score, _ in reranked], ["2-1", "3-2", "1-0"])
+        self.assertNotIn("2-0", [score for score, _ in reranked])
+
     def test_apply_three_layer_total_goals_adjustment_rebalances_buckets(self):
         adjusted, diag = self.service.apply_three_layer_total_goals_adjustment(
             {
@@ -787,6 +1957,21 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertEqual(signal["final_price_format"], "decimal")
         self.assertGreater(signal["bias_final"], 0.25)
 
+    def test_extract_over_under_market_signal_adds_high_line_balanced_over_nudge(self):
+        signal = self.service.extract_over_under_market_signal(
+            {
+                "大小球": {
+                    "initial": {"line": 3.25, "over": 1.95, "under": 1.95},
+                    "final": {"line": 3.25, "over": 1.91, "under": 1.99},
+                }
+            }
+        )
+        self.assertTrue(signal["available"])
+        self.assertEqual(signal["goal_pressure"], "balanced")
+        self.assertTrue(signal["balanced_high_line_over_nudge"])
+        self.assertIn("ou_high_line_balanced_over_nudge", signal["signals"])
+        self.assertGreaterEqual(signal["pace_shift"], 0.008)
+
     def test_market_ou_calibration_uses_water_movement_for_total_lambda(self):
         inference = InferencePipelineService(
             league_config={},
@@ -816,6 +2001,35 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertGreater(new_home + new_away, 2.14)
         self.assertLess(diag["target_total"], 2.95)
         self.assertEqual(diag["market_pressure_source"], "market_signal")
+
+    def test_market_ou_calibration_uses_high_line_balanced_over_nudge(self):
+        inference = InferencePipelineService(
+            league_config={},
+            team_manager=None,
+            match_intelligence_engine=None,
+            odds_reference=None,
+            upset_analyzer=None,
+            model_fusion=None,
+            poisson_model=None,
+            weight_adjuster=None,
+            league_ou_learning=None,
+            postprocess_service=self.service,
+        )
+        new_home, new_away, diag = inference.apply_market_ou_calibration(
+            home_lambda=1.35,
+            away_lambda=1.25,
+            current_odds={
+                "大小球": {
+                    "initial": {"line": 3.25, "over": 1.95, "under": 1.95},
+                    "final": {"line": 3.25, "over": 1.91, "under": 1.99},
+                }
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["market_signal"]["goal_pressure"], "balanced")
+        self.assertTrue(diag["market_signal"]["balanced_high_line_over_nudge"])
+        self.assertGreaterEqual(diag["market_pace_shift"], 0.008)
+        self.assertGreater(new_home + new_away, 2.6)
 
     def test_real_market_over_under_skips_duplicate_pace_shift_when_market_lambda_applied(self):
         inference = InferencePipelineService(
@@ -1336,6 +2550,59 @@ class HistoricalOddsAlignmentTest(unittest.TestCase):
         self.assertTrue(alignment["same_capital_flow"])
         self.assertGreaterEqual(alignment["score"], 0.75)
 
+
+class InferenceConfidenceCalibrationTest(unittest.TestCase):
+    def test_calibrate_confidence_with_league_learning_applies_positive_adjustment(self):
+        adjusted, diag = InferencePipelineService._calibrate_confidence_with_league_learning(
+            confidence=0.44,
+            applied_weights={
+                "league_weight_factor": 1.031,
+                "league_total_predictions": 18,
+                "confidence_adjustment": 0.012,
+                "weight_reason": "联赛近30天命中率高于全局基线，放大联赛学习调权",
+            },
+        )
+        self.assertAlmostEqual(adjusted, 0.452, places=6)
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["reason"], "league_confidence_boost")
+        self.assertEqual(diag["base_confidence"], 0.44)
+        self.assertEqual(diag["adjusted_confidence"], 0.452)
+
+    def test_calibrate_confidence_with_league_learning_applies_negative_adjustment(self):
+        adjusted, diag = InferencePipelineService._calibrate_confidence_with_league_learning(
+            confidence=0.44,
+            applied_weights={
+                "league_weight_factor": 0.986,
+                "league_total_predictions": 9,
+                "confidence_adjustment": -0.018,
+                "weight_reason": "联赛近30天命中率低于全局基线，收缩信心",
+            },
+        )
+        self.assertAlmostEqual(adjusted, 0.422, places=6)
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["reason"], "league_confidence_trim")
+        self.assertEqual(diag["adjusted_confidence"], 0.422)
+
+    def test_refresh_cached_confidence_uses_final_probabilities_as_raw_baseline(self):
+        cached = {
+            "confidence": 0.452,
+            "final_probabilities": {"home_win": 0.44, "draw": 0.31, "away_win": 0.25},
+            "applied_model_weights": {
+                "league_weight_factor": 1.031,
+                "league_total_predictions": 18,
+                "confidence_adjustment": 0.012,
+                "weight_reason": "联赛近30天命中率高于全局基线，放大联赛学习调权",
+            },
+            "realtime": {"context_applied": {}},
+        }
+        refreshed = EnhancedPredictor._refresh_cached_confidence(cached)
+        self.assertAlmostEqual(refreshed["confidence"], 0.452, places=6)
+        self.assertEqual(
+            refreshed["realtime"]["context_applied"]["league_confidence_adjustment"]["base_confidence"],
+            0.44,
+        )
+        self.assertTrue(refreshed["realtime"]["context_applied"]["league_confidence_adjustment"]["applied"])
+
     def test_live_outcome_adjustment_uses_historical_market_alignment(self):
         service = object.__new__(InferencePipelineService)
         adjusted, diag = service.apply_live_outcome_adjustment(
@@ -1424,6 +2691,440 @@ class HistoricalOddsAlignmentTest(unittest.TestCase):
         self.assertIn("动态调权:样本不足", normalized)
 
 
+class InferencePipelineReviewRetryTest(unittest.TestCase):
+    def test_run_applies_league_confidence_adjustment_to_final_confidence(self):
+        postprocess = PredictionPostprocessService({"premier_league": {"avg_goals": 2.7}})
+        inference = InferencePipelineService(
+            league_config={"premier_league": {"name": "英超", "avg_goals": 2.7}},
+            team_manager=type("TM", (), {
+                "analyze_team_strength": staticmethod(lambda league_code, team: {"strength": 1.0, "attack": 1.0, "defense": 1.0, "injured_count": 0})
+            })(),
+            match_intelligence_engine=type("MI", (), {
+                "_build_match_intelligence": staticmethod(lambda **kwargs: {"available": True, "signals": [], "market": {"signals": []}}),
+                "_apply_match_intelligence_adjustment": staticmethod(lambda final_prob, match_intelligence: (final_prob, {"applied": False, "signals": []})),
+                "_finalize_match_intelligence": staticmethod(lambda **kwargs: kwargs.get("match_intelligence") or {}),
+            })(),
+            odds_reference=type("OR", (), {
+                "find_similar_matches": staticmethod(lambda **kwargs: {"available": False, "similar_matches": [], "summary": {}}),
+                "get_league_record_count": staticmethod(lambda league_code: 0),
+            })(),
+            upset_analyzer=type("UA", (), {
+                "assess_upset_potential": staticmethod(lambda **kwargs: {"level": "低", "similar_cases_count": 0, "risk_score_detail": {}, "case_knowledge": {}})
+            })(),
+            model_fusion=type("MF", (), {
+                "predict": staticmethod(lambda **kwargs: {"final": {"home_win": 0.44, "draw": 0.31, "away_win": 0.25}, "all_models": {}})
+            })(),
+            poisson_model=_DummyPoissonModel(),
+            weight_adjuster=type("WA", (), {"adjust_weights": staticmethod(lambda *args, **kwargs: {})})(),
+            league_ou_learning=type("LOU", (), {})(),
+            postprocess_service=postprocess,
+        )
+        inference.apply_dynamic_weights = lambda league_code: {
+            "league_weight_factor": 1.031,
+            "league_total_predictions": 18,
+            "confidence_adjustment": 0.012,
+            "weight_reason": "联赛近30天命中率高于全局基线，放大联赛学习调权",
+        }
+        inference.apply_live_outcome_adjustment = lambda **kwargs: (kwargs["final_prob"], {"applied": False})
+        inference._build_preliminary_upset_potential = lambda **kwargs: {
+            "available": False,
+            "motivation_risk": {"available": False, "supports_upset": False, "pressure_side": "away", "favored_side": "home", "score": 0.0},
+            "handicap_strength_mismatch": {"mismatch_detected": False},
+        }
+        inference.build_real_market_over_under = lambda **kwargs: ({"available": True, "line": 2.75, "over": 0.5, "under": 0.5}, {"available": True})
+        inference.apply_real_totals_outcome_adjustment = lambda **kwargs: (kwargs["final_prob"], {"applied": False})
+        inference._apply_draw_confirmation_guard = lambda **kwargs: (kwargs["final_prob"], {"applied": False, "qualified": False, "reason": "not_draw_top1", "signals": [], "evidence": []})
+
+        realtime = {"context_applied": {}}
+        result = inference.run(
+            home_team="切尔西",
+            away_team="诺丁汉森林",
+            league_code="premier_league",
+            match_date="2026-05-04",
+            current_odds={
+                "欧赔": {"final": {"home": 2.38, "draw": 3.34, "away": 3.04}},
+                "亚值": {"final": {"handicap_value": 0.0}},
+                "大小球": {"final": {"line": 2.75, "over": 1.9, "under": 1.9}},
+            },
+            analysis_context={"home_form": 1, "away_form": 5, "home_motivation": 86.0, "away_motivation": 84.0},
+            realtime=realtime,
+            review_learning={},
+        )
+        self.assertAlmostEqual(result["confidence"], 0.452, places=6)
+        self.assertEqual(realtime["context_applied"]["league_confidence_adjustment"]["base_confidence"], 0.44)
+        self.assertEqual(realtime["context_applied"]["league_confidence_adjustment"]["adjusted_confidence"], 0.452)
+
+    def test_retry_review_outcome_adjustment_after_match_intelligence(self):
+        postprocess = PredictionPostprocessService({"premier_league": {"avg_goals": 2.7}})
+        inference = InferencePipelineService(
+            league_config={"premier_league": {"avg_goals": 2.7}},
+            team_manager=type("TM", (), {
+                "analyze_team_strength": staticmethod(lambda league_code, team: {"strength": 1.0, "attack": 1.0, "defense": 1.0, "injured_count": 0})
+            })(),
+            match_intelligence_engine=type("MI", (), {
+                "_build_match_intelligence": staticmethod(lambda **kwargs: {
+                    "available": True,
+                    "signals": ["战意差异"],
+                    "market": {"signals": ["draw_guard"]},
+                }),
+                "_apply_match_intelligence_adjustment": staticmethod(lambda final_prob, match_intelligence: (
+                    {"home_win": 0.40664878699423324, "draw": 0.3425485028967692, "away_win": 0.25080271010899763},
+                    {
+                        "applied": True,
+                        "delta": {"home": 0.0121, "draw": 0.025, "away": -0.0138},
+                        "signals": ["战意差异", "三盘口画像:draw_guard"],
+                    },
+                )),
+                "_finalize_match_intelligence": staticmethod(lambda **kwargs: kwargs.get("match_intelligence") or {}),
+            })(),
+            odds_reference=type("OR", (), {
+                "find_similar_matches": staticmethod(lambda **kwargs: {"available": False, "similar_matches": [], "summary": {}}),
+                "get_league_record_count": staticmethod(lambda league_code: 0),
+            })(),
+            upset_analyzer=type("UA", (), {
+                "assess_upset_potential": staticmethod(lambda **kwargs: {
+                    "motivation_risk": {"available": True, "supports_upset": True, "pressure_side": "home", "favored_side": "away", "score": 14.22},
+                    "handicap_strength_mismatch": {"mismatch_detected": False},
+                })
+            })(),
+            model_fusion=type("MF", (), {
+                "predict": staticmethod(lambda **kwargs: {"final": {"home_win": 0.45, "draw": 0.3, "away_win": 0.25}})
+            })(),
+            poisson_model=_DummyPoissonModel(),
+            weight_adjuster=type("WA", (), {"adjust_weights": staticmethod(lambda *args, **kwargs: {})})(),
+            league_ou_learning=type("LOU", (), {})(),
+            postprocess_service=postprocess,
+        )
+        inference.apply_dynamic_weights = lambda league_code: {}
+        inference.apply_live_outcome_adjustment = lambda **kwargs: (
+            {"home_win": 0.43254878699423323, "draw": 0.3166485028967692, "away_win": 0.25080271010899763},
+            {"applied": True},
+        )
+        inference._build_preliminary_upset_potential = lambda **kwargs: {
+            "available": True,
+            "motivation_risk": {"available": True, "supports_upset": True, "pressure_side": "home", "favored_side": "away", "score": 14.22},
+            "handicap_strength_mismatch": {"mismatch_detected": False},
+        }
+        inference.build_real_market_over_under = lambda **kwargs: ({"available": True, "line": 2.75, "over": 0.5, "under": 0.5}, {"available": True})
+        inference.apply_real_totals_outcome_adjustment = lambda **kwargs: (kwargs["final_prob"], {"applied": False})
+        inference._apply_draw_confirmation_guard = lambda **kwargs: (kwargs["final_prob"], {"applied": False, "qualified": False, "reason": "not_draw_top1", "signals": [], "evidence": []})
+
+        realtime = {"context_applied": {}}
+        result = inference.run(
+            home_team="切尔西",
+            away_team="诺丁汉森林",
+            league_code="premier_league",
+            match_date="2026-05-04",
+            current_odds={
+                "欧赔": {"final": {"home": 2.38, "draw": 3.34, "away": 3.04}},
+                "亚值": {"final": {"handicap_value": 0.0}},
+                "大小球": {"final": {"line": 2.75, "over": 1.9, "under": 1.9}},
+            },
+            analysis_context={"home_form": 1, "away_form": 5, "home_motivation": 86.0, "away_motivation": 84.0},
+            realtime=realtime,
+            review_learning={},
+        )
+        self.assertTrue(result["final_probabilities"]["draw"] > 0.34)
+        self.assertTrue(result["final_probabilities"]["away_win"] > 0.25)
+        self.assertTrue(realtime["context_applied"]["review_outcome_retry_gate"]["eligible"])
+        self.assertTrue(realtime["context_applied"]["review_outcome_retry_gate"]["strong_away_motivation"])
+
+    def test_retry_review_outcome_adjustment_retries_balanced_premier_home_top_without_first_pass_adjustment(self):
+        postprocess = PredictionPostprocessService({"premier_league": {"avg_goals": 2.7}})
+        inference = InferencePipelineService(
+            league_config={"premier_league": {"avg_goals": 2.7}},
+            team_manager=type("TM", (), {
+                "analyze_team_strength": staticmethod(lambda league_code, team: {"strength": 1.0, "attack": 1.0, "defense": 1.0, "injured_count": 0})
+            })(),
+            match_intelligence_engine=type("MI", (), {
+                "_build_match_intelligence": staticmethod(lambda **kwargs: {"available": True, "signals": [], "market": {"signals": []}}),
+                "_apply_match_intelligence_adjustment": staticmethod(lambda final_prob, match_intelligence: (
+                    {"home_win": 0.389, "draw": 0.324, "away_win": 0.287},
+                    {"applied": True, "delta": {"home": -0.011, "draw": 0.012, "away": -0.001}, "signals": ["balanced_retry_case"]},
+                )),
+                "_finalize_match_intelligence": staticmethod(lambda **kwargs: kwargs.get("match_intelligence") or {}),
+            })(),
+            odds_reference=type("OR", (), {
+                "find_similar_matches": staticmethod(lambda **kwargs: {"available": False, "similar_matches": [], "summary": {}}),
+                "get_league_record_count": staticmethod(lambda league_code: 0),
+            })(),
+            upset_analyzer=type("UA", (), {
+                "assess_upset_potential": staticmethod(lambda **kwargs: {
+                    "motivation_risk": {"available": False, "supports_upset": False, "pressure_side": "away", "favored_side": "home", "score": 0.0},
+                    "handicap_strength_mismatch": {"mismatch_detected": False},
+                })
+            })(),
+            model_fusion=type("MF", (), {
+                "predict": staticmethod(lambda **kwargs: {"final": {"home_win": 0.42, "draw": 0.31, "away_win": 0.27}})
+            })(),
+            poisson_model=_DummyPoissonModel(),
+            weight_adjuster=type("WA", (), {"adjust_weights": staticmethod(lambda *args, **kwargs: {})})(),
+            league_ou_learning=type("LOU", (), {})(),
+            postprocess_service=postprocess,
+        )
+        inference.apply_dynamic_weights = lambda league_code: {}
+        inference.apply_live_outcome_adjustment = lambda **kwargs: (
+            {"home_win": 0.42, "draw": 0.31, "away_win": 0.27},
+            {"applied": False},
+        )
+        inference._build_preliminary_upset_potential = lambda **kwargs: {
+            "available": True,
+            "motivation_risk": {"available": False, "supports_upset": False, "pressure_side": "away", "favored_side": "home", "score": 0.0},
+            "handicap_strength_mismatch": {"mismatch_detected": False},
+        }
+        inference.build_real_market_over_under = lambda **kwargs: ({"available": True, "line": 2.5, "over": 0.5, "under": 0.5}, {"available": True})
+        inference.apply_real_totals_outcome_adjustment = lambda **kwargs: (kwargs["final_prob"], {"applied": False})
+        inference._apply_draw_confirmation_guard = lambda **kwargs: (kwargs["final_prob"], {"applied": False, "qualified": False, "reason": "not_draw_top1", "signals": [], "evidence": []})
+
+        realtime = {"context_applied": {}}
+        result = inference.run(
+            home_team="富勒姆",
+            away_team="伯恩茅斯",
+            league_code="premier_league",
+            match_date="2026-05-09",
+            current_odds={
+                "欧赔": {"final": {"home": 2.64, "draw": 3.22, "away": 2.92}},
+                "亚值": {"final": {"handicap_value": -0.25}},
+                "大小球": {"final": {"line": 2.5, "over": 1.9, "under": 1.9}},
+            },
+            analysis_context={"home_form": 3, "away_form": 4, "home_motivation": 78.0, "away_motivation": 77.0},
+            realtime=realtime,
+            review_learning={},
+        )
+        self.assertTrue(realtime["context_applied"]["review_outcome_retry_gate"]["eligible"])
+        self.assertTrue(realtime["context_applied"]["review_outcome_retry_gate"]["balanced_home_top_case"])
+        self.assertIn("review_outcome_adjustment_retry", realtime["context_applied"])
+        self.assertGreater(result["final_probabilities"]["away_win"], 0.287)
+
+    def test_retry_review_outcome_adjustment_skips_non_premier_league(self):
+        postprocess = PredictionPostprocessService({"serie_a": {"avg_goals": 2.7}})
+        inference = InferencePipelineService(
+            league_config={"serie_a": {"avg_goals": 2.7}},
+            team_manager=type("TM", (), {
+                "analyze_team_strength": staticmethod(lambda league_code, team: {"strength": 1.0, "attack": 1.0, "defense": 1.0, "injured_count": 0})
+            })(),
+            match_intelligence_engine=type("MI", (), {
+                "_build_match_intelligence": staticmethod(lambda **kwargs: {"available": True, "signals": [], "market": {"signals": []}}),
+                "_apply_match_intelligence_adjustment": staticmethod(lambda final_prob, match_intelligence: (
+                    {"home_win": 0.41, "draw": 0.34, "away_win": 0.25},
+                    {"applied": True, "delta": {"home": 0.01, "draw": 0.01, "away": -0.02}, "signals": []},
+                )),
+                "_finalize_match_intelligence": staticmethod(lambda **kwargs: kwargs.get("match_intelligence") or {}),
+            })(),
+            odds_reference=type("OR", (), {
+                "find_similar_matches": staticmethod(lambda **kwargs: {"available": False, "similar_matches": [], "summary": {}}),
+                "get_league_record_count": staticmethod(lambda league_code: 0),
+            })(),
+            upset_analyzer=type("UA", (), {
+                "assess_upset_potential": staticmethod(lambda **kwargs: {"motivation_risk": {"available": True, "supports_upset": True, "pressure_side": "home", "favored_side": "away", "score": 14.22}, "handicap_strength_mismatch": {"mismatch_detected": False}})
+            })(),
+            model_fusion=type("MF", (), {
+                "predict": staticmethod(lambda **kwargs: {"final": {"home_win": 0.42, "draw": 0.33, "away_win": 0.25}})
+            })(),
+            poisson_model=_DummyPoissonModel(),
+            weight_adjuster=type("WA", (), {"adjust_weights": staticmethod(lambda *args, **kwargs: {})})(),
+            league_ou_learning=type("LOU", (), {})(),
+            postprocess_service=postprocess,
+        )
+        inference.apply_dynamic_weights = lambda league_code: {}
+        inference.apply_live_outcome_adjustment = lambda **kwargs: (kwargs["final_prob"], {"applied": False})
+        inference._build_preliminary_upset_potential = lambda **kwargs: {
+            "available": True,
+            "motivation_risk": {"available": True, "supports_upset": True, "pressure_side": "home", "favored_side": "away", "score": 14.22},
+            "handicap_strength_mismatch": {"mismatch_detected": False},
+        }
+        inference.build_real_market_over_under = lambda **kwargs: ({"available": True, "line": 2.75, "over": 0.5, "under": 0.5}, {"available": True})
+        inference.apply_real_totals_outcome_adjustment = lambda **kwargs: (kwargs["final_prob"], {"applied": False})
+        inference._apply_draw_confirmation_guard = lambda **kwargs: (kwargs["final_prob"], {"applied": False, "qualified": False, "reason": "not_draw_top1", "signals": [], "evidence": []})
+
+        realtime = {"context_applied": {}}
+        result = inference.run(
+            home_team="卡利亚里",
+            away_team="乌迪内斯",
+            league_code="serie_a",
+            match_date="2026-05-09",
+            current_odds={
+                "欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}},
+                "亚值": {"final": {"handicap_value": -0.5}},
+                "大小球": {"final": {"line": 2.25, "over": 1.9, "under": 1.8}},
+            },
+            analysis_context={"home_form": 3, "away_form": 3, "home_motivation": 80.0, "away_motivation": 82.0},
+            realtime=realtime,
+            review_learning={},
+        )
+        self.assertEqual(result["final_probabilities"]["home_win"], 0.41)
+        self.assertFalse(realtime["context_applied"]["review_outcome_retry_gate"]["eligible"])
+        self.assertNotIn("review_outcome_adjustment_retry", realtime["context_applied"])
+
+    def test_serie_a_full_upset_knowledge_retry_restores_away_path_after_blocked_soft_draw(self):
+        postprocess = PredictionPostprocessService({"serie_a": {"avg_goals": 2.7}})
+        inference = InferencePipelineService(
+            league_config={"serie_a": {"avg_goals": 2.7}},
+            team_manager=type("TM", (), {
+                "analyze_team_strength": staticmethod(lambda league_code, team: {"strength": 1.0, "attack": 1.0, "defense": 1.0, "injured_count": 0})
+            })(),
+            match_intelligence_engine=type("MI", (), {
+                "_build_match_intelligence": staticmethod(lambda **kwargs: {"available": True, "signals": [], "market": {"signals": []}}),
+                "_apply_match_intelligence_adjustment": staticmethod(lambda final_prob, match_intelligence: (final_prob, {"applied": False, "signals": []})),
+                "_finalize_match_intelligence": staticmethod(lambda **kwargs: kwargs.get("match_intelligence") or {}),
+            })(),
+            odds_reference=type("OR", (), {
+                "find_similar_matches": staticmethod(lambda **kwargs: {
+                    "available": True,
+                    "summary": {
+                        "sample_size": 5,
+                        "result_rates": {"主胜": 0.2, "平局": 0.2, "客胜": 0.6},
+                        "cold_result_rate": 0.6,
+                    },
+                }),
+                "get_league_record_count": staticmethod(lambda league_code: 0),
+            })(),
+            upset_analyzer=type("UA", (), {
+                "assess_upset_potential": staticmethod(lambda **kwargs: {
+                    "level": "中",
+                    "similar_cases_count": 1,
+                    "risk_score_detail": {"knowledge_score": 18.0},
+                    "historical_odds_reference": {
+                        "available": True,
+                        "summary": {
+                            "sample_size": 5,
+                            "result_rates": {"主胜": 0.2, "平局": 0.2, "客胜": 0.6},
+                            "cold_result_rate": 0.6,
+                        },
+                    },
+                    "case_knowledge": {"available": True, "hint": "那不勒斯vs拉齐奥(中度爆冷)"},
+                    "motivation_risk": {"available": False, "supports_upset": False, "pressure_side": "away", "favored_side": "home", "score": 3.0},
+                    "handicap_strength_mismatch": {"mismatch_detected": False},
+                })
+            })(),
+            model_fusion=type("MF", (), {
+                "predict": staticmethod(lambda **kwargs: {"final": {"home_win": 0.36, "draw": 0.401, "away_win": 0.239}})
+            })(),
+            poisson_model=_DummyPoissonModel(),
+            weight_adjuster=type("WA", (), {"adjust_weights": staticmethod(lambda *args, **kwargs: {})})(),
+            league_ou_learning=type("LOU", (), {})(),
+            postprocess_service=postprocess,
+        )
+        inference.apply_dynamic_weights = lambda league_code: {}
+        inference.apply_live_outcome_adjustment = lambda **kwargs: (kwargs["final_prob"], {"applied": False})
+        inference._build_preliminary_upset_potential = lambda **kwargs: {
+            "available": False,
+            "motivation_risk": {"available": False, "supports_upset": False, "pressure_side": "away", "favored_side": "home", "score": 3.0},
+            "handicap_strength_mismatch": {"mismatch_detected": False},
+        }
+        inference.build_real_market_over_under = lambda **kwargs: ({"available": True, "line": 2.5, "over": 0.3181, "under": 0.6819}, {"available": True})
+        inference.apply_real_totals_outcome_adjustment = lambda **kwargs: (kwargs["final_prob"], {"applied": False})
+
+        original_apply_review_outcome_adjustment = postprocess.apply_review_outcome_adjustment
+        review_call_count = {"count": 0}
+
+        def fake_apply_review_outcome_adjustment(**kwargs):
+            review_call_count["count"] += 1
+            if review_call_count["count"] == 1:
+                return (
+                    {"home_win": 0.3622434699, "draw": 0.4006465768, "away_win": 0.2371099533},
+                    {
+                        "applied": False,
+                        "signals": ["review-league-serie-a-soft-draw-away-blocked-home-top"],
+                        "reason": "three_layer_evaluated_no_adjustment",
+                        "three_layer_evaluated": True,
+                        "home_bias_gate": {"qualified": False, "evidence": []},
+                        "applied_shift": {"draw_shift": 0.0, "away_shift": 0.0, "home_shift": 0.0, "draw_to_away_relief": 0.0, "draw_to_away_trim": 0.0},
+                        "three_layer_context": {"handicap_depth_bucket": "level_medium", "euro_support_bucket": "draw_soft"},
+                        "motivation_risk": {"available": False, "supports_upset": False, "pressure_side": "away", "favored_side": "home", "score": 3.0},
+                    },
+                )
+            return original_apply_review_outcome_adjustment(**kwargs)
+
+        inference.postprocess_service.apply_review_outcome_adjustment = fake_apply_review_outcome_adjustment
+
+        original_draw_guard = InferencePipelineService._apply_draw_confirmation_guard
+
+        def fake_draw_guard(**kwargs):
+            diag = kwargs.get("review_outcome_diag") or {}
+            signals = set(str(item).strip() for item in (diag.get("signals") or []) if str(item).strip())
+            if "review-league-serie-a-upset-knowledge-retry" in signals:
+                return (
+                    {"home_win": 0.334, "draw": 0.321, "away_win": 0.345},
+                    {
+                        "applied": True,
+                        "qualified": False,
+                        "reason": "draw_confirmation_failed_shifted",
+                        "signals": [
+                            "draw_market_not_confirmed",
+                            "serie_a_soft_draw_confirmation_override",
+                            "serie_a_soft_redirect_draw_to_away",
+                            "away_upset_redirect_draw_to_away",
+                        ],
+                        "evidence": ["under_supports_draw"],
+                        "favored_side": "away_win",
+                    },
+                )
+            if "review-league-serie-a-soft-draw-away-blocked-home-top" in signals:
+                return (
+                    {"home_win": 0.3540668835, "draw": 0.4011054089, "away_win": 0.2448277076},
+                    {
+                        "applied": False,
+                        "qualified": True,
+                        "reason": "draw_confirmation_passed",
+                        "signals": [
+                            "draw_market_not_confirmed",
+                        ],
+                        "evidence": ["draw_prob_clear_lead", "under_supports_draw"],
+                        "favored_side": None,
+                    },
+                )
+            return original_draw_guard(**kwargs)
+
+        inference._apply_draw_confirmation_guard = fake_draw_guard
+
+        realtime = {"context_applied": {}}
+        result = inference.run(
+            home_team="那不勒斯",
+            away_team="博洛尼亚",
+            league_code="serie_a",
+            match_date="2026-05-12",
+            current_odds={
+                "欧赔": {"final": {"home": 1.5377, "draw": 4.0433, "away": 6.1386}},
+                "亚值": {"final": {"handicap_value": -0.75}},
+                "大小球": {"final": {"line": 2.5, "over": 1.9144, "under": 1.8511}},
+            },
+            analysis_context={"home_form": 3, "away_form": 3, "home_motivation": 75.0, "away_motivation": 74.0},
+            realtime=realtime,
+            review_learning={},
+        )
+        self.assertEqual(result["main_prediction"], "客胜")
+        self.assertGreater(result["final_probabilities"]["away_win"], result["final_probabilities"]["home_win"])
+        self.assertTrue(realtime["context_applied"]["serie_a_upset_knowledge_retry_gate"]["eligible"])
+        self.assertIn("review-league-serie-a-upset-knowledge-retry", realtime["context_applied"]["review_outcome_adjustment"]["signals"])
+        self.assertTrue(realtime["context_applied"]["review_outcome_adjustment_full_upset_retry"]["retry_from_full_upset_knowledge"])
+        self.assertEqual(realtime["context_applied"]["draw_confirmation_guard"]["favored_side"], "away_win")
+
+    def test_serie_a_draw_guarded_home_path_can_enter_narrow_review_without_retry(self):
+        postprocess = PredictionPostprocessService({"serie_a": {"avg_goals": 2.7}})
+        adjusted, diag = postprocess.apply_review_outcome_adjustment(
+            final_probabilities={"home_win": 0.4112078931, "draw": 0.3037017170, "away_win": 0.2850903899},
+            league_code="serie_a",
+            strength_diff=0,
+            asian_handicap={"final": {"handicap_value": -0.5}},
+            current_odds={
+                "欧赔": {"final": {"home": 2.5844, "draw": 2.9995, "away": 2.9031}},
+                "大小球": {
+                    "initial": {"line": 2.25, "over": 1.9457, "under": 1.8329},
+                    "final": {"line": 2.25, "over": 1.9557, "under": 1.82},
+                },
+            },
+            review_learning={"league_review": {"league_tags": ["意甲联赛-主胜偏置"]}},
+            upset_potential={
+                "motivation_risk": {"available": True, "supports_upset": True, "pressure_side": "home", "favored_side": "away", "score": 14.22},
+                "handicap_strength_mismatch": {"mismatch_detected": False},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("review-league-serie-a-home-draw-guard-entry", diag["signals"])
+        self.assertGreater(adjusted["away_win"], 0.2850903899)
+
+
 class InferenceScoreRerankGuardTest(unittest.TestCase):
     def test_under_three_penalizes_high_total_scores(self):
         top_scores, diag = InferencePipelineService._rerank_scores_for_under_three(
@@ -1460,6 +3161,72 @@ class InferenceScoreRerankGuardTest(unittest.TestCase):
         self.assertEqual(diag["factors"]["2-2"], 0.8)
         self.assertEqual(top_scores[0][0], "2-0")
         self.assertEqual(top_scores[1][0], "1-0")
+
+    def test_under_three_keeps_deeper_candidates_for_postprocess(self):
+        top_scores, diag = InferencePipelineService._rerank_scores_for_under_three(
+            {
+                "1-0": 0.2082,
+                "0-0": 0.1404,
+                "2-0": 0.1282,
+                "1-1": 0.1110,
+                "0-1": 0.1016,
+                "2-1": 0.0727,
+                "3-0": 0.0526,
+                "1-2": 0.0355,
+                "0-2": 0.0305,
+                "3-1": 0.0298,
+            },
+            {"line": 2.5, "over": 0.3181, "under": 0.6819},
+            limit=8,
+        )
+        self.assertTrue(diag["applied"])
+        self.assertGreaterEqual(len(top_scores), 8)
+        self.assertIn("0-1", [score for score, _ in top_scores])
+        self.assertIn("1-2", [score for score, _ in top_scores])
+        self.assertNotIn("0-2", [score for score, _ in top_scores])
+
+    def test_under_three_retains_open_learning_tail_candidates(self):
+        top_scores, diag = InferencePipelineService._rerank_scores_for_under_three(
+            {
+                "1-1": 0.12263,
+                "1-0": 0.111834,
+                "0-1": 0.101031,
+                "2-1": 0.083985,
+                "1-2": 0.075872,
+                "0-0": 0.075236,
+                "2-0": 0.073527,
+                "0-2": 0.060008,
+                "2-2": 0.049883,
+                "3-1": 0.036812,
+                "3-0": 0.032228,
+                "1-3": 0.030043,
+                "0-3": 0.023762,
+                "3-2": 0.021864,
+            },
+            {
+                "line": 2.5,
+                "over": 0.4628,
+                "under": 0.5372,
+                "league_learning": {
+                    "recent_avg_goals": 2.95,
+                    "over25_rate": 0.65,
+                    "over35_rate": 0.35,
+                    "btts_rate": 0.6,
+                },
+                "market": {
+                    "initial": {"line": 3.25},
+                    "final": {"line": 2.5},
+                },
+            },
+            limit=8,
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("under3-open-learning-tail-retention", diag["signals"])
+        self.assertEqual(diag["target_limit"], 20)
+        self.assertGreaterEqual(len(top_scores), 14)
+        self.assertIn("3-1", [score for score, _ in top_scores])
+        self.assertIn("3-2", [score for score, _ in top_scores])
+        self.assertNotIn("4-2", [score for score, _ in top_scores])
 
 
 class MatchIntelligenceScenarioRuleTest(unittest.TestCase):
@@ -1515,6 +3282,460 @@ class DrawConfirmationGuardTest(unittest.TestCase):
         self.assertLess(adjusted["draw"], 0.355)
         self.assertGreater(adjusted["home_win"], 0.34)
 
+    def test_draw_confirmation_guard_rebounds_moderate_unconfirmed_draw_to_home(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3431850768, "draw": 0.4140136888, "away_win": 0.2428012344},
+            current_odds={"欧赔": {"final": {"home": 2.18, "draw": 3.852, "away": 4.35}}},
+            over_under={"line": 3.0, "over": 0.2739, "under": 0.7261},
+            match_intelligence={"scenario_tags": []},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("home_rebound_draw_confirmation_override", diag["signals"])
+        self.assertIn("home_rebound_draw_excess_boost", diag["signals"])
+        self.assertIn("home_rebound_redirect_draw_to_home", diag["signals"])
+        self.assertEqual(diag["favored_side"], "home_win")
+        self.assertGreater(adjusted["home_win"], adjusted["draw"])
+
+    def test_draw_confirmation_guard_skips_home_rebound_when_draw_has_volatility_support(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3333184011, "draw": 0.3347094250, "away_win": 0.3319721739},
+            current_odds={"欧赔": {"final": {"home": 2.32, "draw": 4.1261, "away": 3.85}}},
+            over_under={"line": 2.75, "over": 0.45145, "under": 0.54855},
+            match_intelligence={
+                "scenario_tags": ["recent_form_volatility_high", "premier_league_relegation_home_motivation_bonus"],
+                "contextual_rules": {"volatility": {"home": {"label": "medium"}, "away": {"label": "high"}}},
+            },
+        )
+        self.assertFalse(diag["applied"])
+        self.assertTrue(diag["qualified"])
+        self.assertNotIn("home_rebound_draw_confirmation_override", diag["signals"])
+        self.assertEqual(adjusted["draw"], 0.3347094250)
+
+    def test_draw_confirmation_guard_trims_near_tie_home_rebound_into_home(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3408472779, "draw": 0.4320708255, "away_win": 0.2270818966},
+            current_odds={"欧赔": {"final": {"home": 1.73, "draw": 5.2213, "away": 5.52}}},
+            over_under={"line": 3.5, "over": 0.2027, "under": 0.7973},
+            match_intelligence={
+                "scenario_tags": [],
+                "contextual_rules": {"volatility": {"home": {"label": "medium"}, "away": {"label": "high"}}},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("home_rebound_draw_confirmation_override", diag["signals"])
+        self.assertIn("home_rebound_near_tie_trim", diag["signals"])
+        self.assertGreater(adjusted["home_win"], adjusted["draw"])
+
+    def test_draw_confirmation_guard_redirects_fragile_home_draw_to_away(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.324, "draw": 0.355, "away_win": 0.321},
+            current_odds={"欧赔": {"final": {"home": 2.28, "draw": 3.46, "away": 3.06}}},
+            over_under={"line": 2.75, "over": 0.57, "under": 0.43},
+            match_intelligence={"scenario_tags": []},
+            review_outcome_diag={
+                "signals": ["review-fragile-home-favorite-correction"],
+                "motivation_risk": {"supports_upset": True, "pressure_side": "away"},
+                "home_bias_gate": {"evidence": ["away_motivation_pressure", "handicap_strength_mismatch"]},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["favored_side"], "away_win")
+        self.assertIn("fragile_home_redirect_draw_to_away", diag["signals"])
+        self.assertLess(adjusted["draw"], 0.355)
+        self.assertGreater(adjusted["away_win"], 0.321)
+        self.assertGreater(adjusted["away_win"], adjusted["home_win"])
+
+    def test_draw_confirmation_guard_overrides_fragile_home_draw_when_only_gap_confirms(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.321, "draw": 0.371, "away_win": 0.308},
+            current_odds={"欧赔": {"final": {"home": 2.26, "draw": 3.46, "away": 3.04}}},
+            over_under={"line": 2.75, "over": 0.56, "under": 0.44},
+            match_intelligence={"scenario_tags": []},
+            review_outcome_diag={
+                "signals": ["review-fragile-home-favorite-correction"],
+                "motivation_risk": {"supports_upset": True, "pressure_side": "away"},
+                "home_bias_gate": {"evidence": ["away_motivation_pressure", "handicap_strength_mismatch"]},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("fragile_home_draw_confirmation_override", diag["signals"])
+        self.assertIn("fragile_home_redirect_draw_to_away", diag["signals"])
+        self.assertLess(adjusted["draw"], 0.371)
+        self.assertGreater(adjusted["away_win"], 0.308)
+
+    def test_draw_confirmation_guard_keeps_fragile_home_when_market_really_confirms_draw(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.324, "draw": 0.355, "away_win": 0.321},
+            current_odds={"欧赔": {"final": {"home": 3.18, "draw": 3.02, "away": 3.22}}},
+            over_under={"line": 2.25, "over": 0.42, "under": 0.58},
+            match_intelligence={"scenario_tags": []},
+            review_outcome_diag={
+                "signals": ["review-fragile-home-favorite-correction"],
+                "motivation_risk": {"supports_upset": True, "pressure_side": "away"},
+                "home_bias_gate": {"evidence": ["away_motivation_pressure"]},
+            },
+        )
+        self.assertFalse(diag["applied"])
+        self.assertTrue(diag["qualified"])
+        self.assertNotIn("fragile_home_draw_confirmation_override", diag["signals"])
+        self.assertEqual(adjusted["draw"], 0.355)
+
+    def test_draw_confirmation_guard_rebounds_fragile_home_medium_strong_support_case_to_home(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3334944443, "draw": 0.3869122622, "away_win": 0.2795932935},
+            current_odds={"欧赔": {"final": {"home": 1.493, "draw": 3.711, "away": 7.636}}},
+            over_under={"line": 3.0, "over": 0.19095, "under": 0.80905},
+            match_intelligence={
+                "scenario_tags": [],
+                "contextual_rules": {"volatility": {"home": {"label": "high"}, "away": {"label": "low"}}},
+            },
+            review_outcome_diag={
+                "signals": [
+                    "review-bias-config-floor",
+                    "review-motivation-risk-correction",
+                    "review-fragile-home-favorite-correction",
+                ],
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": True,
+                    "pressure_side": "away",
+                    "favored_side": "home",
+                    "score": 14.22,
+                },
+                "home_bias_gate": {"qualified": True, "evidence": ["limited_probability_edge", "limited_strength_gap", "away_motivation_pressure"]},
+                "applied_shift": {"draw_shift": 0.0174, "away_shift": 0.03, "home_shift": 0.0},
+                "three_layer_context": {"handicap_depth_bucket": "level_medium", "euro_support_bucket": "strong_support"},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("fragile_home_strong_support_rebound_override", diag["signals"])
+        self.assertIn("fragile_home_strong_support_redirect_draw_to_home", diag["signals"])
+        self.assertNotIn("fragile_home_redirect_draw_to_away", diag["signals"])
+        self.assertEqual(diag["favored_side"], "home_win")
+        self.assertGreater(adjusted["home_win"], adjusted["draw"])
+        self.assertGreater(adjusted["home_win"], adjusted["away_win"])
+
+    def test_draw_confirmation_guard_redirects_away_upset_signal_when_draw_only_leads_by_gap(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.33, "draw": 0.368, "away_win": 0.336},
+            current_odds={"欧赔": {"final": {"home": 2.62, "draw": 3.46, "away": 2.66}}},
+            over_under={"line": 2.75, "over": 0.56, "under": 0.44},
+            match_intelligence={"scenario_tags": []},
+            review_outcome_diag={
+                "signals": [],
+                "motivation_risk": {"supports_upset": True, "pressure_side": "home", "favored_side": "away", "score": 15.6},
+                "applied_shift": {"draw_shift": 0.012, "away_shift": 0.024},
+                "home_bias_gate": {"evidence": ["limited_probability_edge"]},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("near_tie_away_promotion", diag["signals"])
+        self.assertIn("near_tie_redirect_draw_to_away", diag["signals"])
+        self.assertIn("away_upset_redirect_draw_to_away", diag["signals"])
+        self.assertLess(adjusted["draw"], 0.368)
+        self.assertGreater(adjusted["away_win"], 0.336)
+        self.assertGreater(adjusted["away_win"], adjusted["home_win"])
+
+    def test_draw_confirmation_guard_skips_near_tie_promotion_when_under_supports_draw(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.314, "draw": 0.368, "away_win": 0.318},
+            current_odds={"欧赔": {"final": {"home": 2.62, "draw": 3.46, "away": 2.66}}},
+            over_under={"line": 2.5, "over": 0.44, "under": 0.56},
+            match_intelligence={"scenario_tags": []},
+            review_outcome_diag={
+                "signals": [],
+                "motivation_risk": {"supports_upset": True, "pressure_side": "home", "favored_side": "away", "score": 15.6},
+                "applied_shift": {"draw_shift": 0.012, "away_shift": 0.024},
+                "home_bias_gate": {"evidence": ["limited_probability_edge"]},
+            },
+        )
+        self.assertFalse(diag["applied"])
+        self.assertTrue(diag["qualified"])
+        self.assertNotIn("near_tie_away_promotion", diag["signals"])
+        self.assertEqual(adjusted["draw"], 0.368)
+
+    def test_draw_confirmation_guard_allows_serie_a_soft_override_with_review_relief(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3336958657, "draw": 0.3732840088, "away_win": 0.2930201256},
+            current_odds={"欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}}},
+            over_under={"line": 2.25, "over": 0.27685, "under": 0.72315},
+            match_intelligence={
+                "scenario_tags": ["recent_form_volatility_high"],
+                "contextual_rules": {"volatility": {"home": {"label": "high"}, "away": {"label": "high"}}},
+            },
+            review_outcome_diag={
+                "signals": ["review-league-serie-a-draw-to-away-relief", "review-narrow-away-bump"],
+                "motivation_risk": {"supports_upset": True, "pressure_side": "home", "favored_side": "away", "score": 14.22},
+                "applied_shift": {"draw_shift": 0.02, "away_shift": 0.033, "draw_to_away_relief": 0.046},
+                "three_layer_context": {"handicap_depth_bucket": "level_medium"},
+                "home_bias_gate": {"evidence": ["limited_probability_edge"]},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("serie_a_soft_draw_confirmation_override", diag["signals"])
+        self.assertIn("serie_a_soft_redirect_draw_to_away", diag["signals"])
+        self.assertIn("away_upset_redirect_draw_to_away", diag["signals"])
+        self.assertGreater(adjusted["away_win"], adjusted["draw"])
+
+    def test_draw_confirmation_guard_allows_serie_a_soft_override_for_low_risk_home_favored_relief(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3540668835, "draw": 0.4011054089, "away_win": 0.2448277076},
+            current_odds={"欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}}},
+            over_under={"line": 2.5, "over": 0.3181, "under": 0.6819},
+            match_intelligence={
+                "scenario_tags": ["recent_form_volatility_high"],
+                "contextual_rules": {"volatility": {"home": {"label": "high"}, "away": {"label": "medium"}}},
+            },
+            review_outcome_diag={
+                "signals": ["review-league-serie-a-draw-to-away-relief", "review-league-serie-a-soft-draw-away-entry"],
+                "motivation_risk": {"supports_upset": False, "pressure_side": "away", "favored_side": "home", "score": 3.0},
+                "applied_shift": {"draw_shift": 0.0, "away_shift": 0.046, "draw_to_away_relief": 0.046},
+                "three_layer_context": {"handicap_depth_bucket": "level_medium"},
+                "home_bias_gate": {"evidence": []},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("serie_a_soft_draw_confirmation_override", diag["signals"])
+        self.assertIn("serie_a_soft_redirect_draw_to_away", diag["signals"])
+        self.assertGreater(adjusted["away_win"], adjusted["draw"])
+
+    def test_draw_confirmation_guard_adds_serie_a_soft_final_margin_trim_when_away_just_trails_home(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.355, "draw": 0.37, "away_win": 0.275},
+            current_odds={"欧赔": {"final": {"home": 1.5377, "draw": 4.0433, "away": 6.1386}}},
+            over_under={"line": 2.5, "over": 0.491595, "under": 0.508405},
+            match_intelligence={
+                "scenario_tags": ["recent_form_volatility_high"],
+                "contextual_rules": {"volatility": {"home": {"label": "high"}, "away": {"label": "medium"}}},
+            },
+            review_outcome_diag={
+                "signals": ["review-league-serie-a-draw-to-away-relief", "review-league-serie-a-soft-draw-away-entry"],
+                "motivation_risk": {"supports_upset": False, "pressure_side": "away", "favored_side": "home", "score": 3.0},
+                "applied_shift": {"draw_shift": 0.0, "away_shift": 0.046, "draw_to_away_relief": 0.046},
+                "three_layer_context": {"handicap_depth_bucket": "level_medium", "euro_support_bucket": "draw_soft"},
+                "home_bias_gate": {"evidence": []},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("serie_a_soft_final_margin_trim", diag["signals"])
+        self.assertGreater(adjusted["away_win"], adjusted["home_win"])
+
+    def test_draw_confirmation_guard_keeps_ligue1_near_away_top_stable(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3176168262, "draw": 0.3369166348, "away_win": 0.3454665390},
+            current_odds={"欧赔": {"final": {"home": 1.74, "draw": 4.1, "away": 4.08}}},
+            over_under={"line": 3.0, "over": 0.1896, "under": 0.8737},
+            match_intelligence={
+                "scenario_tags": [],
+                "contextual_rules": {"volatility": {"home": {"label": "medium"}, "away": {"label": "medium"}}},
+            },
+            review_outcome_diag={
+                "signals": [
+                    "review-bias-config-floor",
+                    "review-league-ligue1-home-away-relief",
+                    "review-league-ligue1-home-edge-trim",
+                ],
+                "motivation_risk": {"supports_upset": False, "pressure_side": "", "favored_side": "", "score": 0.0},
+                "applied_shift": {"draw_shift": 0.0151, "away_shift": 0.056, "draw_to_away_trim": 0.0092},
+                "three_layer_context": {"handicap_depth_bucket": "level_medium", "euro_support_bucket": "strong_support"},
+                "home_bias_gate": {"evidence": []},
+            },
+        )
+        self.assertFalse(diag["applied"])
+        self.assertEqual(diag["reason"], "not_draw_top1")
+        self.assertGreater(adjusted["away_win"], adjusted["draw"])
+        self.assertGreater(adjusted["away_win"], adjusted["home_win"])
+
+    def test_draw_confirmation_guard_redirects_ligue1_home_edge_false_draw_to_away(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.316858, "draw": 0.36298, "away_win": 0.320162},
+            current_odds={"欧赔": {"final": {"home": 1.74, "draw": 4.1, "away": 4.08}}},
+            over_under={"line": 3.0, "over": 0.157964, "under": 0.842036},
+            match_intelligence={
+                "scenario_tags": [],
+                "contextual_rules": {"volatility": {"home": {"label": "medium"}, "away": {"label": "medium"}}},
+            },
+            review_outcome_diag={
+                "signals": [
+                    "review-bias-config-floor",
+                    "review-league-ligue1-home-away-relief",
+                    "review-league-ligue1-home-edge-trim",
+                ],
+                "motivation_risk": {"available": True, "supports_upset": False, "pressure_side": "away", "favored_side": "home", "score": 0.0},
+                "applied_shift": {"draw_shift": 0.0151, "away_shift": 0.056, "draw_to_away_trim": 0.0091},
+                "three_layer_context": {"handicap_depth_bucket": "level_medium", "euro_support_bucket": "strong_support"},
+                "home_bias_gate": {"evidence": ["limited_probability_edge", "limited_strength_gap"]},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("ligue1_home_edge_redirect_draw_to_away", diag["signals"])
+        self.assertIn("away_upset_redirect_draw_to_away", diag["signals"])
+        self.assertEqual(diag["favored_side"], "away_win")
+        self.assertGreater(adjusted["away_win"], adjusted["draw"])
+        self.assertGreater(adjusted["away_win"], adjusted["home_win"])
+
+    def test_draw_confirmation_guard_rebounds_blocked_serie_a_soft_draw_back_to_home(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3622434699, "draw": 0.4006465768, "away_win": 0.2371099533},
+            current_odds={"欧赔": {"final": {"home": 1.5377, "draw": 4.0433, "away": 6.1386}}},
+            over_under={"line": 2.5, "over": 0.3181, "under": 0.6819},
+            match_intelligence={
+                "scenario_tags": ["recent_form_volatility_high"],
+                "contextual_rules": {"volatility": {"home": {"label": "high"}, "away": {"label": "medium"}}},
+            },
+            review_outcome_diag={
+                "signals": ["review-league-serie-a-soft-draw-away-blocked-home-top"],
+                "motivation_risk": {"supports_upset": False, "pressure_side": "away", "favored_side": "home", "score": 3.0},
+                "applied_shift": {"draw_shift": 0.0, "away_shift": 0.0, "draw_to_away_relief": 0.0},
+                "three_layer_context": {"handicap_depth_bucket": "level_medium", "euro_support_bucket": "draw_soft"},
+                "home_bias_gate": {"evidence": []},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("serie_a_soft_blocked_home_draw_confirmation_override", diag["signals"])
+        self.assertIn("serie_a_soft_blocked_home_redirect_draw_to_home", diag["signals"])
+        self.assertEqual(diag["favored_side"], "home_win")
+        self.assertGreater(adjusted["home_win"], adjusted["draw"])
+        self.assertGreater(adjusted["home_win"], adjusted["away_win"])
+
+    def test_draw_confirmation_guard_adds_serie_a_home_fragility_final_trim_for_cagliari_shape(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.34044946855031734, "draw": 0.3729137508748933, "away_win": 0.2866367805747895},
+            current_odds={"欧赔": {"final": {"home": 2.5844, "draw": 2.9995, "away": 2.9031}}},
+            over_under={"line": 2.25, "over": 0.27775, "under": 0.72225},
+            match_intelligence={
+                "scenario_tags": ["recent_form_volatility_high"],
+                "contextual_rules": {"volatility": {"home": {"label": "high"}, "away": {"label": "high"}}},
+            },
+            review_outcome_diag={
+                "signals": [
+                    "review-bias-config-floor",
+                    "review-league-serie-a-home-draw-guard-entry",
+                    "review-league-serie-a-home-draw-guard-near-tie",
+                ],
+                "motivation_risk": {"supports_upset": True, "pressure_side": "home", "favored_side": "away", "score": 14.22},
+                "applied_shift": {"draw_shift": 0.02, "away_shift": 0.03},
+                "three_layer_context": {"handicap_depth_bucket": "level_medium", "euro_support_bucket": "draw_guarded"},
+                "home_bias_gate": {"evidence": ["limited_probability_edge", "limited_strength_gap"]},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("serie_a_home_fragility_draw_excess_boost", diag["signals"])
+        self.assertIn("away_upset_redirect_draw_to_away", diag["signals"])
+        self.assertIn("serie_a_home_fragility_final_trim", diag["signals"])
+        self.assertGreater(adjusted["away_win"], adjusted["home_win"])
+
+    def test_draw_confirmation_guard_overrides_serie_a_upset_knowledge_draw_to_away(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.2939234699, "draw": 0.3994065768, "away_win": 0.3066699533},
+            current_odds={"欧赔": {"final": {"home": 1.5377, "draw": 4.0433, "away": 6.1386}}},
+            over_under={"line": 2.5, "over": 0.3181, "under": 0.6819},
+            match_intelligence={
+                "scenario_tags": ["recent_form_volatility_high"],
+                "contextual_rules": {"volatility": {"home": {"label": "high"}, "away": {"label": "medium"}}},
+            },
+            review_outcome_diag={
+                "signals": [
+                    "review-fragile-home-favorite-correction",
+                    "review-league-serie-a-draw-to-away-relief",
+                    "review-league-serie-a-soft-draw-away-entry",
+                    "review-league-serie-a-upset-knowledge-retry",
+                ],
+                "motivation_risk": {"supports_upset": False, "pressure_side": "away", "favored_side": "home", "score": 3.0},
+                "applied_shift": {"draw_shift": 0.0128, "away_shift": 0.046},
+                "three_layer_context": {"handicap_depth_bucket": "level_medium", "euro_support_bucket": "strong_support"},
+                "home_bias_gate": {"evidence": ["limited_probability_edge", "limited_strength_gap", "runner_up_close"]},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("serie_a_upset_knowledge_draw_confirmation_override", diag["signals"])
+        self.assertIn("serie_a_upset_knowledge_draw_excess_boost", diag["signals"])
+        self.assertIn("serie_a_upset_knowledge_redirect_draw_to_away", diag["signals"])
+        self.assertEqual(diag["favored_side"], "away_win")
+        self.assertGreater(adjusted["away_win"], adjusted["draw"])
+        self.assertGreater(adjusted["away_win"], adjusted["home_win"])
+
+    def test_draw_confirmation_guard_uses_narrow_away_bump_as_near_tie_redirect_signal(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3211217112, "draw": 0.3403209648, "away_win": 0.3385573239},
+            current_odds={"欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}}},
+            over_under={"line": 2.75, "over": 0.2882, "under": 0.7118},
+            match_intelligence={"scenario_tags": []},
+            review_outcome_diag={
+                "signals": ["review-narrow-away-bump"],
+                "motivation_risk": {"supports_upset": True, "pressure_side": "home", "favored_side": "away", "score": 15.68},
+                "applied_shift": {"draw_shift": 0.012, "away_shift": 0.033},
+                "home_bias_gate": {"evidence": ["limited_probability_edge"]},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("near_tie_away_promotion", diag["signals"])
+        self.assertIn("narrow_away_strong_redirect_boost", diag["signals"])
+        self.assertIn("narrow_away_strong_redirect", diag["signals"])
+        self.assertIn("away_upset_redirect_draw_to_away", diag["signals"])
+        self.assertGreater(adjusted["away_win"], adjusted["draw"])
+        self.assertGreater(adjusted["away_win"], adjusted["home_win"])
+
+    def test_draw_confirmation_guard_extends_near_tie_window_for_strong_narrow_away_bump(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3211217112, "draw": 0.3851209648, "away_win": 0.3385573239},
+            current_odds={"欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}}},
+            over_under={"line": 2.75, "over": 0.2882, "under": 0.7118},
+            match_intelligence={"scenario_tags": []},
+            review_outcome_diag={
+                "signals": ["review-narrow-away-bump"],
+                "motivation_risk": {"supports_upset": True, "pressure_side": "home", "favored_side": "away", "score": 15.68},
+                "applied_shift": {"draw_shift": 0.012, "away_shift": 0.033},
+                "home_bias_gate": {"evidence": ["limited_probability_edge"]},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("near_tie_away_promotion", diag["signals"])
+        self.assertIn("narrow_away_strong_redirect_boost", diag["signals"])
+        self.assertIn("narrow_away_strong_redirect", diag["signals"])
+        self.assertGreater(adjusted["away_win"], adjusted["home_win"])
+
+    def test_draw_confirmation_guard_flips_strong_narrow_away_bump_case_to_away(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3135217112, "draw": 0.3783209648, "away_win": 0.3081573239},
+            current_odds={"欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}}},
+            over_under={"line": 2.75, "over": 0.2882, "under": 0.7118},
+            match_intelligence={"scenario_tags": []},
+            review_outcome_diag={
+                "signals": ["review-narrow-away-bump"],
+                "motivation_risk": {"supports_upset": True, "pressure_side": "home", "favored_side": "away", "score": 15.68},
+                "applied_shift": {"draw_shift": 0.012, "away_shift": 0.033},
+                "home_bias_gate": {"evidence": ["limited_probability_edge"]},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("narrow_away_strong_redirect_boost", diag["signals"])
+        self.assertIn("narrow_away_strong_redirect", diag["signals"])
+        self.assertGreater(adjusted["away_win"], adjusted["draw"])
+        self.assertGreater(adjusted["away_win"], adjusted["home_win"])
+
+    def test_draw_confirmation_guard_trims_near_tie_strong_away_redirect_into_away(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3332430249, "draw": 0.3784668883, "away_win": 0.2882900868},
+            current_odds={"欧赔": {"final": {"home": 2.92, "draw": 3.12, "away": 2.46}}},
+            over_under={"line": 2.75, "over": 0.28505, "under": 0.71495},
+            match_intelligence={
+                "scenario_tags": [],
+                "contextual_rules": {"volatility": {"home": {"label": "medium"}, "away": {"label": "low"}}},
+            },
+            review_outcome_diag={
+                "signals": ["review-narrow-away-bump"],
+                "motivation_risk": {"supports_upset": True, "pressure_side": "home", "favored_side": "away", "score": 15.68},
+                "applied_shift": {"draw_shift": 0.012, "away_shift": 0.033},
+                "home_bias_gate": {"evidence": ["limited_probability_edge"]},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("away_upset_near_tie_trim", diag["signals"])
+        self.assertIn("narrow_away_strong_redirect", diag["signals"])
+        self.assertGreater(adjusted["away_win"], adjusted["home_win"])
+        self.assertGreater(adjusted["away_win"], adjusted["draw"])
+
     def test_draw_confirmation_guard_keeps_market_confirmed_draw(self):
         adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
             final_prob={"home_win": 0.31, "draw": 0.36, "away_win": 0.33},
@@ -1526,6 +3747,322 @@ class DrawConfirmationGuardTest(unittest.TestCase):
         self.assertTrue(diag["qualified"])
         self.assertEqual(diag["reason"], "draw_confirmation_passed")
         self.assertEqual(adjusted["draw"], 0.36)
+
+    def test_draw_confirmation_guard_rebounds_la_liga_flat_false_draw_to_home_when_market_disagrees(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.347, "draw": 0.409, "away_win": 0.244},
+            current_odds={"欧赔": {"final": {"home": 2.08, "draw": 3.86, "away": 4.54}}},
+            over_under={"line": 3.0, "over": 0.274, "under": 0.726},
+            match_intelligence={"scenario_tags": ["la_liga_mid_table_home_flat"]},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("home_rebound_draw_confirmation_override", diag["signals"])
+        self.assertIn("home_rebound_redirect_draw_to_home", diag["signals"])
+        self.assertNotIn("draw_confirmation_passed", diag["reason"])
+        self.assertGreater(adjusted["home_win"], adjusted["draw"])
+
+    def test_draw_confirmation_guard_rebounds_la_liga_fragile_home_false_draw_to_home(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3348, "draw": 0.3872, "away_win": 0.278},
+            current_odds={"欧赔": {"final": {"home": 1.52, "draw": 3.92, "away": 7.05}}},
+            over_under={"line": 3.0, "over": 0.191, "under": 0.809},
+            match_intelligence={"scenario_tags": ["la_liga_mid_table_home_flat"]},
+            review_outcome_diag={
+                "signals": [
+                    "review-bias-config-floor",
+                    "review-motivation-risk-correction",
+                    "review-fragile-home-favorite-correction",
+                ],
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": True,
+                    "pressure_side": "away",
+                    "favored_side": "home",
+                    "score": 14.22,
+                },
+                "home_bias_gate": {"qualified": True, "evidence": ["limited_probability_edge", "away_motivation_pressure"]},
+                "applied_shift": {"draw_shift": 0.0174, "away_shift": 0.03, "home_shift": 0.0},
+                "three_layer_context": {"handicap_depth_bucket": "level_medium", "euro_support_bucket": "strong_support"},
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("fragile_home_strong_support_rebound_override", diag["signals"])
+        self.assertIn("fragile_home_strong_support_redirect_draw_to_home", diag["signals"])
+        self.assertNotIn("fragile_home_redirect_draw_to_away", diag["signals"])
+        self.assertEqual(diag["favored_side"], "home_win")
+        self.assertGreater(adjusted["home_win"], adjusted["draw"])
+
+    def test_draw_confirmation_guard_keeps_la_liga_weak_gap_draw_without_support_evidence(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.361955983234495, "draw": 0.3669740570443156, "away_win": 0.27106995972118946},
+            current_odds={"欧赔": {"final": {"home": 2.67, "draw": 4.3608, "away": 3.8894}}},
+            over_under={"line": 2.75, "over": 0.37075, "under": 0.62925},
+            match_intelligence={
+                "scenario_tags": [],
+                "contextual_rules": {"volatility": {"home": {"label": "low"}, "away": {"label": "low"}}},
+            },
+            review_outcome_diag={
+                "signals": ["review-bias-config-floor"],
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": False,
+                    "pressure_side": "away",
+                    "favored_side": "home",
+                    "score": 3.0,
+                },
+                "applied_shift": {"draw_shift": 0.011, "away_shift": 0.0, "home_shift": 0.0},
+                "three_layer_context": {"handicap_depth_bucket": "level_medium", "euro_support_bucket": "strong_support"},
+            },
+        )
+        self.assertFalse(diag["applied"])
+        self.assertEqual(diag["reason"], "la_liga_weak_gap_draw_retained")
+        self.assertIn("draw_confirmation_gap_weak", diag["signals"])
+        self.assertIn("draw_market_not_confirmed", diag["signals"])
+        self.assertIn("la_liga_weak_gap_draw_retention", diag["signals"])
+        self.assertEqual(adjusted["draw"], 0.3669740570443156)
+        self.assertGreater(adjusted["draw"], adjusted["home_win"])
+
+    def test_draw_confirmation_guard_overrides_extreme_under_draw_without_market_support(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3490907957, "draw": 0.4266856709, "away_win": 0.2242235334},
+            current_odds={"欧赔": {"final": {"home": 1.42, "draw": 4.0065, "away": 6.593}}},
+            over_under={"line": 3.0, "over": 0.1801, "under": 0.8199},
+            match_intelligence={"scenario_tags": []},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("extreme_under_not_draw_confirmed", diag["signals"])
+        self.assertIn("extreme_under_draw_confirmation_override", diag["signals"])
+        self.assertLess(adjusted["draw"], 0.4266856709)
+        self.assertGreater(adjusted["home_win"], 0.3490907957)
+
+    def test_draw_confirmation_guard_keeps_extreme_under_draw_when_away_remains_close(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3450253485, "draw": 0.3922639777, "away_win": 0.2627106738},
+            current_odds={"欧赔": {"final": {"home": 1.43, "draw": 6.2982, "away": 6.9232}}},
+            over_under={"line": 3.75, "over": 0.27185, "under": 0.72815},
+            match_intelligence={"scenario_tags": []},
+        )
+        self.assertFalse(diag["applied"])
+        self.assertTrue(diag["qualified"])
+        self.assertIn("extreme_under_not_draw_confirmed", diag["signals"])
+        self.assertNotIn("extreme_under_draw_confirmation_override", diag["signals"])
+        self.assertEqual(adjusted["draw"], 0.3922639777)
+
+    def test_draw_confirmation_guard_overrides_deep_soft_extreme_under_false_draw(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3234520396, "draw": 0.4281410287, "away_win": 0.2484069317},
+            current_odds={"欧赔": {"final": {"home": 1.74, "draw": 4.32, "away": 5.28}}},
+            over_under={"line": 3.0, "over": 0.19, "under": 0.81},
+            match_intelligence={"scenario_tags": ["recent_form_volatility_high"]},
+            review_outcome_diag={
+                "signals": [],
+                "three_layer_context": {
+                    "handicap_depth_bucket": "level_deep",
+                    "euro_support_bucket": "draw_soft",
+                },
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("deep_soft_extreme_under_draw_confirmation_override", diag["signals"])
+        self.assertIn("deep_soft_extreme_under_redirect_draw_to_home", diag["signals"])
+        self.assertLess(adjusted["draw"], 0.4281410287)
+        self.assertGreater(adjusted["home_win"], adjusted["draw"])
+
+    def test_draw_confirmation_guard_keeps_medium_bucket_extreme_under_draw_without_deep_soft_override(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3234520396, "draw": 0.4281410287, "away_win": 0.2484069317},
+            current_odds={"欧赔": {"final": {"home": 1.74, "draw": 4.32, "away": 5.28}}},
+            over_under={"line": 3.0, "over": 0.19, "under": 0.81},
+            match_intelligence={"scenario_tags": ["recent_form_volatility_high"]},
+            review_outcome_diag={
+                "signals": [],
+                "three_layer_context": {
+                    "handicap_depth_bucket": "level_medium",
+                    "euro_support_bucket": "draw_soft",
+                },
+            },
+        )
+        self.assertFalse(diag["applied"])
+        self.assertTrue(diag["qualified"])
+        self.assertIn("extreme_under_not_draw_confirmed", diag["signals"])
+        self.assertNotIn("deep_soft_extreme_under_draw_confirmation_override", diag["signals"])
+        self.assertEqual(adjusted["draw"], 0.4281410287)
+
+    def test_draw_confirmation_guard_rebounds_deep_soft_extreme_under_without_upset_signal(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3275410198, "draw": 0.4146231841, "away_win": 0.2578357961},
+            current_odds={"欧赔": {"final": {"home": 1.62, "draw": 4.33, "away": 6.0}}},
+            over_under={"line": 3.0, "over": 0.2701, "under": 0.7299},
+            match_intelligence={"scenario_tags": []},
+            review_outcome_diag={
+                "signals": [],
+                "motivation_risk": {"available": True, "supports_upset": False, "pressure_side": "away", "favored_side": "home", "score": 0.0},
+                "three_layer_context": {
+                    "handicap_depth_bucket": "level_deep",
+                    "euro_support_bucket": "draw_soft",
+                },
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("deep_soft_extreme_under_rebound_override", diag["signals"])
+        self.assertIn("deep_soft_extreme_under_rebound_redirect_draw_to_home", diag["signals"])
+        self.assertGreater(adjusted["home_win"], adjusted["draw"])
+
+    def test_draw_confirmation_guard_skips_deep_soft_extreme_under_rebound_when_upset_signal_exists(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3275410198, "draw": 0.4146231841, "away_win": 0.2578357961},
+            current_odds={"欧赔": {"final": {"home": 1.62, "draw": 4.33, "away": 6.0}}},
+            over_under={"line": 3.0, "over": 0.2701, "under": 0.7299},
+            match_intelligence={"scenario_tags": []},
+            review_outcome_diag={
+                "signals": [],
+                "motivation_risk": {"available": True, "supports_upset": True, "pressure_side": "away", "favored_side": "home", "score": 14.22},
+                "three_layer_context": {
+                    "handicap_depth_bucket": "level_deep",
+                    "euro_support_bucket": "draw_soft",
+                },
+            },
+        )
+        self.assertFalse(diag["applied"])
+        self.assertTrue(diag["qualified"])
+        self.assertNotIn("deep_soft_extreme_under_rebound_override", diag["signals"])
+        self.assertEqual(adjusted["draw"], 0.4146231841)
+
+    def test_draw_confirmation_guard_rebounds_very_deep_extreme_under_false_draw_even_with_home_favored_pressure(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3076518962, "draw": 0.4336967655, "away_win": 0.2586513382},
+            current_odds={"欧赔": {"final": {"home": 1.48, "draw": 6.38, "away": 7.8}}},
+            over_under={"line": 3.25, "over": 0.1961, "under": 0.8039},
+            match_intelligence={"scenario_tags": []},
+            review_outcome_diag={
+                "signals": [],
+                "motivation_risk": {"available": True, "supports_upset": True, "pressure_side": "away", "favored_side": "home", "score": 14.22},
+                "three_layer_context": {
+                    "handicap_depth_bucket": "level_very_deep",
+                    "euro_support_bucket": "draw_soft",
+                },
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("deep_soft_extreme_under_rebound_override", diag["signals"])
+        self.assertIn("deep_soft_extreme_under_rebound_redirect_draw_to_home", diag["signals"])
+        self.assertGreater(adjusted["home_win"], adjusted["draw"])
+
+    def test_draw_confirmation_guard_rebounds_deep_extreme_under_false_draw_with_home_favored_pressure(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.307900195, "draw": 0.4322791888, "away_win": 0.2598206162},
+            current_odds={"欧赔": {"final": {"home": 1.56, "draw": 6.18, "away": 8.12}}},
+            over_under={"line": 3.0, "over": 0.24935, "under": 0.75065},
+            match_intelligence={"scenario_tags": []},
+            review_outcome_diag={
+                "signals": [],
+                "motivation_risk": {"available": True, "supports_upset": True, "pressure_side": "away", "favored_side": "home", "score": 14.22},
+                "three_layer_context": {
+                    "handicap_depth_bucket": "level_deep",
+                    "euro_support_bucket": "draw_soft",
+                },
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("deep_soft_extreme_under_rebound_override", diag["signals"])
+        self.assertIn("deep_soft_extreme_under_rebound_redirect_draw_to_home", diag["signals"])
+        self.assertGreater(adjusted["home_win"], adjusted["draw"])
+
+    def test_draw_confirmation_guard_rebounds_very_deep_extreme_under_false_draw_without_upset_signal_at_high_line(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3324718684, "draw": 0.4265236835, "away_win": 0.2410044481},
+            current_odds={"欧赔": {"final": {"home": 1.66, "draw": 5.8675, "away": 8.075}}},
+            over_under={"line": 3.5, "over": 0.2085, "under": 0.7915},
+            match_intelligence={"scenario_tags": []},
+            review_outcome_diag={
+                "signals": [],
+                "motivation_risk": {"available": True, "supports_upset": False, "pressure_side": "away", "favored_side": "home", "score": 0.0},
+                "three_layer_context": {
+                    "handicap_depth_bucket": "level_very_deep",
+                    "euro_support_bucket": "draw_soft",
+                },
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("deep_soft_extreme_under_rebound_override", diag["signals"])
+        self.assertIn("deep_soft_extreme_under_rebound_redirect_draw_to_home", diag["signals"])
+        self.assertEqual(diag["favored_side"], "home_win")
+        self.assertGreater(adjusted["home_win"], adjusted["draw"])
+
+    def test_draw_confirmation_guard_rebounds_very_deep_extreme_under_with_away_pressure_at_high_line(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3684906423, "draw": 0.4173145866, "away_win": 0.2141947710},
+            current_odds={"欧赔": {"final": {"home": 1.42, "draw": 8.7324, "away": 9.8571}}},
+            over_under={"line": 4.75, "over": 0.27, "under": 0.73},
+            match_intelligence={
+                "scenario_tags": ["recent_form_volatility_high"],
+                "contextual_rules": {"volatility": {"home": {"label": "medium"}, "away": {"label": "high"}}},
+            },
+            review_outcome_diag={
+                "signals": [],
+                "motivation_risk": {"available": True, "supports_upset": True, "pressure_side": "away", "favored_side": "home", "score": 14.22},
+                "three_layer_context": {
+                    "handicap_depth_bucket": "level_very_deep",
+                    "euro_support_bucket": "draw_soft",
+                },
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("very_deep_extreme_under_pressure_rebound_override", diag["signals"])
+        self.assertIn("very_deep_extreme_under_pressure_draw_excess_boost", diag["signals"])
+        self.assertIn("very_deep_extreme_under_pressure_redirect_draw_to_home", diag["signals"])
+        self.assertEqual(diag["favored_side"], "home_win")
+        self.assertGreater(adjusted["home_win"], adjusted["draw"])
+
+    def test_draw_confirmation_guard_rebounds_volatility_only_false_draw_to_home(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.349, "draw": 0.361, "away_win": 0.29},
+            current_odds={"欧赔": {"final": {"home": 2.22, "draw": 3.92, "away": 3.05}}},
+            over_under={"line": 3.5, "over": 0.29, "under": 0.71},
+            match_intelligence={
+                "scenario_tags": ["recent_form_volatility_high"],
+                "contextual_rules": {"volatility": {"home": {"label": "medium"}, "away": {"label": "medium"}}},
+            },
+            review_outcome_diag={
+                "signals": ["review-bias-config-floor"],
+                "motivation_risk": {
+                    "available": True,
+                    "supports_upset": False,
+                    "pressure_side": "away",
+                    "favored_side": "home",
+                    "score": 0.0,
+                },
+                "applied_shift": {"draw_shift": 0.012, "away_shift": 0.022, "home_shift": 0.0},
+                "three_layer_context": {
+                    "handicap_depth_bucket": "unknown",
+                    "euro_support_bucket": "market_opposes",
+                },
+            },
+        )
+        self.assertTrue(diag["applied"])
+        self.assertIn("volatility_only_home_rebound_override", diag["signals"])
+        self.assertIn("volatility_only_home_rebound_redirect_draw_to_home", diag["signals"])
+        self.assertNotIn("away_upset_redirect_draw_to_away", diag["signals"])
+        self.assertEqual(diag["favored_side"], "home_win")
+        self.assertGreater(adjusted["home_win"], adjusted["draw"])
+
+    def test_draw_confirmation_guard_skips_away_upset_redirect_for_deep_handicap_draw(self):
+        adjusted, diag = InferencePipelineService._apply_draw_confirmation_guard(
+            final_prob={"home_win": 0.3345271216, "draw": 0.4089065553, "away_win": 0.2565663231},
+            current_odds={"欧赔": {"final": {"home": 1.66, "draw": 4.988, "away": 4.79}}},
+            over_under={"line": 3.0, "over": 0.46, "under": 0.54},
+            match_intelligence={"scenario_tags": []},
+            review_outcome_diag={
+                "signals": [],
+                "motivation_risk": {"supports_upset": True, "pressure_side": "home", "favored_side": "away", "score": 14.22},
+                "applied_shift": {"draw_shift": 0.0, "away_shift": 0.0},
+                "three_layer_context": {"handicap_depth_bucket": "level_very_deep"},
+            },
+        )
+        self.assertFalse(diag["applied"])
+        self.assertTrue(diag["qualified"])
+        self.assertNotIn("away_upset_draw_confirmation_override", diag["signals"])
+        self.assertEqual(adjusted["draw"], 0.4089065553)
 
 
 if __name__ == "__main__":

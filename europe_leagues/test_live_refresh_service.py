@@ -99,6 +99,34 @@ class LiveRefreshServiceTest(unittest.TestCase):
         self.assertEqual(prepared["realtime"]["context_applied"]["existing_snapshot_odds"]["ok"], True)
         self.assertEqual(prepared["realtime"]["context_applied"]["okooo_totals_fetch"]["skipped"], "force_refresh_odds=False")
 
+    def test_hydrate_existing_snapshot_odds_uses_team_fallback_without_match_id(self):
+        realtime = self.service.build_realtime("", "local-chrome", False)
+        payload = {
+            "match_id": "1296096",
+            "home_team": "阿斯顿维拉",
+            "away_team": "利物浦",
+            "match_date": "2026-05-16",
+            "大小球": {"found": True, "final": {"line": 3.5}},
+            "欧赔": {"final": {"home": 1.9, "draw": 3.4, "away": 3.8}},
+        }
+
+        with patch("domain.live.find_snapshot_for_match", return_value=("/tmp/existing.json", payload)) as mock_find:
+            merged = self.service.hydrate_existing_snapshot_odds(
+                league_code="premier_league",
+                current_odds={},
+                realtime=realtime,
+                match_id="",
+                home_team="阿斯顿维拉",
+                away_team="利物浦",
+                match_date="2026-05-16",
+            )
+
+        self.assertEqual(mock_find.call_args.kwargs["match_id"], "")
+        self.assertEqual(merged["大小球"]["final"]["line"], 3.5)
+        self.assertEqual(merged["snapshot_path"], "/tmp/existing.json")
+        self.assertEqual(realtime["context_applied"]["existing_snapshot_odds"]["ok"], True)
+        self.assertEqual(realtime["okooo"]["match_id"], "1296096")
+
     def test_prepare_prediction_inputs_skips_network_refresh_and_totals_fetch_when_force_refresh_odds_false(self):
         with patch.object(self.service, "refresh_live_snapshot", wraps=self.service.refresh_live_snapshot) as mock_refresh, patch.object(
             self.service, "ensure_totals_if_needed", wraps=self.service.ensure_totals_if_needed
@@ -125,6 +153,37 @@ class LiveRefreshServiceTest(unittest.TestCase):
         self.assertFalse(prepared["realtime"]["context_applied"]["okooo_totals_fetch"]["attempted"])
         self.assertEqual(prepared["realtime"]["context_applied"]["okooo_totals_fetch"]["skipped"], "force_refresh_odds=False")
 
+    def test_prepare_prediction_inputs_refresh_uses_hydrated_match_id(self):
+        payload = {
+            "match_id": "1300083",
+            "home_team": "门兴格拉德巴赫",
+            "away_team": "霍芬海姆",
+            "match_date": "2026-05-17",
+            "大小球": {"found": True, "final": {"line": 3.5}},
+        }
+
+        with patch("domain.live.find_snapshot_for_match", return_value=("/tmp/existing.json", payload)), patch.object(
+            self.service, "refresh_live_snapshot", return_value={"match_id": "1300083"}
+        ) as mock_refresh, patch.object(
+            self.service, "ensure_totals_if_needed", return_value={"match_id": "1300083"}
+        ), patch("domain.live.auto_enrich_team_context_if_enabled", return_value=None):
+            prepared = self.service.prepare_prediction_inputs(
+                home_team="门兴格拉德巴赫",
+                away_team="霍芬海姆",
+                league_code="bundesliga",
+                match_date="2026-05-17",
+                current_odds={},
+                match_id="1300078",
+                force_refresh_odds=True,
+                okooo_driver="local-chrome",
+                okooo_headed=False,
+                match_time="",
+                analysis_context={},
+            )
+
+        self.assertEqual(mock_refresh.call_args.kwargs["match_id"], "1300083")
+        self.assertEqual(prepared["realtime"]["okooo"]["match_id"], "1300083")
+
     def test_refresh_report_match_odds_uses_driver_chain_instead_of_hardcoded_local_chrome(self):
         payload = {
             "match_id": "1296096",
@@ -136,7 +195,7 @@ class LiveRefreshServiceTest(unittest.TestCase):
         driver_calls = []
 
         def fake_refresh(*args, **kwargs):
-            driver_calls.append(kwargs["driver"])
+            driver_calls.append((kwargs["driver"], kwargs.get("strict_identity"), kwargs.get("match_id"), kwargs.get("match_time")))
             if kwargs["driver"] == "driver-a":
                 return None
             return "/tmp/report.json", payload
@@ -154,7 +213,82 @@ class LiveRefreshServiceTest(unittest.TestCase):
                 okooo_headed=True,
             )
 
-        self.assertEqual(driver_calls, ["driver-a", "driver-b"])
+        self.assertEqual(
+            driver_calls,
+            [
+                ("driver-a", True, "", ""),
+                ("driver-b", True, "", ""),
+            ],
+        )
+        self.assertEqual(result["match_id"], "1296096")
+
+    def test_refresh_live_snapshot_skips_conflicting_match_id_when_current_odds_already_has_real_totals(self):
+        realtime = self.service.build_realtime("1300080", "driver-a", False)
+        current_odds = {
+            "match_id": "1300080",
+            "大小球": {"final": {"line": 3.75}},
+        }
+        conflicting_payload = {
+            "match_id": "1300078",
+            "home_team": "法兰克福",
+            "away_team": "斯图加特",
+            "match_date": "2026-05-16",
+            "大小球": {"found": True, "final": {"line": 4.75}},
+        }
+
+        with patch("domain.live.build_okooo_driver_chain", return_value=["driver-a"]), patch(
+            "domain.live.describe_unavailable_okooo_drivers", return_value=[]
+        ), patch(
+            "domain.live.refresh_okooo_snapshot", return_value=("/tmp/conflict.json", conflicting_payload)
+        ):
+            merged = self.service.refresh_live_snapshot(
+                league_code="bundesliga",
+                home_team="法兰克福",
+                away_team="斯图加特",
+                match_date="2026-05-16",
+                current_odds=current_odds,
+                realtime=realtime,
+                force_refresh_odds=True,
+                okooo_driver="driver-a",
+                okooo_headed=False,
+                match_time="",
+                match_id="1300080",
+            )
+
+        self.assertIs(merged, current_odds)
+        self.assertEqual(realtime["okooo"]["match_id"], "1300080")
+        self.assertEqual(realtime["okooo"]["errors"][0]["error"], "snapshot_match_id_conflict")
+
+    def test_refresh_report_match_odds_passes_explicit_match_context_in_strict_mode(self):
+        payload = {
+            "match_id": "1296096",
+            "home_team": "阿斯顿维拉",
+            "away_team": "利物浦",
+            "match_date": "2026-05-16",
+            "欧赔": {"final": {"home": 1.9, "draw": 3.4, "away": 3.8}},
+        }
+        refresh_kwargs = []
+
+        def fake_refresh(*args, **kwargs):
+            refresh_kwargs.append(kwargs)
+            return "/tmp/report.json", payload
+
+        with patch("domain.live.build_okooo_driver_chain", return_value=["driver-a"]), patch(
+            "domain.live.refresh_okooo_snapshot", side_effect=fake_refresh
+        ):
+            result = self.service.refresh_report_match_odds(
+                league_code="premier_league",
+                match_date="2026-05-16",
+                home_team="阿斯顿维拉",
+                away_team="利物浦",
+                current_odds={},
+                match_id="1296096",
+                match_time="03:00",
+            )
+
+        self.assertEqual(refresh_kwargs[0]["strict_identity"], True)
+        self.assertEqual(refresh_kwargs[0]["match_id"], "1296096")
+        self.assertEqual(refresh_kwargs[0]["match_time"], "03:00")
         self.assertEqual(result["match_id"], "1296096")
 
     def test_refresh_report_match_odds_prefer_existing_only_skips_when_market_content_is_real(self):

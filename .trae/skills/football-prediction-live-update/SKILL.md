@@ -44,6 +44,7 @@ name: football-prediction-live-update
 - 当前公共设备池：`100` 组随机 `iPhone Safari` profile
 - 欧赔优先解析 `multi_company_consensus`
 - 大小球真实盘口优先来自 `handicap.php -> 大小球 tab`
+- 当前正式链已支持：自动翻月定位目标日期、按当天比赛分组精确锁定主客队、快照身份校验、预测前快照注水与缺失盘口补抓
 
 ## 推荐流程
 
@@ -51,7 +52,7 @@ name: football-prediction-live-update
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py collect-data --league la_liga --date 2026-05-15 --json
+python3 prediction_system.py collect-data --league premier_league --date 2026-05-24 --json
 ```
 
 ### 2. 重新执行正式预测
@@ -59,23 +60,39 @@ python3 prediction_system.py collect-data --league la_liga --date 2026-05-15 --j
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py predict-match \
-  --league la_liga \
-  --home-team 赫罗纳 \
-  --away-team 皇家社会 \
-  --date 2026-05-15 \
+  --league premier_league \
+  --home-team 伯恩利 \
+  --away-team 狼队 \
+  --date 2026-05-24 \
+  --time 23:00 \
   --json
 ```
 
-### 3. 需要阶段化审计时用 Harness
+### 3. 盘口未落盘时显式刷新快照
+
+```bash
+cd /Users/bytedance/trae_projects
+python3 europe_leagues/okooo_save_snapshot.py \
+  --driver local-chrome \
+  --league 英超 \
+  --team1 伯恩利 \
+  --team2 狼队 \
+  --date 2026-05-24 \
+  --time 23:00 \
+  --overwrite
+```
+
+### 4. 需要阶段化审计时用 Harness
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py harness-run \
   --pipeline match_prediction \
-  --league la_liga \
-  --home-team 赫罗纳 \
-  --away-team 皇家社会 \
-  --date 2026-05-15 \
+  --league premier_league \
+  --home-team 伯恩利 \
+  --away-team 狼队 \
+  --date 2026-05-24 \
+  --time 23:00 \
   --json
 ```
 
@@ -84,8 +101,12 @@ python3 prediction_system.py harness-run \
 - 首发是否改变球队强弱结构
 - 伤停变化是否影响关键位置
 - 欧赔 / 亚盘 / 大小球是否出现同向强化或反向走弱
+- `collect-data` 是否已经把 `odds_data` 写回目标比赛
+- `schedule` 与 `snapshot` 是否是同一场比赛，避免错误 `match_id` 串场
 - `market_snapshot.欧赔.company_mode` 是否为 `multi_company_consensus`
 - `market_snapshot.欧赔.companies` 是否为空
+- `over_under.line_source` 是否为 `snapshot_final`
+- `staking.kelly.recommended` 是否已经从真实欧赔生成
 - `retrieved_memory_explanation` 与历史盘路是否支持临场修正
 - `live_betting_advice` 是否因临场信息发生变化
 
@@ -119,6 +140,16 @@ python3 prediction_system.py harness-run \
 - 新预测是什么
 - 哪些临场信息改变了判断
 - 是方向改变、信心改变，还是比分排序改变
+- 若原先是 `missing_real_line`，是否因真实盘口回流而完成修正
+
+## 当前已验证样例
+
+- `premier_league / 伯恩利 vs 狼队 / 2026-05-24`
+- 验证结果：
+  - 旧版在缺少真实盘口时偏 `客胜`
+  - 接入真实 `欧赔 / 亚值 / 大小球 / 凯利` 后，正式 `predict-match` 已修正为 `平局`
+  - `over_under.line_source` 从 `missing_real_line` 变为 `snapshot_final`
+  - `staking.kelly.recommended` 已能输出 `平局`
 
 ## 调试边界
 
@@ -127,6 +158,7 @@ python3 prediction_system.py harness-run \
 - 直接正则替换 `MEMORY.md`
 - 直接在文档里硬拼临场条目
 - 假设存在某个固定的辅助脚本路径
+- 把 support/debug 脚本输出直接当最终预测结论
 
 这些方式容易绕开正式持久化与结果闭环。
 

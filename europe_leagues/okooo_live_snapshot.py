@@ -239,6 +239,7 @@ def refresh_snapshot(
     match_id: str = "",
     headed: bool = False,
     match_time: str = "",
+    strict_identity: bool = False,
 ) -> Optional[Tuple[str, Dict[str, Any]]]:
     """Run okooo_save_snapshot.py to refresh odds and return (path, payload)."""
     league_cn = LEAGUE_CODE_TO_CN.get(league_code, league_code)
@@ -260,6 +261,8 @@ def refresh_snapshot(
     ]
     if match_time:
         cmd.extend(["--time", match_time])
+    if strict_identity:
+        cmd.append("--strict-identity")
     if headed and driver == "browser-use":
         cmd.append("--headed")
     if match_id:
@@ -281,6 +284,8 @@ def refresh_snapshot(
             away_team=away_team,
             match_date=match_date,
         ):
+            if strict_identity:
+                return out_path, payload
             retry_cmd = cmd[:]
             if "--match-id" in retry_cmd:
                 idx = retry_cmd.index("--match-id")

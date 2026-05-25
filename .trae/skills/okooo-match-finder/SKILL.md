@@ -31,6 +31,8 @@ description: "澳客 MatchID 定位与预测入口衔接技能，按 `prediction
 4. 若需要显式快照，再调用 `okooo_save_snapshot.py --match-id ...`
 5. 若赛程匹配失败，再退回 remen 模糊匹配
 
+当前实现已经把“赛程抓取 -> MatchID 定位 -> 快照落盘 -> 正式预测链注水”串成一条闭环，不再只是返回一个 `match_id`。
+
 如果出现“别的设备能打开，本机抓不到 `odds.php`”：
 
 - 不要先默认判断为网络不通
@@ -48,6 +50,10 @@ description: "澳客 MatchID 定位与预测入口衔接技能，按 `prediction
 - 当前正式访问口径：`iPhone Safari UA + Referer: https://m.okooo.com/`
 - 当前公共设备池：`100` 组随机 `iPhone Safari` profile
 - 欧赔解析优先级：多公司明细 -> `multi_company_consensus` -> `99家平均` fallback
+- `okooo_fetch_daily_schedule.py` 现已支持自动翻月到目标年月、按日期分组抽取整天比赛、过滤 `盈亏/亚指/欧指/分析` 等噪声文案，并把结果落盘到 `.okooo-scraper/schedules/<league>/YYYY-MM-DD.json`
+- `okooo_save_snapshot.py` 现已支持自动翻月、日期分区扫描、按 `日期 + 主客队 + 时间` 精确锁定比赛行，避免误点同日其它场次
+- 快照链新增身份校验：仅当 `match_id + 主客队 + match_date` 一致时才复用历史快照，避免旧文件串场
+- 本地 `local-chrome` 模式现在会在盘口抓完前保持调试会话存活，避免 `cdp_connection_refused` 导致欧赔 / 亚值 / 大小球 / 凯利半路丢失
 - 球队可能用简称展示，例如 `布伦特`、`毕尔巴鄂`
 - 因此必须结合：
   - `--date`
@@ -80,14 +86,14 @@ description: "澳客 MatchID 定位与预测入口衔接技能，按 `prediction
 
 ```bash
 cd /Users/bytedance/trae_projects
-python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026-04-28
+python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026-05-24
 ```
 
 ### 先走正式采集入口
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py collect-data --league premier_league --date 2026-04-28 --json
+python3 prediction_system.py collect-data --league premier_league --date 2026-05-24 --json
 ```
 
 ### 用 MatchID 直接抓快照
@@ -97,13 +103,35 @@ cd /Users/bytedance/trae_projects
 python3 europe_leagues/okooo_save_snapshot.py \
   --driver local-chrome \
   --league 英超 \
-  --team1 曼联 \
-  --team2 布伦特福德 \
-  --date 2026-04-28 \
-  --time 03:00 \
-  --match-id 1296070 \
+  --team1 伯恩利 \
+  --team2 狼队 \
+  --date 2026-05-24 \
+  --time 23:00 \
+  --match-id 1296105 \
   --overwrite
 ```
+
+### 直接走正式单场预测
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py predict-match \
+  --league premier_league \
+  --home-team 伯恩利 \
+  --away-team 狼队 \
+  --date 2026-05-24 \
+  --time 23:00 \
+  --json
+```
+
+## 当前已验证样例
+
+- `premier_league / 伯恩利 vs 狼队 / 2026-05-24 / MatchID=1296105`
+- 已验证能力：
+  - 从 `2025年08月` 自动翻页到 `2026年05月`
+  - 在当日 10 场比赛中精确锁定目标行，不误点 `布莱顿 vs 曼联`
+  - 快照稳定抓到 `欧赔 / 亚值 / 大小球 / 凯利`
+  - `collect-data` 与 `predict-match` 已能读回真实盘口快照
 
 ## 失败排查顺序
 
@@ -111,8 +139,10 @@ python3 europe_leagues/okooo_save_snapshot.py \
 2. 是否日期不对
 3. 是否球队简称未收录到 `okooo_team_aliases.json`
 4. 是否忘记传 `match_time`
-5. 是否被页面风控拦截
-6. 是否已有旧快照需要 `--overwrite`
+5. 是否命中了错误赛程缓存，导致 `date_click=false` 或赛程行内嵌日期不一致
+6. 是否复用了错误 `match_id` 或旧快照文件，触发 `missing_real_line`
+7. 是否被页面风控拦截
+8. 是否已有旧快照需要 `--overwrite`
 
 ## 边界说明
 

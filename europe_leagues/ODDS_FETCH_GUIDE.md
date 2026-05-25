@@ -24,7 +24,8 @@
 1. 先定位比赛：联赛、主客队、日期，必要时补 `match_time`
 2. 优先调用 `prediction_system.py collect-data`，或抓当天赛程获取 `match_id`
 3. 必要时用 `okooo_save_snapshot.py` 显式生成实时快照 JSON
-4. 再通过 `prediction_system.py predict-match` 或 `harness-run --pipeline match_prediction` 进入正式预测链
+4. 预测链会优先注入已有快照；若真实盘口线缺失，会按严格身份补抓快照
+5. 再通过 `prediction_system.py predict-match` 或 `harness-run --pipeline match_prediction` 进入正式预测链
 5. 预测 side effects 由 `domain/persistence.py` 统一处理；赛果闭环由 `runtime/result_sync.py` 与 `result_manager.py` 统一处理
 
 ## 关键事实
@@ -37,6 +38,10 @@
 - 默认快照 driver：`local-chrome`
 - 默认访问策略：`iPhone Safari UA + Referer: https://m.okooo.com/`
 - 公共移动设备池：`okooo_mobile_access.py` 统一维护，当前为 `100` 组随机 `iPhone Safari` profile，统一 `viewport={"width": 1080, "height": 720}`
+- 日赛程脚本已支持自动翻月到目标年月、按日期分组抽取整天赛程并清洗操作按钮噪声
+- 快照脚本已支持按 `日期 + 主客队 + 时间` 精确锁定目标比赛行，避免同日多场 `23:00` 误命中
+- 快照读取链路新增身份校验：只有 `match_id + 主客队 + match_date` 一致时才复用旧快照
+- 预测链已支持预测前快照注水与 `missing_real_line` 场景下的正式补抓
 
 ## 当前访问策略
 
@@ -58,14 +63,14 @@
 
 ```bash
 cd /Users/bytedance/trae_projects
-python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026-04-28
+python3 europe_leagues/okooo_fetch_daily_schedule.py --league 英超 --date 2026-05-24
 ```
 
 ### 2. 走正式采集入口
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py collect-data --league premier_league --date 2026-04-28 --json
+python3 prediction_system.py collect-data --league premier_league --date 2026-05-24 --json
 ```
 
 ### 3. 用 MatchID 直接抓快照
@@ -75,11 +80,11 @@ cd /Users/bytedance/trae_projects
 python3 europe_leagues/okooo_save_snapshot.py \
   --driver local-chrome \
   --league 英超 \
-  --team1 曼联 \
-  --team2 布伦特福德 \
-  --date 2026-04-28 \
-  --time 03:00 \
-  --match-id 1296070 \
+  --team1 伯恩利 \
+  --team2 狼队 \
+  --date 2026-05-24 \
+  --time 23:00 \
+  --match-id 1296105 \
   --out-dir /Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots \
   --overwrite
 ```
@@ -90,11 +95,10 @@ python3 europe_leagues/okooo_save_snapshot.py \
 cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py predict-match \
   --league premier_league \
-  --home-team 曼联 \
-  --away-team 布伦特福德 \
-  --date 2026-04-28 \
-  --time 03:00 \
-  --match-id 1296070 \
+  --home-team 伯恩利 \
+  --away-team 狼队 \
+  --date 2026-05-24 \
+  --time 23:00 \
   --json
 ```
 
@@ -105,10 +109,10 @@ cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py harness-run \
   --pipeline match_prediction \
   --league premier_league \
-  --date 2026-04-28 \
-  --home-team 曼联 \
-  --away-team 布伦特福德 \
-  --time 03:00 \
+  --date 2026-05-24 \
+  --home-team 伯恩利 \
+  --away-team 狼队 \
+  --time 23:00 \
   --json
 ```
 
@@ -132,19 +136,24 @@ python3 prediction_system.py harness-run \
 
 当前已在正式 `predict-match` 链上验证过样例：
 
-- 比赛：`la_liga / 埃尔切 vs 赫塔费 / MatchID=1302914`
-- 欧赔：可稳定解析为 `multi_company_consensus`
-- 亚值 / 大小球 / 凯利：可稳定落入 `market_snapshot`
-- 大小球：`over_under.available=true`，`line_source=snapshot_final`
+- `la_liga / 埃尔切 vs 赫塔费 / MatchID=1302914`
+- `premier_league / 伯恩利 vs 狼队 / MatchID=1296105`
+- 已验证结果：
+  - 欧赔可稳定解析为 `multi_company_consensus`
+  - 亚值 / 大小球 / 凯利可稳定落入 `market_snapshot`
+  - 大小球可写入 `over_under.line`，来源为 `snapshot_final`
+  - 真实盘口回流后，预测结果可以从原始模型方向被正式修正
 
 ## 稳定性策略
 
 1. 已知 `match_id` 时优先直连抓取，不要重复模糊匹配
 2. 未知 `match_id` 时优先用 `collect-data` 或 `okooo_fetch_daily_schedule.py` 落赛程 JSON
 3. 球队简称差异统一依赖 `okooo_team_aliases.json`
-4. 大小球优先走 `handicap.php -> 大小球 tab`
-5. `/ou/`、`overunder.php`、`daxiao.php` 只作为 fallback
-6. 最终进入正式预测流程时，优先使用 CLI，而不是直接 import 底层预测类
+4. 若联赛页停在错误月份，优先依赖脚本自动翻月，不要手工假设日期标签可直接点击
+5. 大小球优先走 `handicap.php -> 大小球 tab`
+6. `/ou/`、`overunder.php`、`daxiao.php` 只作为 fallback
+7. 最终进入正式预测流程时，优先使用 CLI，而不是直接 import 底层预测类
+8. 当 `line_source=missing_real_line` 时，应先排查错误 `match_id`、坏赛程缓存或串场快照，而不是直接回退默认盘口
 
 ## 当前闭环位置
 
@@ -205,6 +214,15 @@ python3 prediction_system.py harness-run \
 - 更新 `okooo_team_aliases.json`
 - 先跑 `okooo_fetch_daily_schedule.py`
 - 已知 MatchID 后直接传 `--match-id`
+
+### 5. 为什么抓到了快照但预测里还是 `missing_real_line`？
+
+优先排查：
+
+1. 快照是否命中了错误比赛，主客队或日期与请求不一致
+2. 旧快照文件是否被错误复用
+3. `collect-data` 是否已经把 `odds_data` 写回目标比赛
+4. `predict-match` 是否读到了最新快照路径
 
 ### 4. 哪个入口才算正式流程？
 

@@ -1,6 +1,7 @@
 import unittest
 
 from domain.lightweight_prediction import (
+    _apply_handicap_adjustment,
     _pick_top_scores,
     build_lightweight_prediction_result,
 )
@@ -88,6 +89,35 @@ class LightweightMemoryPredictionTest(unittest.TestCase):
         )
         self.assertIn(scores[0][0], {"0-0", "1-1"})
         self.assertTrue(all(score in {"0-0", "1-1", "1-0", "0-1", "2-0", "0-2", "2-2"} for score, _ in scores))
+
+    def test_apply_handicap_adjustment_reduces_shallow_home_bias_with_risk_signals(self):
+        adjusted = _apply_handicap_adjustment(
+            {"home_win": 0.46, "draw": 0.29, "away_win": 0.25},
+            -0.25,
+            2.06,
+            1.84,
+            risk_summary={"factors": ["欧赔走弱主队，防平或客队不败", "平赔偏低，需保留平局容错"]},
+        )
+        self.assertLess(adjusted["home_win"], 0.46)
+        self.assertGreater(adjusted["draw"], 0.29)
+        self.assertGreater(adjusted["away_win"], 0.25)
+
+    def test_pick_top_scores_rebalances_fragile_home_in_lightweight_mode(self):
+        scores, diag = _pick_top_scores(
+            "主胜",
+            probabilities={"home_win": 0.45, "draw": 0.31, "away_win": 0.24},
+            handicap_value=-0.25,
+            home_water=2.04,
+            away_water=1.84,
+            ou_line=2.75,
+            over_prob=0.52,
+            under_prob=0.48,
+            risk_summary={"factors": ["欧赔走弱主队，防平或客队不败", "平赔偏低，需保留平局容错"]},
+            include_diag=True,
+        )
+        self.assertIn("lightweight-fragile-home-template-rebalance", diag["signals"])
+        self.assertNotEqual(scores[0][0], "1-0")
+        self.assertTrue(any(score in {"2-1", "1-1"} for score, _ in scores[:2]))
 
 
 if __name__ == "__main__":

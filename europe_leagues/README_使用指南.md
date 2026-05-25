@@ -19,6 +19,8 @@
 6. 需要批次复盘时使用 `sync-pending-results-review`
 7. 需要显式重建时再执行 `accuracy --refresh`
 
+默认日常流程到这里为止。`apply-reanalysis` 属于高级维护流，用来把当前模型 replay 的选定结果显式提升为正式记录，不是每次赛后都要自动执行的标准步骤。
+
 ## 比赛类型与写回边界
 
 ### league-backed / SoT-backed
@@ -66,27 +68,27 @@ python3 prediction_system.py list-leagues --json
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py collect-data --league premier_league --date 2026-05-11 --json
+python3 prediction_system.py collect-data --league premier_league --date 2026-05-24 --json
 ```
 
 ### 3. 单场预测
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py predict-match --league premier_league --home-team 曼联 --away-team 切尔西 --date 2026-05-11 --json
+python3 prediction_system.py predict-match --league premier_league --home-team 伯恩利 --away-team 狼队 --date 2026-05-24 --time 23:00 --json
 ```
 
 ### 4. 批量预测
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py predict-schedule --league premier_league --date 2026-05-11 --days 1 --json
+python3 prediction_system.py predict-schedule --league premier_league --date 2026-05-24 --days 1 --json
 ```
 
 如只想查看批量结果而不触发写回副作用：
 
 ```bash
-python3 prediction_system.py predict-schedule --league premier_league --date 2026-05-11 --days 1 --no-write --json
+python3 prediction_system.py predict-schedule --league premier_league --date 2026-05-24 --days 1 --no-write --json
 ```
 
 ### 5. Harness 审计链路
@@ -94,7 +96,7 @@ python3 prediction_system.py predict-schedule --league premier_league --date 202
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py harness-list --json
-python3 prediction_system.py harness-run --pipeline match_prediction --league premier_league --home-team 曼联 --away-team 切尔西 --date 2026-05-11 --json
+python3 prediction_system.py harness-run --pipeline match_prediction --league premier_league --home-team 伯恩利 --away-team 狼队 --date 2026-05-24 --time 23:00 --json
 ```
 
 ### 6. 结果同步
@@ -115,6 +117,25 @@ python3 prediction_system.py sync-pending-results-review --days-back 30 --limit 
 python3 prediction_system.py accuracy --refresh --json
 python3 prediction_system.py build-season-master-review --season 2025-26 --recent-days 7 --days-back 30 --limit 50 --rag-limit 300 --json
 ```
+
+### 7.1 高级维护流：Replay / Reanalysis Apply
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 prediction_system.py apply-reanalysis --league la_liga --dry-run --json
+python3 prediction_system.py apply-reanalysis --league bundesliga --only-improved --json
+python3 prediction_system.py apply-reanalysis --league ligue_1 --only-improved --refresh-accuracy --json
+```
+
+推荐顺序：
+
+1. 先准备或重建 `reanalysis_results_<league>.json`
+2. 用 `--dry-run` 预览候选场次
+3. 需要保守 apply 时加 `--only-improved`
+4. 确认后执行正式 apply
+5. 需要同步官方统计时再加 `--refresh-accuracy`
+
+这条链路是受控维护动作，不应和默认赛后自动闭环混为一谈。
 
 ### 8. RAG 与仓库维护
 
@@ -151,6 +172,7 @@ python3 prediction_system.py refresh-repo-docs --json
 - 默认请求特征：`iPhone Safari UA + Referer: https://m.okooo.com/`
 - 默认 no-cache 头与 cache-bust 参数
 - 公共设备池：`okooo_mobile_access.py` 统一维护，当前为 `100` 组随机 `iPhone Safari` profile
+- 联赛页定位已支持自动翻月、按日期分组抽取整天赛程、同日多场下按主客队精确锁定目标比赛
 
 如果本机默认浏览器或裸 `curl` 访问 `odds.php` 返回 `403/405`，不代表正式链不可用；优先确认是否绕过了公共访问策略。
 
@@ -183,6 +205,11 @@ python3 prediction_system.py refresh-repo-docs --json
 - 大小球真实盘口与水位
 - 凯利初赔 / 即赔
 
+另一个已验证样例：
+
+- `premier_league / 伯恩利 vs 狼队 / 2026-05-24 / MatchID=1296105`
+- 已确认真实盘口回流后，预测结论可从原始偏 `客胜` 修正为偏 `平局`
+
 ## 持久化与赛果闭环
 
 预测 side effects 由 `domain/persistence.py` 统一编排，通常会联动：
@@ -207,6 +234,12 @@ python3 prediction_system.py refresh-repo-docs --json
 - `prediction_archive.json` 实际赛果字段补齐
 - 准确率刷新
 - RAG / 记忆样本 / review-learning 相关衍生更新
+
+对于 replay apply 维护流，`apply-reanalysis` 会把选中的 replay 预测显式写回正式统计数据源；对 SoT-backed 联赛，这一步会同时更新 prediction archive 与 `<league>/teams_2025-26.md` 备注中的预测片段。这里更新的是预测备注，不会去篡改比分列或正式赛果列。
+
+## 官方准确率与 replay 准确率
+
+`accuracy` 主统计中的 `overall` / `by_league` 代表正式记录口径；`reanalysis_report` 代表当前模型 replay 口径。前者回答“系统正式留下的预测表现如何”，后者回答“当前模型重放历史比赛时会如何表现”。两者并存是设计行为，不会因为存在 `reanalysis_results*.json` 就自动互相覆盖；只有显式执行 `apply-reanalysis` 后，选中的 replay 结果才会写回正式统计数据源。
 
 ## 什么时候需要底层 Python 调试
 
@@ -237,6 +270,14 @@ python3 prediction_system.py refresh-repo-docs --json
 ### 4. 直接改旧模板目录当正式输出
 
 错误。`analysis/predictions/`、`analysis/results/` 等历史目录不再是正式主流程输出。
+
+### 5. 把 replay 准确率当成官方准确率
+
+错误。`accuracy` 里的 `reanalysis_report` 只是当前模型 replay 口径，不等同于正式历史统计；正式统计仍以 `overall` / `by_league` 为准。
+
+### 6. 认为有了 `reanalysis_results*.json` 就已经完成正式更新
+
+错误。replay 文件本身只是一份比较/诊断产物；只有显式执行 `apply-reanalysis`，选中的 replay 结果才会写回正式数据源。
 
 ## 相关文件
 

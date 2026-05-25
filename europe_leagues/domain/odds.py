@@ -252,6 +252,7 @@ def auto_fetch_okooo_totals_if_needed(
                 match_id=str(match_id or ''),
                 headed=bool(okooo_headed),
                 match_time=match_time or '',
+                strict_identity=True,
             )
             if not refreshed:
                 last_error = 'snapshot_not_found'

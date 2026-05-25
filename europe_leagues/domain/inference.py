@@ -49,6 +49,55 @@ class InferencePipelineService:
             return None
 
     @staticmethod
+    def _clamp_probability(value: float, lower: float = 0.0, upper: float = 0.99) -> float:
+        return max(lower, min(upper, float(value)))
+
+    @classmethod
+    def _calibrate_confidence_with_league_learning(
+        cls,
+        confidence: float,
+        applied_weights: Optional[Dict[str, Any]],
+    ) -> Tuple[float, Dict[str, Any]]:
+        raw_confidence = cls._clamp_probability(cls._to_float(confidence) or 0.0)
+        diag: Dict[str, Any] = {
+            'applied': False,
+            'reason': 'missing_applied_weights',
+            'base_confidence': round(raw_confidence, 4),
+            'adjusted_confidence': round(raw_confidence, 4),
+            'confidence_adjustment': 0.0,
+            'league_weight_factor': 1.0,
+            'league_total_predictions': 0,
+            'weight_reason': '',
+        }
+        if not isinstance(applied_weights, dict) or not applied_weights:
+            return raw_confidence, diag
+
+        league_weight_factor = cls._to_float(applied_weights.get('league_weight_factor'))
+        if league_weight_factor is not None:
+            diag['league_weight_factor'] = round(league_weight_factor, 4)
+        diag['league_total_predictions'] = int(applied_weights.get('league_total_predictions', 0) or 0)
+        diag['weight_reason'] = str(applied_weights.get('weight_reason') or '').strip()
+
+        confidence_adjustment = cls._to_float(applied_weights.get('confidence_adjustment'))
+        if confidence_adjustment is None:
+            diag['reason'] = 'missing_confidence_adjustment'
+            return raw_confidence, diag
+
+        confidence_adjustment = cls._clamp_probability(confidence_adjustment, -0.08, 0.08)
+        diag['confidence_adjustment'] = round(confidence_adjustment, 4)
+        if abs(confidence_adjustment) < 0.0005:
+            diag['reason'] = 'neutral_confidence_adjustment'
+            return raw_confidence, diag
+
+        adjusted_confidence = cls._clamp_probability(raw_confidence + confidence_adjustment)
+        diag['adjusted_confidence'] = round(adjusted_confidence, 4)
+        diag['applied'] = True
+        diag['reason'] = 'league_confidence_boost' if confidence_adjustment > 0 else 'league_confidence_trim'
+        if adjusted_confidence in (0.0, 0.99):
+            diag['reason'] += '_clamped'
+        return adjusted_confidence, diag
+
+    @staticmethod
     def _rerank_scores_for_under_three(
         score_probs: Optional[Dict[str, Any]],
         over_under: Optional[Dict[str, Any]],
@@ -59,6 +108,7 @@ class InferencePipelineService:
             key=lambda item: item[1],
             reverse=True,
         )
+        target_limit = max(3, int(limit or 8))
         diag: Dict[str, Any] = {
             'applied': False,
             'reason': 'guard_not_triggered',
@@ -66,10 +116,11 @@ class InferencePipelineService:
             'over': None,
             'under': None,
             'penalties': {},
+            'target_limit': target_limit,
         }
         if not ranked or not isinstance(over_under, dict):
             diag['reason'] = 'missing_score_probs_or_over_under'
-            return ranked[: max(3, int(limit or 8))], diag
+            return ranked[: target_limit], diag
 
         line = InferencePipelineService._to_float(over_under.get('line'))
         over_prob = InferencePipelineService._to_float(over_under.get('over'))
@@ -79,10 +130,36 @@ class InferencePipelineService:
         diag['under'] = under_prob
         if line is None or over_prob is None or under_prob is None:
             diag['reason'] = 'invalid_over_under_payload'
-            return ranked[: max(3, int(limit or 8))], diag
+            return ranked[: target_limit], diag
         if line > 3.0 or under_prob <= over_prob:
             diag['reason'] = 'not_under_three'
-            return ranked[: max(3, int(limit or 8))], diag
+            return ranked[: target_limit], diag
+
+        league_learning = over_under.get('league_learning') if isinstance(over_under.get('league_learning'), dict) else {}
+        market_learning_case = False
+        market_payload = over_under.get('market') if isinstance(over_under.get('market'), dict) else {}
+        market_initial = market_payload.get('initial') if isinstance(market_payload.get('initial'), dict) else {}
+        market_final = market_payload.get('final') if isinstance(market_payload.get('final'), dict) else {}
+        initial_line = InferencePipelineService._to_float(market_initial.get('line'))
+        final_line = InferencePipelineService._to_float(market_final.get('line'))
+        if (
+            line <= 2.5
+            and float(under_prob - over_prob) <= 0.1
+            and float(league_learning.get('recent_avg_goals') or 0.0) >= 2.85
+            and float(league_learning.get('over25_rate') or 0.0) >= 0.62
+            and float(league_learning.get('over35_rate') or 0.0) >= 0.3
+            and float(league_learning.get('btts_rate') or 0.0) >= 0.58
+            and initial_line is not None
+            and final_line is not None
+            and initial_line >= 3.25
+            and final_line <= 2.5
+            and (initial_line - final_line) >= 0.5
+        ):
+            market_learning_case = True
+            target_limit = max(target_limit, 20)
+            diag['target_limit'] = target_limit
+            diag['tail_retention'] = 'open_learning'
+            diag['market_line_drop'] = round(initial_line - final_line, 4)
 
         if line <= 2.5:
             factors = {'3-1': 0.64, '2-2': 0.74}
@@ -108,10 +185,14 @@ class InferencePipelineService:
             diag['applied'] = True
             diag['reason'] = 'under_three_score_penalty'
             diag['signals'] = ['under3-score-consistency-guard']
+            if diag.get('tail_retention') == 'open_learning':
+                diag['signals'].append('under3-open-learning-tail-retention')
             diag['penalties'] = penalties
         else:
             diag['reason'] = 'target_scores_missing'
-        return reranked[:3], diag
+            if diag.get('tail_retention') == 'open_learning':
+                diag['signals'] = ['under3-open-learning-tail-retention']
+        return reranked[: target_limit], diag
 
     @staticmethod
     def _apply_draw_confirmation_guard(
@@ -119,6 +200,7 @@ class InferencePipelineService:
         current_odds: Optional[Dict[str, Any]],
         over_under: Optional[Dict[str, Any]],
         match_intelligence: Optional[Dict[str, Any]],
+        review_outcome_diag: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, float], Dict[str, Any]]:
         diag: Dict[str, Any] = {
             'applied': False,
@@ -175,15 +257,28 @@ class InferencePipelineService:
         if ou_line is not None:
             diag['ou_line'] = ou_line
         if ou_under is not None and ou_over is not None:
-            diag['ou_under_edge'] = round(ou_under - ou_over, 4)
+            ou_under_edge = ou_under - ou_over
+            diag['ou_under_edge'] = round(ou_under_edge, 4)
             if ou_line is not None and ou_line <= 2.5 and ou_under > ou_over:
                 diag['qualified'] = True
                 diag['evidence'].append('under_supports_draw')
             elif ou_under <= ou_over and ou_line is not None and ou_line >= 2.75:
                 diag['signals'].append('open_total_not_support_draw')
+            if (
+                ou_line is not None
+                and ou_line >= 3.0
+                and ou_under_edge >= 0.45
+                and 'draw_market_not_confirmed' in diag['signals']
+            ):
+                diag['signals'].append('extreme_under_not_draw_confirmed')
 
         scenario_tags = match_intelligence.get('scenario_tags', []) if isinstance(match_intelligence, dict) else []
         contextual_rules = match_intelligence.get('contextual_rules', {}) if isinstance(match_intelligence, dict) else {}
+        review_diag = review_outcome_diag if isinstance(review_outcome_diag, dict) else {}
+        review_signals = set(str(item).strip() for item in (review_diag.get('signals') or []) if str(item).strip())
+        review_motivation = review_diag.get('motivation_risk') if isinstance(review_diag.get('motivation_risk'), dict) else {}
+        review_home_bias_gate = review_diag.get('home_bias_gate') if isinstance(review_diag.get('home_bias_gate'), dict) else {}
+        review_evidence = set(str(item).strip() for item in (review_home_bias_gate.get('evidence') or []) if str(item).strip())
         if 'recent_form_volatility_high' in scenario_tags:
             diag['qualified'] = True
             diag['evidence'].append('double_volatility_supports_draw')
@@ -192,6 +287,10 @@ class InferencePipelineService:
             diag['evidence'].append('la_liga_mid_table_home_flat')
         if 'premier_league_relegation_home_motivation_bonus' in scenario_tags:
             diag['signals'].append('relegation_home_motivation_conflicts_draw')
+        if 'review-fragile-home-favorite-correction' in review_signals:
+            diag['signals'].append('fragile_home_outcome_review_present')
+        if review_motivation.get('supports_upset') and str(review_motivation.get('pressure_side') or '').strip() == 'away':
+            diag['signals'].append('away_pressure_review_signal')
         volatility = contextual_rules.get('volatility') if isinstance(contextual_rules, dict) else {}
         if isinstance(volatility, dict):
             diag['volatility'] = {
@@ -199,18 +298,502 @@ class InferencePipelineService:
                 'away': (volatility.get('away') or {}).get('label'),
             }
 
+        review_favored_side = str(review_motivation.get('favored_side') or '').strip()
+        review_score = float(review_motivation.get('score') or 0.0) if isinstance(review_motivation, dict) else 0.0
+        review_applied_shift = review_diag.get('applied_shift') if isinstance(review_diag.get('applied_shift'), dict) else {}
+        away_review_shift = float(review_applied_shift.get('away_shift') or 0.0)
+        review_three_layer_context = review_diag.get('three_layer_context') if isinstance(review_diag.get('three_layer_context'), dict) else {}
+        review_handicap_depth_bucket = str(review_three_layer_context.get('handicap_depth_bucket') or '').strip()
+        review_euro_support_bucket = str(review_three_layer_context.get('euro_support_bucket') or '').strip()
+        narrow_away_bump_present = 'review-narrow-away-bump' in review_signals
+        away_upset_bucket_ok = bool(
+            not review_handicap_depth_bucket
+            or review_handicap_depth_bucket in {'level_ball', 'level_shallow', 'level_medium', 'unknown'}
+            or away_review_shift >= 0.02
+            or narrow_away_bump_present
+        )
+        soft_draw_context_evidence = {'la_liga_mid_table_home_flat'}
+        draw_support_evidence = {
+            'draw_market_supported',
+            'under_supports_draw',
+            'double_volatility_supports_draw',
+        }.union(soft_draw_context_evidence)
+        home_rebound_blocking_evidence = draw_support_evidence.difference(soft_draw_context_evidence)
+        soft_draw_support_evidence = {
+            'under_supports_draw',
+            'double_volatility_supports_draw',
+        }
+        extreme_under_unconfirmed_draw = bool(
+            'draw_market_not_confirmed' in diag['signals']
+            and 'extreme_under_not_draw_confirmed' in diag['signals']
+            and 'draw_prob_clear_lead' in diag['evidence']
+            and 'draw_market_supported' not in diag['evidence']
+            and ou_line is not None
+            and ou_line <= 3.25
+            and top_gap >= 0.06
+            and top_gap <= 0.12
+            and p_h >= 0.32
+            and (p_h - p_a) >= 0.10
+        )
+        deep_soft_extreme_under_rebound = bool(
+            'draw_market_not_confirmed' in diag['signals']
+            and 'extreme_under_not_draw_confirmed' in diag['signals']
+            and 'draw_prob_clear_lead' in diag['evidence']
+            and 'draw_market_supported' not in diag['evidence']
+            and review_handicap_depth_bucket in {'level_deep', 'level_very_deep'}
+            and review_euro_support_bucket == 'draw_soft'
+            and ou_line is not None
+            and (
+                ou_line <= 3.25
+                or (
+                    review_handicap_depth_bucket == 'level_very_deep'
+                    and not bool(review_motivation.get('supports_upset'))
+                    and ou_line <= 3.5
+                )
+            )
+            and top_gap >= 0.08
+            and top_gap <= 0.13
+            and p_h >= 0.305
+            and (p_h - p_a) >= 0.045
+            and (
+                not bool(review_motivation.get('supports_upset'))
+                or (
+                    review_handicap_depth_bucket == 'level_very_deep'
+                    and ou_line >= 3.25
+                    and top_gap >= 0.12
+                    and review_favored_side == 'home'
+                    and str(review_motivation.get('pressure_side') or '').strip() == 'away'
+                    and review_score >= 14.0
+                )
+                or (
+                    review_handicap_depth_bucket == 'level_deep'
+                    and ou_line <= 3.0
+                    and top_gap >= 0.12
+                    and review_favored_side == 'home'
+                    and str(review_motivation.get('pressure_side') or '').strip() == 'away'
+                    and review_score >= 14.0
+                )
+            )
+        )
+        very_deep_extreme_under_pressure_rebound = bool(
+            'draw_market_not_confirmed' in diag['signals']
+            and 'extreme_under_not_draw_confirmed' in diag['signals']
+            and 'away_pressure_review_signal' in diag['signals']
+            and 'draw_prob_clear_lead' in diag['evidence']
+            and 'double_volatility_supports_draw' in diag['evidence']
+            and 'draw_market_supported' not in diag['evidence']
+            and review_handicap_depth_bucket == 'level_very_deep'
+            and review_euro_support_bucket == 'draw_soft'
+            and ou_line is not None
+            and ou_line >= 4.25
+            and ou_line <= 5.0
+            and ou_under_edge >= 0.44
+            and top_gap >= 0.045
+            and top_gap <= 0.07
+            and p_h >= 0.35
+            and (p_h - p_a) >= 0.12
+            and bool(review_motivation.get('supports_upset'))
+            and review_favored_side == 'home'
+            and str(review_motivation.get('pressure_side') or '').strip() == 'away'
+            and review_score >= 14.0
+            and home_odds is not None
+            and home_odds <= 1.5
+            and away_odds is not None
+            and away_odds >= 6.0
+        )
+        fragile_home_strong_support_rebound = bool(
+            'review-fragile-home-favorite-correction' in review_signals
+            and review_handicap_depth_bucket == 'level_medium'
+            and review_euro_support_bucket == 'strong_support'
+            and review_favored_side == 'home'
+            and str(review_motivation.get('pressure_side') or '').strip() == 'away'
+            and review_score >= 12.0
+            and 'away_motivation_pressure' in review_evidence
+            and 'handicap_strength_mismatch' not in review_evidence
+            and not home_rebound_blocking_evidence.intersection(diag['evidence'])
+            and 'draw_market_not_confirmed' in diag['signals']
+            and 'extreme_under_not_draw_confirmed' in diag['signals']
+            and 'draw_prob_clear_lead' in diag['evidence']
+            and 'draw_market_supported' not in diag['evidence']
+            and ou_line is not None
+            and ou_line <= 3.0
+            and top_gap >= 0.045
+            and top_gap <= 0.065
+            and p_h >= 0.33
+            and p_h > p_a
+            and (p_h - p_a) <= 0.06
+        )
+        fragile_home_unconfirmed_draw = bool(
+            'review-fragile-home-favorite-correction' in review_signals
+            and not fragile_home_strong_support_rebound
+            and not home_rebound_blocking_evidence.intersection(diag['evidence'])
+        )
+        away_upset_unconfirmed_draw = bool(
+            bool(review_motivation.get('supports_upset'))
+            and review_favored_side == 'away'
+            and review_score >= 12.0
+            and not draw_support_evidence.intersection(diag['evidence'])
+            and away_upset_bucket_ok
+            and ('draw_market_not_confirmed' in diag['signals'] or top_gap <= 0.13)
+        )
+        serie_a_soft_draw_away_rescue = bool(
+            away_upset_bucket_ok
+            and 'review-league-serie-a-draw-to-away-relief' in review_signals
+            and (
+                (
+                    review_favored_side == 'away'
+                    and review_score >= 14.0
+                )
+                or (
+                    review_favored_side == 'home'
+                    and review_score <= 3.5
+                    and away_review_shift >= 0.04
+                )
+            )
+            and 'draw_market_not_confirmed' in diag['signals']
+            and set(diag['evidence']).issubset(soft_draw_support_evidence.union({'draw_prob_clear_lead'}))
+            and top_gap <= 0.09
+            and p_a >= 0.24
+        )
+        serie_a_soft_blocked_home_rebound = bool(
+            'review-league-serie-a-soft-draw-away-blocked-home-top' in review_signals
+            and not bool(review_motivation.get('supports_upset'))
+            and review_favored_side == 'home'
+            and review_score <= 3.5
+            and review_handicap_depth_bucket == 'level_medium'
+            and review_euro_support_bucket == 'draw_soft'
+            and 'draw_market_not_confirmed' in diag['signals']
+            and set(diag['evidence']).issubset(soft_draw_support_evidence)
+            and ou_line is not None
+            and ou_line <= 2.5
+            and top_gap <= 0.04
+            and p_h >= 0.35
+            and (p_h - p_a) >= 0.11
+            and home_odds is not None
+            and home_odds <= 1.65
+            and away_odds is not None
+            and away_odds >= 5.0
+        )
+        serie_a_home_fragility_final_follow_through = bool(
+            'review-league-serie-a-home-draw-guard-entry' in review_signals
+            and 'review-league-serie-a-home-draw-guard-near-tie' in review_signals
+            and review_favored_side == 'away'
+            and review_score >= 14.0
+            and away_review_shift >= 0.03
+            and 'draw_market_not_confirmed' in diag['signals']
+            and 'under_supports_draw' in diag['evidence']
+            and top_gap <= 0.08
+            and p_a >= 0.27
+        )
+        ligue1_home_edge_final_follow_through = bool(
+            'review-league-ligue1-home-edge-trim' in review_signals
+            and review_handicap_depth_bucket == 'level_medium'
+            and review_euro_support_bucket == 'strong_support'
+            and not bool(review_motivation.get('supports_upset'))
+            and review_favored_side == 'home'
+            and review_score <= 3.5
+            and away_review_shift >= 0.05
+            and float(review_applied_shift.get('draw_to_away_trim') or 0.0) >= 0.008
+            and 'draw_market_not_confirmed' in diag['signals']
+            and 'extreme_under_not_draw_confirmed' in diag['signals']
+            and top_gap <= 0.05
+            and p_d >= p_a
+            and p_a >= 0.31
+            and home_odds is not None
+            and home_odds <= 1.8
+            and draw_odds is not None
+            and draw_odds >= 4.0
+            and away_odds is not None
+            and away_odds >= 4.0
+        )
+        serie_a_upset_knowledge_draw_override = bool(
+            'review-league-serie-a-upset-knowledge-retry' in review_signals
+            and 'review-league-serie-a-draw-to-away-relief' in review_signals
+            and 'draw_market_not_confirmed' in diag['signals']
+            and 'under_supports_draw' in diag['evidence']
+            and 'draw_market_supported' not in diag['evidence']
+            and review_handicap_depth_bucket == 'level_medium'
+            and review_euro_support_bucket in {'strong_support', 'draw_soft'}
+            and away_review_shift >= 0.04
+            and top_gap <= 0.1
+            and p_a >= 0.3
+            and p_h <= 0.31
+            and away_odds is not None
+            and away_odds >= 5.0
+            and home_odds is not None
+            and home_odds <= 1.7
+        )
+        home_rebound_unconfirmed_draw = bool(
+            not review_signals.intersection({'review-fragile-home-favorite-correction', 'review-narrow-away-bump'})
+            and 'draw_prob_clear_lead' in diag['evidence']
+            and 'draw_market_not_confirmed' in diag['signals']
+            and not home_rebound_blocking_evidence.intersection(diag['evidence'])
+            and top_gap <= 0.095
+            and p_h >= 0.34
+            and (p_h - p_a) >= 0.09
+        )
+        volatility_only_home_rebound = bool(
+            not bool(review_motivation.get('supports_upset'))
+            and set(diag['evidence']) == {'double_volatility_supports_draw'}
+            and 'draw_market_not_confirmed' in diag['signals']
+            and review_handicap_depth_bucket == 'unknown'
+            and review_euro_support_bucket == 'market_opposes'
+            and ou_line is not None
+            and ou_line >= 3.25
+            and ou_under_edge >= 0.35
+            and top_gap <= 0.018
+            and p_h >= 0.34
+            and (p_h - p_a) >= 0.05
+        )
+        deep_soft_home_unconfirmed_draw = bool(
+            'draw_market_not_confirmed' in diag['signals']
+            and 'double_volatility_supports_draw' in diag['evidence']
+            and 'under_supports_draw' not in diag['evidence']
+            and review_handicap_depth_bucket in {'level_deep', 'level_very_deep'}
+            and review_euro_support_bucket == 'draw_soft'
+            and top_gap <= 0.12
+            and p_h >= 0.32
+            and (p_h - p_a) >= 0.10
+        )
+        deep_soft_extreme_under_home_unconfirmed_draw = bool(
+            'draw_market_not_confirmed' in diag['signals']
+            and 'extreme_under_not_draw_confirmed' in diag['signals']
+            and 'draw_prob_clear_lead' in diag['evidence']
+            and 'double_volatility_supports_draw' in diag['evidence']
+            and 'under_supports_draw' not in diag['evidence']
+            and 'draw_market_supported' not in diag['evidence']
+            and review_handicap_depth_bucket in {'level_deep', 'level_very_deep'}
+            and review_euro_support_bucket == 'draw_soft'
+            and top_gap >= 0.09
+            and top_gap <= 0.125
+            and p_h >= 0.32
+            and (p_h - p_a) >= 0.07
+        )
+        market_opposed_home_unconfirmed_draw = bool(
+            'draw_market_not_confirmed' in diag['signals']
+            and 'draw_prob_clear_lead' in diag['evidence']
+            and not draw_support_evidence.intersection(diag['evidence'])
+            and review_euro_support_bucket == 'market_opposes'
+            and top_gap >= 0.045
+            and top_gap <= 0.07
+            and p_h >= 0.31
+            and abs(p_h - p_a) <= 0.02
+        )
+        near_tie_draw_away_gap_max = 0.066 if narrow_away_bump_present and away_review_shift >= 0.03 else 0.038
+        near_tie_home_gap_max = 0.07 if narrow_away_bump_present and away_review_shift >= 0.03 else 0.05
+        near_tie_away_promotion = bool(
+            away_upset_unconfirmed_draw
+            and away_review_shift >= 0.02
+            and (
+                'draw_market_not_confirmed' in diag['signals']
+                or narrow_away_bump_present
+            )
+            and 'under_supports_draw' not in diag['evidence']
+            and abs(p_d - p_a) <= near_tie_draw_away_gap_max
+            and abs(p_d - p_h) <= near_tie_home_gap_max
+        )
+        narrow_away_strong_redirect = bool(
+            away_upset_unconfirmed_draw
+            and narrow_away_bump_present
+            and away_review_shift >= 0.03
+            and 'under_supports_draw' not in diag['evidence']
+            and top_gap <= 0.07
+        )
+        if (fragile_home_strong_support_rebound or fragile_home_unconfirmed_draw or away_upset_unconfirmed_draw or home_rebound_unconfirmed_draw or volatility_only_home_rebound or deep_soft_home_unconfirmed_draw or deep_soft_extreme_under_home_unconfirmed_draw or deep_soft_extreme_under_rebound or very_deep_extreme_under_pressure_rebound or market_opposed_home_unconfirmed_draw or serie_a_soft_draw_away_rescue or serie_a_soft_blocked_home_rebound or serie_a_home_fragility_final_follow_through or serie_a_upset_knowledge_draw_override or extreme_under_unconfirmed_draw) and diag['qualified']:
+            removable_evidence = {'draw_prob_clear_lead'}
+            if serie_a_soft_draw_away_rescue or serie_a_soft_blocked_home_rebound:
+                removable_evidence = removable_evidence.union(soft_draw_support_evidence)
+            if serie_a_home_fragility_final_follow_through or serie_a_upset_knowledge_draw_override:
+                removable_evidence = removable_evidence.union({'under_supports_draw', 'double_volatility_supports_draw'})
+            if deep_soft_home_unconfirmed_draw:
+                removable_evidence = removable_evidence.union({'double_volatility_supports_draw'})
+            if deep_soft_extreme_under_home_unconfirmed_draw:
+                removable_evidence = removable_evidence.union({'double_volatility_supports_draw'})
+            if volatility_only_home_rebound:
+                removable_evidence = removable_evidence.union({'double_volatility_supports_draw'})
+            if home_rebound_unconfirmed_draw or fragile_home_strong_support_rebound or fragile_home_unconfirmed_draw:
+                removable_evidence = removable_evidence.union(soft_draw_context_evidence)
+            if set(diag['evidence']).issubset(removable_evidence):
+                diag['qualified'] = False
+                if fragile_home_strong_support_rebound:
+                    diag['signals'].append('fragile_home_strong_support_rebound_override')
+                if volatility_only_home_rebound:
+                    diag['signals'].append('volatility_only_home_rebound_override')
+                if fragile_home_unconfirmed_draw:
+                    diag['signals'].append('fragile_home_draw_confirmation_override')
+                if away_upset_unconfirmed_draw:
+                    diag['signals'].append('away_upset_draw_confirmation_override')
+                if home_rebound_unconfirmed_draw:
+                    diag['signals'].append('home_rebound_draw_confirmation_override')
+                if deep_soft_home_unconfirmed_draw:
+                    diag['signals'].append('deep_soft_home_draw_confirmation_override')
+                if deep_soft_extreme_under_home_unconfirmed_draw:
+                    diag['signals'].append('deep_soft_extreme_under_draw_confirmation_override')
+                if deep_soft_extreme_under_rebound:
+                    diag['signals'].append('deep_soft_extreme_under_rebound_override')
+                if very_deep_extreme_under_pressure_rebound:
+                    diag['signals'].append('very_deep_extreme_under_pressure_rebound_override')
+                if market_opposed_home_unconfirmed_draw:
+                    diag['signals'].append('market_opposed_home_draw_confirmation_override')
+                if serie_a_soft_draw_away_rescue:
+                    diag['signals'].append('serie_a_soft_draw_confirmation_override')
+                if serie_a_soft_blocked_home_rebound:
+                    diag['signals'].append('serie_a_soft_blocked_home_draw_confirmation_override')
+                if serie_a_home_fragility_final_follow_through:
+                    diag['signals'].append('serie_a_home_fragility_draw_confirmation_override')
+                if serie_a_upset_knowledge_draw_override:
+                    diag['signals'].append('serie_a_upset_knowledge_draw_confirmation_override')
+                if extreme_under_unconfirmed_draw:
+                    diag['signals'].append('extreme_under_draw_confirmation_override')
+
+        la_liga_weak_gap_draw_retention = bool(
+            'review-bias-config-floor' in review_signals
+            and review_handicap_depth_bucket == 'level_medium'
+            and review_euro_support_bucket == 'strong_support'
+            and not bool(review_motivation.get('supports_upset'))
+            and review_favored_side == 'home'
+            and review_score <= 3.5
+            and 'draw_confirmation_gap_weak' in diag['signals']
+            and 'draw_market_not_confirmed' in diag['signals']
+            and not diag['evidence']
+            and ou_line is not None
+            and ou_line <= 2.75
+            and ou_under_edge is not None
+            and ou_under_edge <= 0.3
+            and top_gap <= 0.008
+            and p_h >= 0.35
+            and p_d >= p_h
+            and str((diag.get('volatility') or {}).get('home') or '').strip() == 'low'
+            and str((diag.get('volatility') or {}).get('away') or '').strip() == 'low'
+        )
+        if la_liga_weak_gap_draw_retention:
+            diag['reason'] = 'la_liga_weak_gap_draw_retained'
+            diag['signals'].append('la_liga_weak_gap_draw_retention')
+            return final_prob, diag
+
         if diag['qualified']:
             diag['reason'] = 'draw_confirmation_passed'
             return final_prob, diag
 
         draw_excess = min(0.026, max(0.0, p_d - runner_up + 0.006))
+        if deep_soft_extreme_under_home_unconfirmed_draw and draw_excess > 0:
+            draw_excess = min(0.07, draw_excess + 0.04)
+            diag['signals'].append('deep_soft_extreme_under_draw_excess_boost')
+        elif volatility_only_home_rebound and draw_excess > 0:
+            diag['signals'].append('volatility_only_home_rebound_draw_excess_base')
+        elif deep_soft_extreme_under_rebound and draw_excess > 0:
+            draw_excess = min(0.07, draw_excess + 0.04)
+            diag['signals'].append('deep_soft_extreme_under_rebound_draw_excess_boost')
+        elif very_deep_extreme_under_pressure_rebound and draw_excess > 0:
+            draw_excess = min(0.076, draw_excess + 0.046)
+            diag['signals'].append('very_deep_extreme_under_pressure_draw_excess_boost')
+        elif fragile_home_strong_support_rebound and draw_excess > 0:
+            draw_excess = min(0.05, draw_excess + 0.016)
+            diag['signals'].append('fragile_home_strong_support_draw_excess_boost')
+        elif deep_soft_home_unconfirmed_draw and draw_excess > 0:
+            draw_excess = min(0.072, draw_excess + 0.044)
+            diag['signals'].append('deep_soft_home_draw_excess_boost')
+        elif market_opposed_home_unconfirmed_draw and draw_excess > 0:
+            draw_excess = min(0.052, draw_excess + 0.022)
+            diag['signals'].append('market_opposed_home_draw_excess_boost')
+        elif home_rebound_unconfirmed_draw and draw_excess > 0:
+            draw_excess = min(0.05, draw_excess + 0.022)
+            diag['signals'].append('home_rebound_draw_excess_boost')
+        elif serie_a_home_fragility_final_follow_through and draw_excess > 0:
+            draw_excess = min(0.04, draw_excess + 0.014)
+            diag['signals'].append('serie_a_home_fragility_draw_excess_boost')
+        elif serie_a_upset_knowledge_draw_override and draw_excess > 0:
+            draw_excess = min(0.084, draw_excess + 0.054)
+            diag['signals'].append('serie_a_upset_knowledge_draw_excess_boost')
+        if 'review-fragile-home-favorite-correction' in review_signals and not fragile_home_strong_support_rebound and draw_excess > 0:
+            draw_excess = min(0.052, draw_excess + 0.014)
+            diag['signals'].append('fragile_home_draw_excess_boost')
+        elif away_upset_unconfirmed_draw and draw_excess > 0:
+            boost = 0.012 if away_review_shift >= 0.02 else 0.01
+            if near_tie_away_promotion:
+                boost += 0.008
+                diag['signals'].append('near_tie_away_promotion')
+            if narrow_away_strong_redirect:
+                boost += 0.01
+                diag['signals'].append('narrow_away_strong_redirect_boost')
+            draw_excess = min(0.052, draw_excess + boost)
+            diag['signals'].append('away_upset_draw_excess_boost')
+        elif serie_a_soft_draw_away_rescue and draw_excess > 0:
+            if review_favored_side == 'home' and review_score <= 3.5 and away_review_shift >= 0.04:
+                draw_excess = min(0.084, draw_excess + 0.054)
+                diag['signals'].append('serie_a_soft_low_risk_draw_excess_boost')
+            else:
+                draw_excess = min(0.056, draw_excess + 0.016)
+            diag['signals'].append('serie_a_soft_draw_excess_boost')
         if draw_excess <= 0.0:
             diag['reason'] = 'draw_confirmation_no_shift'
             return final_prob, diag
         favored_side = 'home_win' if p_h >= p_a else 'away_win'
         favored_ratio = 0.68 if favored_side == 'home_win' else 0.32
+        if deep_soft_extreme_under_home_unconfirmed_draw and favored_side == 'home_win':
+            favored_ratio = 0.96
+            diag['signals'].append('deep_soft_extreme_under_redirect_draw_to_home')
+        elif volatility_only_home_rebound and favored_side == 'home_win':
+            favored_ratio = 0.88
+            diag['signals'].append('volatility_only_home_rebound_redirect_draw_to_home')
+        elif deep_soft_extreme_under_rebound and favored_side == 'home_win':
+            favored_ratio = 0.94
+            diag['signals'].append('deep_soft_extreme_under_rebound_redirect_draw_to_home')
+        elif very_deep_extreme_under_pressure_rebound and favored_side == 'home_win':
+            favored_ratio = 0.98
+            diag['signals'].append('very_deep_extreme_under_pressure_redirect_draw_to_home')
+        elif fragile_home_strong_support_rebound and favored_side == 'home_win':
+            favored_ratio = 0.94
+            diag['signals'].append('fragile_home_strong_support_redirect_draw_to_home')
+        elif deep_soft_home_unconfirmed_draw and favored_side == 'home_win':
+            favored_ratio = 0.98
+            diag['signals'].append('deep_soft_redirect_draw_to_home')
+        elif market_opposed_home_unconfirmed_draw and favored_side == 'home_win':
+            favored_ratio = 0.92
+            diag['signals'].append('market_opposed_redirect_draw_to_home')
+        elif home_rebound_unconfirmed_draw and favored_side == 'home_win':
+            favored_ratio = 0.9
+            diag['signals'].append('home_rebound_redirect_draw_to_home')
+        elif serie_a_soft_blocked_home_rebound and favored_side == 'home_win':
+            favored_ratio = 0.94
+            diag['signals'].append('serie_a_soft_blocked_home_redirect_draw_to_home')
         if 'premier_league_relegation_home_motivation_bonus' in scenario_tags and favored_side == 'home_win':
+            favored_ratio = max(favored_ratio, 0.78)
+        if 'review-fragile-home-favorite-correction' in review_signals and not fragile_home_strong_support_rebound and not serie_a_upset_knowledge_draw_override:
+            favored_side = 'away_win'
             favored_ratio = 0.78
+            if 'away_motivation_pressure' in review_evidence or 'handicap_strength_mismatch' in review_evidence:
+                favored_ratio = 0.86
+            diag['signals'].append('fragile_home_redirect_draw_to_away')
+        elif away_upset_unconfirmed_draw or serie_a_soft_draw_away_rescue or serie_a_home_fragility_final_follow_through or ligue1_home_edge_final_follow_through:
+            favored_side = 'away_win'
+            favored_ratio = 0.72
+            if away_review_shift >= 0.02 or review_score >= 15.0:
+                favored_ratio = 0.8
+            if near_tie_away_promotion:
+                favored_ratio = max(favored_ratio, 0.94 if away_review_shift >= 0.024 else 0.9)
+                diag['signals'].append('near_tie_redirect_draw_to_away')
+            if narrow_away_strong_redirect:
+                favored_ratio = max(favored_ratio, 0.96)
+                diag['signals'].append('narrow_away_strong_redirect')
+            if serie_a_soft_draw_away_rescue:
+                if review_favored_side == 'home' and review_score <= 3.5 and away_review_shift >= 0.04:
+                    favored_ratio = max(favored_ratio, 1.0)
+                    diag['signals'].append('serie_a_soft_low_risk_full_redirect')
+                else:
+                    favored_ratio = max(favored_ratio, 0.96)
+                diag['signals'].append('serie_a_soft_redirect_draw_to_away')
+            if serie_a_home_fragility_final_follow_through:
+                favored_ratio = max(favored_ratio, 0.94)
+                diag['signals'].append('serie_a_home_fragility_redirect_draw_to_away')
+            if ligue1_home_edge_final_follow_through:
+                favored_ratio = max(favored_ratio, 0.94)
+                diag['signals'].append('ligue1_home_edge_redirect_draw_to_away')
+            diag['signals'].append('away_upset_redirect_draw_to_away')
+        elif serie_a_upset_knowledge_draw_override:
+            favored_side = 'away_win'
+            favored_ratio = 1.0
+            diag['signals'].append('serie_a_upset_knowledge_redirect_draw_to_away')
         p_d -= draw_excess
         if favored_side == 'home_win':
             p_h += draw_excess * favored_ratio
@@ -221,6 +804,75 @@ class InferencePipelineService:
         total = p_h + p_d + p_a
         if total > 0:
             p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
+        if (
+            (home_rebound_unconfirmed_draw or fragile_home_strong_support_rebound or volatility_only_home_rebound)
+            and favored_side == 'home_win'
+            and p_d >= p_h
+            and (p_d - p_h) <= 0.002
+        ):
+            home_rebound_trim = min(0.0022, (p_d - p_h) + 0.0008, max(0.0, p_d - 0.02))
+            if home_rebound_trim > 0:
+                p_d -= home_rebound_trim
+                p_h += home_rebound_trim
+                total = p_h + p_d + p_a
+                if total > 0:
+                    p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
+                if fragile_home_strong_support_rebound:
+                    diag['signals'].append('fragile_home_strong_support_near_tie_trim')
+                elif volatility_only_home_rebound:
+                    diag['signals'].append('volatility_only_home_rebound_near_tie_trim')
+                else:
+                    diag['signals'].append('home_rebound_near_tie_trim')
+        away_near_tie_trim_limit = 0.006 if serie_a_home_fragility_final_follow_through else (0.0045 if (narrow_away_strong_redirect or serie_a_soft_draw_away_rescue) else 0.0025)
+        if (
+            favored_side == 'away_win'
+            and (away_upset_unconfirmed_draw or serie_a_soft_draw_away_rescue or serie_a_home_fragility_final_follow_through or serie_a_upset_knowledge_draw_override)
+            and p_h >= p_a
+            and (p_h - p_a) <= away_near_tie_trim_limit
+        ):
+            away_rebound_trim = min(0.0028, (p_h - p_a) + 0.0008, max(0.0, p_h - 0.02))
+            if away_rebound_trim > 0:
+                p_h -= away_rebound_trim
+                p_a += away_rebound_trim
+                total = p_h + p_d + p_a
+                if total > 0:
+                    p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
+                diag['signals'].append('away_upset_near_tie_trim')
+                if serie_a_soft_draw_away_rescue:
+                    diag['signals'].append('serie_a_soft_near_tie_trim')
+                if serie_a_home_fragility_final_follow_through:
+                    diag['signals'].append('serie_a_home_fragility_near_tie_trim')
+        if (
+            serie_a_soft_draw_away_rescue
+            and review_favored_side == 'home'
+            and review_score <= 3.5
+            and away_review_shift >= 0.04
+            and favored_side == 'away_win'
+            and p_h >= p_a
+            and (p_h - p_a) <= 0.007
+        ):
+            serie_a_soft_final_trim = min(0.0038, (p_h - p_a) + 0.0006, max(0.0, p_h - 0.02))
+            if serie_a_soft_final_trim > 0:
+                p_h -= serie_a_soft_final_trim
+                p_a += serie_a_soft_final_trim
+                total = p_h + p_d + p_a
+                if total > 0:
+                    p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
+                diag['signals'].append('serie_a_soft_final_margin_trim')
+        if (
+            serie_a_home_fragility_final_follow_through
+            and favored_side == 'away_win'
+            and p_h >= p_a
+            and (p_h - p_a) <= 0.02
+        ):
+            serie_a_home_fragility_final_trim = min(0.0106, ((p_h - p_a) * 0.5) + 0.0009, max(0.0, p_h - 0.02))
+            if serie_a_home_fragility_final_trim > 0:
+                p_h -= serie_a_home_fragility_final_trim
+                p_a += serie_a_home_fragility_final_trim
+                total = p_h + p_d + p_a
+                if total > 0:
+                    p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
+                diag['signals'].append('serie_a_home_fragility_final_trim')
         diag.update(
             {
                 'applied': True,
@@ -285,6 +937,169 @@ class InferencePipelineService:
             '受让两球半': 2.5,
         }
         return mapping.get(raw.replace(' ', ''))
+
+    def _build_preliminary_upset_potential(
+        self,
+        *,
+        home_team: str,
+        away_team: str,
+        league_code: str,
+        strength_diff: float,
+        predicted_outcome: str,
+        asian_handicap: Optional[Dict[str, Any]],
+        european_odds: Optional[Dict[str, Any]],
+        match_intelligence: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        preliminary: Dict[str, Any] = {
+            'available': False,
+            'motivation_risk': {},
+            'handicap_strength_mismatch': {},
+        }
+        analyzer = self.upset_analyzer
+        if analyzer is None:
+            return preliminary
+        try:
+            if hasattr(analyzer, '_score_motivation_risk'):
+                motivation_risk = analyzer._score_motivation_risk(
+                    match_intelligence=match_intelligence,
+                    strength_diff=strength_diff,
+                    predicted_outcome=predicted_outcome,
+                )
+                if isinstance(motivation_risk, dict):
+                    preliminary['motivation_risk'] = motivation_risk
+        except Exception:
+            preliminary['motivation_risk'] = {}
+        try:
+            if hasattr(analyzer, 'analyze_handicap_vs_strength'):
+                mismatch = analyzer.analyze_handicap_vs_strength(
+                    home_team=home_team,
+                    away_team=away_team,
+                    strength_diff=strength_diff,
+                    asian_handicap=asian_handicap,
+                    european_odds=european_odds,
+                )
+                if isinstance(mismatch, dict):
+                    preliminary['handicap_strength_mismatch'] = mismatch
+        except Exception:
+            preliminary['handicap_strength_mismatch'] = {}
+        preliminary['available'] = bool(
+            (isinstance(preliminary.get('motivation_risk'), dict) and preliminary['motivation_risk'].get('available'))
+            or (
+                isinstance(preliminary.get('handicap_strength_mismatch'), dict)
+                and preliminary['handicap_strength_mismatch'].get('mismatch_detected')
+            )
+        )
+        return preliminary
+
+    @staticmethod
+    def _build_serie_a_upset_knowledge_retry_gate(
+        *,
+        final_prob: Dict[str, float],
+        review_outcome_diag: Optional[Dict[str, Any]],
+        draw_guard_diag: Optional[Dict[str, Any]],
+        upset_potential: Optional[Dict[str, Any]],
+        main_prediction: str,
+        league_code: str,
+    ) -> Dict[str, Any]:
+        gate: Dict[str, Any] = {
+            'eligible': False,
+            'reason': 'not_serie_a',
+            'knowledge_score': 0.0,
+            'similar_cases_count': 0,
+            'case_knowledge_available': False,
+            'reverse_rate': 0.0,
+            'cold_rate': 0.0,
+            'draw_shift': 0.0,
+            'away_shift': 0.0,
+        }
+        if league_code != 'serie_a':
+            return gate
+        if not isinstance(final_prob, dict):
+            gate['reason'] = 'invalid_final_prob'
+            return gate
+
+        review_diag = review_outcome_diag if isinstance(review_outcome_diag, dict) else {}
+
+        if main_prediction not in {'主胜', '平局'}:
+            gate['reason'] = 'not_home_or_draw_top'
+            return gate
+        review_signals = {
+            str(item).strip()
+            for item in (review_diag.get('signals') or [])
+            if str(item).strip()
+        }
+        if 'review-league-serie-a-soft-draw-away-blocked-home-top' not in review_signals:
+            gate['reason'] = 'blocked_soft_draw_signal_missing'
+            return gate
+
+        draw_diag = draw_guard_diag if isinstance(draw_guard_diag, dict) else {}
+        draw_guard_signals = {
+            str(item).strip()
+            for item in (draw_diag.get('signals') or [])
+            if str(item).strip()
+        }
+        draw_guard_evidence = {
+            str(item).strip()
+            for item in (draw_diag.get('evidence') or [])
+            if str(item).strip()
+        }
+        three_layer_context = review_diag.get('three_layer_context') if isinstance(review_diag.get('three_layer_context'), dict) else {}
+        retryable_blocked_soft_draw = bool(
+            'draw_market_not_confirmed' in draw_guard_signals
+            and 'under_supports_draw' in draw_guard_evidence
+            and str(three_layer_context.get('handicap_depth_bucket') or '').strip() == 'level_medium'
+            and str(three_layer_context.get('euro_support_bucket') or '').strip() == 'draw_soft'
+        )
+        if (
+            'serie_a_soft_blocked_home_redirect_draw_to_home' not in draw_guard_signals
+            and not retryable_blocked_soft_draw
+        ):
+            gate['reason'] = 'blocked_home_rebound_missing'
+            return gate
+
+        p_h = float(final_prob.get('home_win') or 0.0)
+        p_d = float(final_prob.get('draw') or 0.0)
+        p_a = float(final_prob.get('away_win') or 0.0)
+        if p_d < 0.36 or p_a < 0.22 or (p_h - p_d) > 0.025:
+            gate['reason'] = 'probability_shape_not_retryable'
+            return gate
+
+        knowledge = upset_potential if isinstance(upset_potential, dict) else {}
+        risk_score_detail = knowledge.get('risk_score_detail') if isinstance(knowledge.get('risk_score_detail'), dict) else {}
+        knowledge_score = float(risk_score_detail.get('knowledge_score') or 0.0)
+        similar_cases_count = int(knowledge.get('similar_cases_count') or 0)
+        case_knowledge = knowledge.get('case_knowledge') if isinstance(knowledge.get('case_knowledge'), dict) else {}
+        case_knowledge_available = bool(case_knowledge.get('available'))
+        historical_reference = knowledge.get('historical_odds_reference') if isinstance(knowledge.get('historical_odds_reference'), dict) else {}
+        historical_summary = historical_reference.get('summary') if isinstance(historical_reference.get('summary'), dict) else {}
+        result_rates = historical_summary.get('result_rates') if isinstance(historical_summary.get('result_rates'), dict) else {}
+        reverse_rate = 1.0 - float(result_rates.get('主胜') or 0.0) if result_rates else 0.0
+        cold_rate = float(historical_summary.get('cold_result_rate') or 0.0)
+        gate.update(
+            {
+                'knowledge_score': round(knowledge_score, 4),
+                'similar_cases_count': similar_cases_count,
+                'case_knowledge_available': case_knowledge_available,
+                'reverse_rate': round(reverse_rate, 4),
+                'cold_rate': round(cold_rate, 4),
+            }
+        )
+        if knowledge_score < 16.0 and not (similar_cases_count >= 1 and case_knowledge_available):
+            gate['reason'] = 'knowledge_signal_weak'
+            return gate
+        if reverse_rate > 0 and reverse_rate < 0.55 and cold_rate < 0.35 and knowledge_score < 18.0:
+            gate['reason'] = 'historical_reverse_rate_weak'
+            return gate
+
+        gate.update(
+            {
+                'eligible': True,
+                'reason': 'eligible',
+                'draw_shift': 0.012,
+                'away_shift': 0.046,
+            }
+        )
+        return gate
 
     def apply_dynamic_weights(self, league_code: str) -> Dict[str, Any]:
         try:
@@ -1259,6 +2074,21 @@ class InferencePipelineService:
             final_prob = adjusted_prob
             ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
         realtime['context_applied']['live_outcome_adjustment'] = live_adj_diag
+        preliminary_upset_potential = self._build_preliminary_upset_potential(
+            home_team=home_team,
+            away_team=away_team,
+            league_code=league_code,
+            strength_diff=strength_diff,
+            predicted_outcome=ranked_probabilities[0][0] if ranked_probabilities else '平局',
+            asian_handicap=asian_handicap,
+            european_odds=european_odds,
+            match_intelligence=match_intelligence,
+        )
+        realtime['context_applied']['preliminary_upset_signal'] = {
+            'available': bool(preliminary_upset_potential.get('available')),
+            'motivation_risk': preliminary_upset_potential.get('motivation_risk') or {},
+            'handicap_strength_mismatch': preliminary_upset_potential.get('handicap_strength_mismatch') or {},
+        }
         final_prob, review_outcome_diag = self.postprocess_service.apply_review_outcome_adjustment(
             final_probabilities=final_prob,
             league_code=league_code,
@@ -1267,6 +2097,7 @@ class InferencePipelineService:
             current_odds=current_odds,
             review_learning=review_learning,
             match_intelligence=match_intelligence,
+            upset_potential=preliminary_upset_potential,
         )
         realtime['context_applied']['review_outcome_adjustment'] = review_outcome_diag
         if isinstance(review_outcome_diag, dict) and review_outcome_diag.get('applied'):
@@ -1274,6 +2105,83 @@ class InferencePipelineService:
         final_prob, match_intel_diag = self.match_intelligence_engine._apply_match_intelligence_adjustment(final_prob=final_prob, match_intelligence=match_intelligence)
         if isinstance(match_intel_diag, dict):
             realtime['context_applied']['match_intelligence_adjustment'] = match_intel_diag
+            retry_motivation = preliminary_upset_potential.get('motivation_risk') if isinstance(preliminary_upset_potential, dict) and isinstance(preliminary_upset_potential.get('motivation_risk'), dict) else {}
+            retry_ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
+            retry_top_label = retry_ranked_probabilities[0][0] if retry_ranked_probabilities else ''
+            retry_home = float(final_prob.get('home_win', 0.0))
+            retry_draw = float(final_prob.get('draw', 0.0))
+            retry_away = float(final_prob.get('away_win', 0.0))
+            retry_top_lead = retry_home - max(retry_draw, retry_away) if retry_top_label == '主胜' else 0.0
+            retry_signals = {
+                str(item).strip()
+                for item in ((review_outcome_diag or {}).get('signals') or [])
+                if str(item).strip()
+            }
+            retry_has_premier_away_support = bool(
+                retry_signals.intersection({
+                    'review-league-premier-away-upset-support',
+                    'review-league-premier-balanced-away-floor',
+                    'review-league-premier-away-follow-through',
+                })
+            )
+            retry_strong_away_motivation = bool(
+                bool(retry_motivation.get('supports_upset'))
+                and str(retry_motivation.get('favored_side') or '').strip() == 'away'
+                and str(retry_motivation.get('pressure_side') or '').strip() == 'home'
+                and float(retry_motivation.get('score') or 0.0) >= 12.0
+            )
+            retry_balanced_home_top_case = bool(
+                retry_top_label == '主胜'
+                and retry_home <= 0.392
+                and retry_draw >= 0.318
+                and retry_away >= 0.272
+                and retry_top_lead <= 0.07
+            )
+            should_retry_review_after_match_intelligence = bool(
+                league_code == 'premier_league'
+                and retry_top_label == '主胜'
+                and not retry_has_premier_away_support
+                and (retry_strong_away_motivation or retry_balanced_home_top_case)
+            )
+            realtime['context_applied']['review_outcome_retry_gate'] = {
+                'eligible': should_retry_review_after_match_intelligence,
+                'league_code': league_code,
+                'top_label': retry_top_label,
+                'motivation_risk': retry_motivation,
+                'strong_away_motivation': retry_strong_away_motivation,
+                'balanced_home_top_case': retry_balanced_home_top_case,
+                'top_lead': round(float(retry_top_lead), 4),
+                'has_premier_away_support': retry_has_premier_away_support,
+            }
+            if should_retry_review_after_match_intelligence:
+                review_retry_upset_signal = dict(preliminary_upset_potential) if isinstance(preliminary_upset_potential, dict) else {}
+                if retry_balanced_home_top_case and not retry_strong_away_motivation:
+                    review_retry_upset_signal['motivation_risk'] = {
+                        'available': True,
+                        'supports_upset': True,
+                        'favored_side': 'away',
+                        'pressure_side': 'home',
+                        'score': 12.0,
+                    }
+                review_retry_prob, review_retry_diag = self.postprocess_service.apply_review_outcome_adjustment(
+                    final_probabilities=final_prob,
+                    league_code=league_code,
+                    strength_diff=strength_diff,
+                    asian_handicap=asian_handicap,
+                    current_odds=current_odds,
+                    review_learning=review_learning,
+                    match_intelligence=match_intelligence,
+                    upset_potential=review_retry_upset_signal,
+                )
+                if isinstance(review_retry_diag, dict):
+                    review_retry_diag = dict(review_retry_diag)
+                    review_retry_diag['retry_after_match_intelligence'] = True
+                    realtime['context_applied']['review_outcome_adjustment_retry'] = review_retry_diag
+                    if review_retry_diag.get('applied'):
+                        final_prob = review_retry_prob
+                        review_outcome_diag = review_retry_diag
+                        realtime['context_applied']['review_outcome_adjustment'] = review_retry_diag
+                        ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
         over_under, over_under_diag = self.build_real_market_over_under(
             home_lambda=home_lambda,
             away_lambda=away_lambda,
@@ -1301,6 +2209,7 @@ class InferencePipelineService:
             current_odds=current_odds,
             over_under=over_under,
             match_intelligence=match_intelligence,
+            review_outcome_diag=review_outcome_diag,
         )
         realtime['context_applied']['draw_confirmation_guard'] = draw_guard_diag
         ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
@@ -1322,6 +2231,92 @@ class InferencePipelineService:
             european_odds=european_odds,
             match_intelligence=match_intelligence,
         )
+        realtime['context_applied']['full_upset_signal'] = {
+            'available': bool(isinstance(upset_potential, dict) and upset_potential),
+            'level': upset_potential.get('level') if isinstance(upset_potential, dict) else None,
+            'similar_cases_count': int(upset_potential.get('similar_cases_count') or 0) if isinstance(upset_potential, dict) else 0,
+            'risk_score_detail': upset_potential.get('risk_score_detail') if isinstance(upset_potential, dict) else {},
+            'case_knowledge': upset_potential.get('case_knowledge') if isinstance(upset_potential, dict) else {},
+        }
+        serie_a_upset_knowledge_retry_gate = self._build_serie_a_upset_knowledge_retry_gate(
+            final_prob=final_prob,
+            review_outcome_diag=review_outcome_diag,
+            draw_guard_diag=draw_guard_diag,
+            upset_potential=upset_potential,
+            main_prediction=main_prediction,
+            league_code=league_code,
+        )
+        realtime['context_applied']['serie_a_upset_knowledge_retry_gate'] = serie_a_upset_knowledge_retry_gate
+        if serie_a_upset_knowledge_retry_gate.get('eligible'):
+            review_retry_signal = {
+                'available': True,
+                'motivation_risk': review_outcome_diag.get('motivation_risk') if isinstance(review_outcome_diag, dict) and isinstance(review_outcome_diag.get('motivation_risk'), dict) else {},
+                'handicap_strength_mismatch': review_outcome_diag.get('handicap_strength_mismatch') if isinstance(review_outcome_diag, dict) and isinstance(review_outcome_diag.get('handicap_strength_mismatch'), dict) else {},
+                'risk_score_detail': upset_potential.get('risk_score_detail') if isinstance(upset_potential, dict) else {},
+                'historical_odds_reference': upset_potential.get('historical_odds_reference') if isinstance(upset_potential, dict) else {},
+                'case_knowledge': upset_potential.get('case_knowledge') if isinstance(upset_potential, dict) else {},
+                'similar_cases_count': int(upset_potential.get('similar_cases_count') or 0) if isinstance(upset_potential, dict) else 0,
+            }
+            review_retry_prob, review_retry_diag = self.postprocess_service.apply_review_outcome_adjustment(
+                final_probabilities=final_prob,
+                league_code=league_code,
+                strength_diff=strength_diff,
+                asian_handicap=asian_handicap,
+                current_odds=current_odds,
+                review_learning=review_learning,
+                match_intelligence=match_intelligence,
+                upset_potential=review_retry_signal,
+            )
+            if isinstance(review_retry_diag, dict):
+                review_retry_diag = dict(review_retry_diag)
+                review_retry_diag['retry_from_full_upset_knowledge'] = True
+                retry_shift = review_retry_diag.get('applied_shift') if isinstance(review_retry_diag.get('applied_shift'), dict) else {}
+                retry_shift['draw_shift'] = max(
+                    float(retry_shift.get('draw_shift') or 0.0),
+                    float(serie_a_upset_knowledge_retry_gate.get('draw_shift') or 0.0),
+                )
+                retry_shift['away_shift'] = max(
+                    float(retry_shift.get('away_shift') or 0.0),
+                    float(serie_a_upset_knowledge_retry_gate.get('away_shift') or 0.0),
+                )
+                review_retry_diag['applied_shift'] = retry_shift
+                retry_signals = [str(item).strip() for item in (review_retry_diag.get('signals') or []) if str(item).strip()]
+                for signal_name in (
+                    'review-league-serie-a-draw-to-away-relief',
+                    'review-league-serie-a-soft-draw-away-entry',
+                    'review-league-serie-a-upset-knowledge-retry',
+                ):
+                    if signal_name not in retry_signals:
+                        retry_signals.append(signal_name)
+                review_retry_diag['signals'] = retry_signals
+                realtime['context_applied']['review_outcome_adjustment_full_upset_retry'] = review_retry_diag
+                knowledge_draw_shift = float(serie_a_upset_knowledge_retry_gate.get('draw_shift') or 0.0)
+                knowledge_away_shift = float(serie_a_upset_knowledge_retry_gate.get('away_shift') or 0.0)
+                final_prob = self.postprocess_service._shift_from_side_to_targets(
+                    review_retry_prob,
+                    from_key='home_win',
+                    draw_shift=knowledge_draw_shift,
+                    away_shift=knowledge_away_shift,
+                )
+                final_prob, draw_guard_diag = self._apply_draw_confirmation_guard(
+                    final_prob=final_prob,
+                    current_odds=current_odds,
+                    over_under=over_under,
+                    match_intelligence=match_intelligence,
+                    review_outcome_diag=review_retry_diag,
+                )
+                realtime['context_applied']['draw_confirmation_guard'] = draw_guard_diag
+                review_outcome_diag = review_retry_diag
+                realtime['context_applied']['review_outcome_adjustment'] = review_retry_diag
+                ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
+                main_prediction = ranked_probabilities[0][0]
+                confidence = ranked_probabilities[0][1]
+        confidence, confidence_diag = self._calibrate_confidence_with_league_learning(
+            confidence=confidence,
+            applied_weights=applied_weights,
+        )
+        realtime['context_applied']['league_confidence_adjustment'] = confidence_diag
+
         match_intelligence = self.match_intelligence_engine._finalize_match_intelligence(
             match_intelligence=match_intelligence,
             historical_odds_reference=historical_odds_reference,

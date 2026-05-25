@@ -222,6 +222,11 @@ class ResultManagerTest(unittest.TestCase):
             (self.base_dir / ".okooo-scraper" / "runtime" / "accuracy_stats.json").read_text(encoding="utf-8")
         )
         self.assertEqual(accuracy_payload["overall"]["total_predictions"], 1)
+        self.assertEqual(accuracy_payload["overall"]["correct_predictions"], 1)
+        self.assertEqual(accuracy_payload["overall"]["total_score_predictions"], 1)
+        self.assertEqual(accuracy_payload["overall"]["correct_score_predictions"], 1)
+        self.assertEqual(accuracy_payload["overall"]["win_scope"], "unified_prediction_sources")
+        self.assertEqual(accuracy_payload["overall"]["score_scope"], "unified_prediction_sources")
 
         review_payload = json.loads(
             (self.base_dir / ".okooo-scraper" / "runtime" / "prediction_review_learning.json").read_text(encoding="utf-8")
@@ -231,6 +236,67 @@ class ResultManagerTest(unittest.TestCase):
         registry = _load_registry(str(self.base_dir))
         self.assertEqual(registry["la_liga_20260511_巴塞罗那_皇家马德里"]["status"], "completed")
         self.assertEqual(registry["la_liga_20260511_巴塞罗那_皇家马德里"]["actual_score"], "2-1")
+
+    def test_calculate_accuracy_uses_archive_backfill_when_teams_note_lacks_prediction(self):
+        (self.base_dir / "la_liga" / "teams_2025-26.md").write_text(
+            "\n".join(
+                [
+                    "# 测试联赛",
+                    "",
+                    "| 日期 | 时间 | 主队 | 比分 | 客队 | 备注 |",
+                    "|-----|------|-----|------|-----|------|",
+                    "| 2026-05-11 | 03:00 | 巴塞罗那 | 2-1 | 皇家马德里 | 无预测记录 |",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        stats = self.manager.calculate_accuracy(league="la_liga", days=30)
+
+        self.assertEqual(stats["total_predictions"], 1)
+        self.assertEqual(stats["correct_predictions"], 1)
+        self.assertEqual(stats["total_score_predictions"], 1)
+        self.assertEqual(stats["correct_score_predictions"], 1)
+        self.assertEqual(stats["win_scope"], "unified_prediction_sources")
+        self.assertEqual(stats["score_scope"], "unified_prediction_sources")
+
+    def test_update_accuracy_stats_outputs_league_weight_profile(self):
+        stats = self.manager.update_accuracy_stats()
+        overall = stats["overall"]
+        league_stats = stats["by_league"]["la_liga"]
+
+        self.assertIn("league_weight_factor", overall)
+        self.assertIn("confidence_adjustment", overall)
+        self.assertIn("weight_reason", overall)
+        self.assertIn("top_weight_drivers", overall)
+        self.assertIn("poisson", overall["model_accuracy"])
+        self.assertIn("elo", overall["model_accuracy"])
+        self.assertGreaterEqual(float(league_stats["league_weight_factor"]), 0.92)
+        self.assertLessEqual(float(league_stats["league_weight_factor"]), 1.08)
+        self.assertTrue(league_stats["weight_reason"])
+        self.assertTrue(isinstance(league_stats["top_weight_drivers"], list))
+
+    def test_calculate_accuracy_restores_completed_status_note_from_archive_prediction(self):
+        (self.base_dir / "la_liga" / "teams_2025-26.md").write_text(
+            "\n".join(
+                [
+                    "# 测试联赛",
+                    "",
+                    "| 日期 | 时间 | 主队 | 比分 | 客队 | 备注 |",
+                    "|-----|------|-----|------|-----|------|",
+                    "| 2026-05-11 | 03:00 | 巴塞罗那 | 2-1 | 皇家马德里 | 已完赛；赛果:主胜 2-1；复盘:胜平负缺失 比分缺失 大小球缺失 |",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        samples = self.manager._build_unified_prediction_samples(days=30)
+        sample = samples["la_liga_20260511_巴塞罗那_皇家马德里"]
+
+        self.assertEqual(sample["predicted_winner"], "home")
+        self.assertEqual(sample["predicted_scores"], ["2-1", "1-0"])
 
     def test_reconcile_memory_pending_entries_updates_memory_from_archive_result(self):
         archive = self.manager.prediction_archive_store.load()
@@ -303,6 +369,178 @@ class ResultManagerTest(unittest.TestCase):
         self.assertIn("#### 未完赛", memory_text)
         self.assertNotIn("■ 赛果: 主胜 2-1", memory_text)
 
+    def test_update_accuracy_stats_includes_reanalysis_report(self):
+        reanalysis_payload = {
+            "generated_at": "2026-05-24T14:37:48.555309",
+            "scope": {"league": "la_liga", "days": 30},
+            "summary": {
+                "replayed_matches": 4,
+                "baseline_win_hits": 1,
+                "replay_win_hits": 3,
+                "baseline_score_hits": 1,
+                "replay_score_hits": 2,
+                "baseline_away_predictions": 0,
+                "replay_away_predictions": 1,
+                "baseline_home_to_away_errors": 1,
+                "replay_home_to_away_errors": 0,
+                "baseline_home_to_draw_errors": 2,
+                "replay_home_to_draw_errors": 1,
+                "improved_matches": 2,
+                "regressed_matches": 0,
+                "blocked_predictions": 0,
+                "snapshot_backed_matches": 2,
+                "baseline_win_accuracy": 25.0,
+                "replay_win_accuracy": 75.0,
+                "baseline_score_accuracy": 25.0,
+                "replay_score_accuracy": 50.0,
+            },
+        }
+        (self.base_dir / "reanalysis_results_la_liga.json").write_text(
+            json.dumps(reanalysis_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        stats = self.manager.update_accuracy_stats()
+        reanalysis = stats["reanalysis_report"]
+
+        self.assertTrue(reanalysis["available"])
+        self.assertEqual(reanalysis["scope"], "current_model_replay")
+        self.assertEqual(reanalysis["overall"]["win_scope"], "current_model_replay")
+        self.assertEqual(reanalysis["overall"]["win_accuracy"], 75.0)
+        self.assertEqual(reanalysis["overall"]["correct_predictions"], 3)
+        self.assertEqual(reanalysis["overall"]["total_predictions"], 4)
+        self.assertEqual(reanalysis["by_league"]["la_liga"]["win_accuracy"], 75.0)
+        self.assertEqual(reanalysis["by_league"]["la_liga"]["source_file"], "reanalysis_results_la_liga.json")
+        self.assertEqual(reanalysis["delta_summary"]["baseline_win_accuracy"], 25.0)
+        self.assertEqual(reanalysis["delta_summary"]["replay_win_accuracy"], 75.0)
+        self.assertEqual(reanalysis["delta_summary"]["win_accuracy_delta"], 50.0)
+        self.assertEqual(reanalysis["delta_summary"]["away_prediction_delta"], 1)
+        self.assertEqual(reanalysis["delta_summary"]["top_win_accuracy_improvements"][0]["league"], "la_liga")
+
+    def test_update_accuracy_stats_marks_reanalysis_unavailable_without_files(self):
+        stats = self.manager.update_accuracy_stats()
+        reanalysis = stats["reanalysis_report"]
+
+        self.assertFalse(reanalysis["available"])
+        self.assertEqual(reanalysis["scope"], "current_model_replay")
+        self.assertEqual(reanalysis["overall"], {})
+        self.assertEqual(reanalysis["by_league"], {})
+        self.assertEqual(reanalysis["delta_summary"], {})
+        self.assertEqual(reanalysis["generated_from"]["files"], [])
+
+    def test_apply_reanalysis_predictions_updates_completed_note_and_archive(self):
+        (self.base_dir / "la_liga" / "teams_2025-26.md").write_text(
+            "\n".join(
+                [
+                    "# 测试联赛",
+                    "",
+                    "| 日期 | 时间 | 主队 | 比分 | 客队 | 备注 |",
+                    "|-----|------|-----|------|-----|------|",
+                    "| 2026-05-11 | 03:00 | 巴塞罗那 | 1-2 | 皇家马德里 | 已完赛；预测:主胜 信心:0.61 比分:2-1/1-0；复盘:旧结果 |",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        reanalysis_payload = {
+            "generated_at": "2026-05-24T18:28:30.180407",
+            "matches": [
+                {
+                    "match_id": "la_liga_20260511_巴塞罗那_皇家马德里",
+                    "league": "la_liga",
+                    "league_name": "西甲联赛",
+                    "match_date": "2026-05-11",
+                    "match_time": "03:00",
+                    "home_team": "巴塞罗那",
+                    "away_team": "皇家马德里",
+                    "storage_mode": "league_sot",
+                    "snapshot": {"match_id": "ext-1"},
+                    "baseline": {
+                        "predicted_winner": "主胜",
+                        "predicted_winner_key": "home",
+                        "win_hit": False,
+                    },
+                    "replay": {
+                        "predicted_winner": "客胜",
+                        "predicted_winner_key": "away",
+                        "predicted_scores": ["1-2", "0-1"],
+                        "final_probabilities": {"home_win": 0.31, "draw": 0.29, "away_win": 0.40},
+                        "all_probabilities": {"主胜": 0.31, "平局": 0.29, "客胜": 0.40},
+                        "confidence": 0.40,
+                        "win_hit": True,
+                    },
+                }
+            ],
+        }
+        reanalysis_path = self.base_dir / "reanalysis_results_la_liga.json"
+        reanalysis_path.write_text(json.dumps(reanalysis_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        report = self.manager.apply_reanalysis_predictions(
+            league="la_liga",
+            input_path=str(reanalysis_path),
+            only_improved=True,
+            refresh_accuracy=True,
+        )
+
+        self.assertEqual(report["applied_count"], 1)
+        content = (self.base_dir / "la_liga" / "teams_2025-26.md").read_text(encoding="utf-8")
+        self.assertIn("预测:客胜", content)
+        self.assertIn("复盘:旧结果", content)
+        archive = self.manager.prediction_archive_store.load()
+        archived = archive["la_liga_20260511_巴塞罗那_皇家马德里"]
+        self.assertEqual(archived["predicted_winner"], "away")
+        self.assertTrue(archived["applied_from_reanalysis"])
+        self.assertEqual(archived["reanalysis_source_file"], "reanalysis_results_la_liga.json")
+        refreshed = report["accuracy_refresh"]
+        self.assertEqual(refreshed["overall"]["correct_predictions"], 1)
+        self.assertEqual(refreshed["by_league"]["la_liga"]["correct_predictions"], 1)
+
+    def test_apply_reanalysis_predictions_dry_run_leaves_completed_note_unchanged(self):
+        original_content = (self.base_dir / "la_liga" / "teams_2025-26.md").read_text(encoding="utf-8")
+        reanalysis_payload = {
+            "generated_at": "2026-05-24T18:28:30.180407",
+            "matches": [
+                {
+                    "match_id": "la_liga_20260511_巴塞罗那_皇家马德里",
+                    "league": "la_liga",
+                    "league_name": "西甲联赛",
+                    "match_date": "2026-05-11",
+                    "match_time": "03:00",
+                    "home_team": "巴塞罗那",
+                    "away_team": "皇家马德里",
+                    "storage_mode": "league_sot",
+                    "baseline": {
+                        "predicted_winner": "主胜",
+                        "predicted_winner_key": "home",
+                        "win_hit": False,
+                    },
+                    "replay": {
+                        "predicted_winner": "客胜",
+                        "predicted_winner_key": "away",
+                        "predicted_scores": ["1-2"],
+                        "final_probabilities": {"home_win": 0.31, "draw": 0.29, "away_win": 0.40},
+                        "all_probabilities": {"主胜": 0.31, "平局": 0.29, "客胜": 0.40},
+                        "confidence": 0.40,
+                        "win_hit": True,
+                    },
+                }
+            ],
+        }
+        reanalysis_path = self.base_dir / "reanalysis_results_la_liga.json"
+        reanalysis_path.write_text(json.dumps(reanalysis_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        report = self.manager.apply_reanalysis_predictions(
+            league="la_liga",
+            input_path=str(reanalysis_path),
+            dry_run=True,
+            only_improved=True,
+        )
+
+        self.assertEqual(report["applied"][0]["status"], "dry_run")
+        self.assertEqual((self.base_dir / "la_liga" / "teams_2025-26.md").read_text(encoding="utf-8"), original_content)
+        archive = self.manager.prediction_archive_store.load()
+        self.assertEqual(archive["la_liga_20260511_巴塞罗那_皇家马德里"]["predicted_winner"], "home")
+
 
 class PredictionPersistenceServiceTest(unittest.TestCase):
     def setUp(self):
@@ -359,6 +597,67 @@ class PredictionPersistenceServiceTest(unittest.TestCase):
         memory_text = (self.base_dir.parent / "MEMORY.md").read_text(encoding="utf-8")
         self.assertIn("2026-05-10 西甲 赫塔费 vs 马略卡", memory_text)
         self.assertIn("2026-05-17 西甲 赫塔费 vs 马洛卡", memory_text)
+
+    def test_render_prediction_memory_block_keeps_pending_section_above_completed(self):
+        pending_entry = "\n".join(
+            [
+                "- [la_liga|2026-05-17|赫塔费|马洛卡] 2026-05-17 西甲 赫塔费 vs 马洛卡 | MatchID: future-1",
+                "  预测: 平局 (41.0%) | 比分: 1-1 > 0-0 | 大小球: 待补真实盘口",
+                "  ▲ 风险: 低(10) 样本2",
+                "  · MatchID: future-1 | 记忆ID: la_liga|2026-05-17|赫塔费|马洛卡 | 更新时间: 2026-05-17 01:00:00",
+            ]
+        )
+        completed_entry = "\n".join(
+            [
+                "- [la_liga|2026-05-10|赫塔费|马略卡] 2026-05-10 西甲 赫塔费 vs 马略卡 | MatchID: done-1",
+                "  预测: 主胜 (40.0%) | 比分: 1-0 > 1-1 | 大小球: 待补真实盘口",
+                "  ▲ 风险: 低(10) 样本1",
+                "  ■ 赛果: 主胜 1-0",
+                "  · MatchID: done-1 | 记忆ID: la_liga|2026-05-10|赫塔费|马略卡 | 更新时间: 2026-05-10 01:00:00",
+            ]
+        )
+
+        block = PredictionPersistenceService.render_prediction_memory_block(
+            [completed_entry, pending_entry],
+            "<!-- prediction-memory:start -->",
+            "<!-- prediction-memory:end -->",
+        )
+
+        pending_pos = block.index("#### 未完赛")
+        completed_pos = block.index("#### 已完赛")
+        self.assertLess(pending_pos, completed_pos)
+        self.assertLess(block.index("future-1"), block.index("done-1"))
+
+    def test_render_prediction_memory_block_auto_reorders_fields(self):
+        raw_entry = "\n".join(
+            [
+                "- [la_liga|2026-05-17|赫塔费|马洛卡] 2026-05-17 西甲 赫塔费 vs 马洛卡 | MatchID: future-2",
+                "  · 更新时间: 2026-05-17 01:00:00 | 记忆ID: la_liga|2026-05-17|赫塔费|马洛卡 | MatchID: future-2",
+                "  ■ 状态: 待开赛",
+                "  ◆ RAG记忆: 测试RAG",
+                "  ▲ 风险: 低(10) 样本3",
+                "  ◦ 欧赔: 2.10/3.20/3.60->2.05/3.25/3.70",
+                "  预测: 平局 (41.0%) | 比分: 1-1 > 0-0 | 大小球: 待补真实盘口",
+            ]
+        )
+
+        block = PredictionPersistenceService.render_prediction_memory_block(
+            [raw_entry],
+            "<!-- prediction-memory:start -->",
+            "<!-- prediction-memory:end -->",
+        )
+
+        prediction_pos = block.index("  预测:")
+        market_pos = block.index("  ◦ 欧赔:")
+        risk_pos = block.index("  ▲ 风险:")
+        rag_pos = block.index("  ◆ RAG记忆:")
+        status_pos = block.index("  ■ 状态:")
+        meta_pos = block.index("  · MatchID: future-2 | 记忆ID: la_liga|2026-05-17|赫塔费|马洛卡 | 更新时间: 2026-05-17 01:00:00")
+        self.assertLess(prediction_pos, market_pos)
+        self.assertLess(market_pos, risk_pos)
+        self.assertLess(risk_pos, rag_pos)
+        self.assertLess(rag_pos, status_pos)
+        self.assertLess(status_pos, meta_pos)
 
     def test_persist_prediction_registers_result_sync_and_sets_canonical_ids(self):
         saved_payloads = []

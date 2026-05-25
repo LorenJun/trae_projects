@@ -1,5 +1,7 @@
+import io
 import unittest
 from argparse import Namespace
+from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -93,6 +95,8 @@ class CliPersistenceTest(unittest.TestCase):
                     "teams_updated": True,
                     "prediction_count": 3,
                     "accuracy_refreshed": persist,
+                    "schedule_source_status": "valid",
+                    "schedule_source_reason": "ok",
                     "persisted": {
                         "enabled": persist,
                         "archived": persist,
@@ -114,10 +118,14 @@ class CliPersistenceTest(unittest.TestCase):
 
         with patch("domain.predictor.DomainPredictor", return_value=DummyPredictor()), patch(
             "domain.predictor.LEAGUE_CONFIG", {"premier_league": {"name": "英超"}}
-        ), patch("app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)):
+        ), patch("app.cli.cleanup_invalid_schedule_cache_files", return_value={"deleted_count": 2, "deleted_files": ["a.json", "b.json"]}), patch(
+            "app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)
+        ):
             cli.run_openclaw_predict_schedule(args)
 
-        updates = captured["payload"]["data"]
+        data = captured["payload"]["data"]
+        updates = data["updates"]
+        self.assertEqual(data["schedule_cache_cleanup"], {"deleted_count": 2, "deleted_files": ["a.json", "b.json"]})
         self.assertEqual(len(updates), 2)
         self.assertEqual(calls[0], ("premier_league", "2026-05-11", True, True))
         self.assertEqual(calls[1], ("premier_league", "2026-05-12", True, True))
@@ -144,6 +152,8 @@ class CliPersistenceTest(unittest.TestCase):
                     "teams_updated": False,
                     "prediction_count": 2,
                     "accuracy_refreshed": False,
+                    "schedule_source_status": "missing",
+                    "schedule_source_reason": "schedule_cache_missing",
                     "persisted": {
                         "enabled": persist,
                         "archived": False,
@@ -164,11 +174,15 @@ class CliPersistenceTest(unittest.TestCase):
 
         with patch("domain.predictor.DomainPredictor", return_value=DummyPredictor()), patch(
             "domain.predictor.LEAGUE_CONFIG", {"premier_league": {"name": "英超"}}
-        ), patch("app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)):
+        ), patch("app.cli.cleanup_invalid_schedule_cache_files", return_value={"deleted_count": 0, "deleted_files": []}), patch(
+            "app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)
+        ):
             cli.run_openclaw_predict_schedule(args)
 
         self.assertEqual(calls, [("premier_league", "2026-05-11", False, False)])
-        update = captured["payload"]["data"][0]
+        data = captured["payload"]["data"]
+        self.assertEqual(data["schedule_cache_cleanup"], {"deleted_count": 0, "deleted_files": []})
+        update = data["updates"][0]
         self.assertFalse(update["updated"])
         self.assertFalse(update["accuracy_refreshed"])
         self.assertEqual(update["persisted"], {"enabled": False, "archived": False, "memory_updated": False, "result_sync_registered": False, "memory_update_count": 0, "result_sync_registration_count": 0})
@@ -230,6 +244,105 @@ class CliPersistenceTest(unittest.TestCase):
         self.assertTrue(data["refreshed"])
         self.assertEqual(data["overall"]["total_predictions"], 1)
         self.assertEqual(data["runtime_profile"]["agent_roles"], ["result_tracker"])
+
+    def test_accuracy_plain_output_includes_reanalysis_summary_when_available(self):
+        class DummyAccuracyManager:
+            def __init__(self):
+                self.accuracy_store = SimpleNamespace(load=lambda: {})
+
+            def update_accuracy_stats(self):
+                return {
+                    "overall": {
+                        "win_accuracy": 43.06,
+                        "correct_predictions": 31,
+                        "total_predictions": 72,
+                        "ou_accuracy": 0.0,
+                        "correct_ou_predictions": 0,
+                        "total_ou_predictions": 0,
+                    },
+                    "reanalysis_report": {
+                        "available": True,
+                        "overall": {
+                            "win_accuracy": 57.14,
+                            "correct_predictions": 8,
+                            "total_predictions": 14,
+                        },
+                        "by_league": {
+                            "premier_league": {
+                                "win_accuracy": 57.14,
+                                "correct_predictions": 8,
+                                "total_predictions": 14,
+                            }
+                        },
+                        "delta_summary": {
+                            "baseline_win_accuracy": 28.57,
+                            "replay_win_accuracy": 57.14,
+                            "win_accuracy_delta": 28.57,
+                            "top_win_accuracy_improvements": [
+                                {
+                                    "league": "premier_league",
+                                    "baseline_win_accuracy": 28.57,
+                                    "replay_win_accuracy": 57.14,
+                                    "win_accuracy_delta": 28.57,
+                                }
+                            ],
+                        },
+                    },
+                    "over_under_report": {"by_line_source": {}},
+                }
+
+        args = Namespace(refresh=True, json=False)
+        buffer = io.StringIO()
+
+        with patch("result_manager.ResultManager", return_value=DummyAccuracyManager()), redirect_stdout(buffer):
+            cli.run_openclaw_accuracy(args)
+
+        output = buffer.getvalue()
+        self.assertIn("总体准确率: 43.06% (31/72)", output)
+        self.assertIn("当前模型重放胜平负准确率: 57.14% (8/14)", output)
+        self.assertIn("  基线对比: 28.57% -> 57.14% (+28.57pt)", output)
+        self.assertIn("  - premier_league: 28.57% -> 57.14% (+28.57pt)", output)
+
+    def test_apply_reanalysis_passes_filters_and_flags(self):
+        captured = {}
+        calls = {}
+
+        class DummyApplyManager:
+            def apply_reanalysis_predictions(self, **kwargs):
+                calls.update(kwargs)
+                return {"applied_count": 1, "skipped_count": 0}
+
+        args = Namespace(
+            league="ligue_1",
+            input="reanalysis_results_ligue_1.json",
+            match_id=["ligue_1_20260518_里昂_朗斯"],
+            only_improved=True,
+            dry_run=True,
+            refresh_accuracy=True,
+            json=True,
+        )
+
+        with patch("result_manager.ResultManager", return_value=DummyApplyManager()), patch(
+            "app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)
+        ):
+            cli.run_openclaw_apply_reanalysis(args)
+
+        self.assertEqual(
+            calls,
+            {
+                "league": "ligue_1",
+                "input_path": "reanalysis_results_ligue_1.json",
+                "match_ids": ["ligue_1_20260518_里昂_朗斯"],
+                "only_improved": True,
+                "dry_run": True,
+                "refresh_accuracy": True,
+            },
+        )
+        self.assertEqual(captured["payload"]["command"], "apply-reanalysis")
+        self.assertEqual(
+            captured["payload"]["data"]["runtime_profile"]["agent_roles"],
+            cli.get_command_runtime_profile("apply-reanalysis")["agent_roles"],
+        )
 
     def test_predict_match_passes_persist_flag_and_reuses_predictor_persisted_metadata(self):
         captured = {}

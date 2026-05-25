@@ -35,6 +35,36 @@ class ReviewBiasService:
                 "away_shallow_market_doubt": {"draw_shift": 0.014, "home_shift": 0.008},
                 "balanced_draw_guard": {"draw_shift": 0.014},
             },
+            "fragile_home_favorite": {
+                "enabled": True,
+                "lead_max": 0.12,
+                "min_evidence": 2,
+                "draw_shift": 0.012,
+                "draw_shift_floor": 0.008,
+                "upset_shift": 0.022,
+                "strong_away_shift": 0.03,
+                "max_draw_ratio_vs_away": 0.58,
+                "motivation_bonus": 0.006,
+                "mismatch_bonus": 0.006,
+                "euro_support_buckets": ["market_opposes", "draw_guarded", "draw_live", "draw_soft", "unknown"],
+                "narrow_away_bump": {
+                    "enabled": True,
+                    "target_buckets": ["home:unknown", "home:level_ball", "home:level_medium"],
+                    "min_away_shift": 0.02,
+                    "bump": 0.005,
+                    "max_away_shift": 0.034,
+                    "blocked_euro_support_buckets": ["draw_guarded", "draw_live", "draw_soft"],
+                    "blocked_scenarios": ["balanced_draw_guard"],
+                    "near_tie_draw_trim": {
+                        "enabled": True,
+                        "draw_away_gap_max": 0.004,
+                        "max_trim": 0.003,
+                        "target_margin": 0.0006,
+                        "blocked_goal_pressures": ["under"],
+                        "blocked_ou_signals": ["under_water_drop", "ou_line_down"]
+                    }
+                },
+            },
             "learning_multipliers": {
                 "draw_multiplier": 1.0,
                 "upset_multiplier": 1.0,
@@ -43,24 +73,80 @@ class ReviewBiasService:
                 "three_layer_max_draw_shift": 0.024,
                 "three_layer_max_upset_shift": 0.02
             },
+            "premier_league": {
+                "home_draw_relief": {
+                    "enabled": True,
+                    "home_prob_max": 0.41,
+                    "draw_prob_min": 0.33,
+                    "away_prob_min": 0.25,
+                    "draw_shift": 0.036,
+                    "strong_away_shift": 0.03,
+                    "balanced_away_floor": 0.024,
+                    "max_draw_ratio_vs_away": 1.15,
+                    "allowed_buckets": ["level_ball", "level_shallow", "level_medium", "unknown"],
+                    "follow_through": {
+                        "enabled": True,
+                        "draw_away_gap_max": 0.06,
+                        "max_trim": 0.032,
+                        "target_margin": 0.0012
+                    }
+                }
+            },
+            "ligue_1": {
+                "home_away_relief": {
+                    "enabled": True,
+                    "home_prob_max": 0.41,
+                    "draw_prob_min": 0.32,
+                    "away_prob_min": 0.24,
+                    "lead_max": 0.08,
+                    "away_shift": 0.021,
+                    "draw_shift_floor": 0.012,
+                    "max_draw_ratio_vs_away": 0.72,
+                    "allowed_buckets": ["level_ball", "level_shallow", "level_medium", "unknown"]
+                }
+            },
+            "serie_a": {
+                "home_draw_guard_relief": {
+                    "enabled": True,
+                    "min_risk_score": 14.0,
+                    "home_prob_max": 0.42,
+                    "draw_prob_min": 0.3,
+                    "away_prob_min": 0.255,
+                    "lead_max": 0.11,
+                    "away_shift": 0.03,
+                    "max_draw_ratio_vs_away": 0.75,
+                    "allowed_buckets": ["level_medium"],
+                    "allowed_euro_support_buckets": ["draw_guarded"],
+                    "allowed_goal_pressures": ["under"]
+                },
+                "draw_to_away_relief": {
+                    "enabled": True,
+                    "draw_prob_max": 0.385,
+                    "home_prob_max": 0.34,
+                    "away_prob_min": 0.29,
+                    "gap_max": 0.085,
+                    "shift": 0.046,
+                    "allowed_buckets": ["level_ball", "level_shallow", "unknown"]
+                }
+            },
         },
         "score": {
             "open_match_total_threshold": 2.8,
             "strong_open_match_total_threshold": 3.1,
             "motivation_risk_min_score": 8.0,
             "home_open_template": {
-                "1-0": 0.84,
-                "2-0": 0.91,
-                "2-1": 1.1,
-                "3-0": 1.02,
-                "3-1": 1.12,
+                "1-0": 0.78,
+                "2-0": 0.88,
+                "2-1": 1.14,
+                "3-0": 1.04,
+                "3-1": 1.14,
             },
             "away_open_template": {
-                "0-1": 0.84,
-                "0-2": 0.98,
-                "1-2": 1.1,
-                "0-3": 1.04,
-                "1-3": 1.12,
+                "0-1": 0.82,
+                "0-2": 1.02,
+                "1-2": 1.14,
+                "0-3": 1.06,
+                "1-3": 1.14,
             },
             "draw_open_template": {
                 "0-0": 0.8,
@@ -68,20 +154,36 @@ class ReviewBiasService:
                 "2-2": 1.16,
                 "3-3": 1.06,
             },
+            "serie_a_away_relief": {
+                "enabled": True,
+                "min_risk_score": 14.0,
+                "allowed_buckets": ["level_medium"],
+                "allowed_euro_support_buckets": ["draw_guarded", "market_opposes"],
+                "allowed_goal_pressures": ["under"],
+                "draw_as_coverage_only": True,
+                "template_factors": {
+                    "0-1": 1.18,
+                    "0-2": 1.12,
+                    "1-2": 1.1,
+                    "0-0": 0.76,
+                    "1-1": 0.84,
+                },
+                "preferred_coverage_scores": ["0-1", "0-2", "1-2"],
+            },
             "bundesliga": {
                 "home_open_template": {
-                    "1-0": 0.8,
-                    "2-0": 0.9,
-                    "2-1": 1.12,
-                    "3-0": 1.08,
-                    "3-1": 1.14,
+                    "1-0": 0.74,
+                    "2-0": 0.86,
+                    "2-1": 1.15,
+                    "3-0": 1.1,
+                    "3-1": 1.18,
                 },
                 "away_open_template": {
-                    "0-1": 0.82,
-                    "0-2": 1.0,
-                    "1-2": 1.12,
-                    "0-3": 1.06,
-                    "1-3": 1.14,
+                    "0-1": 0.8,
+                    "0-2": 1.04,
+                    "1-2": 1.16,
+                    "0-3": 1.08,
+                    "1-3": 1.18,
                 },
             },
         },

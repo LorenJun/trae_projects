@@ -18,7 +18,7 @@
 - 基础：`list-leagues`、`health-check`、`setup-openclaw`
 - 采集与预测：`collect-data`、`predict-match`、`predict-match-lite`、`predict-schedule`
 - 结果同步：`pending-results`、`save-result`、`auto-sync-results`、`result-sync-daemon`
-- 复盘与治理：`accuracy`、`sync-pending-results-review`、`build-season-master-review`
+- 复盘与治理：`accuracy`、`apply-reanalysis`、`sync-pending-results-review`、`build-season-master-review`
 - 文档与清理：`refresh-repo-docs`、`purge-nonreal-data`
 - RAG：`rag-rebuild`、`rag-diagnose`、`sync-memory-rag`
 - 归档与运行：`migrate-archive`、`harness-list`、`harness-run`
@@ -33,6 +33,23 @@
 4. `domain/*` 提供 inference / postprocess / live / rag / persistence 等领域服务
 5. `domain/persistence.py` 负责预测落盘 side effects
 6. `runtime/result_sync.py` 与 `result_manager.py` 负责赛果同步、结果闭环与衍生数据更新
+
+## 当前实时盘口回流链
+
+当前正式预测链已经把“赛程抓取、MatchID 定位、快照落盘、预测前注水、缺失盘口补抓”串成闭环：
+
+1. `collect-data` 可优先读取澳客赛程与已存在快照
+2. `okooo_fetch_daily_schedule.py` 可自动翻月到目标年月，并按日期分组抽取整天赛程
+3. `okooo_save_snapshot.py` 可按 `日期 + 主客队 + 时间` 精确锁定比赛行并抓取 `欧赔 / 亚值 / 大小球 / 凯利`
+4. `domain/live.py` 与 `domain/odds.py` 会在预测前注入快照，必要时补抓真实盘口线
+5. 预测输出中的 `over_under.line_source=snapshot_final` 代表真实盘口已成功接入正式链
+
+当前链路已显式防御：
+
+- 错误月份导致的日期定位失败
+- 同日多场比赛误点
+- 错误 `match_id` 导致的串场快照
+- `match_id` 命中但主客队/日期不一致的旧文件复用
 
 关键文件：
 
@@ -105,6 +122,12 @@
 
 `accuracy --refresh` 仍然可用，但更多是显式重建入口，不是唯一的日常闭环方式。
 
+对 replay / reanalysis 场景，正式维护流新增了 `apply-reanalysis`：它会把选中的 replay 预测显式写回正式统计数据源。对 SoT-backed 联赛，这一步会同步更新 prediction archive 与 `<league>/teams_2025-26.md` 备注中的预测片段；这不是自动发生的，也不是 `accuracy --refresh` 的隐式副作用。
+
+## 官方准确率与 replay 准确率
+
+`accuracy` 输出里的 `overall` / `by_league` 代表正式记录口径，回答“系统正式留下的预测表现如何”；`reanalysis_report` 代表当前模型 replay 口径，回答“当前模型重放历史比赛时会如何表现”。两套统计并存是刻意设计，不会因为存在 `reanalysis_results*.json` 就自动互相覆盖；只有显式执行 `apply-reanalysis` 后，选中的 replay 结果才会进入正式统计数据源。
+
 ## 常用命令
 
 ### 环境检查
@@ -135,6 +158,16 @@ python3 prediction_system.py result-sync-daemon --json
 python3 prediction_system.py sync-pending-results-review --days-back 30 --limit 20 --json
 python3 prediction_system.py accuracy --refresh --json
 ```
+
+### 高级维护：Replay / Reanalysis Apply
+
+```bash
+python3 prediction_system.py apply-reanalysis --league la_liga --dry-run --json
+python3 prediction_system.py apply-reanalysis --league bundesliga --only-improved --json
+python3 prediction_system.py apply-reanalysis --league ligue_1 --only-improved --refresh-accuracy --json
+```
+
+推荐顺序是：先准备 `reanalysis_results_<league>.json`，再用 `--dry-run` 预览候选，确认后用 `--only-improved` 做保守 apply，需要时再附带 `--refresh-accuracy`。这条链路属于受控维护动作，不应被当作默认日常赛后闭环。
 
 ### RAG 与仓库治理
 
@@ -184,6 +217,7 @@ europe_leagues/
 - 默认访问口径是 `iPhone Safari UA + Referer: https://m.okooo.com/`
 - 公共移动设备池由 `okooo_mobile_access.py` 统一维护，当前为 `100` 组随机 profile
 - 正式 `predict-match` 已验证可稳定拿到真实欧赔、亚值、大小球、凯利数据
+- `premier_league / 伯恩利 vs 狼队 / 2026-05-24 / MatchID=1296105` 已验证真实盘口回流后可修正最终预测方向
 
 仓库根下的 skills 位于：
 
@@ -195,3 +229,4 @@ europe_leagues/
 - `domain/persistence.py`
 - `runtime/result_sync.py`
 - `result_manager.py`
+- `domain/writeback.py`

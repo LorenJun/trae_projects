@@ -24,11 +24,21 @@ description: "足球比赛预测主技能，按 `prediction_system.py` 发现入
 4. 命令会经 `app/cli.py` 进入 `DomainPredictor` / `EnhancedPredictor`
 5. 预测链会联动：
    - 实时快照刷新
+   - 预测前快照注水与 `match_id` 修正
    - 缺失大小球补抓
+   - 日赛程缓存校验与坏缓存清理
    - EWMA 近况补齐
    - RAG 相似比赛 / 盘口样本 / 爆冷案例检索
    - `domain/persistence.py` 负责 side effects
    - `runtime/result_sync.py` / `result_manager.py` 负责赛后闭环
+
+其中澳客相关链路当前已经支持：
+
+- 自动翻到目标年月
+- 按当天日期分组抽取整天比赛
+- 按 `日期 + 主客队 + 时间` 精确锁定目标比赛行
+- 快照身份校验，避免错误 `match_id` 或旧文件串场
+- 将真实 `欧赔 / 亚值 / 大小球 / 凯利` 回流到正式 `predict-match`
 
 ## 当前澳客访问口径
 
@@ -81,6 +91,8 @@ description: "足球比赛预测主技能，按 `prediction_system.py` 发现入
 - 大小球不要默认按 `2.5` 解读；真实盘口缺失时必须明确落为缺失态
 - 若已知 `match_id`，优先直连抓取，避免重复赛程模糊匹配
 - 若球队在赛程里显示简称，需结合 `okooo_team_aliases.json`
+- 若赛程页当前停在错误月份，应优先依赖脚本自动翻月，而不是手工假设日期标签可直接点击
+- 若 `collect-data` 已有真实快照，`predict-match` 应优先复用并注入，而不是重新走弱兜底
 - 新预测会联动 SoT 或 runtime-only 写回、archive、MEMORY、RAG 与 result sync registry
 - 赛后回填应优先走 `save-result` / `auto-sync-results` / `result-sync-daemon` / `sync-pending-results-review`
 - 默认使用 CLI-first，不要把底层 Python import 当成标准用户流程
@@ -93,11 +105,10 @@ description: "足球比赛预测主技能，按 `prediction_system.py` 发现入
 cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py predict-match \
   --league premier_league \
-  --home-team 曼联 \
-  --away-team 布伦特福德 \
-  --date 2026-04-28 \
-  --time 03:00 \
-  --match-id 1296070 \
+  --home-team 伯恩利 \
+  --away-team 狼队 \
+  --date 2026-05-24 \
+  --time 23:00 \
   --json
 ```
 
@@ -154,11 +165,16 @@ python3 prediction_system.py save-result --match-id premier_league_20260428_曼�
 当前链路已用以下样例做过正式 `predict-match` 验证：
 
 - `la_liga / 埃尔切 vs 赫塔费 / MatchID=1302914`
+- `premier_league / 伯恩利 vs 狼队 / MatchID=1296105`
 - 可稳定拿到真实：
   - 欧赔 `multi_company_consensus`
   - 亚值
   - 大小球
   - 凯利
+- 其中 `伯恩利 vs 狼队` 已验证：
+  - 先由赛程页自动翻月到 `2026-05`
+  - 从当天 10 场比赛中精确定位目标行
+  - 真实盘口回流后，正式预测从偏 `客胜` 修正为偏 `平局`
 
 ## 调试边界
 

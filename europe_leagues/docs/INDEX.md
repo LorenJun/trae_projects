@@ -25,6 +25,7 @@
 - `auto-sync-results`
 - `result-sync-daemon`
 - `accuracy`
+- `apply-reanalysis`
 - `sync-pending-results-review`
 - `build-season-master-review`
 - `refresh-repo-docs`
@@ -42,9 +43,9 @@
 
 ### 核心说明
 
-- `../README.md`：应用级总览、入口说明、SoT/runtime 边界、核心命令
-- `../README_使用指南.md`：CLI-first 执行手册与常见工作流
-- `PRD_足球预测系统_2026.md`：产品视角 PRD 与当前架构假设
+- `../README.md`：应用级总览、入口说明、SoT/runtime 边界、核心命令、官方 vs replay 准确率口径
+- `../README_使用指南.md`：CLI-first 执行手册、默认工作流、高级 replay/apply 维护流
+- `PRD_足球预测系统_2026.md`：产品视角 PRD、当前架构假设与 replay/apply 治理语义
 
 ### 专项指南
 
@@ -75,6 +76,8 @@
 - `ligue_1`
 - `world_cup`
 
+对 SoT-backed 联赛，`apply-reanalysis` 会把选中的 replay 预测同时写回 prediction archive 与对应 `<league>/teams_2025-26.md` 的预测备注片段。
+
 ### runtime-only
 
 以下 competition 以运行时归档与滚动记忆为主：
@@ -83,6 +86,13 @@
 - `champions_league`
 - `conference_league`
 - 其他杯赛 / 欧战扩展比赛
+
+## 结果统计口径
+
+- `accuracy` 主统计中的 `overall` / `by_league` 代表正式记录口径
+- `reanalysis_report` 代表当前模型 replay 口径
+- 两者并存是设计行为，不会自动互相覆盖
+- `apply-reanalysis` 是把选中的 replay 结果显式提升为正式记录的维护动作
 
 ## 技能位置
 

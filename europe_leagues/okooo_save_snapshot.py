@@ -142,7 +142,7 @@ def _time_tokens(hh_mm: str) -> list[str]:
     return uniq
 
 
-def _candidate_date_hints(date_yyyy_mm_dd: str, hh_mm: str = "") -> list[str]:
+def _candidate_date_hints(date_yyyy_mm_dd: str, hh_mm: str = "", strict_identity: bool = False) -> list[str]:
     """Return candidate dates for schedule matching.
 
     Some overnight matches are stored in local league files as the next calendar
@@ -154,6 +154,8 @@ def _candidate_date_hints(date_yyyy_mm_dd: str, hh_mm: str = "") -> list[str]:
     if not raw:
         return []
     out = [raw]
+    if strict_identity:
+        return out
     try:
         base = datetime.strptime(raw, "%Y-%m-%d")
     except Exception:
@@ -181,6 +183,225 @@ def _candidate_date_hints(date_yyyy_mm_dd: str, hh_mm: str = "") -> list[str]:
             seen.add(item)
             uniq.append(item)
     return uniq
+
+
+def _target_year_month(date_yyyy_mm_dd: str) -> Optional[tuple[int, int]]:
+    if not date_yyyy_mm_dd:
+        return None
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", date_yyyy_mm_dd.strip())
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+def _read_schedule_month_state(bu: Any) -> Dict[str, Any]:
+    js = r"""
+(() => {
+  const nodes = Array.from(document.querySelectorAll('a,div,span,button,li,p,em,strong,h1,h2,h3'));
+  let best = null;
+  for (const el of nodes) {
+    const text = String(el?.innerText || '').replace(/\s+/g, '').trim();
+    if (!text || text.length > 24) continue;
+    const m = text.match(/(\d{4})年(\d{1,2})月/);
+    if (!m) continue;
+    const candidate = {
+      text,
+      year: Number(m[1]),
+      month: Number(m[2]),
+      tag: el?.tagName || '',
+    };
+    if (!best || candidate.text.length < best.text.length) {
+      best = candidate;
+    }
+  }
+  if (!best) return JSON.stringify({found:false});
+  return JSON.stringify({
+    found: true,
+    text: best.text,
+    year: best.year,
+    month: best.month,
+    tag: best.tag,
+  });
+})()
+"""
+    result = bu.eval_json(js)
+    if isinstance(result, dict):
+        return result
+    return {"found": False}
+
+
+def _click_schedule_month_nav(bu: Any, direction: str) -> Dict[str, Any]:
+    label = "下月" if direction == "next" else "上月"
+    js = r"""
+(() => {
+  const label = %s;
+  const nodes = Array.from(document.querySelectorAll('a,div,span,button,li,p,em,strong'));
+  const candidates = nodes
+    .map(el => ({el, text: String(el?.innerText || '').replace(/\s+/g, '').trim()}))
+    .filter(x => x.text && x.text.includes(label))
+    .filter(x => x.text.length <= 12)
+    .sort((a, b) => a.text.length - b.text.length);
+  if (!candidates.length) {
+    return JSON.stringify({clicked:false, direction:label, reason:'nav_not_found'});
+  }
+  const target = candidates[0];
+  target.el.click();
+  return JSON.stringify({
+    clicked: true,
+    direction: label,
+    text: target.text,
+    tag: target.el?.tagName || '',
+  });
+})()
+""" % json.dumps(label, ensure_ascii=False)
+    result = bu.eval_json(js)
+    if isinstance(result, dict):
+        return result
+    return {"clicked": False, "direction": label, "reason": "invalid_click_result"}
+
+
+def _navigate_schedule_to_month(bu: Any, date_yyyy_mm_dd: str, max_steps: int = 18) -> Dict[str, Any]:
+    target = _target_year_month(date_yyyy_mm_dd)
+    if not target:
+        return {
+            "attempted": False,
+            "matched": False,
+            "target_date": date_yyyy_mm_dd,
+            "reason": "invalid_target_date",
+        }
+
+    target_year, target_month = target
+    state = _read_schedule_month_state(bu)
+    history: list[Dict[str, Any]] = []
+
+    for step in range(max_steps + 1):
+        if isinstance(state, dict) and state.get("found"):
+            current_year = int(state.get("year") or 0)
+            current_month = int(state.get("month") or 0)
+            if current_year == target_year and current_month == target_month:
+                return {
+                    "attempted": True,
+                    "matched": True,
+                    "target_date": date_yyyy_mm_dd,
+                    "target_year": target_year,
+                    "target_month": target_month,
+                    "steps": step,
+                    "final_state": state,
+                    "history": history,
+                }
+            delta_months = (target_year - current_year) * 12 + (target_month - current_month)
+            direction = "next" if delta_months > 0 else "prev"
+        else:
+            return {
+                "attempted": True,
+                "matched": False,
+                "target_date": date_yyyy_mm_dd,
+                "target_year": target_year,
+                "target_month": target_month,
+                "steps": step,
+                "final_state": state if isinstance(state, dict) else {"found": False},
+                "history": history,
+                "reason": "month_label_not_found",
+            }
+
+        if step >= max_steps:
+            break
+
+        click_result = _click_schedule_month_nav(bu, direction)
+        history.append(
+            {
+                "step": step + 1,
+                "direction": direction,
+                "before": state,
+                "click": click_result,
+            }
+        )
+        if not isinstance(click_result, dict) or click_result.get("clicked") is not True:
+            return {
+                "attempted": True,
+                "matched": False,
+                "target_date": date_yyyy_mm_dd,
+                "target_year": target_year,
+                "target_month": target_month,
+                "steps": step,
+                "final_state": state,
+                "history": history,
+                "reason": f"{direction}_nav_not_found",
+            }
+        time.sleep(1.4)
+        state = _read_schedule_month_state(bu)
+
+    return {
+        "attempted": True,
+        "matched": False,
+        "target_date": date_yyyy_mm_dd,
+        "target_year": target_year,
+        "target_month": target_month,
+        "steps": max_steps,
+        "final_state": state if isinstance(state, dict) else {"found": False},
+        "history": history,
+        "reason": "max_steps_exceeded",
+    }
+
+
+def _click_schedule_date(bu: Any, date_yyyy_mm_dd: str) -> Dict[str, Any]:
+    tokens = _date_tokens(date_yyyy_mm_dd)
+    if not tokens:
+        return {"clicked": False, "reason": "invalid_target_date", "target_date": date_yyyy_mm_dd}
+    js = r"""
+(() => {
+  const tokens = %s;
+  const nodes = Array.from(document.querySelectorAll('a,div,span,button,li,p,em,strong,td,th,h1,h2,h3'));
+  const norm = (t) => String(t || '').replace(/\s+/g, '').trim();
+  const candidates = [];
+  for (const el of nodes) {
+    const text = norm(el?.innerText);
+    if (!text || text.length > 12) continue;
+    if (!tokens.includes(text)) continue;
+    const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+    const top = rect ? rect.top : 99999;
+    const left = rect ? rect.left : 99999;
+    const width = rect ? rect.width : 0;
+    const height = rect ? rect.height : 0;
+    const visible = rect ? (width > 0 && height > 0) : true;
+    if (!visible) continue;
+    candidates.push({
+      el,
+      text,
+      top,
+      left,
+      width,
+      height,
+      tag: el?.tagName || '',
+      nearTop: top >= -5 && top <= 260,
+    });
+  }
+  candidates.sort((a, b) => {
+    if (Number(b.nearTop) !== Number(a.nearTop)) return Number(b.nearTop) - Number(a.nearTop);
+    if (a.top !== b.top) return a.top - b.top;
+    if (a.left !== b.left) return a.left - b.left;
+    return a.text.length - b.text.length;
+  });
+  if (!candidates.length) {
+    return JSON.stringify({clicked:false, tokens, reason:'date_tab_not_found'});
+  }
+  const target = candidates[0];
+  target.el.click();
+  return JSON.stringify({
+    clicked: true,
+    token: target.text,
+    text: target.text,
+    top: target.top,
+    left: target.left,
+    tag: target.tag,
+    near_top: target.nearTop,
+  });
+})()
+""" % json.dumps(tokens, ensure_ascii=False)
+    result = bu.eval_json(js)
+    if isinstance(result, dict):
+        return result
+    return {"clicked": False, "reason": "invalid_click_result", "target_date": date_yyyy_mm_dd}
 
 
 def _alias_table_path() -> str:
@@ -231,6 +452,8 @@ def _find_match_id_from_schedule_cache(
     candidate_dates: list[str],
     alias_table: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
+    from enhanced_prediction_workflow import validate_schedule_cache_payload
+
     alias_table = alias_table or {}
     t1_tokens = _norm_team_tokens_multi(_team_aliases(alias_table, league, team1))
     t2_tokens = _norm_team_tokens_multi(_team_aliases(alias_table, league, team2))
@@ -243,6 +466,13 @@ def _find_match_id_from_schedule_cache(
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
+            continue
+        validation = validate_schedule_cache_payload(
+            payload,
+            league_code=_league_slug(league),
+            match_date=current_date,
+        )
+        if validation.get("status") != "valid":
             continue
         for row in payload.get("matches") or []:
             if not isinstance(row, dict):
@@ -315,6 +545,79 @@ def _norm_team_tokens_multi(names: list[str]) -> list[str]:
     return sorted([t for t in tokens if len(t) >= 2], key=len, reverse=True)
 
 
+
+def _pick_best_token_hit(compact_text: str, tokens: list[str]) -> Optional[Dict[str, Any]]:
+    best: Optional[Dict[str, Any]] = None
+    for token in tokens or []:
+        position = compact_text.find(token)
+        if position < 0:
+            continue
+        candidate = {"token": token, "position": position, "length": len(token)}
+        if best is None:
+            best = candidate
+            continue
+        if candidate["length"] > best["length"]:
+            best = candidate
+            continue
+        if candidate["length"] == best["length"] and candidate["position"] < best["position"]:
+            best = candidate
+    return best
+
+
+
+def _select_best_schedule_row(
+    rows: list[Dict[str, Any]],
+    *,
+    team1: str,
+    team2: str,
+    league: str = "",
+    alias_table: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    alias_table = alias_table or {}
+    team1_tokens = _norm_team_tokens_multi(_team_aliases(alias_table, league, team1))
+    team2_tokens = _norm_team_tokens_multi(_team_aliases(alias_table, league, team2))
+    best_row: Optional[Dict[str, Any]] = None
+    best_score: Optional[tuple] = None
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        compact_text = re.sub(r"\s+", "", str(row.get("text") or "")).strip()
+        if not compact_text:
+            continue
+        team1_hit = _pick_best_token_hit(compact_text, team1_tokens)
+        team2_hit = _pick_best_token_hit(compact_text, team2_tokens)
+        if not team1_hit or not team2_hit:
+            continue
+        ordered = int(team1_hit["position"] <= team2_hit["position"])
+        if ordered:
+            gap = max(0, team2_hit["position"] - (team1_hit["position"] + team1_hit["length"]))
+        else:
+            gap = 9999
+        broad_round_penalty = compact_text.count("第")
+        score = (
+            ordered,
+            team1_hit["length"] + team2_hit["length"],
+            -gap,
+            -max(0, len(compact_text) - 48),
+            -broad_round_penalty,
+        )
+        if best_score is None or score > best_score:
+            best_row = row
+            best_score = score
+    return best_row
+
+
+
+def _is_broad_round_summary_row(row: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(row, dict):
+        return False
+    compact_text = re.sub(r"\s+", "", str(row.get("text") or "")).strip()
+    if not compact_text:
+        return False
+    return compact_text.count("第") >= 3 and len(compact_text) >= 60
+
+
+
 def _eval_scroll_to_bottom(bu: Any) -> None:
     bu.eval_json("(() => { window.scrollTo(0, document.body.scrollHeight); return JSON.stringify({ok:true}); })()")
     time.sleep(1.2)
@@ -323,6 +626,154 @@ def _eval_scroll_to_bottom(bu: Any) -> None:
 def _eval_scroll_to_top(bu: Any) -> None:
     bu.eval_json("(() => { window.scrollTo(0, 0); return JSON.stringify({ok:true}); })()")
     time.sleep(0.8)
+
+
+def _extract_schedule_rows_for_date_on_current_page(
+    bu: Any,
+    date_hint: str = "",
+    limit: int = 100,
+) -> Dict[str, Any]:
+    d_tokens = _date_tokens(date_hint)
+    js = r"""
+(() => {
+  const dateFull = %s;
+  const tokens = %s;
+  const limit = %d;
+  const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+  const compact = (s) => String(s || '').replace(/\s+/g, '').trim();
+  const hasDateToken = (text) => {
+    const c = compact(text);
+    if (dateFull && c.includes(dateFull)) return true;
+    return (tokens || []).some(tok => tok && c.includes(tok));
+  };
+
+  const blocks = Array.from(document.querySelectorAll('div,section,li,tr,tbody'))
+    .map(el => {
+      const text = norm(el.innerText);
+      const itemCount = el.querySelectorAll('.item').length;
+      const matchAnchorCount = el.querySelectorAll("a[href*='MatchID='],a[href*='matchid='],[onclick*='MatchID='],[onclick*='matchid=']").length;
+      return {el, text, itemCount, matchAnchorCount};
+    })
+    .filter(x => x.text && x.text.length < 1500)
+    .filter(x => hasDateToken(x.text));
+
+  blocks.sort((a, b) => {
+    if (b.itemCount !== a.itemCount) return b.itemCount - a.itemCount;
+    if (b.matchAnchorCount !== a.matchAnchorCount) return b.matchAnchorCount - a.matchAnchorCount;
+    return a.text.length - b.text.length;
+  });
+  let root = null;
+  for (const block of blocks) {
+    if (block.itemCount >= 2 || block.matchAnchorCount >= 2) {
+      root = block.el;
+      break;
+    }
+  }
+  if (!root && blocks.length) root = blocks[0].el;
+  if (!root) {
+    return JSON.stringify({count: 0, rows: [], mode: 'date_section_missing'});
+  }
+
+  const dateTitleNode = Array.from(root.children || [])
+    .find(el => hasDateToken(el?.innerText || ''));
+  const sectionDateText = norm(dateTitleNode?.innerText || dateFull || '');
+
+  const out = [];
+  const seen = new Set();
+  const itemNodes = Array.from(root.querySelectorAll('.item'));
+  for (const item of itemNodes) {
+    const text = norm(item.innerText);
+    if (!text) continue;
+    const anchor =
+      item.querySelector("a.middle[href*='MatchID='], a.middle[href*='matchid=']") ||
+      item.querySelector("a.arraw[href*='MatchID='], a.arraw[href*='matchid=']") ||
+      item.querySelector("a[href*='MatchID='], a[href*='matchid=']");
+    if (!anchor) continue;
+    let href = anchor.getAttribute('href') || '';
+    const midMatch = href.match(/MatchID=(\d+)/i) || href.match(/matchid=(\d+)/i);
+    const mid = midMatch ? midMatch[1] : '';
+    if (!mid || seen.has(mid)) continue;
+    if (href.startsWith('/')) href = location.origin + href;
+    out.push({
+      mid,
+      href,
+      text: `${sectionDateText} ${text}`.trim(),
+    });
+    seen.add(mid);
+    if (out.length >= limit) break;
+  }
+
+  if (!out.length) {
+    const anchors = Array.from(root.querySelectorAll("a[href*='MatchID='],a[href*='matchid='],[onclick*='MatchID='],[onclick*='matchid=']")).slice(0, limit * 4);
+    for (const el of anchors) {
+      const attrs = [el.getAttribute?.('href') || '', el.getAttribute?.('onclick') || '', el.getAttribute?.('data-href') || ''].join(' ');
+      const midMatch = attrs.match(/MatchID=(\d+)/i) || attrs.match(/matchid=(\d+)/i);
+      const mid = midMatch ? midMatch[1] : '';
+      if (!mid || seen.has(mid)) continue;
+      const row = el.closest('.item') || el.closest('li') || el.closest('tr') || el.parentElement;
+      const text = norm(row?.innerText || el.innerText || '');
+      if (!text) continue;
+      let href = el.getAttribute?.('href') || '';
+      if (!href || !/MatchID=/i.test(href)) {
+        href = `https://m.okooo.com/match/history.php?MatchID=${mid}`;
+      } else if (href.startsWith('/')) {
+        href = location.origin + href;
+      }
+      out.push({
+        mid,
+        href,
+        text: `${sectionDateText} ${text}`.trim(),
+      });
+      seen.add(mid);
+      if (out.length >= limit) break;
+    }
+  }
+
+  return JSON.stringify({count: out.length, rows: out.slice(0, limit), mode: 'date_section'});
+})()
+""" % (
+        json.dumps(date_hint, ensure_ascii=False),
+        json.dumps(d_tokens, ensure_ascii=False),
+        limit,
+    )
+    return bu.eval_json(js)
+
+
+def _find_rows_in_date_section(
+    bu: Any,
+    team1: str,
+    team2: str,
+    date_hint: str = "",
+    time_hint: str = "",
+    league: str = "",
+    alias_table: Dict[str, Any] | None = None,
+    limit: int = 5,
+) -> Dict[str, Any]:
+    alias_table = alias_table or {}
+    t1_tokens = _norm_team_tokens_multi(_team_aliases(alias_table, league, team1))
+    t2_tokens = _norm_team_tokens_multi(_team_aliases(alias_table, league, team2))
+    tm_tokens = _time_tokens(time_hint)
+    raw = _extract_schedule_rows_for_date_on_current_page(bu, date_hint=date_hint, limit=max(limit * 6, 30))
+    rows = []
+    for row in (raw or {}).get("rows") or []:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("text") or "")
+        compact = re.sub(r"\s+", "", text).strip()
+        if not compact:
+            continue
+        has_t1 = any(tok and tok in compact for tok in t1_tokens)
+        has_t2 = any(tok and tok in compact for tok in t2_tokens)
+        if not has_t1 or not has_t2:
+            continue
+        if tm_tokens and not any(tok and tok in compact for tok in tm_tokens):
+            continue
+        score = 20.0 + (8.0 if tm_tokens else 0.0) + min(len(compact), 80) / 100.0
+        new_row = dict(row)
+        new_row["score"] = score
+        rows.append(new_row)
+    rows.sort(key=lambda x: float(x.get("score") or 0.0), reverse=True)
+    return {"count": len(rows), "rows": rows[:limit], "mode": (raw or {}).get("mode", "date_section")}
 
 
 def _find_rows_fuzzy(
@@ -497,8 +948,34 @@ def _find_rows_anywhere_on_current_page(
     return bu.eval_json(js)
 
 
-def _find_existing_snapshot_by_match_id(out_dir: Path, match_id: str) -> Optional[Path]:
-    """Return an existing snapshot JSON path in out_dir that matches match_id, else None."""
+def _snapshot_identity_matches_request(
+    payload: Dict[str, Any],
+    *,
+    home_team: str = "",
+    away_team: str = "",
+    match_date: str = "",
+) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if home_team and str(payload.get("home_team") or payload.get("team1") or "").strip() != str(home_team).strip():
+        return False
+    if away_team and str(payload.get("away_team") or payload.get("team2") or "").strip() != str(away_team).strip():
+        return False
+    if match_date and str(payload.get("match_date") or "").strip() != str(match_date).strip():
+        return False
+    return True
+
+
+
+def _find_existing_snapshot_by_match_id(
+    out_dir: Path,
+    match_id: str,
+    *,
+    home_team: str = "",
+    away_team: str = "",
+    match_date: str = "",
+) -> Optional[Path]:
+    """Return an existing snapshot path only when both match_id and identity match."""
     if not match_id:
         return None
     try:
@@ -511,8 +988,16 @@ def _find_existing_snapshot_by_match_id(out_dir: Path, match_id: str) -> Optiona
             data = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             continue
-        if isinstance(data, dict) and str(data.get("match_id") or "") == str(match_id):
-            return p
+        if not isinstance(data, dict) or str(data.get("match_id") or "") != str(match_id):
+            continue
+        if not _snapshot_identity_matches_request(
+            data,
+            home_team=home_team,
+            away_team=away_team,
+            match_date=match_date,
+        ):
+            continue
+        return p
     return None
 
 
@@ -2039,7 +2524,20 @@ def _find_match_id(
     date_hint: str = "",
     time_hint: str = "",
     alias_table: Dict[str, Any] | None = None,
+    strict_identity: bool = False,
 ) -> Dict[str, Any]:
+    def find_rows_in_section(date_hint_current: str, time_hint_current: str) -> Dict[str, Any]:
+        return _find_rows_in_date_section(
+            bu,
+            team1,
+            team2,
+            date_hint=date_hint_current,
+            time_hint=time_hint_current,
+            league=league,
+            alias_table=alias_table or {},
+            limit=5,
+        )
+
     def find_rows(date_hint_current: str, time_hint_current: str) -> Dict[str, Any]:
         return _find_rows_fuzzy(
             bu,
@@ -2064,32 +2562,66 @@ def _find_match_id(
             limit=5,
         )
 
-    candidate_dates = _candidate_date_hints(date_hint, time_hint)
+    candidate_dates = _candidate_date_hints(date_hint, time_hint, strict_identity=strict_identity)
     if not candidate_dates:
         candidate_dates = [date_hint]
 
     def search_with_candidates(relax_time: bool = False) -> Dict[str, Any]:
         effective_time_hint = "" if relax_time else time_hint
         for current_date in candidate_dates:
+            found_local = find_rows_in_section(current_date, effective_time_hint)
+            if isinstance(found_local, dict) and found_local.get("rows"):
+                best_local = _select_best_schedule_row(
+                    found_local.get("rows") or [],
+                    team1=team1,
+                    team2=team2,
+                    league=league,
+                    alias_table=alias_table or {},
+                )
+                if isinstance(best_local, dict) and not _is_broad_round_summary_row(best_local):
+                    found_local["_best_row"] = best_local
+                    if current_date and current_date != date_hint:
+                        found_local["_matched_date_hint"] = current_date
+                    if relax_time and time_hint:
+                        found_local["_matched_time_hint"] = effective_time_hint
+                    return found_local
             found_local = find_rows(current_date, effective_time_hint)
             if isinstance(found_local, dict) and found_local.get("rows"):
-                if current_date and current_date != date_hint:
-                    found_local["_matched_date_hint"] = current_date
-                if relax_time and time_hint:
-                    found_local["_matched_time_hint"] = effective_time_hint
-                return found_local
+                best_local = _select_best_schedule_row(
+                    found_local.get("rows") or [],
+                    team1=team1,
+                    team2=team2,
+                    league=league,
+                    alias_table=alias_table or {},
+                )
+                if isinstance(best_local, dict) and not _is_broad_round_summary_row(best_local):
+                    found_local["_best_row"] = best_local
+                    if current_date and current_date != date_hint:
+                        found_local["_matched_date_hint"] = current_date
+                    if relax_time and time_hint:
+                        found_local["_matched_time_hint"] = effective_time_hint
+                    return found_local
             # Relaxed midnight fallback should avoid broad page-wide scans; otherwise
             # large container text can incorrectly match unrelated rows and collapse
             # multiple matches onto the same MatchID.
-            if relax_time:
+            if relax_time or strict_identity:
                 continue
             found_local = find_rows_anywhere(current_date, effective_time_hint)
             if isinstance(found_local, dict) and found_local.get("rows"):
-                if current_date and current_date != date_hint:
-                    found_local["_matched_date_hint"] = current_date
-                if relax_time and time_hint:
-                    found_local["_matched_time_hint"] = effective_time_hint
-                return found_local
+                best_local = _select_best_schedule_row(
+                    found_local.get("rows") or [],
+                    team1=team1,
+                    team2=team2,
+                    league=league,
+                    alias_table=alias_table or {},
+                )
+                if isinstance(best_local, dict) and not _is_broad_round_summary_row(best_local):
+                    found_local["_best_row"] = best_local
+                    if current_date and current_date != date_hint:
+                        found_local["_matched_date_hint"] = current_date
+                    if relax_time and time_hint:
+                        found_local["_matched_time_hint"] = effective_time_hint
+                    return found_local
         return {}
 
     bu.open(REMEN_URL)
@@ -2108,12 +2640,17 @@ def _find_match_id(
     bu.eval_json(click_league)
     time.sleep(2.0)
 
+    if date_hint:
+        _navigate_schedule_to_month(bu, date_hint, max_steps=18)
+
     found = search_with_candidates()
     if not isinstance(found, dict) or not found.get("rows"):
         league_url = _mobile_league_url(league)
         if league_url:
             bu.open(league_url)
             time.sleep(2.0)
+            if date_hint:
+                _navigate_schedule_to_month(bu, date_hint, max_steps=18)
             found = search_with_candidates()
 
     # If still not found, try scrolling to load more schedule blocks.
@@ -2127,23 +2664,32 @@ def _find_match_id(
         if not isinstance(found, dict) or not found.get("rows"):
             _eval_scroll_to_top(bu)
             found = search_with_candidates()
-    if (not isinstance(found, dict) or not found.get("rows")) and time_hint:
+    if (not isinstance(found, dict) or not found.get("rows")) and time_hint and not strict_identity:
         found = search_with_candidates(relax_time=True)
     if not isinstance(found, dict) or not found.get("rows"):
-        cached = _find_match_id_from_schedule_cache(
-            league=league,
-            team1=team1,
-            team2=team2,
-            candidate_dates=candidate_dates,
-            alias_table=alias_table or {},
-        )
-        if isinstance(cached, dict) and cached.get("match_id"):
-            return cached
+        if not strict_identity:
+            cached = _find_match_id_from_schedule_cache(
+                league=league,
+                team1=team1,
+                team2=team2,
+                candidate_dates=candidate_dates,
+                alias_table=alias_table or {},
+            )
+            if isinstance(cached, dict) and cached.get("match_id"):
+                return cached
     if not isinstance(found, dict) or not found.get("rows"):
         raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
 
-    first = found["rows"][0]
-    return {"match_id": first["mid"], "schedule_row": first}
+    best = found.get("_best_row") if isinstance(found.get("_best_row"), dict) else _select_best_schedule_row(
+        found.get("rows") or [],
+        team1=team1,
+        team2=team2,
+        league=league,
+        alias_table=alias_table or {},
+    )
+    if not isinstance(best, dict):
+        best = found["rows"][0]
+    return {"match_id": best["mid"], "schedule_row": best}
 
 
 def _extract_europe(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
@@ -2597,6 +3143,11 @@ def main() -> None:
         default="",
         help="可选：比赛时间 HH:MM，用于在赛程中更精准定位（例如 03:00）。",
     )
+    parser.add_argument(
+        "--strict-identity",
+        action="store_true",
+        help="严格按请求日期+主客队(+时间)定位比赛，禁用相邻日期与宽松页面兜底。",
+    )
     args = parser.parse_args()
 
     event_name = f"{args.team1}vs{args.team2}"
@@ -2623,72 +3174,89 @@ def main() -> None:
         def client_factory(session_name: str) -> Any:
             return BrowserUse(session=session_name, headed=args.headed)
 
-    if args.match_id:
-        match_id = str(args.match_id)
-        found = {
-            "match_id": match_id,
-            "schedule_row": {
-                "mid": match_id,
-                "href": f"https://m.okooo.com/match/history.php?MatchID={match_id}",
-                "text": "",
-                "score": None,
-            },
-        }
-    else:
-        alias_table = _load_alias_table()
-        schedule_bu = client_factory(f"{session_prefix}_sched")
-        try:
-            found = _find_match_id(
-                schedule_bu,
-                args.league,
-                args.team1,
-                args.team2,
-                date_hint=args.date,
-                time_hint=args.time,
-                alias_table=alias_table,
-            )
-        finally:
-            schedule_bu.close()
-        match_id = found["match_id"]
-
-    # Output path policy:
-    # - If a snapshot with the same match_id already exists in out_dir, overwrite it.
-    # - Else: if --overwrite is set, use a stable event filename.
-    # - Else: create a timestamped filename.
-    out_path: Path
-    existing = None if args.no_matchid_dedupe else _find_existing_snapshot_by_match_id(out_dir, str(match_id))
-    if existing:
-        out_path = existing
-    else:
-        if args.overwrite:
-            filename = f"{_safe_filename(event_name)}.json"
+    schedule_bu = None
+    keep_schedule_session_alive = bool(
+        args.driver == "local-chrome" and chrome_meta.get("started_by_script")
+    )
+    try:
+        if args.match_id:
+            match_id = str(args.match_id)
+            found = {
+                "match_id": match_id,
+                "schedule_row": {
+                    "mid": match_id,
+                    "href": f"https://m.okooo.com/match/history.php?MatchID={match_id}",
+                    "text": "",
+                    "score": None,
+                },
+            }
         else:
-            filename = f"{_safe_filename(event_name)}_{_now_stamp()}.json"
-        out_path = out_dir / filename
+            alias_table = _load_alias_table()
+            schedule_bu = client_factory(f"{session_prefix}_sched")
+            try:
+                found = _find_match_id(
+                    schedule_bu,
+                    args.league,
+                    args.team1,
+                    args.team2,
+                    date_hint=args.date,
+                    time_hint=args.time,
+                    alias_table=alias_table,
+                    strict_identity=bool(args.strict_identity),
+                )
+            finally:
+                if schedule_bu and not keep_schedule_session_alive:
+                    schedule_bu.close()
+                    schedule_bu = None
+            match_id = found["match_id"]
 
-    payload: Dict[str, Any] = {
-        "captured_at": datetime.now().isoformat(timespec="seconds"),
-        "driver": args.driver,
-        "chrome": chrome_meta if chrome_meta else None,
-        "league": args.league,
-        "event": event_name,
-        "match_id": match_id,
-        "match_date": args.date or "",
-        "home_team": args.team1,
-        "away_team": args.team2,
-        "match_time": found["schedule_row"].get("text", ""),
-        "schedule": found["schedule_row"],
-        "欧赔": _extract_europe_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_eu"),
-        "亚值": _extract_asian_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_as"),
-        "大小球": _extract_totals_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_ou"),
-        "凯利": _extract_kelly_full_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_ke"),
-    }
-    if args.overwrite:
-        payload["_note"] = "overwrite=true: same event writes to a stable filename"
-    if existing:
-        payload["_note_match_id_overwrite"] = f"match_id={match_id}: overwrote existing snapshot file"
-    out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(str(out_path))
+        # Output path policy:
+        # - If a snapshot with the same match_id already exists in out_dir, overwrite it.
+        # - Else: if --overwrite is set, use a stable event filename.
+        # - Else: create a timestamped filename.
+        out_path: Path
+        existing = None if args.no_matchid_dedupe else _find_existing_snapshot_by_match_id(
+            out_dir,
+            str(match_id),
+            home_team=args.team1,
+            away_team=args.team2,
+            match_date=args.date,
+        )
+        if existing:
+            out_path = existing
+        else:
+            if args.overwrite:
+                filename = f"{_safe_filename(event_name)}.json"
+            else:
+                filename = f"{_safe_filename(event_name)}_{_now_stamp()}.json"
+            out_path = out_dir / filename
+
+        payload: Dict[str, Any] = {
+            "captured_at": datetime.now().isoformat(timespec="seconds"),
+            "driver": args.driver,
+            "chrome": chrome_meta if chrome_meta else None,
+            "league": args.league,
+            "event": event_name,
+            "match_id": match_id,
+            "match_date": args.date or "",
+            "home_team": args.team1,
+            "away_team": args.team2,
+            "match_time": found["schedule_row"].get("text", ""),
+            "schedule": found["schedule_row"],
+            "欧赔": _extract_europe_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_eu"),
+            "亚值": _extract_asian_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_as"),
+            "大小球": _extract_totals_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_ou"),
+            "凯利": _extract_kelly_full_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_ke"),
+        }
+        if args.overwrite:
+            payload["_note"] = "overwrite=true: same event writes to a stable filename"
+        if existing:
+            payload["_note_match_id_overwrite"] = f"match_id={match_id}: overwrote existing snapshot file"
+        out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(str(out_path))
+    finally:
+        if schedule_bu:
+            schedule_bu.close()
 
 
 if __name__ == "__main__":

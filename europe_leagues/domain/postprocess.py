@@ -480,6 +480,23 @@ class PredictionPostprocessService:
             goal_pressure = 'under'
         direction = 1.0 if goal_pressure == 'over' else -1.0 if goal_pressure == 'under' else 0.0
         pace_shift = direction * (abs(line_delta) * 0.08 + abs(bias_delta) * 0.25 + abs(bias_final) * 0.06)
+        balanced_high_line_over_nudge = False
+        if (
+            goal_pressure == 'balanced'
+            and final_line >= 3.25
+            and bias_final >= 0.012
+            and bias_delta >= -0.015
+            and ('over_water_drop' in signals or line_delta >= 0.0)
+        ):
+            pace_shift = max(
+                0.008,
+                min(
+                    0.016,
+                    max(0.0, line_delta) * 0.06 + max(0.0, bias_delta) * 0.22 + max(0.0, bias_final) * 0.14,
+                ),
+            )
+            balanced_high_line_over_nudge = True
+            signals.append('ou_high_line_balanced_over_nudge')
         return {
             'available': True,
             'goal_pressure': goal_pressure,
@@ -491,6 +508,7 @@ class PredictionPostprocessService:
             'bias_final': round(bias_final, 6),
             'bias_delta': round(bias_delta, 6),
             'pace_shift': round(pace_shift, 6),
+            'balanced_high_line_over_nudge': balanced_high_line_over_nudge,
             'initial_price_format': initial_prices.get('format'),
             'final_price_format': final_prices.get('format'),
             'initial_prices': initial_prices,
@@ -607,6 +625,14 @@ class PredictionPostprocessService:
             current_odds=odds_payload,
             review_learning=review_learning,
         )
+        euro_final = {}
+        if isinstance(odds_payload, dict):
+            euro_block = odds_payload.get('欧赔') or odds_payload.get('胜平负赔率')
+            if isinstance(euro_block, dict) and isinstance(euro_block.get('final'), dict):
+                euro_final = euro_block.get('final') or {}
+        home_price = self._safe_float(euro_final.get('home') if 'home' in euro_final else euro_final.get('主')) if isinstance(euro_final, dict) else None
+        draw_price = self._safe_float(euro_final.get('draw') if 'draw' in euro_final else euro_final.get('平')) if isinstance(euro_final, dict) else None
+        away_price = self._safe_float(euro_final.get('away') if 'away' in euro_final else euro_final.get('客')) if isinstance(euro_final, dict) else None
         learning = review_learning if isinstance(review_learning, dict) else {}
         league_review = learning.get('league_review') if isinstance(learning.get('league_review'), dict) else {}
         stratified_review = learning.get('outcome_stratified_review') if isinstance(learning.get('outcome_stratified_review'), dict) else {}
@@ -698,6 +724,10 @@ class PredictionPostprocessService:
             match_intelligence=match_intelligence,
         )
         motivation_bias_cfg = outcome_bias.get('motivation_risk') if isinstance(outcome_bias.get('motivation_risk'), dict) else {}
+        risk_score = 0.0
+        supports_upset = False
+        pressure_side = ''
+        favored_side = ''
         if motivation_bias_cfg.get('enabled', True) and isinstance(motivation_risk, dict) and motivation_risk.get('available'):
             risk_score = float(motivation_risk.get('score') or 0.0)
             supports_upset = bool(motivation_risk.get('supports_upset'))
@@ -722,11 +752,508 @@ class PredictionPostprocessService:
                 elif pressure_side == 'home':
                     home_shift = max(home_shift, side_shift)
                 signals.append('review-motivation-risk-correction')
+        fragile_home_cfg = outcome_bias.get('fragile_home_favorite') if isinstance(outcome_bias.get('fragile_home_favorite'), dict) else {}
+        handicap_mismatch = upset_potential.get('handicap_strength_mismatch') if isinstance(upset_potential, dict) and isinstance(upset_potential.get('handicap_strength_mismatch'), dict) else {}
+        if fragile_home_cfg.get('enabled', True) and top_key == 'home_win':
+            evidence: List[str] = []
+            lead_max = float(fragile_home_cfg.get('lead_max') or 0.12)
+            euro_support_buckets = {
+                str(item).strip()
+                for item in (fragile_home_cfg.get('euro_support_buckets') or [])
+                if str(item).strip()
+            }
+            if top_lead <= lead_max:
+                evidence.append('limited_probability_edge')
+            if context.get('handicap_depth_bucket') in {'level_ball', 'level_shallow'}:
+                evidence.append('shallow_market')
+            if str(context.get('euro_support_bucket') or '').strip() in euro_support_buckets:
+                evidence.append('fragile_euro_support')
+            if supports_upset and pressure_side == 'away' and risk_score >= float(motivation_bias_cfg.get('min_score') or 8.0):
+                evidence.append('away_motivation_pressure')
+            elif (
+                league_code == 'serie_a'
+                and supports_upset
+                and favored_side == 'away'
+                and pressure_side == 'home'
+                and risk_score >= max(12.0, float(motivation_bias_cfg.get('min_score') or 8.0))
+                and top_prob <= 0.4
+                and top_lead <= 0.07
+                and context.get('handicap_depth_bucket') in {'level_ball', 'level_shallow'}
+                and str(context.get('euro_support_bucket') or '').strip() in {'soft_support', 'fragile_support', 'market_opposes', 'unknown'}
+            ):
+                evidence.append('away_motivation_pressure')
+            if handicap_mismatch.get('mismatch_detected'):
+                evidence.append('handicap_strength_mismatch')
+            if runner_up >= max(0.24, top_prob - 0.06):
+                evidence.append('runner_up_close')
+            pressure_evidence = {'away_motivation_pressure', 'handicap_strength_mismatch', 'runner_up_close'}
+            if len(evidence) >= int(fragile_home_cfg.get('min_evidence') or 2) and any(item in pressure_evidence for item in evidence):
+                base_draw_shift = float(fragile_home_cfg.get('draw_shift') or 0.012)
+                base_away_shift = float(fragile_home_cfg.get('upset_shift') or 0.022)
+                strong_away_shift = float(fragile_home_cfg.get('strong_away_shift') or base_away_shift)
+                draw_shift = max(draw_shift, float(fragile_home_cfg.get('draw_shift_floor') or 0.008), base_draw_shift)
+                away_shift = max(away_shift, base_away_shift)
+                if 'away_motivation_pressure' in evidence:
+                    away_shift = max(away_shift, strong_away_shift, away_shift + float(fragile_home_cfg.get('motivation_bonus') or 0.0))
+                if 'handicap_strength_mismatch' in evidence:
+                    away_shift = max(away_shift, away_shift + float(fragile_home_cfg.get('mismatch_bonus') or 0.0))
+                max_draw_ratio = float(fragile_home_cfg.get('max_draw_ratio_vs_away') or 0.58)
+                if away_shift > 0 and draw_shift > away_shift * max_draw_ratio:
+                    draw_shift = away_shift * max_draw_ratio
+                signals.append('review-fragile-home-favorite-correction')
+                home_bias_gate['qualified'] = True
+                for item in evidence:
+                    if item not in home_bias_gate['evidence']:
+                        home_bias_gate['evidence'].append(item)
+        narrow_away_cfg = fragile_home_cfg.get('narrow_away_bump') if isinstance(fragile_home_cfg.get('narrow_away_bump'), dict) else {}
+        target_buckets = {str(item).strip() for item in (narrow_away_cfg.get('target_buckets') or []) if str(item).strip()}
+        blocked_euro_support = {
+            str(item).strip() for item in (narrow_away_cfg.get('blocked_euro_support_buckets') or []) if str(item).strip()
+        }
+        blocked_scenarios = {str(item).strip() for item in (narrow_away_cfg.get('blocked_scenarios') or []) if str(item).strip()}
+        narrow_bucket_hit = context.get('stratified_key') in target_buckets if target_buckets else False
+        narrow_support_ok = bool(top_key == 'home_win' and supports_upset and favored_side == 'away')
+        narrow_market_blocked = str(context.get('euro_support_bucket') or '').strip() in blocked_euro_support
+        narrow_scenario_blocked = str(context.get('scenario_name') or '').strip() in blocked_scenarios
+        if (
+            narrow_away_cfg.get('enabled', True)
+            and narrow_bucket_hit
+            and narrow_support_ok
+            and away_shift >= float(narrow_away_cfg.get('min_away_shift') or 0.02)
+            and not narrow_market_blocked
+            and not narrow_scenario_blocked
+        ):
+            away_shift = min(
+                float(narrow_away_cfg.get('max_away_shift') or 0.034),
+                away_shift + float(narrow_away_cfg.get('bump') or 0.005),
+            )
+            signals.append('review-narrow-away-bump')
+            if away_shift > 0 and draw_shift > away_shift * float(fragile_home_cfg.get('max_draw_ratio_vs_away') or 0.58):
+                draw_shift = away_shift * float(fragile_home_cfg.get('max_draw_ratio_vs_away') or 0.58)
+
+        premier_home_draw_relief = outcome_bias.get('home_draw_relief') if isinstance(outcome_bias.get('home_draw_relief'), dict) else {}
+        premier_follow_through_cfg = (
+            premier_home_draw_relief.get('follow_through')
+            if isinstance(premier_home_draw_relief.get('follow_through'), dict)
+            else {}
+        )
+        premier_strong_away_upset = bool(
+            supports_upset
+            and favored_side == 'away'
+            and pressure_side == 'home'
+            and risk_score >= max(12.0, float(motivation_bias_cfg.get('min_score') or 8.0))
+        )
+        premier_home_prob_max = float(premier_home_draw_relief.get('home_prob_max') or 0.38)
+        premier_draw_prob_min = float(premier_home_draw_relief.get('draw_prob_min') or 0.33)
+        premier_away_prob_min = float(premier_home_draw_relief.get('away_prob_min') or 0.29)
+        if premier_strong_away_upset:
+            premier_home_prob_max += 0.015
+            premier_draw_prob_min = max(0.0, premier_draw_prob_min - 0.04)
+            premier_away_prob_min = max(0.0, premier_away_prob_min - 0.02)
+        premier_balanced_unknown_case = bool(
+            context.get('handicap_depth_bucket') == 'unknown'
+            and top_prob <= 0.43
+            and float(probabilities.get('draw', 0.0)) >= 0.30
+            and float(probabilities.get('away_win', 0.0)) >= 0.27
+            and top_lead <= 0.12
+        )
+        premier_balanced_medium_case = bool(
+            context.get('handicap_depth_bucket') == 'level_medium'
+            and top_prob <= 0.405
+            and float(probabilities.get('draw', 0.0)) >= 0.31
+            and float(probabilities.get('away_win', 0.0)) >= 0.255
+            and top_lead <= 0.07
+            and str(context.get('euro_support_bucket') or '').strip() in {'strong_support', 'unknown', 'market_opposes'}
+        )
+        premier_balanced_guard_case = bool(
+            str(context.get('scenario_name') or '').strip() == 'balanced_draw_guard'
+            and context.get('handicap_depth_bucket') in {'level_ball', 'level_medium'}
+            and top_prob <= 0.405
+            and float(probabilities.get('draw', 0.0)) >= 0.265
+            and float(probabilities.get('away_win', 0.0)) >= 0.275
+            and top_lead <= 0.09
+        )
+        premier_balanced_case = premier_balanced_unknown_case or premier_balanced_medium_case or premier_balanced_guard_case
+        premier_allowed_buckets = {
+            str(item).strip() for item in (premier_home_draw_relief.get('allowed_buckets') or []) if str(item).strip()
+        }
+        if (
+            top_key == 'home_win'
+            and league_code == 'premier_league'
+            and premier_home_draw_relief.get('enabled', True)
+            and float(probabilities.get('home_win', 0.0)) <= premier_home_prob_max
+            and (
+                float(probabilities.get('draw', 0.0)) >= premier_draw_prob_min
+                or premier_balanced_case
+            )
+            and (
+                float(probabilities.get('away_win', 0.0)) >= premier_away_prob_min
+                or premier_balanced_case
+            )
+            and context.get('handicap_depth_bucket') in premier_allowed_buckets
+        ):
+            draw_shift = max(draw_shift, float(premier_home_draw_relief.get('draw_shift') or 0.028))
+            signals.append('review-league-premier-home-draw-relief')
+            if premier_strong_away_upset:
+                away_shift = max(away_shift, float(premier_home_draw_relief.get('strong_away_shift') or 0.026), 0.026)
+                signals.append('review-league-premier-away-upset-support')
+            elif premier_balanced_case:
+                away_shift = max(away_shift, float(premier_home_draw_relief.get('balanced_away_floor') or 0.022), 0.022)
+                signals.append('review-league-premier-balanced-away-floor')
+            max_draw_ratio = float(premier_home_draw_relief.get('max_draw_ratio_vs_away') or 1.0)
+            if away_shift > 0 and draw_shift > away_shift * max_draw_ratio:
+                draw_shift = away_shift * max_draw_ratio
+
+        ligue_home_away_relief = outcome_bias.get('home_away_relief') if isinstance(outcome_bias.get('home_away_relief'), dict) else {}
+        ligue_balanced_home_case = bool(
+            top_key == 'home_win'
+            and league_code == 'ligue_1'
+            and float(probabilities.get('home_win', 0.0)) <= float(ligue_home_away_relief.get('home_prob_max') or 0.41)
+            and float(probabilities.get('draw', 0.0)) >= float(ligue_home_away_relief.get('draw_prob_min') or 0.32)
+            and float(probabilities.get('away_win', 0.0)) >= float(ligue_home_away_relief.get('away_prob_min') or 0.24)
+            and top_lead <= float(ligue_home_away_relief.get('lead_max') or 0.08)
+            and context.get('handicap_depth_bucket') in {
+                str(item).strip() for item in (ligue_home_away_relief.get('allowed_buckets') or []) if str(item).strip()
+            }
+            and (
+                'review-away-upset-correction' in signals
+                or 'review-fragile-home-favorite-correction' in signals
+                or context.get('stratified_key') == 'home:level_medium'
+            )
+        )
+        if ligue_home_away_relief.get('enabled', True) and ligue_balanced_home_case:
+            away_shift = max(away_shift, float(ligue_home_away_relief.get('away_shift') or 0.021), away_shift)
+            draw_shift = max(draw_shift, float(ligue_home_away_relief.get('draw_shift_floor') or 0.012), draw_shift)
+            max_draw_ratio = float(ligue_home_away_relief.get('max_draw_ratio_vs_away') or 0.72)
+            if away_shift > 0 and draw_shift > away_shift * max_draw_ratio:
+                draw_shift = away_shift * max_draw_ratio
+            signals.append('review-league-ligue1-home-away-relief')
+
+        draw_to_away_relief = 0.0
+        draw_to_away_trim = 0.0
+        near_tie_trim_cfg = narrow_away_cfg.get('near_tie_draw_trim') if isinstance(narrow_away_cfg.get('near_tie_draw_trim'), dict) else {}
+        ou_market_signal = self.extract_over_under_market_signal(current_odds) if isinstance(current_odds, dict) else {'available': False}
+        ou_signal_names = {
+            str(item).strip()
+            for item in (ou_market_signal.get('signals') or [])
+            if str(item).strip()
+        }
+        goal_pressure = str(ou_market_signal.get('goal_pressure') or '').strip()
+        serie_a_home_draw_guard_relief = outcome_bias.get('home_draw_guard_relief') if isinstance(outcome_bias.get('home_draw_guard_relief'), dict) else {}
+        projected_home_guard_probabilities = dict(probabilities)
+        if top_key == 'home_win' and league_code == 'serie_a' and (draw_shift > 0 or away_shift > 0):
+            projected_home_guard_probabilities = self._shift_from_side_to_targets(
+                probabilities,
+                from_key='home_win',
+                draw_shift=draw_shift,
+                away_shift=away_shift,
+            )
+        projected_home_guard_ranked = sorted(projected_home_guard_probabilities.items(), key=lambda item: item[1], reverse=True)
+        projected_home_guard_top_key = projected_home_guard_ranked[0][0] if projected_home_guard_ranked else ''
+        projected_home_guard_runner_up = float(projected_home_guard_ranked[1][1] if len(projected_home_guard_ranked) > 1 else 0.0)
+        projected_home_guard_top_lead = float(projected_home_guard_ranked[0][1] if projected_home_guard_ranked else 0.0) - projected_home_guard_runner_up
+        serie_a_home_draw_guard_near_tie_case = bool(
+            top_key == 'home_win'
+            and league_code == 'serie_a'
+            and supports_upset
+            and favored_side == 'away'
+            and pressure_side == 'home'
+            and risk_score >= float(serie_a_home_draw_guard_relief.get('min_risk_score') or 14.0)
+            and context.get('handicap_depth_bucket') == 'level_medium'
+            and str(context.get('euro_support_bucket') or '').strip() == 'draw_guarded'
+            and str(ou_market_signal.get('goal_pressure') or '').strip() == 'under'
+            and (
+                (
+                    float(probabilities.get('home_win', 0.0)) <= 0.395
+                    and float(probabilities.get('draw', 0.0)) >= 0.34
+                    and float(probabilities.get('away_win', 0.0)) >= 0.255
+                    and top_lead <= 0.045
+                )
+                or (
+                    float(projected_home_guard_probabilities.get('home_win', 0.0)) <= 0.395
+                    and float(projected_home_guard_probabilities.get('draw', 0.0)) >= 0.32
+                    and float(projected_home_guard_probabilities.get('away_win', 0.0)) >= 0.28
+                    and projected_home_guard_top_key in {'home_win', 'draw'}
+                    and projected_home_guard_top_lead <= 0.06
+                )
+            )
+        )
+        if (
+            top_key == 'home_win'
+            and league_code == 'serie_a'
+            and serie_a_home_draw_guard_relief.get('enabled', True)
+            and serie_a_home_draw_guard_near_tie_case
+        ):
+            away_shift = max(away_shift, float(serie_a_home_draw_guard_relief.get('away_shift') or 0.03), 0.03)
+            draw_shift = max(draw_shift, 0.012)
+            draw_shift = min(
+                draw_shift,
+                away_shift * float(serie_a_home_draw_guard_relief.get('max_draw_ratio_vs_away') or 0.75),
+            )
+            signals.append('review-league-serie-a-home-draw-guard-entry')
+            signals.append('review-league-serie-a-home-draw-guard-near-tie')
+
         adjusted = dict(probabilities)
         if top_key == 'home_win':
             adjusted = self._shift_from_side_to_targets(adjusted, from_key='home_win', draw_shift=draw_shift, away_shift=away_shift)
         elif top_key == 'away_win':
             adjusted = self._shift_from_side_to_targets(adjusted, from_key='away_win', draw_shift=draw_shift, home_shift=home_shift)
+        la_liga_low_tempo_draw_retention = bool(
+            league_code == 'la_liga'
+            and top_key == 'home_win'
+            and context.get('handicap_depth_bucket') == 'level_ball'
+            and str(context.get('strength_gap_bucket') or '').strip() == 'balanced'
+            and 'review-fragile-home-favorite-correction' in signals
+            and goal_pressure == 'under'
+            and 'ou_line_down' in ou_signal_names
+            and float(adjusted.get('draw', 0.0)) >= 0.36
+            and float(adjusted.get('away_win', 0.0)) >= 0.255
+            and float(adjusted.get('home_win', 0.0)) > float(adjusted.get('draw', 0.0))
+            and float(adjusted.get('home_win', 0.0)) - float(adjusted.get('draw', 0.0)) <= 0.012
+        )
+        la_liga_medium_home_draw_retention = bool(
+            league_code == 'la_liga'
+            and top_key == 'home_win'
+            and context.get('handicap_depth_bucket') == 'level_medium'
+            and str(context.get('strength_gap_bucket') or '').strip() == 'balanced'
+            and str(context.get('euro_support_bucket') or '').strip() == 'strong_support'
+            and 'review-bias-config-floor' in signals
+            and not home_bias_gate.get('qualified')
+            and goal_pressure in {'balanced', ''}
+            and float(adjusted.get('home_win', 0.0)) <= 0.37
+            and float(adjusted.get('draw', 0.0)) >= 0.34
+            and float(adjusted.get('away_win', 0.0)) >= 0.29
+            and float(adjusted.get('home_win', 0.0)) > float(adjusted.get('draw', 0.0))
+            and float(adjusted.get('home_win', 0.0)) - float(adjusted.get('draw', 0.0)) <= 0.03
+        )
+        if la_liga_low_tempo_draw_retention or la_liga_medium_home_draw_retention:
+            base_target_margin = 0.0015 if la_liga_low_tempo_draw_retention else 0.0012
+            draw_retention_trim = min(
+                max(0.0, float(adjusted.get('home_win', 0.0)) - float(adjusted.get('draw', 0.0)) + base_target_margin),
+                max(0.0, float(adjusted.get('home_win', 0.0)) - 0.02),
+                0.018 if la_liga_low_tempo_draw_retention else 0.02,
+            )
+            if draw_retention_trim > 0:
+                adjusted['home_win'] = max(0.0, float(adjusted.get('home_win', 0.0)) - draw_retention_trim)
+                adjusted['draw'] = float(adjusted.get('draw', 0.0)) + draw_retention_trim
+                adjusted = self._normalize_prob_triplet(adjusted)
+                if la_liga_low_tempo_draw_retention:
+                    signals.append('review-league-la-liga-low-tempo-draw-retention')
+                if la_liga_medium_home_draw_retention:
+                    signals.append('review-league-la-liga-medium-home-draw-retention')
+        ligue_home_edge_trim_case = bool(
+            league_code == 'ligue_1'
+            and top_key == 'home_win'
+            and 'review-league-ligue1-home-away-relief' in signals
+            and context.get('handicap_depth_bucket') == 'level_medium'
+            and str(context.get('euro_support_bucket') or '').strip() == 'strong_support'
+            and not supports_upset
+            and goal_pressure in {'balanced', ''}
+            and float(adjusted.get('home_win', 0.0)) <= 0.372
+            and float(adjusted.get('draw', 0.0)) >= 0.34
+            and float(adjusted.get('away_win', 0.0)) >= 0.285
+            and float(adjusted.get('home_win', 0.0)) > float(adjusted.get('draw', 0.0))
+            and float(adjusted.get('home_win', 0.0)) - float(adjusted.get('draw', 0.0)) <= 0.024
+        )
+        if ligue_home_edge_trim_case:
+            ligue_home_edge_trim = min(
+                0.024,
+                max(0.0, float(adjusted.get('home_win', 0.0)) - float(adjusted.get('draw', 0.0)) + 0.0015),
+                max(0.0, float(adjusted.get('home_win', 0.0)) - 0.02),
+            )
+            if ligue_home_edge_trim > 0:
+                adjusted['home_win'] = max(0.0, float(adjusted.get('home_win', 0.0)) - ligue_home_edge_trim)
+                adjusted['away_win'] = float(adjusted.get('away_win', 0.0)) + ligue_home_edge_trim
+                adjusted = self._normalize_prob_triplet(adjusted)
+                away_shift = max(away_shift, 0.03)
+                signals.append('review-league-ligue1-home-edge-trim')
+                ligue_home_edge_pivot_case = bool(
+                    float(adjusted.get('home_win', 0.0)) <= 0.361
+                    and float(adjusted.get('draw', 0.0)) >= 0.345
+                    and float(adjusted.get('away_win', 0.0)) >= 0.294
+                    and max(float(adjusted.get('home_win', 0.0)), float(adjusted.get('draw', 0.0))) - float(adjusted.get('away_win', 0.0)) <= 0.055
+                    and abs(float(adjusted.get('home_win', 0.0)) - float(adjusted.get('draw', 0.0))) <= 0.016
+                    and home_price is not None
+                    and home_price <= 1.8
+                    and draw_price is not None
+                    and draw_price >= 4.0
+                    and away_price is not None
+                    and away_price >= 4.0
+                )
+                if ligue_home_edge_pivot_case:
+                    draw_to_away_trim = min(
+                        0.014,
+                        max(0.0, (float(adjusted.get('draw', 0.0)) - float(adjusted.get('away_win', 0.0))) * 0.25),
+                        max(0.0, float(adjusted.get('draw', 0.0)) - 0.02),
+                    )
+                    if draw_to_away_trim > 0:
+                        adjusted['draw'] = max(0.0, float(adjusted.get('draw', 0.0)) - draw_to_away_trim)
+                        adjusted['away_win'] = float(adjusted.get('away_win', 0.0)) + draw_to_away_trim
+                        adjusted = self._normalize_prob_triplet(adjusted)
+                    ligue_follow_through_trim = min(
+                        0.028,
+                        max(
+                            0.0,
+                            max(float(adjusted.get('home_win', 0.0)), float(adjusted.get('draw', 0.0)))
+                            - float(adjusted.get('away_win', 0.0))
+                            + 0.0008,
+                        ),
+                        max(0.0, float(adjusted.get('home_win', 0.0)) - 0.02),
+                    )
+                    if ligue_follow_through_trim > 0:
+                        adjusted['home_win'] = max(0.0, float(adjusted.get('home_win', 0.0)) - ligue_follow_through_trim)
+                        adjusted['away_win'] = float(adjusted.get('away_win', 0.0)) + ligue_follow_through_trim
+                        adjusted = self._normalize_prob_triplet(adjusted)
+                        away_shift = max(away_shift, 0.056)
+        blocked_goal_pressures = {
+            str(item).strip()
+            for item in (near_tie_trim_cfg.get('blocked_goal_pressures') or [])
+            if str(item).strip()
+        }
+        blocked_ou_signals = {
+            str(item).strip()
+            for item in (near_tie_trim_cfg.get('blocked_ou_signals') or [])
+            if str(item).strip()
+        }
+        serie_a_draw_relief = outcome_bias.get('draw_to_away_relief') if isinstance(outcome_bias.get('draw_to_away_relief'), dict) else {}
+        serie_a_soft_draw_away_case = bool(
+            not supports_upset
+            and league_code == 'serie_a'
+            and context.get('handicap_depth_bucket') == 'level_medium'
+            and str(context.get('euro_support_bucket') or '').strip() == 'draw_soft'
+            and float(probabilities.get('home_win', 0.0)) <= 0.362
+            and float(probabilities.get('away_win', 0.0)) >= 0.24
+            and top_prob <= 0.405
+            and top_lead <= 0.06
+            and 'ou_line_down' not in ou_signal_names
+        )
+        if (
+            top_key == 'draw'
+            and league_code == 'serie_a'
+            and serie_a_draw_relief.get('enabled', True)
+            and (
+                (
+                    supports_upset
+                    and favored_side == 'away'
+                    and pressure_side == 'home'
+                    and risk_score >= max(12.0, float(motivation_bias_cfg.get('min_score') or 8.0))
+                )
+                or (
+                    not supports_upset
+                    and float(probabilities.get('home_win', 0.0)) <= 0.356
+                    and float(probabilities.get('away_win', 0.0)) >= 0.24
+                    and top_prob <= 0.405
+                    and 'under_water_drop' in ou_signal_names
+                )
+                or serie_a_soft_draw_away_case
+            )
+            and (
+                serie_a_soft_draw_away_case
+                or float(adjusted.get('draw', 0.0)) <= float(serie_a_draw_relief.get('draw_prob_max') or 0.385)
+            )
+            and (
+                serie_a_soft_draw_away_case
+                or float(adjusted.get('home_win', 0.0)) <= float(serie_a_draw_relief.get('home_prob_max') or 0.34)
+            )
+            and (
+                serie_a_soft_draw_away_case
+                or float(adjusted.get('away_win', 0.0)) >= float(serie_a_draw_relief.get('away_prob_min') or 0.29)
+            )
+            and (
+                serie_a_soft_draw_away_case
+                or float(adjusted.get('draw', 0.0)) - float(adjusted.get('away_win', 0.0)) <= float(serie_a_draw_relief.get('gap_max') or 0.085)
+            )
+            and (
+                serie_a_soft_draw_away_case
+                or context.get('handicap_depth_bucket') in {
+                    str(item).strip() for item in (serie_a_draw_relief.get('allowed_buckets') or []) if str(item).strip()
+                }
+            )
+            and (
+                serie_a_soft_draw_away_case
+                or goal_pressure not in blocked_goal_pressures
+            )
+            and (
+                serie_a_soft_draw_away_case
+                or not ou_signal_names.intersection(blocked_ou_signals)
+                or (
+                    not supports_upset
+                    and 'under_water_drop' in ou_signal_names
+                    and 'ou_line_down' not in ou_signal_names
+                )
+            )
+        ):
+            draw_gap = max(0.0, float(adjusted.get('draw', 0.0)) - float(adjusted.get('away_win', 0.0)))
+            if serie_a_soft_draw_away_case:
+                draw_to_away_relief = min(
+                    float(serie_a_draw_relief.get('shift') or 0.046),
+                    max(0.0, float(adjusted.get('draw', 0.0)) - 0.28),
+                    max(0.03, draw_gap * 0.58),
+                )
+            else:
+                draw_to_away_relief = min(
+                    float(serie_a_draw_relief.get('shift') or 0.046),
+                    max(0.0, float(adjusted.get('draw', 0.0)) - 0.26),
+                    max(float(serie_a_draw_relief.get('shift') or 0.046) * 0.75, draw_gap * 0.8),
+                )
+            if draw_to_away_relief > 0:
+                if serie_a_soft_draw_away_case:
+                    projected_draw = max(0.0, float(adjusted.get('draw', 0.0)) - draw_to_away_relief)
+                    projected_home = float(adjusted.get('home_win', 0.0))
+                    projected_away = float(adjusted.get('away_win', 0.0)) + draw_to_away_relief
+                    if projected_home > max(projected_draw, projected_away):
+                        draw_to_away_relief = 0.0
+                        signals.append('review-league-serie-a-soft-draw-away-blocked-home-top')
+                if draw_to_away_relief > 0:
+                    adjusted['draw'] = max(0.0, float(adjusted.get('draw', 0.0)) - draw_to_away_relief)
+                    adjusted['away_win'] = float(adjusted.get('away_win', 0.0)) + draw_to_away_relief
+                    adjusted = self._normalize_prob_triplet(adjusted)
+                    away_shift = max(away_shift, float(serie_a_draw_relief.get('shift') or 0.046))
+                    signals.append('review-league-serie-a-draw-to-away-relief')
+                    if serie_a_soft_draw_away_case:
+                        signals.append('review-league-serie-a-soft-draw-away-entry')
+        premier_follow_through_active = bool(
+            league_code == 'premier_league'
+            and premier_follow_through_cfg.get('enabled', True)
+            and (
+                'review-league-premier-away-upset-support' in signals
+                or 'review-league-premier-balanced-away-floor' in signals
+            )
+        )
+        if (
+            (
+                'review-narrow-away-bump' in signals
+                or premier_follow_through_active
+            )
+            and near_tie_trim_cfg.get('enabled', True)
+            and adjusted.get('draw', 0.0) >= adjusted.get('away_win', 0.0)
+            and float(adjusted.get('draw', 0.0) - adjusted.get('away_win', 0.0)) <= (
+                float(premier_follow_through_cfg.get('draw_away_gap_max') or 0.04)
+                if premier_follow_through_active
+                else float(near_tie_trim_cfg.get('draw_away_gap_max') or 0.004)
+            )
+            and goal_pressure not in blocked_goal_pressures
+            and not ou_signal_names.intersection(blocked_ou_signals)
+        ):
+            draw_gap = max(0.0, float(adjusted.get('draw', 0.0)) - float(adjusted.get('away_win', 0.0)))
+            draw_to_away_trim = min(
+                float(premier_follow_through_cfg.get('max_trim') or 0.02)
+                if premier_follow_through_active
+                else float(near_tie_trim_cfg.get('max_trim') or 0.003),
+                draw_gap / 2.0 + (
+                    float(premier_follow_through_cfg.get('target_margin') or 0.001)
+                    if premier_follow_through_active
+                    else float(near_tie_trim_cfg.get('target_margin') or 0.0006)
+                ),
+                max(0.0, float(adjusted.get('draw', 0.0)) - 0.02),
+            )
+            if draw_to_away_trim > 0:
+                adjusted['draw'] = max(0.0, float(adjusted.get('draw', 0.0)) - draw_to_away_trim)
+                adjusted['away_win'] = float(adjusted.get('away_win', 0.0)) + draw_to_away_trim
+                adjusted = self._normalize_prob_triplet(adjusted)
+                signals.append('review-narrow-away-near-tie-trim')
+                if premier_follow_through_active:
+                    signals.append('review-league-premier-away-follow-through')
         diag = {
             'applied': adjusted != probabilities,
             'signals': list(dict.fromkeys(signals)),
@@ -737,6 +1264,8 @@ class PredictionPostprocessService:
                 'draw_shift': round(float(draw_shift), 4),
                 'away_shift': round(float(away_shift), 4),
                 'home_shift': round(float(home_shift), 4),
+                'draw_to_away_relief': round(float(draw_to_away_relief), 4),
+                'draw_to_away_trim': round(float(draw_to_away_trim), 4),
             },
             'stratified_review': {
                 'handicap_depth_bucket': context.get('handicap_depth_bucket'),
@@ -922,6 +1451,7 @@ class PredictionPostprocessService:
         *,
         predicted_outcome_label: str,
         expansion_strength: float,
+        preferred_scores: Optional[List[str]] = None,
     ) -> Tuple[Optional[Tuple[str, float]], Dict[str, Any]]:
         profile = cls._build_score_selection_profile(selected_scores, predicted_outcome_label=predicted_outcome_label)
         if not profile.get('needs_expansion'):
@@ -932,6 +1462,11 @@ class PredictionPostprocessService:
         threshold = min_selected_prob * threshold_ratio
         best_candidate: Optional[Tuple[str, float]] = None
         best_value = -1.0
+        preferred_order = {
+            str(score).strip(): index
+            for index, score in enumerate(preferred_scores or [])
+            if str(score).strip()
+        }
 
         for index, (score, prob) in enumerate(ranked_scores):
             if score in selected_names or float(prob or 0.0) < threshold:
@@ -957,6 +1492,8 @@ class PredictionPostprocessService:
                 bonus += 0.4
             elif abs(total_goals - float(profile['avg_total_goals'] or 0.0)) >= 4:
                 bonus -= 0.25
+            if score in preferred_order:
+                bonus += max(0.9, 1.6 - preferred_order[score] * 0.22)
             candidate_value = bonus + float(prob or 0.0) * 8.0 - index * 0.01
             if bonus >= 1.5 and candidate_value > best_value:
                 best_candidate = (score, float(prob or 0.0))
@@ -991,9 +1528,11 @@ class PredictionPostprocessService:
         primary_probability = 0.0
         secondary_probability = 0.0
         secondary_gap = 1.0
+        secondary_label = ''
         if ranked_outcomes:
             primary_probability = float(ranked_outcomes[0][1] or 0.0)
             if len(ranked_outcomes) > 1:
+                secondary_label = str(ranked_outcomes[1][0]).strip()
                 secondary_probability = float(ranked_outcomes[1][1] or 0.0)
                 secondary_gap = max(0.0, primary_probability - secondary_probability)
         double_pick = bool(
@@ -1003,10 +1542,6 @@ class PredictionPostprocessService:
             and secondary_gap <= 0.06
         )
         allowed_outcomes = [predicted_outcome_label]
-        if double_pick:
-            secondary_label = str(ranked_outcomes[1][0]).strip()
-            if secondary_label and secondary_label not in allowed_outcomes:
-                allowed_outcomes.append(secondary_label)
         motivation_risk: Dict[str, Any] = {}
         if isinstance(upset_potential, dict) and isinstance(upset_potential.get('motivation_risk'), dict):
             motivation_risk = upset_potential.get('motivation_risk') or {}
@@ -1014,36 +1549,45 @@ class PredictionPostprocessService:
             motivation = match_intelligence.get('motivation') if isinstance(match_intelligence.get('motivation'), dict) else {}
             if isinstance(motivation.get('risk_signal'), dict):
                 motivation_risk = motivation.get('risk_signal') or {}
-        score_bias_cfg = self.review_bias.section('score', league_code)
-        motivation_side_map = {'home': '主胜', 'away': '客胜'}
-        motivation_pressure_label = motivation_side_map.get(str(motivation_risk.get('pressure_side') or '').strip(), '')
-        motivation_min_score = float(score_bias_cfg.get('motivation_risk_min_score') or 8.0)
-        if (
-            motivation_pressure_label
-            and bool(motivation_risk.get('supports_upset'))
-            and float(motivation_risk.get('score') or 0.0) >= motivation_min_score
-        ):
-            if '平局' not in allowed_outcomes:
-                allowed_outcomes.append('平局')
-            if motivation_pressure_label not in allowed_outcomes:
-                allowed_outcomes.append(motivation_pressure_label)
-        directional_scores = [
-            (score, prob)
-            for score, prob in scores
-            if any(self._score_matches_outcome(score, outcome) for outcome in allowed_outcomes)
-        ]
-        adjusted = dict(directional_scores)
         context = self.build_three_layer_runtime_context(
             predicted_outcome_label=predicted_outcome_label,
             strength_diff=strength_diff,
             current_odds=current_odds,
             review_learning=review_learning,
         )
+        score_bias_cfg = self.review_bias.section('score', league_code)
+        motivation_side_map = {'home': '主胜', 'away': '客胜'}
+        motivation_pressure_label = motivation_side_map.get(str(motivation_risk.get('pressure_side') or '').strip(), '')
+        motivation_min_score = float(score_bias_cfg.get('motivation_risk_min_score') or 8.0)
+        away_upset_score_guard = bool(
+            predicted_outcome_label == '客胜'
+            and bool(motivation_risk.get('supports_upset'))
+            and str(motivation_risk.get('favored_side') or '').strip() == 'away'
+            and str(motivation_risk.get('pressure_side') or '').strip() == 'home'
+            and float(motivation_risk.get('score') or 0.0) >= motivation_min_score
+        )
         learning = review_learning if isinstance(review_learning, dict) else {}
         score_bias = learning.get('score_bias') if isinstance(learning.get('score_bias'), dict) else {}
         line = self._safe_float((over_under or {}).get('line')) if isinstance(over_under, dict) else None
         over_prob = self._safe_float((over_under or {}).get('over')) if isinstance(over_under, dict) else None
         under_prob = self._safe_float((over_under or {}).get('under')) if isinstance(over_under, dict) else None
+        if double_pick:
+            secondary_label = str(ranked_outcomes[1][0]).strip()
+            if secondary_label and secondary_label not in allowed_outcomes:
+                if not (away_upset_score_guard and secondary_label == '主胜'):
+                    allowed_outcomes.append(secondary_label)
+        home_price = self._safe_float((((current_odds or {}).get('欧赔') or {}).get('final') or {}).get('home')) if isinstance(current_odds, dict) else None
+        away_price = self._safe_float((((current_odds or {}).get('欧赔') or {}).get('final') or {}).get('away')) if isinstance(current_odds, dict) else None
+        deep_home_draw_relief = bool(
+            predicted_outcome_label == '平局'
+            and context.get('handicap_depth_bucket') == 'level_very_deep'
+            and motivation_pressure_label == '主胜'
+            and bool(motivation_risk.get('supports_upset'))
+            and float(motivation_risk.get('score') or 0.0) >= motivation_min_score
+            and home_price is not None
+            and home_price <= 1.8
+            and float(confidence or 0.0) <= 0.47
+        )
         open_match_total_threshold = float(score_bias_cfg.get('open_match_total_threshold') or 2.8)
         strong_open_match_total_threshold = float(score_bias_cfg.get('strong_open_match_total_threshold') or max(3.0, open_match_total_threshold))
         open_match = bool(
@@ -1051,6 +1595,130 @@ class PredictionPostprocessService:
             or (over_prob is not None and under_prob is not None and over_prob > under_prob)
             or (home_lambda + away_lambda >= open_match_total_threshold)
         )
+        low_tempo_guard = bool(
+            line is not None and line <= 2.75 and over_prob is not None and under_prob is not None and under_prob - over_prob >= 0.06
+        )
+        ou_market_signal = self.extract_over_under_market_signal(current_odds) if isinstance(current_odds, dict) else {'available': False}
+        ou_signal_names = {
+            str(item).strip()
+            for item in (ou_market_signal.get('signals') or [])
+            if str(item).strip()
+        }
+        score_serie_a_away_relief_cfg = score_bias_cfg.get('serie_a_away_relief') if isinstance(score_bias_cfg.get('serie_a_away_relief'), dict) else {}
+        serie_a_away_relief_score_case = bool(
+            predicted_outcome_label == '客胜'
+            and league_code == 'serie_a'
+            and score_serie_a_away_relief_cfg.get('enabled', True)
+            and bool(motivation_risk.get('supports_upset'))
+            and str(motivation_risk.get('favored_side') or '').strip() == 'away'
+            and str(motivation_risk.get('pressure_side') or '').strip() == 'home'
+            and float(motivation_risk.get('score') or 0.0) >= float(score_serie_a_away_relief_cfg.get('min_risk_score') or 14.0)
+            and context.get('handicap_depth_bucket') in {
+                str(item).strip()
+                for item in (score_serie_a_away_relief_cfg.get('allowed_buckets') or ['level_medium'])
+                if str(item).strip()
+            }
+            and str(context.get('euro_support_bucket') or '').strip() in {
+                str(item).strip()
+                for item in (score_serie_a_away_relief_cfg.get('allowed_euro_support_buckets') or ['draw_guarded'])
+                if str(item).strip()
+            }
+            and str(ou_market_signal.get('goal_pressure') or '').strip() in {
+                str(item).strip()
+                for item in (score_serie_a_away_relief_cfg.get('allowed_goal_pressures') or ['under'])
+                if str(item).strip()
+            }
+        )
+        serie_a_soft_away_template_case = bool(
+            predicted_outcome_label == '客胜'
+            and league_code == 'serie_a'
+            and not bool(motivation_risk.get('supports_upset'))
+            and double_pick
+            and secondary_label == '主胜'
+            and secondary_gap <= 0.012
+            and float(confidence or 0.0) <= 0.37
+            and not open_match
+            and context.get('handicap_depth_bucket') == 'level_medium'
+            and str(context.get('euro_support_bucket') or '').strip() == 'market_opposes'
+            and line is not None
+            and line <= 2.5
+            and over_prob is not None
+            and under_prob is not None
+            and under_prob > over_prob
+        )
+        serie_a_soft_draw_coverage_case = bool(
+            predicted_outcome_label == '平局'
+            and league_code == 'serie_a'
+            and not bool(motivation_risk.get('supports_upset'))
+            and double_pick
+            and secondary_label == '主胜'
+            and secondary_gap <= 0.04
+            and float(confidence or 0.0) <= 0.41
+            and not open_match
+            and context.get('handicap_depth_bucket') == 'level_medium'
+            and str(context.get('euro_support_bucket') or '').strip() == 'draw_soft'
+            and line is not None
+            and line <= 2.5
+            and over_prob is not None
+            and under_prob is not None
+            and under_prob > over_prob
+            and home_price is not None
+            and away_price is not None
+            and away_price < home_price
+        )
+        shallow_market_guard = bool(
+            context.get('handicap_depth_bucket') in {'level_ball', 'level_shallow'}
+            and float(confidence or 0.0) <= 0.52
+            and primary_probability <= 0.52
+            and secondary_gap <= 0.08
+        )
+        fragile_euro_support = str(context.get('euro_support_bucket') or '').strip() in {
+            'market_opposes', 'draw_guarded', 'draw_live', 'draw_soft', 'unknown'
+        }
+        fragile_home_score_guard = bool(
+            predicted_outcome_label == '主胜'
+            and sum(
+                int(flag)
+                for flag in (
+                    secondary_gap <= 0.08,
+                    open_match,
+                    context.get('scenario_name') == 'strong_home_shallow_line',
+                    bool(motivation_risk.get('supports_upset')) and motivation_pressure_label == '客胜',
+                    shallow_market_guard,
+                    fragile_euro_support,
+                )
+            ) >= 2
+            and not (
+                double_pick
+                and low_tempo_guard
+                and not open_match
+                and motivation_pressure_label != '客胜'
+            )
+        )
+        if bool(motivation_risk.get('supports_upset')) and float(motivation_risk.get('score') or 0.0) >= motivation_min_score:
+            if predicted_outcome_label != '平局' and '平局' not in allowed_outcomes:
+                allowed_outcomes.append('平局')
+            if (
+                predicted_outcome_label != '平局'
+                and motivation_pressure_label
+                and motivation_pressure_label not in allowed_outcomes
+                and not (away_upset_score_guard and motivation_pressure_label == '主胜')
+            ):
+                allowed_outcomes.append(motivation_pressure_label)
+            if deep_home_draw_relief and motivation_pressure_label not in allowed_outcomes:
+                allowed_outcomes.append(motivation_pressure_label)
+        if serie_a_away_relief_score_case:
+            allowed_outcomes = ['客胜'] + (['平局'] if score_serie_a_away_relief_cfg.get('draw_as_coverage_only', True) else [])
+        elif serie_a_soft_away_template_case:
+            allowed_outcomes = ['客胜', '平局']
+        elif serie_a_soft_draw_coverage_case:
+            allowed_outcomes = ['平局', '客胜']
+        directional_scores = [
+            (score, prob)
+            for score, prob in scores
+            if any(self._score_matches_outcome(score, outcome) for outcome in allowed_outcomes)
+        ]
+        adjusted = dict(directional_scores)
         signals: List[str] = []
         filtered_out_count = len(scores) - len(directional_scores)
         if filtered_out_count > 0:
@@ -1062,18 +1730,36 @@ class PredictionPostprocessService:
                 if score in adjusted:
                     adjusted[score] *= factor
             signals.append('score-three-layer-strong_home_shallow_line')
+        if fragile_home_score_guard:
+            for score, factor in {'1-0': 0.72, '2-0': 0.82, '2-1': 1.16, '1-1': 1.14, '1-2': 1.16, '0-1': 1.08}.items():
+                if score in adjusted:
+                    adjusted[score] *= factor
+            if low_tempo_guard:
+                for score, factor in {'1-0': 1.03, '1-1': 1.06, '1-2': 0.96, '2-1': 0.98}.items():
+                    if score in adjusted:
+                        adjusted[score] *= factor
+            signals.append('score-fragile-home-template-rebalance')
         low_total_penalty = float(score_bias.get('recommended_low_total_penalty') or 0.0)
         home_open_template = score_bias_cfg.get('home_open_template') if isinstance(score_bias_cfg.get('home_open_template'), dict) else {}
         away_open_template = score_bias_cfg.get('away_open_template') if isinstance(score_bias_cfg.get('away_open_template'), dict) else {}
         draw_open_template = score_bias_cfg.get('draw_open_template') if isinstance(score_bias_cfg.get('draw_open_template'), dict) else {}
         if predicted_outcome_label == '主胜' and open_match:
             home_template = {
-                '1-0': max(0.76, float(home_open_template.get('1-0') or 0.88) - low_total_penalty),
-                '2-0': max(0.84, float(home_open_template.get('2-0') or 0.94) - low_total_penalty * 0.5),
+                '1-0': max(0.72, float(home_open_template.get('1-0') or 0.88) - low_total_penalty),
+                '2-0': max(0.8, float(home_open_template.get('2-0') or 0.94) - low_total_penalty * 0.5),
                 '2-1': float(home_open_template.get('2-1') or 1.07) + low_total_penalty,
                 '3-1': float(home_open_template.get('3-1') or 1.05) + low_total_penalty * 0.7,
                 '3-0': float(home_open_template.get('3-0') or 0.94),
             }
+            if fragile_home_score_guard:
+                home_template['1-0'] = min(home_template['1-0'], 0.7)
+                home_template['2-0'] = min(home_template['2-0'], 0.78)
+                home_template['2-1'] = max(home_template['2-1'], 1.18)
+                home_template['3-1'] = max(home_template['3-1'], 1.16)
+                if '1-1' in adjusted:
+                    adjusted['1-1'] *= 1.08
+                if '1-2' in adjusted:
+                    adjusted['1-2'] *= 1.12
             if home_lambda + away_lambda >= strong_open_match_total_threshold:
                 home_template['3-0'] = max(home_template['3-0'], 1.04)
                 home_template['3-1'] = max(home_template['3-1'], 1.14)
@@ -1105,16 +1791,18 @@ class PredictionPostprocessService:
             }.items():
                 if score in adjusted:
                     adjusted[score] *= factor
+            if deep_home_draw_relief:
+                for score, factor in {
+                    '0-0': 0.8,
+                    '1-1': 0.88,
+                    '1-0': 1.16,
+                    '2-0': 1.18,
+                    '2-1': 1.12,
+                }.items():
+                    if score in adjusted:
+                        adjusted[score] *= factor
+                signals.append('score-deep-home-draw-relief')
             signals.append('score-template-cap')
-        low_tempo_guard = bool(
-            line is not None and line <= 2.75 and over_prob is not None and under_prob is not None and under_prob - over_prob >= 0.06
-        )
-        shallow_market_guard = bool(
-            context.get('handicap_depth_bucket') in {'level_ball', 'level_shallow'}
-            and float(confidence or 0.0) <= 0.52
-            and primary_probability <= 0.52
-            and secondary_gap <= 0.08
-        )
         if low_tempo_guard:
             if predicted_outcome_label == '主胜':
                 for score, factor in {'3-1': 0.86, '3-0': 0.9, '2-1': 0.96, '1-0': 1.04}.items():
@@ -1139,6 +1827,43 @@ class PredictionPostprocessService:
                     if score in adjusted:
                         adjusted[score] *= factor
             signals.append('score-market-shallow-cap')
+        preferred_coverage_scores = None
+        if serie_a_away_relief_score_case or serie_a_soft_away_template_case or serie_a_soft_draw_coverage_case:
+            preferred_coverage_scores = score_serie_a_away_relief_cfg.get('preferred_coverage_scores')
+        if serie_a_away_relief_score_case:
+            for score, factor in {
+                str(name).strip(): float(value)
+                for name, value in (score_serie_a_away_relief_cfg.get('template_factors') or {}).items()
+                if str(name).strip()
+            }.items():
+                if score in adjusted:
+                    adjusted[score] *= factor
+            signals.append('score-serie-a-away-relief-template-rebalance')
+        elif serie_a_soft_away_template_case:
+            for score, factor in {
+                '0-0': 0.66,
+                '1-1': 0.8,
+                '0-1': 1.14,
+                '0-2': 1.24,
+                '1-2': 1.3,
+            }.items():
+                if score in adjusted:
+                    adjusted[score] *= factor
+            signals.append('score-serie-a-soft-away-template-rebalance')
+        elif serie_a_soft_draw_coverage_case:
+            for score, factor in {
+                '0-0': 0.82,
+                '1-1': 0.9,
+                '0-1': 1.12,
+                '0-2': 1.18,
+                '1-2': 1.24,
+                '1-0': 0.8,
+                '2-0': 0.74,
+                '2-1': 0.86,
+            }.items():
+                if score in adjusted:
+                    adjusted[score] *= factor
+            signals.append('score-serie-a-soft-draw-coverage-rebalance')
         if self._apply_review_score_correction(
             adjusted,
             predicted_outcome_label=predicted_outcome_label,
@@ -1147,31 +1872,227 @@ class PredictionPostprocessService:
         ):
             signals.append('score-review-conservative-correction')
         ranked_adjusted = sorted(self._rescale_score_list(list(adjusted.items())), key=lambda item: item[1], reverse=True)
+        league_ou_learning = {}
+        if isinstance(over_under, dict) and isinstance(over_under.get('league_learning'), dict):
+            league_ou_learning = over_under.get('league_learning') or {}
+        market_payload = over_under.get('market') if isinstance(over_under, dict) and isinstance(over_under.get('market'), dict) else {}
+        market_initial = market_payload.get('initial') if isinstance(market_payload.get('initial'), dict) else {}
+        market_final = market_payload.get('final') if isinstance(market_payload.get('final'), dict) else {}
+        market_initial_line = self._safe_float(market_initial.get('line'))
+        market_final_line = self._safe_float(market_final.get('line'))
         target_limit = max(2 if double_pick else 1, int(limit or 3))
         reranked = list(ranked_adjusted[:target_limit])
         coverage_profile = self._build_score_selection_profile(reranked, predicted_outcome_label=predicted_outcome_label)
         coverage_expansion_strength = float(score_bias.get('recommended_score_coverage_expansion') or 0.0)
         coverage_expansion_rate = float(score_bias.get('coverage_expansion_rate') or 0.0)
+        if serie_a_soft_away_template_case:
+            coverage_expansion_strength = max(coverage_expansion_strength, 0.08)
+        elif serie_a_soft_draw_coverage_case:
+            coverage_expansion_strength = max(coverage_expansion_strength, 0.06)
         coverage_expansion_applied = False
         coverage_candidate = None
         if (
             target_limit >= 3
             and coverage_profile.get('needs_expansion')
-            and (coverage_expansion_rate >= 0.18 or coverage_expansion_strength >= 0.03)
+            and (
+                coverage_expansion_rate >= 0.18
+                or coverage_expansion_strength >= 0.03
+                or serie_a_soft_away_template_case
+                or serie_a_soft_draw_coverage_case
+            )
         ):
             coverage_candidate, coverage_profile = self._pick_coverage_expansion_candidate(
                 ranked_adjusted,
                 reranked,
                 predicted_outcome_label=predicted_outcome_label,
                 expansion_strength=coverage_expansion_strength,
+                preferred_scores=preferred_coverage_scores,
             )
             if coverage_candidate:
                 if len(reranked) >= target_limit:
                     reranked = reranked[:-1]
                 reranked.append(coverage_candidate)
                 reranked = sorted(self._rescale_score_list(reranked), key=lambda item: item[1], reverse=True)[:target_limit]
+                if (
+                    predicted_outcome_label == '主胜'
+                    and league_code == 'premier_league'
+                    and open_match
+                    and double_pick
+                    and not low_tempo_guard
+                    and coverage_candidate[0] in {'3-0', '3-1'}
+                    and bool(coverage_profile.get('all_low_templates'))
+                    and float(confidence or 0.0) <= 0.4
+                    and any(score == '2-1' for score, _prob in reranked)
+                    and any(score == '1-1' for score, _prob in reranked)
+                ):
+                    prioritized_candidate = (coverage_candidate[0], float(coverage_candidate[1] or 0.0))
+                    if (
+                        coverage_candidate[0] == '3-1'
+                        and context.get('handicap_depth_bucket') == 'level_very_deep'
+                        and line is not None
+                        and line >= 3.25
+                        and over_prob is not None
+                        and under_prob is not None
+                        and under_prob > over_prob
+                        and not bool(motivation_risk.get('supports_upset'))
+                    ):
+                        clean_sheet_candidate = next(
+                            ((score, prob) for score, prob in ranked_adjusted if score == '3-0'),
+                            None,
+                        )
+                        if clean_sheet_candidate:
+                            prioritized_candidate = (clean_sheet_candidate[0], float(clean_sheet_candidate[1] or 0.0))
+                            coverage_candidate = prioritized_candidate
+                            signals.append('score-home-open-clean-sheet-preference')
+                    replaced = False
+                    reordered = []
+                    for score, prob in reranked:
+                        if not replaced and score == '1-1':
+                            reordered.append(prioritized_candidate)
+                            replaced = True
+                            continue
+                        if score != prioritized_candidate[0]:
+                            reordered.append((score, prob))
+                    if not replaced:
+                        reordered.append(prioritized_candidate)
+                    reranked = sorted(
+                        self._rescale_score_list(reordered),
+                        key=lambda item: (
+                            0 if item[0] == '2-1' else 1 if item[0] == prioritized_candidate[0] else 2,
+                            -float(item[1] or 0.0),
+                        ),
+                    )[:target_limit]
+                    signals.append('score-home-open-coverage-priority')
+                if (
+                    serie_a_soft_away_template_case
+                    and coverage_candidate[0] in {'1-2', '0-2'}
+                    and any(score == '0-0' for score, _prob in reranked)
+                    and any(score == '0-1' for score, _prob in reranked)
+                ):
+                    reranked = sorted(
+                        reranked,
+                        key=lambda item: (
+                            0 if item[0] == '0-1' else 1 if item[0] == coverage_candidate[0] else 2,
+                            -float(item[1] or 0.0),
+                        ),
+                    )[:target_limit]
+                    signals.append('score-serie-a-soft-away-coverage-priority')
+                if (
+                    serie_a_soft_draw_coverage_case
+                    and coverage_candidate[0] in {'1-2', '0-2', '0-1'}
+                    and any(score == '0-0' for score, _prob in reranked)
+                ):
+                    reranked = sorted(
+                        reranked,
+                        key=lambda item: (
+                            0 if item[0] == '0-0' else 1 if item[0] == coverage_candidate[0] else 2 if item[0] == '1-1' else 3,
+                            -float(item[1] or 0.0),
+                        ),
+                    )[:target_limit]
+                    signals.append('score-serie-a-soft-draw-coverage-priority')
                 coverage_expansion_applied = True
                 signals.append('score-review-coverage-expansion')
+        if (
+            predicted_outcome_label == '主胜'
+            and league_code == 'premier_league'
+            and not open_match
+            and not double_pick
+            and low_tempo_guard
+            and float(confidence or 0.0) <= 0.42
+            and secondary_gap <= 0.07
+            and line is not None
+            and line <= 2.5
+            and over_prob is not None
+            and under_prob is not None
+            and under_prob > over_prob
+            and (under_prob - over_prob) <= 0.1
+            and any(score == '1-0' for score, _prob in reranked)
+            and any(score == '2-1' for score, _prob in reranked)
+            and not any(score in {'3-1', '3-2'} for score, _prob in reranked)
+            and float(league_ou_learning.get('over25_rate') or 0.0) >= 0.62
+            and float(league_ou_learning.get('over35_rate') or 0.0) >= 0.3
+            and float(league_ou_learning.get('btts_rate') or 0.0) >= 0.58
+            and float(league_ou_learning.get('recent_avg_goals') or 0.0) >= 2.85
+            and market_initial_line is not None
+            and market_final_line is not None
+            and market_initial_line >= 3.25
+            and market_final_line <= 2.5
+            and (market_initial_line - market_final_line) >= 0.5
+        ):
+            preferred_ceiling_scores = ['3-2', '3-1']
+            if float(league_ou_learning.get('btts_rate') or 0.0) >= 0.6 and float(away_lambda or 0.0) >= 1.1:
+                preferred_ceiling_scores = ['4-2', '3-2', '3-1']
+            ceiling_candidate = None
+            for preferred_score in preferred_ceiling_scores:
+                ceiling_candidate = next(
+                    ((score, prob) for score, prob in ranked_adjusted if score == preferred_score),
+                    None,
+                )
+                if ceiling_candidate:
+                    break
+            if ceiling_candidate:
+                replaced = False
+                retained_ceiling = (ceiling_candidate[0], float(ceiling_candidate[1] or 0.0))
+                reordered = []
+                for score, prob in reranked:
+                    if not replaced and score == '2-0':
+                        reordered.append(retained_ceiling)
+                        replaced = True
+                        continue
+                    if score != retained_ceiling[0]:
+                        reordered.append((score, prob))
+                if not replaced:
+                    reordered.append(retained_ceiling)
+                reranked = sorted(
+                    self._rescale_score_list(reordered),
+                    key=lambda item: (
+                        0 if item[0] == '2-1' else 1 if item[0] == retained_ceiling[0] else 2 if item[0] == '1-0' else 3,
+                        -float(item[1] or 0.0),
+                    ),
+                )[:target_limit]
+                signals.append('score-premier-home-ceiling-retention')
+        if (
+            predicted_outcome_label == '平局'
+            and league_code == 'premier_league'
+            and open_match
+            and double_pick
+            and secondary_label == '主胜'
+            and line is not None
+            and line >= 3.0
+            and over_prob is not None
+            and under_prob is not None
+            and under_prob - over_prob >= 0.3
+            and float(confidence or 0.0) <= 0.37
+            and bool(motivation_risk.get('supports_upset'))
+            and motivation_pressure_label == '主胜'
+            and any(score == '1-1' for score, _prob in reranked)
+            and any(score == '1-0' for score, _prob in reranked)
+        ):
+            zero_zero_candidate = next(
+                ((score, prob) for score, prob in ranked_adjusted if score == '0-0'),
+                None,
+            )
+            if zero_zero_candidate:
+                replaced = False
+                retained_zero_zero = (zero_zero_candidate[0], float(zero_zero_candidate[1] or 0.0))
+                reordered = []
+                for score, prob in reranked:
+                    if not replaced and score == '1-0':
+                        reordered.append(retained_zero_zero)
+                        replaced = True
+                        continue
+                    if score != '0-0':
+                        reordered.append((score, prob))
+                if not replaced:
+                    reordered.append(retained_zero_zero)
+                reranked = sorted(
+                    self._rescale_score_list(reordered),
+                    key=lambda item: (
+                        0 if item[0] == '1-1' else 1 if item[0] == '0-0' else 2,
+                        -float(item[1] or 0.0),
+                    ),
+                )[:target_limit]
+                signals.append('score-premier-draw-zero-zero-retention')
         diag = {
             'applied': reranked != scores[: len(reranked)],
             'signals': list(dict.fromkeys(signals)),

@@ -70,9 +70,17 @@ def _parse_row_text(text: str) -> Dict[str, Any]:
         s_clean = re.sub(r"\b\d{1,2}:\d{2}\b", "", s_clean)
     
     # Remove round marker, 完/进行中 markers, extra spaces, date tokens
+    s_clean = re.sub(r"\b\d{4}-\d{1,2}-\d{1,2}\b", "", s_clean)
     s_clean = re.sub(r"^第\d+轮", "", s_clean)
+    s_clean = re.sub(r"\b第\d+轮\b", "", s_clean)
     s_clean = re.sub(r"\b(?:完|进行中|未开始)\b", "", s_clean, flags=re.IGNORECASE)
     s_clean = re.sub(r"\b\d{1,2}-\d{1,2}\b", "", s_clean)
+    s_clean = re.sub(
+        r"\b(?:盈亏|亚指|欧指|分析|预测|AI|积分|阵容|情报|独家|直播|动画|会员)\b",
+        "",
+        s_clean,
+        flags=re.IGNORECASE,
+    )
     s_clean = re.sub(r"\s+", " ", s_clean).strip()
     
     # Split into home and away
@@ -112,7 +120,14 @@ def main() -> None:
     args = parser.parse_args()
 
     # Import from the snapshot script to reuse CDP/session + league url mapping.
-    from okooo_save_snapshot import LocalChromeSession, _ensure_local_chrome, _mobile_league_url, REMEN_URL
+    from okooo_save_snapshot import (
+        LocalChromeSession,
+        REMEN_URL,
+        _extract_schedule_rows_for_date_on_current_page,
+        _ensure_local_chrome,
+        _mobile_league_url,
+        _navigate_schedule_to_month,
+    )
 
     league_cn = (args.league or "").strip()
     league_code = _league_code(league_cn)
@@ -155,103 +170,29 @@ def main() -> None:
             s.eval_json("(() => { window.scrollTo(0, 0); return JSON.stringify({ok:true}); })()")
             time.sleep(1.0)
 
-        # Click date tab, if present (avoid clicking large containers).
+        month_nav = {"attempted": False, "matched": False, "reason": "missing_date"}
+        if args.date:
+            month_nav = _navigate_schedule_to_month(s, args.date, max_steps=18)
+
         dtoks = _date_tokens(args.date)
-        click_js = r"""
-(() => {
-  const tokens = %s;
-  const els = Array.from(document.querySelectorAll('a,div,span,button,li,p,em,strong,td,th,h1,h2,h3'));
-  const norm = (t) => String(t||'').replace(/\s+/g,'').trim();
-  const isSmall = (t) => t && t.length >= 3 && t.length <= 8;
-  const isDateLike = (t) => /^\d{1,2}-\d{1,2}$/.test(t);
-  for (const tok of tokens) {
-    const re = new RegExp(`^(?:\\d{4}-)?${tok.replace(/[-/\\\\^$*+?.()|[\\]{}]/g,'\\\\$&')}`);
-    const cands = els
-      .map(e => ({e, t: norm(e.innerText)}))
-      .filter(x => x.t && x.t.length <= 40)
-      .filter(x => x.t.includes(tok))
-      .filter(x => re.test(x.t) || x.t === tok || x.t.endsWith(tok))
-      .filter(x => isSmall(x.t) || isDateLike(x.t) || x.t.length <= 12);
-    // pick smallest text candidate to avoid huge containers
-    cands.sort((a,b) => a.t.length - b.t.length);
-    if (cands.length) {
-      cands[0].e.click();
-      return JSON.stringify({clicked:true, token:tok, text:cands[0].t});
-    }
-  }
-  return JSON.stringify({clicked:false, tokens});
-})()
-""" % json.dumps(dtoks, ensure_ascii=False)
-        click_result = s.eval_json(click_js)
-        time.sleep(2.0)
+        click_result = {
+            "clicked": True,
+            "mode": "month_section_scan",
+            "token": args.date,
+        }
         # Allow time for scroll/navigation/render.
         s.eval_json("(() => { return JSON.stringify({href: location.href, scrollY: window.scrollY}); })()")
 
-        # Extract matches by scanning the whole page. We'll filter by date in Python.
-        extract_js = r"""
-(() => {
-  const dateFull = %s;  // 'YYYY-MM-DD'
-  const tokens = %s;    // ['MM-DD', 'M-D']
-  const norm = (t) => String(t||'').replace(/\s+/g,' ').trim();
-  const out = [];
-  const seen = new Set();
-
-  const extractMidAndHref = (el) => {
-    let href = '';
-    if (el && el.getAttribute) {
-      href = el.getAttribute('href') || '';
-    }
-    // Some rows use onclick instead of href.
-    const onclick = el && el.getAttribute ? (el.getAttribute('onclick') || '') : '';
-    const combined = `${href} ${onclick}`;
-    const m = combined.match(/matchid=(\d+)/i);
-    const mid = m ? m[1] : null;
-    if (!mid) return {mid:null, href:null};
-    if (href && href.includes('MatchID=')) {
-      // Normalize to absolute if needed
-      if (href.startsWith('/')) href = location.origin + href;
-      return {mid, href};
-    }
-    return {mid, href: `https://m.okooo.com/match/history.php?MatchID=${mid}`};
-  };
-
-  const pushNode = (el) => {
-    const x = extractMidAndHref(el);
-    const mid = x.mid;
-    const href = x.href;
-    if (!mid || seen.has(mid)) return;
-    const row = el.closest ? (el.closest('li') || el.closest('tr') || el.closest('div')) : null;
-    if (!row) return;
-    const text = (row.innerText || '').replace(/\s+/g,' ').trim();
-    if (!text) return;
-    seen.add(mid);
-    out.push({mid, href, text});
-  };
-
-  // Prefer extracting within the date section if the page contains it.
-  const candidates = Array.from(document.querySelectorAll('div,li,section,table,tbody'))
-    .filter(el => (el.innerText || '').includes(dateFull))
-    .filter(el => (el.innerText || '').length < 3000);
-
-  let root = null;
-  let best = -1;
-  for (const el of candidates) {
-    const n = el.querySelectorAll("[href*='MatchID='],[href*='matchid='],[onclick*='MatchID='],[onclick*='matchid='],a[href*='history.php']").length;
-    if (n > best) { best = n; root = el; }
-  }
-
-  const scope = root || document;
-  scope.querySelectorAll("[href*='MatchID='],[href*='matchid='],[onclick*='MatchID='],[onclick*='matchid='],a[href*='history.php']").forEach(pushNode);
-  return JSON.stringify({count: out.length, rows: out, mode: 'full'});
-})()
-""" % (json.dumps(args.date, ensure_ascii=False), json.dumps(dtoks, ensure_ascii=False))
-        raw = s.eval_json(extract_js)
+        raw = _extract_schedule_rows_for_date_on_current_page(s, date_hint=args.date, limit=64)
     finally:
         s.close()
 
     rows = (raw or {}).get("rows") if isinstance(raw, dict) else None
     if not rows:
-        raise SystemExit(f"未抓到赛程行：league={league_cn}, date={args.date}, click={click_result}")
+        raise SystemExit(f"未抓到赛程行：league={league_cn}, date={args.date}, month_nav={month_nav}, click={click_result}")
+
+    if not isinstance(click_result, dict) or click_result.get("clicked") is not True:
+        raise SystemExit(f"日期切换失败：league={league_cn}, date={args.date}, month_nav={month_nav}, click={click_result}")
 
     matches: List[Dict[str, Any]] = []
     for r in rows:
@@ -279,6 +220,7 @@ def main() -> None:
         "league_code": league_code,
         "date": args.date,
         "source_url": league_url,
+        "month_navigation": month_nav,
         "date_click": click_result,
         "matches": matches,
     }

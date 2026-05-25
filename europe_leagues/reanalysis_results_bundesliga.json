@@ -1,0 +1,2478 @@
+{
+  "generated_at": "2026-05-24T19:07:42.252108",
+  "scope": {
+    "league": "bundesliga",
+    "days": 30,
+    "limit": 0,
+    "allow_missing_snapshot": false
+  },
+  "summary": {
+    "replayed_matches": 10,
+    "baseline_win_hits": 5,
+    "replay_win_hits": 6,
+    "baseline_score_hits": 2,
+    "replay_score_hits": 3,
+    "baseline_away_predictions": 0,
+    "replay_away_predictions": 0,
+    "baseline_top1_1_0": 3,
+    "replay_top1_1_0": 3,
+    "baseline_home_to_away_errors": 4,
+    "replay_home_to_away_errors": 4,
+    "baseline_home_to_draw_errors": 0,
+    "replay_home_to_draw_errors": 0,
+    "improved_matches": 1,
+    "regressed_matches": 0,
+    "snapshot_backed_matches": 10,
+    "blocked_predictions": 0,
+    "baseline_confusion": {
+      "draw->home": 1,
+      "home->home": 4,
+      "home->away": 4,
+      "draw->draw": 1
+    },
+    "replay_confusion": {
+      "home->home": 5,
+      "home->away": 4,
+      "draw->draw": 1
+    },
+    "baseline_win_accuracy": 50.0,
+    "replay_win_accuracy": 60.0,
+    "baseline_score_accuracy": 20.0,
+    "replay_score_accuracy": 30.0,
+    "skipped_matches": 8
+  },
+  "league_summaries": {
+    "bundesliga": {
+      "summary": {
+        "replayed_matches": 10,
+        "baseline_win_hits": 5,
+        "replay_win_hits": 6,
+        "baseline_score_hits": 2,
+        "replay_score_hits": 3,
+        "baseline_away_predictions": 0,
+        "replay_away_predictions": 0,
+        "baseline_top1_1_0": 3,
+        "replay_top1_1_0": 3,
+        "baseline_home_to_away_errors": 4,
+        "replay_home_to_away_errors": 4,
+        "baseline_home_to_draw_errors": 0,
+        "replay_home_to_draw_errors": 0,
+        "improved_matches": 1,
+        "regressed_matches": 0,
+        "snapshot_backed_matches": 10,
+        "blocked_predictions": 0,
+        "baseline_confusion": {
+          "draw->home": 1,
+          "home->home": 4,
+          "home->away": 4,
+          "draw->draw": 1
+        },
+        "replay_confusion": {
+          "home->home": 5,
+          "home->away": 4,
+          "draw->draw": 1
+        },
+        "baseline_win_accuracy": 50.0,
+        "replay_win_accuracy": 60.0,
+        "baseline_score_accuracy": 20.0,
+        "replay_score_accuracy": 30.0,
+        "skipped_matches": 8
+      },
+      "changed_preview": [
+        {
+          "match_id": "bundesliga_20260509_莱比锡红牛_圣保利",
+          "league": "bundesliga",
+          "match_date": "2026-05-09",
+          "teams": "莱比锡红牛 vs 圣保利",
+          "actual_score": "2-1",
+          "actual_winner": "主胜",
+          "baseline_predicted_winner": "平局",
+          "replay_predicted_winner": "主胜",
+          "baseline_top_scores": [
+            "1-1",
+            "0-0"
+          ],
+          "replay_top_scores": [
+            "1-1",
+            "2-1"
+          ],
+          "review_outcome_signals": [],
+          "draw_guard_signals": [
+            "draw_market_not_confirmed",
+            "away_pressure_review_signal"
+          ],
+          "score_rerank_signals": [
+            "score-double-pick",
+            "score-fragile-home-template-rebalance",
+            "score-review-conservative-correction",
+            "score-review-coverage-expansion"
+          ],
+          "baseline_win_hit": false,
+          "replay_win_hit": true,
+          "improved": true,
+          "regressed": false
+        },
+        {
+          "match_id": "bundesliga_20260510_沃尔夫斯堡_拜仁慕尼黑",
+          "league": "bundesliga",
+          "match_date": "2026-05-10",
+          "teams": "沃尔夫斯堡 vs 拜仁慕尼黑",
+          "actual_score": "0-1",
+          "actual_winner": "客胜",
+          "baseline_predicted_winner": "主胜",
+          "replay_predicted_winner": "主胜",
+          "baseline_top_scores": [
+            "1-1",
+            "0-2"
+          ],
+          "replay_top_scores": [
+            "1-1",
+            "2-1"
+          ],
+          "review_outcome_signals": [
+            "review-stratified-handicap-strength-correction",
+            "review-bias-config-floor"
+          ],
+          "draw_guard_signals": [
+            "draw_confirmation_gap_weak",
+            "draw_market_not_confirmed",
+            "extreme_under_not_draw_confirmed"
+          ],
+          "score_rerank_signals": [
+            "score-direction-filter",
+            "score-double-pick",
+            "score-fragile-home-template-rebalance",
+            "score-template-cap",
+            "score-review-conservative-correction"
+          ],
+          "baseline_win_hit": false,
+          "replay_win_hit": false,
+          "improved": false,
+          "regressed": false
+        },
+        {
+          "match_id": "bundesliga_20260516_圣保利_沃尔夫斯堡",
+          "league": "bundesliga",
+          "match_date": "2026-05-16",
+          "teams": "圣保利 vs 沃尔夫斯堡",
+          "actual_score": "1-3",
+          "actual_winner": "客胜",
+          "baseline_predicted_winner": "主胜",
+          "replay_predicted_winner": "主胜",
+          "baseline_top_scores": [
+            "1-1",
+            "2-1",
+            "1-0"
+          ],
+          "replay_top_scores": [
+            "1-1",
+            "2-1"
+          ],
+          "review_outcome_signals": [],
+          "draw_guard_signals": [],
+          "score_rerank_signals": [
+            "score-direction-filter",
+            "score-template-cap",
+            "score-review-conservative-correction",
+            "score-review-coverage-expansion"
+          ],
+          "baseline_win_hit": false,
+          "replay_win_hit": false,
+          "improved": false,
+          "regressed": false
+        },
+        {
+          "match_id": "bundesliga_20260516_弗赖堡_莱比锡红牛",
+          "league": "bundesliga",
+          "match_date": "2026-05-16",
+          "teams": "弗赖堡 vs 莱比锡红牛",
+          "actual_score": "4-1",
+          "actual_winner": "主胜",
+          "baseline_predicted_winner": "主胜",
+          "replay_predicted_winner": "主胜",
+          "baseline_top_scores": [
+            "1-0"
+          ],
+          "replay_top_scores": [
+            "1-1",
+            "2-1"
+          ],
+          "review_outcome_signals": [],
+          "draw_guard_signals": [],
+          "score_rerank_signals": [
+            "score-direction-filter",
+            "score-double-pick",
+            "score-fragile-home-template-rebalance",
+            "score-template-cap",
+            "score-market-shallow-cap",
+            "score-review-conservative-correction",
+            "score-review-coverage-expansion"
+          ],
+          "baseline_win_hit": true,
+          "replay_win_hit": true,
+          "improved": false,
+          "regressed": false
+        },
+        {
+          "match_id": "bundesliga_20260516_云达不莱梅_多特蒙德",
+          "league": "bundesliga",
+          "match_date": "2026-05-16",
+          "teams": "云达不莱梅 vs 多特蒙德",
+          "actual_score": "0-2",
+          "actual_winner": "客胜",
+          "baseline_predicted_winner": "主胜",
+          "replay_predicted_winner": "主胜",
+          "baseline_top_scores": [
+            "2-1",
+            "1-0"
+          ],
+          "replay_top_scores": [
+            "1-1",
+            "2-1"
+          ],
+          "review_outcome_signals": [
+            "review-stratified-handicap-strength-correction",
+            "review-bias-config-floor"
+          ],
+          "draw_guard_signals": [],
+          "score_rerank_signals": [
+            "score-direction-filter",
+            "score-double-pick",
+            "score-fragile-home-template-rebalance",
+            "score-template-cap",
+            "score-review-conservative-correction",
+            "score-review-coverage-expansion"
+          ],
+          "baseline_win_hit": false,
+          "replay_win_hit": false,
+          "improved": false,
+          "regressed": false
+        },
+        {
+          "match_id": "bundesliga_20260516_海登海姆_美因茨",
+          "league": "bundesliga",
+          "match_date": "2026-05-16",
+          "teams": "海登海姆 vs 美因茨",
+          "actual_score": "0-2",
+          "actual_winner": "客胜",
+          "baseline_predicted_winner": "主胜",
+          "replay_predicted_winner": "主胜",
+          "baseline_top_scores": [
+            "2-1",
+            "1-0"
+          ],
+          "replay_top_scores": [
+            "2-1",
+            "1-1"
+          ],
+          "review_outcome_signals": [
+            "review-bias-config-floor"
+          ],
+          "draw_guard_signals": [],
+          "score_rerank_signals": [
+            "score-direction-filter",
+            "score-double-pick",
+            "score-fragile-home-template-rebalance",
+            "score-template-cap",
+            "score-review-conservative-correction",
+            "score-review-coverage-expansion"
+          ],
+          "baseline_win_hit": false,
+          "replay_win_hit": false,
+          "improved": false,
+          "regressed": false
+        },
+        {
+          "match_id": "bundesliga_20260509_斯图加特_勒沃库森",
+          "league": "bundesliga",
+          "match_date": "2026-05-09",
+          "teams": "斯图加特 vs 勒沃库森",
+          "actual_score": "3-1",
+          "actual_winner": "主胜",
+          "baseline_predicted_winner": "主胜",
+          "replay_predicted_winner": "主胜",
+          "baseline_top_scores": [
+            "2-1",
+            "2-0"
+          ],
+          "replay_top_scores": [
+            "1-0",
+            "2-1"
+          ],
+          "review_outcome_signals": [
+            "review-stratified-handicap-strength-correction",
+            "review-bias-config-floor"
+          ],
+          "draw_guard_signals": [],
+          "score_rerank_signals": [
+            "score-direction-filter",
+            "score-review-conservative-correction"
+          ],
+          "baseline_win_hit": true,
+          "replay_win_hit": true,
+          "improved": false,
+          "regressed": false
+        }
+      ]
+    }
+  },
+  "changed_preview": [
+    {
+      "match_id": "bundesliga_20260509_莱比锡红牛_圣保利",
+      "league": "bundesliga",
+      "match_date": "2026-05-09",
+      "teams": "莱比锡红牛 vs 圣保利",
+      "actual_score": "2-1",
+      "actual_winner": "主胜",
+      "baseline_predicted_winner": "平局",
+      "replay_predicted_winner": "主胜",
+      "baseline_top_scores": [
+        "1-1",
+        "0-0"
+      ],
+      "replay_top_scores": [
+        "1-1",
+        "2-1"
+      ],
+      "review_outcome_signals": [],
+      "draw_guard_signals": [
+        "draw_market_not_confirmed",
+        "away_pressure_review_signal"
+      ],
+      "score_rerank_signals": [
+        "score-double-pick",
+        "score-fragile-home-template-rebalance",
+        "score-review-conservative-correction",
+        "score-review-coverage-expansion"
+      ],
+      "baseline_win_hit": false,
+      "replay_win_hit": true,
+      "improved": true,
+      "regressed": false
+    },
+    {
+      "match_id": "bundesliga_20260510_沃尔夫斯堡_拜仁慕尼黑",
+      "league": "bundesliga",
+      "match_date": "2026-05-10",
+      "teams": "沃尔夫斯堡 vs 拜仁慕尼黑",
+      "actual_score": "0-1",
+      "actual_winner": "客胜",
+      "baseline_predicted_winner": "主胜",
+      "replay_predicted_winner": "主胜",
+      "baseline_top_scores": [
+        "1-1",
+        "0-2"
+      ],
+      "replay_top_scores": [
+        "1-1",
+        "2-1"
+      ],
+      "review_outcome_signals": [
+        "review-stratified-handicap-strength-correction",
+        "review-bias-config-floor"
+      ],
+      "draw_guard_signals": [
+        "draw_confirmation_gap_weak",
+        "draw_market_not_confirmed",
+        "extreme_under_not_draw_confirmed"
+      ],
+      "score_rerank_signals": [
+        "score-direction-filter",
+        "score-double-pick",
+        "score-fragile-home-template-rebalance",
+        "score-template-cap",
+        "score-review-conservative-correction"
+      ],
+      "baseline_win_hit": false,
+      "replay_win_hit": false,
+      "improved": false,
+      "regressed": false
+    },
+    {
+      "match_id": "bundesliga_20260516_圣保利_沃尔夫斯堡",
+      "league": "bundesliga",
+      "match_date": "2026-05-16",
+      "teams": "圣保利 vs 沃尔夫斯堡",
+      "actual_score": "1-3",
+      "actual_winner": "客胜",
+      "baseline_predicted_winner": "主胜",
+      "replay_predicted_winner": "主胜",
+      "baseline_top_scores": [
+        "1-1",
+        "2-1",
+        "1-0"
+      ],
+      "replay_top_scores": [
+        "1-1",
+        "2-1"
+      ],
+      "review_outcome_signals": [],
+      "draw_guard_signals": [],
+      "score_rerank_signals": [
+        "score-direction-filter",
+        "score-template-cap",
+        "score-review-conservative-correction",
+        "score-review-coverage-expansion"
+      ],
+      "baseline_win_hit": false,
+      "replay_win_hit": false,
+      "improved": false,
+      "regressed": false
+    },
+    {
+      "match_id": "bundesliga_20260516_弗赖堡_莱比锡红牛",
+      "league": "bundesliga",
+      "match_date": "2026-05-16",
+      "teams": "弗赖堡 vs 莱比锡红牛",
+      "actual_score": "4-1",
+      "actual_winner": "主胜",
+      "baseline_predicted_winner": "主胜",
+      "replay_predicted_winner": "主胜",
+      "baseline_top_scores": [
+        "1-0"
+      ],
+      "replay_top_scores": [
+        "1-1",
+        "2-1"
+      ],
+      "review_outcome_signals": [],
+      "draw_guard_signals": [],
+      "score_rerank_signals": [
+        "score-direction-filter",
+        "score-double-pick",
+        "score-fragile-home-template-rebalance",
+        "score-template-cap",
+        "score-market-shallow-cap",
+        "score-review-conservative-correction",
+        "score-review-coverage-expansion"
+      ],
+      "baseline_win_hit": true,
+      "replay_win_hit": true,
+      "improved": false,
+      "regressed": false
+    },
+    {
+      "match_id": "bundesliga_20260516_云达不莱梅_多特蒙德",
+      "league": "bundesliga",
+      "match_date": "2026-05-16",
+      "teams": "云达不莱梅 vs 多特蒙德",
+      "actual_score": "0-2",
+      "actual_winner": "客胜",
+      "baseline_predicted_winner": "主胜",
+      "replay_predicted_winner": "主胜",
+      "baseline_top_scores": [
+        "2-1",
+        "1-0"
+      ],
+      "replay_top_scores": [
+        "1-1",
+        "2-1"
+      ],
+      "review_outcome_signals": [
+        "review-stratified-handicap-strength-correction",
+        "review-bias-config-floor"
+      ],
+      "draw_guard_signals": [],
+      "score_rerank_signals": [
+        "score-direction-filter",
+        "score-double-pick",
+        "score-fragile-home-template-rebalance",
+        "score-template-cap",
+        "score-review-conservative-correction",
+        "score-review-coverage-expansion"
+      ],
+      "baseline_win_hit": false,
+      "replay_win_hit": false,
+      "improved": false,
+      "regressed": false
+    },
+    {
+      "match_id": "bundesliga_20260516_海登海姆_美因茨",
+      "league": "bundesliga",
+      "match_date": "2026-05-16",
+      "teams": "海登海姆 vs 美因茨",
+      "actual_score": "0-2",
+      "actual_winner": "客胜",
+      "baseline_predicted_winner": "主胜",
+      "replay_predicted_winner": "主胜",
+      "baseline_top_scores": [
+        "2-1",
+        "1-0"
+      ],
+      "replay_top_scores": [
+        "2-1",
+        "1-1"
+      ],
+      "review_outcome_signals": [
+        "review-bias-config-floor"
+      ],
+      "draw_guard_signals": [],
+      "score_rerank_signals": [
+        "score-direction-filter",
+        "score-double-pick",
+        "score-fragile-home-template-rebalance",
+        "score-template-cap",
+        "score-review-conservative-correction",
+        "score-review-coverage-expansion"
+      ],
+      "baseline_win_hit": false,
+      "replay_win_hit": false,
+      "improved": false,
+      "regressed": false
+    },
+    {
+      "match_id": "bundesliga_20260509_斯图加特_勒沃库森",
+      "league": "bundesliga",
+      "match_date": "2026-05-09",
+      "teams": "斯图加特 vs 勒沃库森",
+      "actual_score": "3-1",
+      "actual_winner": "主胜",
+      "baseline_predicted_winner": "主胜",
+      "replay_predicted_winner": "主胜",
+      "baseline_top_scores": [
+        "2-1",
+        "2-0"
+      ],
+      "replay_top_scores": [
+        "1-0",
+        "2-1"
+      ],
+      "review_outcome_signals": [
+        "review-stratified-handicap-strength-correction",
+        "review-bias-config-floor"
+      ],
+      "draw_guard_signals": [],
+      "score_rerank_signals": [
+        "score-direction-filter",
+        "score-review-conservative-correction"
+      ],
+      "baseline_win_hit": true,
+      "replay_win_hit": true,
+      "improved": false,
+      "regressed": false
+    }
+  ],
+  "matches": [
+    {
+      "match_id": "bundesliga_20260509_莱比锡红牛_圣保利",
+      "league": "bundesliga",
+      "league_name": "德甲联赛",
+      "match_date": "2026-05-09",
+      "match_time": "21:30",
+      "home_team": "莱比锡红牛",
+      "away_team": "圣保利",
+      "source_presence": [
+        "archive",
+        "teams_sot"
+      ],
+      "storage_mode": "league_sot",
+      "snapshot": {
+        "available": true,
+        "snapshot_path": "/Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots/bundesliga/莱比锡红牛vs圣保利.json",
+        "match_id": "1300071"
+      },
+      "baseline": {
+        "predicted_winner": "平局",
+        "predicted_winner_key": "draw",
+        "predicted_scores": [
+          "1-1",
+          "0-0"
+        ],
+        "predicted_scores_top1": "1-1",
+        "predicted_ou": null,
+        "actual_score": "2-1",
+        "actual_winner": "主胜",
+        "actual_winner_key": "home",
+        "win_hit": false,
+        "score_hit": false
+      },
+      "replay": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "1-1",
+          "2-1"
+        ],
+        "predicted_scores_top1": "1-1",
+        "final_probabilities": {
+          "home_win": 0.37463175767935586,
+          "draw": 0.36962304119641387,
+          "away_win": 0.25574520112423027
+        },
+        "all_probabilities": {
+          "主胜": 0.37463175767935586,
+          "平局": 0.36962304119641387,
+          "客胜": 0.25574520112423027
+        },
+        "confidence": 0.37463175767935586,
+        "prediction_blocked": false,
+        "blocked_reason": "",
+        "review_outcome_adjustment": {
+          "applied": false,
+          "signals": [],
+          "reason": "three_layer_evaluated_no_adjustment",
+          "three_layer_evaluated": true,
+          "home_bias_gate": {
+            "qualified": false,
+            "evidence": []
+          },
+          "applied_shift": {
+            "draw_shift": 0.0,
+            "away_shift": 0.0,
+            "home_shift": 0.0,
+            "draw_to_away_relief": 0.0,
+            "draw_to_away_trim": 0.0
+          },
+          "stratified_review": {
+            "handicap_depth_bucket": "level_very_deep",
+            "strength_gap_bucket": "balanced",
+            "matched_key": "draw:level_very_deep",
+            "matched": {
+              "predicted_winner": "draw",
+              "predicted_winner_label": "平局",
+              "handicap_bucket": "level_very_deep",
+              "handicap_bucket_label": "球半及以上",
+              "sample_count": 2,
+              "hit_count": 1,
+              "miss_count": 1,
+              "draw_miss_count": 0,
+              "opposite_miss_count": 1,
+              "examples": [
+                {
+                  "teams": "莱比锡红牛 vs 圣保利",
+                  "actual_score": "2-1",
+                  "actual_winner": "主胜"
+                }
+              ],
+              "hit_rate": 0.5,
+              "miss_rate": 0.5,
+              "draw_miss_rate": 0.0,
+              "opposite_miss_rate": 0.5,
+              "recommended_draw_shift": 0.0,
+              "recommended_upset_shift": 0.0,
+              "learning_multiplier": {
+                "draw": 0.95,
+                "upset": 0.95
+              }
+            }
+          },
+          "three_layer_context": {
+            "predicted_winner": "draw",
+            "predicted_outcome_label": "平局",
+            "handicap_depth_bucket": "level_very_deep",
+            "strength_gap_bucket": "balanced",
+            "euro_support_bucket": "draw_soft",
+            "scenario_name": "",
+            "asian_line": -1.5,
+            "strength_diff": 0.0,
+            "stratified_key": "draw:level_very_deep",
+            "three_layer_key": "draw:level_very_deep:draw_soft"
+          },
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": true,
+            "pressure_side": "away",
+            "favored_side": "home",
+            "score": 17.5
+          }
+        },
+        "draw_confirmation_guard": {
+          "applied": true,
+          "qualified": false,
+          "reason": "draw_confirmation_failed_shifted",
+          "signals": [
+            "draw_market_not_confirmed",
+            "away_pressure_review_signal"
+          ],
+          "evidence": [],
+          "top_gap": 0.038671,
+          "draw_market_gap": 4.1187,
+          "volatility": {
+            "home": "high",
+            "away": "medium"
+          },
+          "shift": 0.026,
+          "favored_side": "home_win",
+          "adjusted_probabilities": {
+            "home_win": 0.374632,
+            "draw": 0.369623,
+            "away_win": 0.255745
+          }
+        },
+        "review_score_rerank": {
+          "applied": true,
+          "signals": [
+            "score-double-pick",
+            "score-fragile-home-template-rebalance",
+            "score-review-conservative-correction",
+            "score-review-coverage-expansion"
+          ],
+          "scenario_name": "",
+          "open_match": false,
+          "confidence": 0.37463175767935586,
+          "filtered_out_count": 0,
+          "allowed_outcomes": [
+            "主胜",
+            "平局",
+            "客胜"
+          ],
+          "double_pick": true,
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": true,
+            "pressure_side": "away",
+            "score": 17.5
+          },
+          "secondary_gap": 0.005008716482941988,
+          "secondary_probability": 0.36962304119641387,
+          "coverage_profile": {
+            "same_total_layer": false,
+            "same_goal_margin": false,
+            "all_low_templates": true,
+            "needs_expansion": true
+          },
+          "coverage_expansion_applied": true,
+          "coverage_expansion_candidate": "3-1"
+        },
+        "win_hit": true,
+        "score_hit": true
+      }
+    },
+    {
+      "match_id": "bundesliga_20260509_霍芬海姆_云达不莱梅",
+      "league": "bundesliga",
+      "league_name": "德甲联赛",
+      "match_date": "2026-05-09",
+      "match_time": "21:30",
+      "home_team": "霍芬海姆",
+      "away_team": "云达不莱梅",
+      "source_presence": [
+        "archive",
+        "teams_sot"
+      ],
+      "storage_mode": "league_sot",
+      "snapshot": {
+        "available": true,
+        "snapshot_path": "/Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots/bundesliga/霍芬海姆vs云达不莱梅.json",
+        "match_id": "1300075"
+      },
+      "baseline": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "1-0",
+          "2-1"
+        ],
+        "predicted_scores_top1": "1-0",
+        "predicted_ou": null,
+        "actual_score": "1-0",
+        "actual_winner": "主胜",
+        "actual_winner_key": "home",
+        "win_hit": true,
+        "score_hit": true
+      },
+      "replay": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "1-0",
+          "2-1"
+        ],
+        "predicted_scores_top1": "1-0",
+        "final_probabilities": {
+          "home_win": 0.42458041232809746,
+          "draw": 0.3004142471288405,
+          "away_win": 0.27500534054306197
+        },
+        "all_probabilities": {
+          "主胜": 0.42458041232809746,
+          "平局": 0.3004142471288405,
+          "客胜": 0.27500534054306197
+        },
+        "confidence": 0.42458041232809746,
+        "prediction_blocked": false,
+        "blocked_reason": "",
+        "review_outcome_adjustment": {
+          "applied": true,
+          "signals": [
+            "review-stratified-handicap-strength-correction",
+            "review-bias-config-floor"
+          ],
+          "reason": "applied",
+          "three_layer_evaluated": true,
+          "home_bias_gate": {
+            "qualified": false,
+            "evidence": [
+              "limited_strength_gap"
+            ]
+          },
+          "applied_shift": {
+            "draw_shift": 0.011,
+            "away_shift": 0.0158,
+            "home_shift": 0.0,
+            "draw_to_away_relief": 0.0,
+            "draw_to_away_trim": 0.0
+          },
+          "stratified_review": {
+            "handicap_depth_bucket": "unknown",
+            "strength_gap_bucket": "balanced",
+            "matched_key": "home:unknown",
+            "matched": {
+              "predicted_winner": "home",
+              "predicted_winner_label": "主胜",
+              "handicap_bucket": "unknown",
+              "handicap_bucket_label": "缺盘口",
+              "sample_count": 8,
+              "hit_count": 4,
+              "miss_count": 4,
+              "draw_miss_count": 1,
+              "opposite_miss_count": 3,
+              "examples": [
+                {
+                  "teams": "法兰克福 vs 斯图加特",
+                  "actual_score": "2-2",
+                  "actual_winner": "平局"
+                },
+                {
+                  "teams": "云达不莱梅 vs 多特蒙德",
+                  "actual_score": "0-2",
+                  "actual_winner": "客胜"
+                },
+                {
+                  "teams": "科隆 vs 海登海姆",
+                  "actual_score": "1-3",
+                  "actual_winner": "客胜"
+                },
+                {
+                  "teams": "沃尔夫斯堡 vs 拜仁慕尼黑",
+                  "actual_score": "0-1",
+                  "actual_winner": "客胜"
+                }
+              ],
+              "hit_rate": 0.5,
+              "miss_rate": 0.5,
+              "draw_miss_rate": 0.125,
+              "opposite_miss_rate": 0.375,
+              "recommended_draw_shift": 0.0,
+              "recommended_upset_shift": 0.014,
+              "learning_multiplier": {
+                "draw": 0.95,
+                "upset": 0.95
+              }
+            }
+          },
+          "three_layer_context": {
+            "predicted_winner": "home",
+            "predicted_outcome_label": "主胜",
+            "handicap_depth_bucket": "unknown",
+            "strength_gap_bucket": "balanced",
+            "euro_support_bucket": "unknown",
+            "scenario_name": "",
+            "asian_line": null,
+            "strength_diff": 0.0,
+            "stratified_key": "home:unknown",
+            "three_layer_key": "home:unknown:unknown"
+          },
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "away",
+            "favored_side": "home",
+            "score": 0.0
+          }
+        },
+        "draw_confirmation_guard": {
+          "applied": false,
+          "qualified": false,
+          "reason": "not_draw_top1",
+          "signals": [],
+          "evidence": []
+        },
+        "review_score_rerank": {
+          "applied": true,
+          "signals": [
+            "score-direction-filter",
+            "score-review-conservative-correction"
+          ],
+          "scenario_name": "",
+          "open_match": false,
+          "confidence": 0.42458041232809746,
+          "filtered_out_count": 5,
+          "allowed_outcomes": [
+            "主胜"
+          ],
+          "double_pick": false,
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "away",
+            "score": 0.0
+          },
+          "secondary_gap": 0.12416616519925694,
+          "secondary_probability": 0.3004142471288405,
+          "coverage_profile": {
+            "same_total_layer": false,
+            "same_goal_margin": false,
+            "all_low_templates": true,
+            "needs_expansion": true
+          },
+          "coverage_expansion_applied": false,
+          "coverage_expansion_candidate": null
+        },
+        "win_hit": true,
+        "score_hit": true
+      }
+    },
+    {
+      "match_id": "bundesliga_20260509_奥格斯堡_门兴格拉德巴赫",
+      "league": "bundesliga",
+      "league_name": "德甲联赛",
+      "match_date": "2026-05-09",
+      "match_time": "21:30",
+      "home_team": "奥格斯堡",
+      "away_team": "门兴格拉德巴赫",
+      "source_presence": [
+        "archive",
+        "teams_sot"
+      ],
+      "storage_mode": "league_sot",
+      "snapshot": {
+        "available": true,
+        "snapshot_path": "/Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots/bundesliga/奥格斯堡vs门兴格拉德巴赫.json",
+        "match_id": "1300074"
+      },
+      "baseline": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "1-0",
+          "2-1"
+        ],
+        "predicted_scores_top1": "1-0",
+        "predicted_ou": null,
+        "actual_score": "3-1",
+        "actual_winner": "主胜",
+        "actual_winner_key": "home",
+        "win_hit": true,
+        "score_hit": false
+      },
+      "replay": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "1-0",
+          "2-1"
+        ],
+        "predicted_scores_top1": "1-0",
+        "final_probabilities": {
+          "home_win": 0.4017696546262459,
+          "draw": 0.3051609429251761,
+          "away_win": 0.2930694024485781
+        },
+        "all_probabilities": {
+          "主胜": 0.4017696546262459,
+          "平局": 0.3051609429251761,
+          "客胜": 0.2930694024485781
+        },
+        "confidence": 0.4017696546262459,
+        "prediction_blocked": false,
+        "blocked_reason": "",
+        "review_outcome_adjustment": {
+          "applied": true,
+          "signals": [
+            "review-stratified-handicap-strength-correction",
+            "review-bias-config-floor"
+          ],
+          "reason": "applied",
+          "three_layer_evaluated": true,
+          "home_bias_gate": {
+            "qualified": false,
+            "evidence": [
+              "limited_strength_gap"
+            ]
+          },
+          "applied_shift": {
+            "draw_shift": 0.011,
+            "away_shift": 0.0158,
+            "home_shift": 0.0,
+            "draw_to_away_relief": 0.0,
+            "draw_to_away_trim": 0.0
+          },
+          "stratified_review": {
+            "handicap_depth_bucket": "unknown",
+            "strength_gap_bucket": "balanced",
+            "matched_key": "home:unknown",
+            "matched": {
+              "predicted_winner": "home",
+              "predicted_winner_label": "主胜",
+              "handicap_bucket": "unknown",
+              "handicap_bucket_label": "缺盘口",
+              "sample_count": 8,
+              "hit_count": 4,
+              "miss_count": 4,
+              "draw_miss_count": 1,
+              "opposite_miss_count": 3,
+              "examples": [
+                {
+                  "teams": "法兰克福 vs 斯图加特",
+                  "actual_score": "2-2",
+                  "actual_winner": "平局"
+                },
+                {
+                  "teams": "云达不莱梅 vs 多特蒙德",
+                  "actual_score": "0-2",
+                  "actual_winner": "客胜"
+                },
+                {
+                  "teams": "科隆 vs 海登海姆",
+                  "actual_score": "1-3",
+                  "actual_winner": "客胜"
+                },
+                {
+                  "teams": "沃尔夫斯堡 vs 拜仁慕尼黑",
+                  "actual_score": "0-1",
+                  "actual_winner": "客胜"
+                }
+              ],
+              "hit_rate": 0.5,
+              "miss_rate": 0.5,
+              "draw_miss_rate": 0.125,
+              "opposite_miss_rate": 0.375,
+              "recommended_draw_shift": 0.0,
+              "recommended_upset_shift": 0.014,
+              "learning_multiplier": {
+                "draw": 0.95,
+                "upset": 0.95
+              }
+            }
+          },
+          "three_layer_context": {
+            "predicted_winner": "home",
+            "predicted_outcome_label": "主胜",
+            "handicap_depth_bucket": "unknown",
+            "strength_gap_bucket": "balanced",
+            "euro_support_bucket": "unknown",
+            "scenario_name": "",
+            "asian_line": null,
+            "strength_diff": 0.0,
+            "stratified_key": "home:unknown",
+            "three_layer_key": "home:unknown:unknown"
+          },
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "away",
+            "favored_side": "home",
+            "score": 0.0
+          }
+        },
+        "draw_confirmation_guard": {
+          "applied": false,
+          "qualified": false,
+          "reason": "not_draw_top1",
+          "signals": [],
+          "evidence": []
+        },
+        "review_score_rerank": {
+          "applied": true,
+          "signals": [
+            "score-direction-filter",
+            "score-review-conservative-correction"
+          ],
+          "scenario_name": "",
+          "open_match": false,
+          "confidence": 0.4017696546262459,
+          "filtered_out_count": 5,
+          "allowed_outcomes": [
+            "主胜"
+          ],
+          "double_pick": false,
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "away",
+            "score": 0.0
+          },
+          "secondary_gap": 0.09660871170106983,
+          "secondary_probability": 0.3051609429251761,
+          "coverage_profile": {
+            "same_total_layer": false,
+            "same_goal_margin": false,
+            "all_low_templates": true,
+            "needs_expansion": true
+          },
+          "coverage_expansion_applied": false,
+          "coverage_expansion_candidate": null
+        },
+        "win_hit": true,
+        "score_hit": false
+      }
+    },
+    {
+      "match_id": "bundesliga_20260510_沃尔夫斯堡_拜仁慕尼黑",
+      "league": "bundesliga",
+      "league_name": "德甲联赛",
+      "match_date": "2026-05-10",
+      "match_time": "00:30",
+      "home_team": "沃尔夫斯堡",
+      "away_team": "拜仁慕尼黑",
+      "source_presence": [
+        "archive",
+        "teams_sot"
+      ],
+      "storage_mode": "league_sot",
+      "snapshot": {
+        "available": true,
+        "snapshot_path": "/Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots/bundesliga/沃尔夫斯堡vs拜仁慕尼黑.json",
+        "match_id": "1300073"
+      },
+      "baseline": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "1-1",
+          "0-2"
+        ],
+        "predicted_scores_top1": "1-1",
+        "predicted_ou": {
+          "side": "小",
+          "line": 4.0
+        },
+        "actual_score": "0-1",
+        "actual_winner": "客胜",
+        "actual_winner_key": "away",
+        "win_hit": false,
+        "score_hit": false
+      },
+      "replay": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "1-1",
+          "2-1"
+        ],
+        "predicted_scores_top1": "1-1",
+        "final_probabilities": {
+          "home_win": 0.3780953440585526,
+          "draw": 0.35940723143285336,
+          "away_win": 0.26249742450859403
+        },
+        "all_probabilities": {
+          "主胜": 0.3780953440585526,
+          "平局": 0.35940723143285336,
+          "客胜": 0.26249742450859403
+        },
+        "confidence": 0.3780953440585526,
+        "prediction_blocked": false,
+        "blocked_reason": "",
+        "review_outcome_adjustment": {
+          "applied": true,
+          "signals": [
+            "review-stratified-handicap-strength-correction",
+            "review-bias-config-floor"
+          ],
+          "reason": "applied",
+          "three_layer_evaluated": true,
+          "home_bias_gate": {
+            "qualified": false,
+            "evidence": [
+              "limited_probability_edge",
+              "limited_strength_gap"
+            ]
+          },
+          "applied_shift": {
+            "draw_shift": 0.012,
+            "away_shift": 0.022,
+            "home_shift": 0.0,
+            "draw_to_away_relief": 0.0,
+            "draw_to_away_trim": 0.0
+          },
+          "stratified_review": {
+            "handicap_depth_bucket": "unknown",
+            "strength_gap_bucket": "balanced",
+            "matched_key": "home:unknown",
+            "matched": {
+              "predicted_winner": "home",
+              "predicted_winner_label": "主胜",
+              "handicap_bucket": "unknown",
+              "handicap_bucket_label": "缺盘口",
+              "sample_count": 8,
+              "hit_count": 4,
+              "miss_count": 4,
+              "draw_miss_count": 1,
+              "opposite_miss_count": 3,
+              "examples": [
+                {
+                  "teams": "法兰克福 vs 斯图加特",
+                  "actual_score": "2-2",
+                  "actual_winner": "平局"
+                },
+                {
+                  "teams": "云达不莱梅 vs 多特蒙德",
+                  "actual_score": "0-2",
+                  "actual_winner": "客胜"
+                },
+                {
+                  "teams": "科隆 vs 海登海姆",
+                  "actual_score": "1-3",
+                  "actual_winner": "客胜"
+                },
+                {
+                  "teams": "沃尔夫斯堡 vs 拜仁慕尼黑",
+                  "actual_score": "0-1",
+                  "actual_winner": "客胜"
+                }
+              ],
+              "hit_rate": 0.5,
+              "miss_rate": 0.5,
+              "draw_miss_rate": 0.125,
+              "opposite_miss_rate": 0.375,
+              "recommended_draw_shift": 0.0,
+              "recommended_upset_shift": 0.014,
+              "learning_multiplier": {
+                "draw": 0.95,
+                "upset": 0.95
+              }
+            }
+          },
+          "three_layer_context": {
+            "predicted_winner": "home",
+            "predicted_outcome_label": "主胜",
+            "handicap_depth_bucket": "unknown",
+            "strength_gap_bucket": "balanced",
+            "euro_support_bucket": "market_opposes",
+            "scenario_name": "",
+            "asian_line": null,
+            "strength_diff": 0.0,
+            "stratified_key": "home:unknown",
+            "three_layer_key": "home:unknown:market_opposes"
+          },
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "home",
+            "favored_side": "away",
+            "score": 0.0
+          }
+        },
+        "draw_confirmation_guard": {
+          "applied": true,
+          "qualified": false,
+          "reason": "draw_confirmation_failed_shifted",
+          "signals": [
+            "draw_confirmation_gap_weak",
+            "draw_market_not_confirmed",
+            "extreme_under_not_draw_confirmed"
+          ],
+          "evidence": [],
+          "top_gap": 0.012659,
+          "draw_market_gap": 3.3072,
+          "ou_line": 4.0,
+          "ou_under_edge": 0.7863,
+          "volatility": {
+            "home": "medium",
+            "away": "medium"
+          },
+          "shift": 0.0187,
+          "favored_side": "home_win",
+          "adjusted_probabilities": {
+            "home_win": 0.378095,
+            "draw": 0.359407,
+            "away_win": 0.262497
+          }
+        },
+        "review_score_rerank": {
+          "applied": true,
+          "signals": [
+            "score-direction-filter",
+            "score-double-pick",
+            "score-fragile-home-template-rebalance",
+            "score-template-cap",
+            "score-review-conservative-correction"
+          ],
+          "scenario_name": "",
+          "open_match": true,
+          "confidence": 0.3780953440585526,
+          "filtered_out_count": 4,
+          "allowed_outcomes": [
+            "主胜",
+            "平局"
+          ],
+          "double_pick": true,
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "home",
+            "score": 0.0
+          },
+          "secondary_gap": 0.01868811262569925,
+          "secondary_probability": 0.35940723143285336,
+          "coverage_profile": {
+            "same_total_layer": false,
+            "same_goal_margin": false,
+            "all_low_templates": true,
+            "needs_expansion": true
+          },
+          "coverage_expansion_applied": false,
+          "coverage_expansion_candidate": null
+        },
+        "win_hit": false,
+        "score_hit": false
+      }
+    },
+    {
+      "match_id": "bundesliga_20260516_圣保利_沃尔夫斯堡",
+      "league": "bundesliga",
+      "league_name": "德甲联赛",
+      "match_date": "2026-05-16",
+      "match_time": "21:30",
+      "home_team": "圣保利",
+      "away_team": "沃尔夫斯堡",
+      "source_presence": [
+        "archive",
+        "teams_sot"
+      ],
+      "storage_mode": "league_sot",
+      "snapshot": {
+        "available": true,
+        "snapshot_path": "/Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots/bundesliga/圣保利vs沃尔夫斯堡.json",
+        "match_id": "1300085"
+      },
+      "baseline": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "1-1",
+          "2-1",
+          "1-0"
+        ],
+        "predicted_scores_top1": "1-1",
+        "predicted_ou": {
+          "side": "大",
+          "line": 2.75
+        },
+        "actual_score": "1-3",
+        "actual_winner": "客胜",
+        "actual_winner_key": "away",
+        "win_hit": false,
+        "score_hit": false
+      },
+      "replay": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "1-1",
+          "2-1"
+        ],
+        "predicted_scores_top1": "1-1",
+        "final_probabilities": {
+          "home_win": 0.4257750950768817,
+          "draw": 0.30094841117963184,
+          "away_win": 0.27327649374348656
+        },
+        "all_probabilities": {
+          "主胜": 0.4257750950768817,
+          "平局": 0.30094841117963184,
+          "客胜": 0.27327649374348656
+        },
+        "confidence": 0.4257750950768817,
+        "prediction_blocked": false,
+        "blocked_reason": "",
+        "review_outcome_adjustment": {
+          "applied": false,
+          "signals": [],
+          "reason": "three_layer_evaluated_no_adjustment",
+          "three_layer_evaluated": true,
+          "home_bias_gate": {
+            "qualified": false,
+            "evidence": [
+              "limited_probability_edge",
+              "limited_strength_gap",
+              "shallow_market"
+            ]
+          },
+          "applied_shift": {
+            "draw_shift": 0.0,
+            "away_shift": 0.0,
+            "home_shift": 0.0,
+            "draw_to_away_relief": 0.0,
+            "draw_to_away_trim": 0.0
+          },
+          "stratified_review": {
+            "handicap_depth_bucket": "level_ball",
+            "strength_gap_bucket": "balanced",
+            "matched_key": "home:level_ball",
+            "matched": {
+              "predicted_winner": "home",
+              "predicted_winner_label": "主胜",
+              "handicap_bucket": "level_ball",
+              "handicap_bucket_label": "平手盘",
+              "sample_count": 2,
+              "hit_count": 1,
+              "miss_count": 1,
+              "draw_miss_count": 0,
+              "opposite_miss_count": 1,
+              "examples": [
+                {
+                  "teams": "圣保利 vs 沃尔夫斯堡",
+                  "actual_score": "1-3",
+                  "actual_winner": "客胜"
+                }
+              ],
+              "hit_rate": 0.5,
+              "miss_rate": 0.5,
+              "draw_miss_rate": 0.0,
+              "opposite_miss_rate": 0.5,
+              "recommended_draw_shift": 0.0,
+              "recommended_upset_shift": 0.0,
+              "learning_multiplier": {
+                "draw": 0.95,
+                "upset": 0.95
+              }
+            }
+          },
+          "three_layer_context": {
+            "predicted_winner": "home",
+            "predicted_outcome_label": "主胜",
+            "handicap_depth_bucket": "level_ball",
+            "strength_gap_bucket": "balanced",
+            "euro_support_bucket": "soft_support",
+            "scenario_name": "",
+            "asian_line": 0.0,
+            "strength_diff": 0.0,
+            "stratified_key": "home:level_ball",
+            "three_layer_key": "home:level_ball:soft_support"
+          },
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": true,
+            "pressure_side": "home",
+            "favored_side": "away",
+            "score": 15.68
+          }
+        },
+        "draw_confirmation_guard": {
+          "applied": false,
+          "qualified": false,
+          "reason": "not_draw_top1",
+          "signals": [],
+          "evidence": []
+        },
+        "review_score_rerank": {
+          "applied": true,
+          "signals": [
+            "score-direction-filter",
+            "score-template-cap",
+            "score-review-conservative-correction",
+            "score-review-coverage-expansion"
+          ],
+          "scenario_name": "",
+          "open_match": true,
+          "confidence": 0.4257750950768817,
+          "filtered_out_count": 3,
+          "allowed_outcomes": [
+            "主胜",
+            "平局"
+          ],
+          "double_pick": false,
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": true,
+            "pressure_side": "home",
+            "score": 15.68
+          },
+          "secondary_gap": 0.12482668389724988,
+          "secondary_probability": 0.30094841117963184,
+          "coverage_profile": {
+            "same_total_layer": false,
+            "same_goal_margin": false,
+            "all_low_templates": true,
+            "needs_expansion": true
+          },
+          "coverage_expansion_applied": true,
+          "coverage_expansion_candidate": "1-0"
+        },
+        "win_hit": false,
+        "score_hit": false
+      }
+    },
+    {
+      "match_id": "bundesliga_20260516_勒沃库森_汉堡",
+      "league": "bundesliga",
+      "league_name": "德甲联赛",
+      "match_date": "2026-05-16",
+      "match_time": "21:30",
+      "home_team": "勒沃库森",
+      "away_team": "汉堡",
+      "source_presence": [
+        "archive",
+        "teams_sot"
+      ],
+      "storage_mode": "league_sot",
+      "snapshot": {
+        "available": true,
+        "snapshot_path": "/Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots/bundesliga/勒沃库森vs汉堡.json",
+        "match_id": "1300079"
+      },
+      "baseline": {
+        "predicted_winner": "平局",
+        "predicted_winner_key": "draw",
+        "predicted_scores": [
+          "1-1",
+          "0-0"
+        ],
+        "predicted_scores_top1": "1-1",
+        "predicted_ou": {
+          "side": "小",
+          "line": 3.75
+        },
+        "actual_score": "1-1",
+        "actual_winner": "平局",
+        "actual_winner_key": "draw",
+        "win_hit": true,
+        "score_hit": true
+      },
+      "replay": {
+        "predicted_winner": "平局",
+        "predicted_winner_key": "draw",
+        "predicted_scores": [
+          "1-1",
+          "0-0"
+        ],
+        "predicted_scores_top1": "1-1",
+        "final_probabilities": {
+          "home_win": 0.32292624684389265,
+          "draw": 0.4185255836938824,
+          "away_win": 0.258548169462225
+        },
+        "all_probabilities": {
+          "平局": 0.4185255836938824,
+          "主胜": 0.32292624684389265,
+          "客胜": 0.258548169462225
+        },
+        "confidence": 0.4185255836938824,
+        "prediction_blocked": false,
+        "blocked_reason": "",
+        "review_outcome_adjustment": {
+          "applied": false,
+          "signals": [],
+          "reason": "three_layer_evaluated_no_adjustment",
+          "three_layer_evaluated": true,
+          "home_bias_gate": {
+            "qualified": false,
+            "evidence": []
+          },
+          "applied_shift": {
+            "draw_shift": 0.0,
+            "away_shift": 0.0,
+            "home_shift": 0.0,
+            "draw_to_away_relief": 0.0,
+            "draw_to_away_trim": 0.0
+          },
+          "stratified_review": {
+            "handicap_depth_bucket": "level_very_deep",
+            "strength_gap_bucket": "balanced",
+            "matched_key": "draw:level_very_deep",
+            "matched": {
+              "predicted_winner": "draw",
+              "predicted_winner_label": "平局",
+              "handicap_bucket": "level_very_deep",
+              "handicap_bucket_label": "球半及以上",
+              "sample_count": 2,
+              "hit_count": 1,
+              "miss_count": 1,
+              "draw_miss_count": 0,
+              "opposite_miss_count": 1,
+              "examples": [
+                {
+                  "teams": "莱比锡红牛 vs 圣保利",
+                  "actual_score": "2-1",
+                  "actual_winner": "主胜"
+                }
+              ],
+              "hit_rate": 0.5,
+              "miss_rate": 0.5,
+              "draw_miss_rate": 0.0,
+              "opposite_miss_rate": 0.5,
+              "recommended_draw_shift": 0.0,
+              "recommended_upset_shift": 0.0,
+              "learning_multiplier": {
+                "draw": 0.95,
+                "upset": 0.95
+              }
+            }
+          },
+          "three_layer_context": {
+            "predicted_winner": "draw",
+            "predicted_outcome_label": "平局",
+            "handicap_depth_bucket": "level_very_deep",
+            "strength_gap_bucket": "balanced",
+            "euro_support_bucket": "draw_soft",
+            "scenario_name": "",
+            "asian_line": -1.75,
+            "strength_diff": 0.0,
+            "stratified_key": "draw:level_very_deep",
+            "three_layer_key": "draw:level_very_deep:draw_soft"
+          },
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "away",
+            "favored_side": "home",
+            "score": 3.0
+          }
+        },
+        "draw_confirmation_guard": {
+          "applied": false,
+          "qualified": true,
+          "reason": "draw_confirmation_passed",
+          "signals": [
+            "draw_market_not_confirmed",
+            "extreme_under_not_draw_confirmed"
+          ],
+          "evidence": [
+            "draw_prob_clear_lead"
+          ],
+          "top_gap": 0.095599,
+          "draw_market_gap": 4.8682,
+          "ou_line": 3.75,
+          "ou_under_edge": 0.4601,
+          "volatility": {
+            "home": "high",
+            "away": "medium"
+          }
+        },
+        "review_score_rerank": {
+          "applied": true,
+          "signals": [
+            "score-direction-filter",
+            "score-template-cap",
+            "score-review-conservative-correction"
+          ],
+          "scenario_name": "",
+          "open_match": true,
+          "confidence": 0.4185255836938824,
+          "filtered_out_count": 6,
+          "allowed_outcomes": [
+            "平局"
+          ],
+          "double_pick": false,
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "away",
+            "score": 3.0
+          },
+          "secondary_gap": 0.09559933684998972,
+          "secondary_probability": 0.32292624684389265,
+          "coverage_profile": {
+            "same_total_layer": false,
+            "same_goal_margin": true,
+            "all_low_templates": true,
+            "needs_expansion": true
+          },
+          "coverage_expansion_applied": false,
+          "coverage_expansion_candidate": null
+        },
+        "win_hit": true,
+        "score_hit": true
+      }
+    },
+    {
+      "match_id": "bundesliga_20260516_弗赖堡_莱比锡红牛",
+      "league": "bundesliga",
+      "league_name": "德甲联赛",
+      "match_date": "2026-05-16",
+      "match_time": "21:30",
+      "home_team": "弗赖堡",
+      "away_team": "莱比锡红牛",
+      "source_presence": [
+        "archive",
+        "teams_sot"
+      ],
+      "storage_mode": "league_sot",
+      "snapshot": {
+        "available": true,
+        "snapshot_path": "/Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots/bundesliga/弗赖堡vs莱比锡红牛.json",
+        "match_id": "1300081"
+      },
+      "baseline": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "1-0"
+        ],
+        "predicted_scores_top1": "1-0",
+        "predicted_ou": {
+          "side": "小",
+          "line": 3.0
+        },
+        "actual_score": "4-1",
+        "actual_winner": "主胜",
+        "actual_winner_key": "home",
+        "win_hit": true,
+        "score_hit": false
+      },
+      "replay": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "1-1",
+          "2-1"
+        ],
+        "predicted_scores_top1": "1-1",
+        "final_probabilities": {
+          "home_win": 0.38522707474545353,
+          "draw": 0.34876518909386833,
+          "away_win": 0.266007736160678
+        },
+        "all_probabilities": {
+          "主胜": 0.38522707474545353,
+          "平局": 0.34876518909386833,
+          "客胜": 0.266007736160678
+        },
+        "confidence": 0.38522707474545353,
+        "prediction_blocked": false,
+        "blocked_reason": "",
+        "review_outcome_adjustment": {
+          "applied": false,
+          "signals": [],
+          "reason": "three_layer_evaluated_no_adjustment",
+          "three_layer_evaluated": true,
+          "home_bias_gate": {
+            "qualified": false,
+            "evidence": [
+              "limited_probability_edge",
+              "limited_strength_gap",
+              "shallow_market"
+            ]
+          },
+          "applied_shift": {
+            "draw_shift": 0.0,
+            "away_shift": 0.0,
+            "home_shift": 0.0,
+            "draw_to_away_relief": 0.0,
+            "draw_to_away_trim": 0.0
+          },
+          "stratified_review": {
+            "handicap_depth_bucket": "level_shallow",
+            "strength_gap_bucket": "balanced",
+            "matched_key": "home:level_shallow",
+            "matched": {
+              "predicted_winner": "home",
+              "predicted_winner_label": "主胜",
+              "handicap_bucket": "level_shallow",
+              "handicap_bucket_label": "平半/半球浅盘",
+              "sample_count": 1,
+              "hit_count": 1,
+              "miss_count": 0,
+              "draw_miss_count": 0,
+              "opposite_miss_count": 0,
+              "examples": [],
+              "hit_rate": 1.0,
+              "miss_rate": 0.0,
+              "draw_miss_rate": 0.0,
+              "opposite_miss_rate": 0.0,
+              "recommended_draw_shift": 0.0,
+              "recommended_upset_shift": 0.0,
+              "learning_multiplier": {
+                "draw": 0.95,
+                "upset": 0.95
+              }
+            }
+          },
+          "three_layer_context": {
+            "predicted_winner": "home",
+            "predicted_outcome_label": "主胜",
+            "handicap_depth_bucket": "level_shallow",
+            "strength_gap_bucket": "balanced",
+            "euro_support_bucket": "soft_support",
+            "scenario_name": "",
+            "asian_line": -0.25,
+            "strength_diff": 0.0,
+            "stratified_key": "home:level_shallow",
+            "three_layer_key": "home:level_shallow:soft_support"
+          },
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": true,
+            "pressure_side": "home",
+            "favored_side": "away",
+            "score": 6.99
+          }
+        },
+        "draw_confirmation_guard": {
+          "applied": false,
+          "qualified": false,
+          "reason": "not_draw_top1",
+          "signals": [],
+          "evidence": []
+        },
+        "review_score_rerank": {
+          "applied": true,
+          "signals": [
+            "score-direction-filter",
+            "score-double-pick",
+            "score-fragile-home-template-rebalance",
+            "score-template-cap",
+            "score-market-shallow-cap",
+            "score-review-conservative-correction",
+            "score-review-coverage-expansion"
+          ],
+          "scenario_name": "",
+          "open_match": true,
+          "confidence": 0.38522707474545353,
+          "filtered_out_count": 3,
+          "allowed_outcomes": [
+            "主胜",
+            "平局"
+          ],
+          "double_pick": true,
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": true,
+            "pressure_side": "home",
+            "score": 6.99
+          },
+          "secondary_gap": 0.0364618856515852,
+          "secondary_probability": 0.34876518909386833,
+          "coverage_profile": {
+            "same_total_layer": false,
+            "same_goal_margin": false,
+            "all_low_templates": true,
+            "needs_expansion": true
+          },
+          "coverage_expansion_applied": true,
+          "coverage_expansion_candidate": "1-0"
+        },
+        "win_hit": true,
+        "score_hit": false
+      }
+    },
+    {
+      "match_id": "bundesliga_20260516_云达不莱梅_多特蒙德",
+      "league": "bundesliga",
+      "league_name": "德甲联赛",
+      "match_date": "2026-05-16",
+      "match_time": "21:30",
+      "home_team": "云达不莱梅",
+      "away_team": "多特蒙德",
+      "source_presence": [
+        "archive",
+        "teams_sot"
+      ],
+      "storage_mode": "league_sot",
+      "snapshot": {
+        "available": true,
+        "snapshot_path": "/Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots/bundesliga/云达不莱梅vs多特蒙德.json",
+        "match_id": "1300082"
+      },
+      "baseline": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "2-1",
+          "1-0"
+        ],
+        "predicted_scores_top1": "2-1",
+        "predicted_ou": {
+          "side": "小",
+          "line": 3.5
+        },
+        "actual_score": "0-2",
+        "actual_winner": "客胜",
+        "actual_winner_key": "away",
+        "win_hit": false,
+        "score_hit": false
+      },
+      "replay": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "1-1",
+          "2-1"
+        ],
+        "predicted_scores_top1": "1-1",
+        "final_probabilities": {
+          "home_win": 0.36171157886981614,
+          "draw": 0.35832984315180183,
+          "away_win": 0.2799585779783821
+        },
+        "all_probabilities": {
+          "主胜": 0.36171157886981614,
+          "平局": 0.35832984315180183,
+          "客胜": 0.2799585779783821
+        },
+        "confidence": 0.36171157886981614,
+        "prediction_blocked": false,
+        "blocked_reason": "",
+        "review_outcome_adjustment": {
+          "applied": true,
+          "signals": [
+            "review-stratified-handicap-strength-correction",
+            "review-bias-config-floor"
+          ],
+          "reason": "applied",
+          "three_layer_evaluated": true,
+          "home_bias_gate": {
+            "qualified": false,
+            "evidence": [
+              "limited_probability_edge",
+              "limited_strength_gap"
+            ]
+          },
+          "applied_shift": {
+            "draw_shift": 0.012,
+            "away_shift": 0.022,
+            "home_shift": 0.0,
+            "draw_to_away_relief": 0.0,
+            "draw_to_away_trim": 0.0
+          },
+          "stratified_review": {
+            "handicap_depth_bucket": "unknown",
+            "strength_gap_bucket": "balanced",
+            "matched_key": "home:unknown",
+            "matched": {
+              "predicted_winner": "home",
+              "predicted_winner_label": "主胜",
+              "handicap_bucket": "unknown",
+              "handicap_bucket_label": "缺盘口",
+              "sample_count": 8,
+              "hit_count": 4,
+              "miss_count": 4,
+              "draw_miss_count": 1,
+              "opposite_miss_count": 3,
+              "examples": [
+                {
+                  "teams": "法兰克福 vs 斯图加特",
+                  "actual_score": "2-2",
+                  "actual_winner": "平局"
+                },
+                {
+                  "teams": "云达不莱梅 vs 多特蒙德",
+                  "actual_score": "0-2",
+                  "actual_winner": "客胜"
+                },
+                {
+                  "teams": "科隆 vs 海登海姆",
+                  "actual_score": "1-3",
+                  "actual_winner": "客胜"
+                },
+                {
+                  "teams": "沃尔夫斯堡 vs 拜仁慕尼黑",
+                  "actual_score": "0-1",
+                  "actual_winner": "客胜"
+                }
+              ],
+              "hit_rate": 0.5,
+              "miss_rate": 0.5,
+              "draw_miss_rate": 0.125,
+              "opposite_miss_rate": 0.375,
+              "recommended_draw_shift": 0.0,
+              "recommended_upset_shift": 0.014,
+              "learning_multiplier": {
+                "draw": 0.95,
+                "upset": 0.95
+              }
+            }
+          },
+          "three_layer_context": {
+            "predicted_winner": "home",
+            "predicted_outcome_label": "主胜",
+            "handicap_depth_bucket": "unknown",
+            "strength_gap_bucket": "balanced",
+            "euro_support_bucket": "market_opposes",
+            "scenario_name": "",
+            "asian_line": null,
+            "strength_diff": 0.0,
+            "stratified_key": "home:unknown",
+            "three_layer_key": "home:unknown:market_opposes"
+          },
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "home",
+            "favored_side": "away",
+            "score": 0.0
+          }
+        },
+        "draw_confirmation_guard": {
+          "applied": false,
+          "qualified": false,
+          "reason": "not_draw_top1",
+          "signals": [],
+          "evidence": []
+        },
+        "review_score_rerank": {
+          "applied": true,
+          "signals": [
+            "score-direction-filter",
+            "score-double-pick",
+            "score-fragile-home-template-rebalance",
+            "score-template-cap",
+            "score-review-conservative-correction",
+            "score-review-coverage-expansion"
+          ],
+          "scenario_name": "",
+          "open_match": true,
+          "confidence": 0.36171157886981614,
+          "filtered_out_count": 3,
+          "allowed_outcomes": [
+            "主胜",
+            "平局"
+          ],
+          "double_pick": true,
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "home",
+            "score": 0.0
+          },
+          "secondary_gap": 0.0033817357180143115,
+          "secondary_probability": 0.35832984315180183,
+          "coverage_profile": {
+            "same_total_layer": false,
+            "same_goal_margin": false,
+            "all_low_templates": true,
+            "needs_expansion": true
+          },
+          "coverage_expansion_applied": true,
+          "coverage_expansion_candidate": "1-0"
+        },
+        "win_hit": false,
+        "score_hit": false
+      }
+    },
+    {
+      "match_id": "bundesliga_20260516_海登海姆_美因茨",
+      "league": "bundesliga",
+      "league_name": "德甲联赛",
+      "match_date": "2026-05-16",
+      "match_time": "21:30",
+      "home_team": "海登海姆",
+      "away_team": "美因茨",
+      "source_presence": [
+        "archive",
+        "teams_sot"
+      ],
+      "storage_mode": "league_sot",
+      "snapshot": {
+        "available": true,
+        "snapshot_path": "/Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots/bundesliga/海登海姆vs美因茨.json",
+        "match_id": "1300086"
+      },
+      "baseline": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "2-1",
+          "1-0"
+        ],
+        "predicted_scores_top1": "2-1",
+        "predicted_ou": {
+          "side": "小",
+          "line": 3.5
+        },
+        "actual_score": "0-2",
+        "actual_winner": "客胜",
+        "actual_winner_key": "away",
+        "win_hit": false,
+        "score_hit": false
+      },
+      "replay": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "2-1",
+          "1-1"
+        ],
+        "predicted_scores_top1": "2-1",
+        "final_probabilities": {
+          "home_win": 0.3990413319970504,
+          "draw": 0.3449494176990755,
+          "away_win": 0.25600925030387406
+        },
+        "all_probabilities": {
+          "主胜": 0.3990413319970504,
+          "平局": 0.3449494176990755,
+          "客胜": 0.25600925030387406
+        },
+        "confidence": 0.3990413319970504,
+        "prediction_blocked": false,
+        "blocked_reason": "",
+        "review_outcome_adjustment": {
+          "applied": true,
+          "signals": [
+            "review-bias-config-floor"
+          ],
+          "reason": "applied",
+          "three_layer_evaluated": true,
+          "home_bias_gate": {
+            "qualified": false,
+            "evidence": [
+              "limited_strength_gap"
+            ]
+          },
+          "applied_shift": {
+            "draw_shift": 0.02,
+            "away_shift": 0.018,
+            "home_shift": 0.0,
+            "draw_to_away_relief": 0.0,
+            "draw_to_away_trim": 0.0
+          },
+          "stratified_review": {
+            "handicap_depth_bucket": "level_medium",
+            "strength_gap_bucket": "balanced",
+            "matched_key": "home:level_medium",
+            "matched": {
+              "predicted_winner": "home",
+              "predicted_winner_label": "主胜",
+              "handicap_bucket": "level_medium",
+              "handicap_bucket_label": "半球至半一",
+              "sample_count": 2,
+              "hit_count": 1,
+              "miss_count": 1,
+              "draw_miss_count": 0,
+              "opposite_miss_count": 1,
+              "examples": [
+                {
+                  "teams": "海登海姆 vs 美因茨",
+                  "actual_score": "0-2",
+                  "actual_winner": "客胜"
+                }
+              ],
+              "hit_rate": 0.5,
+              "miss_rate": 0.5,
+              "draw_miss_rate": 0.0,
+              "opposite_miss_rate": 0.5,
+              "recommended_draw_shift": 0.0,
+              "recommended_upset_shift": 0.0,
+              "learning_multiplier": {
+                "draw": 0.95,
+                "upset": 0.95
+              }
+            }
+          },
+          "three_layer_context": {
+            "predicted_winner": "home",
+            "predicted_outcome_label": "主胜",
+            "handicap_depth_bucket": "level_medium",
+            "strength_gap_bucket": "balanced",
+            "euro_support_bucket": "strong_support",
+            "scenario_name": "",
+            "asian_line": -0.5,
+            "strength_diff": 0.0,
+            "stratified_key": "home:level_medium",
+            "three_layer_key": "home:level_medium:strong_support"
+          },
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "away",
+            "favored_side": "home",
+            "score": 0.0
+          }
+        },
+        "draw_confirmation_guard": {
+          "applied": false,
+          "qualified": false,
+          "reason": "not_draw_top1",
+          "signals": [],
+          "evidence": []
+        },
+        "review_score_rerank": {
+          "applied": true,
+          "signals": [
+            "score-direction-filter",
+            "score-double-pick",
+            "score-fragile-home-template-rebalance",
+            "score-template-cap",
+            "score-review-conservative-correction",
+            "score-review-coverage-expansion"
+          ],
+          "scenario_name": "",
+          "open_match": true,
+          "confidence": 0.3990413319970504,
+          "filtered_out_count": 2,
+          "allowed_outcomes": [
+            "主胜",
+            "平局"
+          ],
+          "double_pick": true,
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "away",
+            "score": 0.0
+          },
+          "secondary_gap": 0.054091914297974886,
+          "secondary_probability": 0.3449494176990755,
+          "coverage_profile": {
+            "same_total_layer": false,
+            "same_goal_margin": false,
+            "all_low_templates": true,
+            "needs_expansion": true
+          },
+          "coverage_expansion_applied": true,
+          "coverage_expansion_candidate": "3-0"
+        },
+        "win_hit": false,
+        "score_hit": false
+      }
+    },
+    {
+      "match_id": "bundesliga_20260509_斯图加特_勒沃库森",
+      "league": "bundesliga",
+      "league_name": "德甲联赛",
+      "match_date": "2026-05-09",
+      "match_time": "21:30",
+      "home_team": "斯图加特",
+      "away_team": "勒沃库森",
+      "source_presence": [
+        "teams_sot"
+      ],
+      "storage_mode": "league_sot",
+      "snapshot": {
+        "available": true,
+        "snapshot_path": "/Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots/bundesliga/斯图加特vs勒沃库森.json",
+        "match_id": "1300072"
+      },
+      "baseline": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "2-1",
+          "2-0"
+        ],
+        "predicted_scores_top1": "2-1",
+        "predicted_ou": {
+          "side": "小",
+          "line": 3.5
+        },
+        "actual_score": "3-1",
+        "actual_winner": "主胜",
+        "actual_winner_key": "home",
+        "win_hit": true,
+        "score_hit": false
+      },
+      "replay": {
+        "predicted_winner": "主胜",
+        "predicted_winner_key": "home",
+        "predicted_scores": [
+          "1-0",
+          "2-1"
+        ],
+        "predicted_scores_top1": "1-0",
+        "final_probabilities": {
+          "home_win": 0.39555831798168173,
+          "draw": 0.30499459056485745,
+          "away_win": 0.2994470914534608
+        },
+        "all_probabilities": {
+          "主胜": 0.39555831798168173,
+          "平局": 0.30499459056485745,
+          "客胜": 0.2994470914534608
+        },
+        "confidence": 0.39555831798168173,
+        "prediction_blocked": false,
+        "blocked_reason": "",
+        "review_outcome_adjustment": {
+          "applied": true,
+          "signals": [
+            "review-stratified-handicap-strength-correction",
+            "review-bias-config-floor"
+          ],
+          "reason": "applied",
+          "three_layer_evaluated": true,
+          "home_bias_gate": {
+            "qualified": false,
+            "evidence": [
+              "limited_probability_edge",
+              "limited_strength_gap"
+            ]
+          },
+          "applied_shift": {
+            "draw_shift": 0.011,
+            "away_shift": 0.0158,
+            "home_shift": 0.0,
+            "draw_to_away_relief": 0.0,
+            "draw_to_away_trim": 0.0
+          },
+          "stratified_review": {
+            "handicap_depth_bucket": "unknown",
+            "strength_gap_bucket": "balanced",
+            "matched_key": "home:unknown",
+            "matched": {
+              "predicted_winner": "home",
+              "predicted_winner_label": "主胜",
+              "handicap_bucket": "unknown",
+              "handicap_bucket_label": "缺盘口",
+              "sample_count": 8,
+              "hit_count": 4,
+              "miss_count": 4,
+              "draw_miss_count": 1,
+              "opposite_miss_count": 3,
+              "examples": [
+                {
+                  "teams": "法兰克福 vs 斯图加特",
+                  "actual_score": "2-2",
+                  "actual_winner": "平局"
+                },
+                {
+                  "teams": "云达不莱梅 vs 多特蒙德",
+                  "actual_score": "0-2",
+                  "actual_winner": "客胜"
+                },
+                {
+                  "teams": "科隆 vs 海登海姆",
+                  "actual_score": "1-3",
+                  "actual_winner": "客胜"
+                },
+                {
+                  "teams": "沃尔夫斯堡 vs 拜仁慕尼黑",
+                  "actual_score": "0-1",
+                  "actual_winner": "客胜"
+                }
+              ],
+              "hit_rate": 0.5,
+              "miss_rate": 0.5,
+              "draw_miss_rate": 0.125,
+              "opposite_miss_rate": 0.375,
+              "recommended_draw_shift": 0.0,
+              "recommended_upset_shift": 0.014,
+              "learning_multiplier": {
+                "draw": 0.95,
+                "upset": 0.95
+              }
+            }
+          },
+          "three_layer_context": {
+            "predicted_winner": "home",
+            "predicted_outcome_label": "主胜",
+            "handicap_depth_bucket": "unknown",
+            "strength_gap_bucket": "balanced",
+            "euro_support_bucket": "unknown",
+            "scenario_name": "",
+            "asian_line": null,
+            "strength_diff": 0.0,
+            "stratified_key": "home:unknown",
+            "three_layer_key": "home:unknown:unknown"
+          },
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "away",
+            "favored_side": "home",
+            "score": 3.0
+          }
+        },
+        "draw_confirmation_guard": {
+          "applied": false,
+          "qualified": false,
+          "reason": "not_draw_top1",
+          "signals": [],
+          "evidence": []
+        },
+        "review_score_rerank": {
+          "applied": true,
+          "signals": [
+            "score-direction-filter",
+            "score-review-conservative-correction"
+          ],
+          "scenario_name": "",
+          "open_match": false,
+          "confidence": 0.39555831798168173,
+          "filtered_out_count": 5,
+          "allowed_outcomes": [
+            "主胜"
+          ],
+          "double_pick": false,
+          "motivation_risk": {
+            "available": true,
+            "supports_upset": false,
+            "pressure_side": "away",
+            "score": 3.0
+          },
+          "secondary_gap": 0.09056372741682428,
+          "secondary_probability": 0.30499459056485745,
+          "coverage_profile": {
+            "same_total_layer": false,
+            "same_goal_margin": false,
+            "all_low_templates": true,
+            "needs_expansion": true
+          },
+          "coverage_expansion_applied": false,
+          "coverage_expansion_candidate": null
+        },
+        "win_hit": true,
+        "score_hit": false
+      }
+    }
+  ],
+  "skipped": [
+    {
+      "match_id": "bundesliga_20260509_多特蒙德_法兰克福",
+      "league": "bundesliga",
+      "match_date": "2026-05-09",
+      "home_team": "多特蒙德",
+      "away_team": "法兰克福",
+      "reason": "missing_snapshot"
+    },
+    {
+      "match_id": "bundesliga_20260510_汉堡_弗赖堡",
+      "league": "bundesliga",
+      "match_date": "2026-05-10",
+      "home_team": "汉堡",
+      "away_team": "弗赖堡",
+      "reason": "missing_snapshot"
+    },
+    {
+      "match_id": "bundesliga_20260510_科隆_海登海姆",
+      "league": "bundesliga",
+      "match_date": "2026-05-10",
+      "home_team": "科隆",
+      "away_team": "海登海姆",
+      "reason": "missing_snapshot"
+    },
+    {
+      "match_id": "bundesliga_20260516_法兰克福_斯图加特",
+      "league": "bundesliga",
+      "match_date": "2026-05-16",
+      "home_team": "法兰克福",
+      "away_team": "斯图加特",
+      "reason": "missing_snapshot"
+    },
+    {
+      "match_id": "bundesliga_20260516_门兴格拉德巴赫_霍芬海姆",
+      "league": "bundesliga",
+      "match_date": "2026-05-16",
+      "home_team": "门兴格拉德巴赫",
+      "away_team": "霍芬海姆",
+      "reason": "missing_snapshot"
+    },
+    {
+      "match_id": "bundesliga_20260516_柏林联合_奥格斯堡",
+      "league": "bundesliga",
+      "match_date": "2026-05-16",
+      "home_team": "柏林联合",
+      "away_team": "奥格斯堡",
+      "reason": "missing_snapshot"
+    },
+    {
+      "match_id": "bundesliga_20260425_美因茨_拜仁慕尼黑",
+      "league": "bundesliga",
+      "match_date": "2026-04-25",
+      "home_team": "美因茨",
+      "away_team": "拜仁慕尼黑",
+      "reason": "missing_snapshot"
+    },
+    {
+      "match_id": "bundesliga_20260516_拜仁慕尼黑_科隆",
+      "league": "bundesliga",
+      "match_date": "2026-05-16",
+      "home_team": "拜仁慕尼黑",
+      "away_team": "科隆",
+      "reason": "missing_snapshot"
+    }
+  ]
+}
