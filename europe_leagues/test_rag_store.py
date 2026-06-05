@@ -5,9 +5,11 @@ from runtime.rag_store import (
     _annotate_review_dimensions,
     _build_query,
     _derive_review_tags,
+    _load_rag_artifacts,
     _select_top_group,
     _temporal_bonus,
     retrieve_hybrid_context,
+    retrieve_structured_cases,
 )
 
 
@@ -116,7 +118,7 @@ class RagTemporalScoringTest(unittest.TestCase):
         self.assertAlmostEqual(selected[0]["time_decay_bonus"], 0.234)
         self.assertAlmostEqual(selected[0]["temporal_bonus"], 0.584)
 
-    def test_retrieve_hybrid_context_uses_temporal_as_tie_break_for_prediction_cases(self):
+    def test_retrieve_hybrid_context_uses_temporal_score_to_prefer_prediction_cases(self):
         documents = [
             {
                 "match_id": "pred-near",
@@ -199,9 +201,7 @@ class RagTemporalScoringTest(unittest.TestCase):
             "avgdl": 3.0,
             "document_frequencies": {"西甲": 3, "历史主队": 3, "历史客队": 3},
         }
-        with patch("runtime.rag_store.load_rag_cases", return_value={"cases": documents}), patch(
-            "runtime.rag_store.load_rag_index", return_value=index_payload
-        ):
+        with patch("runtime.rag_store._load_rag_artifacts", return_value=({"cases": documents}, index_payload)):
             result = retrieve_hybrid_context(
                 None,
                 league_code="la_liga",
@@ -215,17 +215,65 @@ class RagTemporalScoringTest(unittest.TestCase):
 
         self.assertEqual(result["similar_cases"][0]["match_id"], "pred-near")
         self.assertEqual(result["similar_cases"][1]["match_id"], "pred-far")
-        self.assertAlmostEqual(
+        base_score_near = (
             result["similar_cases"][0]["bm25_score"]
             + result["similar_cases"][0]["market_bonus"]
-            + result["similar_cases"][0]["structured_bonus"],
+            + result["similar_cases"][0]["structured_bonus"]
+        )
+        base_score_far = (
             result["similar_cases"][1]["bm25_score"]
             + result["similar_cases"][1]["market_bonus"]
-            + result["similar_cases"][1]["structured_bonus"],
+            + result["similar_cases"][1]["structured_bonus"]
         )
+        self.assertAlmostEqual(base_score_near, base_score_far)
         self.assertGreater(result["similar_cases"][0]["temporal_bonus"], result["similar_cases"][1]["temporal_bonus"])
+        self.assertGreater(result["similar_cases"][0]["similarity_score"], result["similar_cases"][1]["similarity_score"])
         self.assertEqual(result["market_cases"][0]["match_id"], "market-near")
         self.assertGreater(result["market_cases"][0]["temporal_bonus"], 0.0)
+
+
+    def test_load_rag_artifacts_rebuilds_once_when_artifacts_missing(self):
+        rebuilt = {"cases": [{"match_id": "m1"}], "index": {"document_frequencies": {"x": 1}}}
+        with patch("runtime.rag_store.build_hybrid_rag_index", return_value=rebuilt) as mock_build:
+            cases_payload, index_payload = _load_rag_artifacts(base_dir="/tmp/does-not-exist", limit=5)
+
+        self.assertEqual(cases_payload, rebuilt)
+        self.assertEqual(index_payload, rebuilt["index"])
+        mock_build.assert_called_once_with(base_dir="/tmp/does-not-exist", limit=5)
+
+    def test_retrieve_structured_cases_passes_match_date_through_query(self):
+        result = {
+            "mode": "hybrid-structured-bm25-v2",
+            "query": {"match_date": "2026-05-15", "season": "2025-2026"},
+            "summary": {},
+            "similar_cases": [{"match_id": "pred-near"}],
+            "market_cases": [],
+            "upset_cases": [],
+        }
+        with patch("runtime.rag_store.retrieve_hybrid_context", return_value=result) as mock_retrieve:
+            payload = retrieve_structured_cases(
+                None,
+                league_code="la_liga",
+                home_team="历史主队",
+                away_team="历史客队",
+                market_snapshot={},
+                match_id="match-1",
+                match_date="2026-05-15",
+                top_k=3,
+            )
+
+        self.assertEqual(payload["query"]["match_date"], "2026-05-15")
+        mock_retrieve.assert_called_once_with(
+            None,
+            league_code="la_liga",
+            home_team="历史主队",
+            away_team="历史客队",
+            market_snapshot={},
+            match_id="match-1",
+            match_date="2026-05-15",
+            analysis_context=None,
+            top_k=3,
+        )
 
 
 class RagReviewTagTest(unittest.TestCase):

@@ -118,7 +118,7 @@ class CliPersistenceTest(unittest.TestCase):
 
         with patch("domain.predictor.DomainPredictor", return_value=DummyPredictor()), patch(
             "domain.predictor.LEAGUE_CONFIG", {"premier_league": {"name": "英超"}}
-        ), patch("app.cli.cleanup_invalid_schedule_cache_files", return_value={"deleted_count": 2, "deleted_files": ["a.json", "b.json"]}), patch(
+        ), patch("app.cli.cleanup_invalid_schedule_cache_files", return_value={"deleted_count": 2, "deleted_files": ["a.json", "b.json"]}) as mock_cleanup, patch(
             "app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)
         ):
             cli.run_openclaw_predict_schedule(args)
@@ -126,6 +126,7 @@ class CliPersistenceTest(unittest.TestCase):
         data = captured["payload"]["data"]
         updates = data["updates"]
         self.assertEqual(data["schedule_cache_cleanup"], {"deleted_count": 2, "deleted_files": ["a.json", "b.json"]})
+        mock_cleanup.assert_called_once_with(leagues=["premier_league"], dates=["2026-05-11", "2026-05-12"])
         self.assertEqual(len(updates), 2)
         self.assertEqual(calls[0], ("premier_league", "2026-05-11", True, True))
         self.assertEqual(calls[1], ("premier_league", "2026-05-12", True, True))

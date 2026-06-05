@@ -608,6 +608,7 @@ class HybridRAGService:
         away_team: str,
         market_snapshot: Optional[Dict[str, Any]],
         match_id: str = "",
+        match_date: str = "",
         top_k: int = 5,
     ) -> Dict[str, Any]:
         return retrieve_structured_cases(
@@ -617,6 +618,7 @@ class HybridRAGService:
             away_team=away_team,
             market_snapshot=market_snapshot,
             match_id=match_id,
+            match_date=match_date,
             top_k=top_k,
         )
 

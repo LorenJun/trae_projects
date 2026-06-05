@@ -1128,7 +1128,7 @@ class PredictionPersistenceService:
         }
         return enriched
 
-    def update_prediction_memory(self, result: Dict[str, Any]) -> None:
+    def update_prediction_memory(self, result: Dict[str, Any], *, sync_derivatives: bool = True) -> None:
         memory_path = self.memory_file_path()
         if not os.path.exists(memory_path):
             logger.warning('未找到 MEMORY.md，跳过预测结果记忆更新')
@@ -1193,8 +1193,9 @@ class PredictionPersistenceService:
 
             with open(memory_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            sync_prediction_memory_samples(self.base_dir, limit=max_entries)
-            sync_rag_index(self.base_dir, limit=max_entries * 2)
+            if sync_derivatives:
+                sync_prediction_memory_samples(self.base_dir, limit=max_entries)
+                sync_rag_index(self.base_dir, limit=max_entries * 2)
         except Exception as exc:
             logger.warning('更新 MEMORY.md 失败: %s', exc)
 
@@ -1290,7 +1291,7 @@ class PredictionPersistenceService:
         result['storage_mode'] = payload.storage_mode
         result['predicted_winner'] = payload.predicted_winner
 
-    def _persist_prediction_side_effects(self, result: Dict[str, Any], league_code: str, *, register_result_sync: bool) -> Dict[str, Any]:
+    def _persist_prediction_side_effects(self, result: Dict[str, Any], league_code: str, *, register_result_sync: bool, sync_derivatives: bool) -> Dict[str, Any]:
         payload = self._build_persistence_payload(result, league_code)
         self._apply_persistence_payload(result, payload)
         persisted = self._persisted_status(True)
@@ -1301,7 +1302,7 @@ class PredictionPersistenceService:
             logger.warning('归档预测失败: %s', exc)
             persisted['error'] = str(exc)
         try:
-            self.update_prediction_memory(result)
+            self.update_prediction_memory(result, sync_derivatives=sync_derivatives)
             persisted['memory_updated'] = True
         except Exception as exc:
             logger.warning('更新 MEMORY.md 失败: %s', exc)
@@ -1319,19 +1320,19 @@ class PredictionPersistenceService:
     def prepare_cached_prediction(self, cached: Dict[str, Any], runtime_profile: Dict[str, Any], league_code: str) -> Dict[str, Any]:
         if 'runtime_profile' not in cached:
             cached['runtime_profile'] = runtime_profile
-        return self._persist_prediction_side_effects(cached, league_code, register_result_sync=True)
+        return self._persist_prediction_side_effects(cached, league_code, register_result_sync=True, sync_derivatives=True)
 
     def persist_prediction(self, cache_name: str, cache_params: Dict[str, Any], result: Dict[str, Any], league_code: str) -> Dict[str, Any]:
         if self.cache is not None:
             self.cache.set(cache_name, cache_params, result)
-        return self._persist_prediction_side_effects(result, league_code, register_result_sync=True)
+        return self._persist_prediction_side_effects(result, league_code, register_result_sync=True, sync_derivatives=True)
 
     def persist_memory_only_prediction(self, result: Dict[str, Any], league_code: str) -> Dict[str, Any]:
         payload = self._build_persistence_payload(result, league_code)
         self._apply_persistence_payload(result, payload)
         persisted = self._persisted_status(True)
         try:
-            self.update_prediction_memory(result)
+            self.update_prediction_memory(result, sync_derivatives=True)
             persisted['memory_updated'] = True
         except Exception as exc:
             logger.warning('更新 MEMORY.md 失败: %s', exc)
@@ -1362,6 +1363,7 @@ class PredictionPersistenceService:
                 prediction,
                 league_code,
                 register_result_sync=True,
+                sync_derivatives=False,
             )
             persisted = persisted_prediction.get('persisted') if isinstance(persisted_prediction, dict) else {}
             if isinstance(persisted, dict) and persisted.get('archived'):
@@ -1371,8 +1373,16 @@ class PredictionPersistenceService:
             if isinstance(persisted, dict) and persisted.get('result_sync_registered'):
                 result_sync_registration_count += 1
 
+        derivative_sync_error = ''
+        if memory_update_count > 0:
+            try:
+                sync_prediction_memory_samples(self.base_dir, limit=100)
+                sync_rag_index(self.base_dir, limit=200)
+            except Exception as exc:
+                logger.warning('批量同步衍生缓存失败: %s', exc)
+                derivative_sync_error = str(exc)
         self.refresh_accuracy_stats()
-        return {
+        summary = {
             'prediction_count': prediction_count,
             'accuracy_refreshed': True,
             'persisted': {
@@ -1386,3 +1396,6 @@ class PredictionPersistenceService:
                 'result_sync_registration_count': result_sync_registration_count,
             },
         }
+        if derivative_sync_error:
+            summary['persisted']['error'] = derivative_sync_error
+        return summary

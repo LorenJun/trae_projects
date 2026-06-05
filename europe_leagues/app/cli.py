@@ -63,13 +63,26 @@ def run_quietly(func):
     return result, stdout_buffer.getvalue(), stderr_buffer.getvalue()
 
 
-def cleanup_invalid_schedule_cache_files():
+def cleanup_invalid_schedule_cache_files(leagues=None, dates=None):
     schedules_root = Path(EUROPE_LEAGUES_ROOT) / ".okooo-scraper" / "schedules"
     deleted_files = []
     if not schedules_root.exists():
         return {"deleted_count": 0, "deleted_files": deleted_files}
 
-    for file_path in schedules_root.rglob("*.json"):
+    league_list = [str(item or "").strip() for item in (leagues or []) if str(item or "").strip()]
+    date_list = [str(item or "").strip() for item in (dates or []) if str(item or "").strip()]
+    candidate_files = []
+
+    if league_list and date_list:
+        for league_code in league_list:
+            for match_date in date_list:
+                candidate_files.append(schedules_root / league_code / f"{match_date}.json")
+    else:
+        candidate_files.extend(schedules_root.rglob("*.json"))
+
+    for file_path in candidate_files:
+        if not file_path.exists() or file_path.is_dir():
+            continue
         try:
             payload = json.loads(file_path.read_text(encoding="utf-8"))
         except Exception:
@@ -979,7 +992,11 @@ def run_openclaw_predict_schedule(args):
         updates = []
         runtime_profile = get_command_runtime_profile("predict-schedule")
         persist = not bool(getattr(args, "no_write", False))
-        cache_cleanup = cleanup_invalid_schedule_cache_files()
+        target_dates = [
+            (base_date + timedelta(days=day_offset)).strftime("%Y-%m-%d")
+            for day_offset in range(args.days)
+        ]
+        cache_cleanup = cleanup_invalid_schedule_cache_files(leagues=leagues, dates=target_dates)
 
         for league_code in leagues:
             for day_offset in range(args.days):

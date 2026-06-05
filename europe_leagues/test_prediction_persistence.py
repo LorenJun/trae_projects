@@ -38,8 +38,8 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
         service = PredictionPersistenceService(base_dir="/tmp", cache=None, result_manager=manager)
         events = []
 
-        def fake_update_memory(result):
-            events.append(("memory", result["home_team"], result["away_team"]))
+        def fake_update_memory(result, sync_derivatives=True):
+            events.append(("memory", result["home_team"], result["away_team"], sync_derivatives))
 
         def fake_register(base_dir, result):
             events.append(("sync", base_dir, result["home_team"], result["away_team"]))
@@ -47,7 +47,9 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
 
         with patch.object(service, "update_prediction_memory", side_effect=fake_update_memory) as mock_memory, patch(
             "domain.persistence.register_prediction_result_sync", side_effect=fake_register
-        ) as mock_register, patch.object(manager, "update_accuracy_stats", wraps=manager.update_accuracy_stats) as mock_refresh:
+        ) as mock_register, patch("domain.persistence.sync_prediction_memory_samples") as mock_samples, patch(
+            "domain.persistence.sync_rag_index"
+        ) as mock_rag, patch.object(manager, "update_accuracy_stats", wraps=manager.update_accuracy_stats) as mock_refresh:
             summary = service.persist_prediction_batch(
                 [
                     {"match_id": "a", "match_date": "2026-05-18", "home_team": "阿森纳", "away_team": "切尔西", "prediction": "主胜"},
@@ -60,14 +62,16 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
         mock_refresh.assert_called_once_with()
         self.assertEqual(mock_memory.call_count, 2)
         self.assertEqual(mock_register.call_count, 2)
+        mock_samples.assert_called_once_with("/tmp", limit=100)
+        mock_rag.assert_called_once_with("/tmp", limit=200)
         self.assertEqual(
             events,
             [
                 ("archive", "阿森纳", "切尔西", "premier_league"),
-                ("memory", "阿森纳", "切尔西"),
+                ("memory", "阿森纳", "切尔西", False),
                 ("sync", "/tmp", "阿森纳", "切尔西"),
                 ("archive", "曼联", "利物浦", "premier_league"),
-                ("memory", "曼联", "利物浦"),
+                ("memory", "曼联", "利物浦", False),
                 ("sync", "/tmp", "曼联", "利物浦"),
             ],
         )
@@ -105,8 +109,8 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
         memory_calls = []
         sync_calls = []
 
-        def fake_update_memory(result):
-            memory_calls.append(result["internal_match_id"])
+        def fake_update_memory(result, sync_derivatives=True):
+            memory_calls.append((result["internal_match_id"], sync_derivatives))
 
         def fake_register(base_dir, result):
             sync_calls.append(result["internal_match_id"])
@@ -114,7 +118,9 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
 
         with patch.object(service, "update_prediction_memory", side_effect=fake_update_memory), patch(
             "domain.persistence.register_prediction_result_sync", side_effect=fake_register
-        ):
+        ), patch("domain.persistence.sync_prediction_memory_samples") as mock_samples, patch(
+            "domain.persistence.sync_rag_index"
+        ) as mock_rag:
             summary = service.persist_prediction_batch(
                 [
                     None,
@@ -127,12 +133,49 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
 
         self.assertEqual(manager.refresh_count, 1)
         self.assertEqual(archived_ids, ["runtime-1"])
-        self.assertEqual(memory_calls, ["runtime-1"])
+        self.assertEqual(memory_calls, [("runtime-1", False)])
         self.assertEqual(sync_calls, ["runtime-1"])
+        mock_samples.assert_called_once_with("/tmp", limit=100)
+        mock_rag.assert_called_once_with("/tmp", limit=200)
         self.assertTrue(summary["persisted"]["archived"])
         self.assertEqual(summary["persisted"]["archive_count"], 1)
         self.assertEqual(summary["persisted"]["memory_update_count"], 1)
         self.assertEqual(summary["persisted"]["result_sync_registration_count"], 1)
+
+    def test_persist_prediction_batch_records_derivative_sync_error_without_raising(self):
+        class DummyResultManager:
+            def update_accuracy_stats(self):
+                return {"overall": {}}
+
+            def _find_existing_teams_match_id(self, league_code, match_date, home_team, away_team):
+                return f"{league_code}_{match_date.replace('-', '')}_{home_team}_{away_team}"
+
+            def _runtime_only_match_id(self, external_match_id, league_code, match_date, home_team, away_team):
+                return external_match_id or f"{league_code}_{match_date.replace('-', '')}_{home_team}_{away_team}"
+
+            def save_prediction_from_enhanced(self, result, league_code):
+                return {}
+
+        service = PredictionPersistenceService(base_dir="/tmp", cache=None, result_manager=DummyResultManager())
+
+        with patch.object(service, "update_prediction_memory") as mock_memory, patch(
+            "domain.persistence.register_prediction_result_sync", side_effect=lambda base_dir, result: dict(result)
+        ), patch("domain.persistence.sync_prediction_memory_samples", side_effect=RuntimeError("sync failed")), patch(
+            "domain.persistence.sync_rag_index"
+        ) as mock_rag:
+            summary = service.persist_prediction_batch(
+                [
+                    {"match_id": "a", "match_date": "2026-05-18", "home_team": "阿森纳", "away_team": "切尔西", "prediction": "主胜"},
+                ],
+                "premier_league",
+            )
+
+        mock_memory.assert_called_once_with(
+            {"match_id": "a", "match_date": "2026-05-18", "home_team": "阿森纳", "away_team": "切尔西", "prediction": "主胜", "external_match_id": "a", "internal_match_id": "premier_league_20260518_阿森纳_切尔西", "teams_match_id": "premier_league_20260518_阿森纳_切尔西", "storage_mode": "league_sot", "predicted_winner": "home", "persisted": {"enabled": True, "archived": True, "memory_updated": True, "result_sync_registered": True}},
+            sync_derivatives=False,
+        )
+        mock_rag.assert_not_called()
+        self.assertEqual(summary["persisted"]["error"], "sync failed")
 
     def test_generate_prediction_report_uses_batch_level_side_effects_only(self):
         predictor = EnhancedPredictor.__new__(EnhancedPredictor)
@@ -1544,6 +1587,112 @@ class PredictionMemoryCleanupTest(unittest.TestCase):
         records = payload["records_by_league"]["la_liga"]
         self.assertEqual([item["match_id"] for item in records], ["m3", "m2"])
         self.assertEqual(payload["total_candidates"], 3)
+
+    def test_build_prediction_memory_samples_matches_results_with_alias_normalization(self):
+        runtime_dir = self.base_dir / ".okooo-scraper" / "runtime"
+        archive_path = runtime_dir / "prediction_archive.json"
+        archive_path.write_text(
+            json.dumps(
+                {
+                    "1302913": {
+                        "match_id": "1302913",
+                        "league": "la_liga",
+                        "match_date": "2026-05-18",
+                        "home_team": "巴塞罗那",
+                        "away_team": "皇家贝蒂斯",
+                        "market_snapshot": {"欧赔": {}, "亚值": {}, "大小球": {}, "凯利": {}},
+                        "archived_at": "2026-05-18T10:00:00",
+                    }
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        (self.base_dir / "okooo_team_aliases.json").write_text(
+            json.dumps(
+                {
+                    "la_liga": {
+                        "巴塞罗那": ["巴萨"],
+                        "皇家贝蒂斯": ["贝蒂斯"],
+                    }
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        teams_dir = self.base_dir / "la_liga"
+        teams_dir.mkdir(parents=True, exist_ok=True)
+        (teams_dir / "teams_2025-26.md").write_text(
+            "\n".join(
+                [
+                    "| 日期 | 时间 | 主队 | 比分 | 客队 | 备注 |",
+                    "|-----|------|-----|------|-----|------|",
+                    "| 2026-05-18 | 03:15 | 巴萨 | 2-1 | 贝蒂斯 | 已结束 |",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        payload = build_prediction_memory_samples(base_dir=str(self.base_dir))
+        record = payload["records_by_league"]["la_liga"][0]
+        self.assertEqual(record["actual_result"], "主胜")
+        self.assertEqual(record["actual_score"], "2-1")
+
+    def test_build_prediction_memory_samples_does_not_use_cross_league_alias_fallback(self):
+        runtime_dir = self.base_dir / ".okooo-scraper" / "runtime"
+        archive_path = runtime_dir / "prediction_archive.json"
+        archive_path.write_text(
+            json.dumps(
+                {
+                    "1302913": {
+                        "match_id": "1302913",
+                        "league": "la_liga",
+                        "match_date": "2026-05-18",
+                        "home_team": "巴塞罗那",
+                        "away_team": "皇家贝蒂斯",
+                        "market_snapshot": {"欧赔": {}, "亚值": {}, "大小球": {}, "凯利": {}},
+                        "archived_at": "2026-05-18T10:00:00",
+                    }
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        (self.base_dir / "okooo_team_aliases.json").write_text(
+            json.dumps(
+                {
+                    "premier_league": {
+                        "巴塞罗那": ["巴萨"],
+                        "皇家贝蒂斯": ["贝蒂斯"],
+                    }
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        teams_dir = self.base_dir / "la_liga"
+        teams_dir.mkdir(parents=True, exist_ok=True)
+        (teams_dir / "teams_2025-26.md").write_text(
+            "\n".join(
+                [
+                    "| 日期 | 时间 | 主队 | 比分 | 客队 | 备注 |",
+                    "|-----|------|-----|------|-----|------|",
+                    "| 2026-05-18 | 03:15 | 巴萨 | 2-1 | 贝蒂斯 | 已结束 |",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        payload = build_prediction_memory_samples(base_dir=str(self.base_dir))
+        record = payload["records_by_league"]["la_liga"][0]
+        self.assertEqual(record["actual_result"], "")
+        self.assertEqual(record["actual_score"], "")
 
     def test_build_prediction_memory_samples_overlays_results_without_memory_markdown(self):
         runtime_dir = self.base_dir / ".okooo-scraper" / "runtime"

@@ -1,0 +1,340 @@
+{
+  "lockfile_version": 1,
+  "generated_by": {
+    "tool": "ttadk",
+    "version": "1.0.16"
+  },
+  "manifest_digest": "e2f0c57b0ba7eb020158a930c375ad297448ecce4dcb8830ee34483310179e64",
+  "resolved_plugins": {
+    "pkg:plugin:ttadk-plugin:ttadk/backend-sdk@master#016cb2c30897": {
+      "name": "ttadk/backend-sdk",
+      "install_order": 5,
+      "origin": "package",
+      "package_owner": "ttadk/backend",
+      "version_scheme": "ref",
+      "format": "ttadk-plugin",
+      "source_ref": "5e33116e14b3",
+      "source_alias": "ttadk-market",
+      "artifact": {
+        "ref": {
+          "type": "branch",
+          "value": "master"
+        },
+        "commit": "016cb2c3089768a41adc296a3d524a6309d0e06b",
+        "content_fingerprint": {
+          "type": "git-object",
+          "path": "plugins/ttadk/backend-sdk",
+          "object_id": "53f9738e95a1e4895d471a099bb38d2546c4f94f"
+        }
+      },
+      "integrity": "sha256-3+5yvqlCv49Z77BG/4O/JKWQHMYq0jjYH/qTtnkJ0ew="
+    },
+    "pkg:plugin:ttadk-plugin:ttadk/backend-test@master#016cb2c30897": {
+      "name": "ttadk/backend-test",
+      "install_order": 7,
+      "origin": "package",
+      "package_owner": "ttadk/backend",
+      "version_scheme": "ref",
+      "format": "ttadk-plugin",
+      "source_ref": "5e33116e14b3",
+      "source_alias": "ttadk-market",
+      "artifact": {
+        "ref": {
+          "type": "branch",
+          "value": "master"
+        },
+        "commit": "016cb2c3089768a41adc296a3d524a6309d0e06b",
+        "content_fingerprint": {
+          "type": "git-object",
+          "path": "plugins/ttadk/backend-test",
+          "object_id": "fcf960799ead6a4986ac5dc6cbb1e5dfafcdd835"
+        }
+      },
+      "integrity": "sha256-nPYUpsqXchtxKfpiv75u66FaPzl+7A/fs4xuYSfiwjc="
+    },
+    "pkg:plugin:ttadk-plugin:ttadk/bits-unit-test-gen@master#016cb2c30897": {
+      "name": "ttadk/bits-unit-test-gen",
+      "install_order": 11,
+      "origin": "package",
+      "package_owner": "ttadk/backend",
+      "version_scheme": "ref",
+      "format": "ttadk-plugin",
+      "source_ref": "5e33116e14b3",
+      "source_alias": "ttadk-market",
+      "artifact": {
+        "ref": {
+          "type": "branch",
+          "value": "master"
+        },
+        "commit": "016cb2c3089768a41adc296a3d524a6309d0e06b",
+        "content_fingerprint": {
+          "type": "git-object",
+          "path": "plugins/ttadk/bits-unit-test-gen",
+          "object_id": "11a6ab2ec1cfe2aafd85fea244f8591debb7a02a"
+        }
+      },
+      "integrity": "sha256-7p/eHFrSA7btuGqI9u+FH6hvdk+MKkuLiqoEAsmxyN4="
+    },
+    "pkg:plugin:ttadk-plugin:ttadk/common-test@master#016cb2c30897": {
+      "name": "ttadk/common-test",
+      "install_order": 6,
+      "origin": "package",
+      "package_owner": "ttadk/backend",
+      "version_scheme": "ref",
+      "format": "ttadk-plugin",
+      "source_ref": "5e33116e14b3",
+      "source_alias": "ttadk-market",
+      "artifact": {
+        "ref": {
+          "type": "branch",
+          "value": "master"
+        },
+        "commit": "016cb2c3089768a41adc296a3d524a6309d0e06b",
+        "content_fingerprint": {
+          "type": "git-object",
+          "path": "plugins/ttadk/common-test",
+          "object_id": "0e145ae39efd5d57d405b37878d5871cada20fb9"
+        }
+      },
+      "integrity": "sha256-MD0oIkp5hy+AOvSvykdW7xzPAPrzNz0fvfg3IJokQfU="
+    },
+    "pkg:plugin:ttadk-plugin:ttadk/core@master#016cb2c30897": {
+      "name": "ttadk/core",
+      "install_order": 0,
+      "origin": "package",
+      "package_owner": "ttadk/backend",
+      "version_scheme": "ref",
+      "format": "ttadk-plugin",
+      "source_ref": "5e33116e14b3",
+      "source_alias": "ttadk-market",
+      "artifact": {
+        "ref": {
+          "type": "branch",
+          "value": "master"
+        },
+        "commit": "016cb2c3089768a41adc296a3d524a6309d0e06b",
+        "content_fingerprint": {
+          "type": "git-object",
+          "path": "plugins/ttadk/core",
+          "object_id": "e53da1cc014baf3a683ceac303e4a0aa0ecfb34d"
+        }
+      },
+      "integrity": "sha256-wHZeBB/wYY+Zde15NSFnCoaQSmirPR4LrxZ7ihseAD8="
+    },
+    "pkg:plugin:ttadk-plugin:ttadk/gdp@master#016cb2c30897": {
+      "name": "ttadk/gdp",
+      "install_order": 1,
+      "origin": "package",
+      "package_owner": "ttadk/backend",
+      "version_scheme": "ref",
+      "format": "ttadk-plugin",
+      "source_ref": "5e33116e14b3",
+      "source_alias": "ttadk-market",
+      "artifact": {
+        "ref": {
+          "type": "branch",
+          "value": "master"
+        },
+        "commit": "016cb2c3089768a41adc296a3d524a6309d0e06b",
+        "content_fingerprint": {
+          "type": "git-object",
+          "path": "plugins/ttadk/gdp",
+          "object_id": "87a547d6c9e3dd91837bf1e64f2320f320a948a5"
+        }
+      },
+      "integrity": "sha256-FWW7ORB4ATdt2pq7cwn3yYfKGwKHY4CU29DzMOoZMSU="
+    },
+    "pkg:plugin:ttadk-plugin:ttadk/gdpa@master#016cb2c30897": {
+      "name": "ttadk/gdpa",
+      "install_order": 9,
+      "origin": "package",
+      "package_owner": "ttadk/backend",
+      "version_scheme": "ref",
+      "format": "ttadk-plugin",
+      "source_ref": "5e33116e14b3",
+      "source_alias": "ttadk-market",
+      "artifact": {
+        "ref": {
+          "type": "branch",
+          "value": "master"
+        },
+        "commit": "016cb2c3089768a41adc296a3d524a6309d0e06b",
+        "content_fingerprint": {
+          "type": "git-object",
+          "path": "plugins/ttadk/gdpa",
+          "object_id": "e7bf7535cd455386b6add344acf75b3d14c227b5"
+        }
+      },
+      "integrity": "sha256-1UXjXq3qKAG0+EHNZXbwpPhgfxCs6O84UyBDM5122c4="
+    },
+    "pkg:plugin:ttadk-plugin:ttadk/hertz@master#016cb2c30897": {
+      "name": "ttadk/hertz",
+      "install_order": 2,
+      "origin": "package",
+      "package_owner": "ttadk/backend",
+      "version_scheme": "ref",
+      "format": "ttadk-plugin",
+      "source_ref": "5e33116e14b3",
+      "source_alias": "ttadk-market",
+      "artifact": {
+        "ref": {
+          "type": "branch",
+          "value": "master"
+        },
+        "commit": "016cb2c3089768a41adc296a3d524a6309d0e06b",
+        "content_fingerprint": {
+          "type": "git-object",
+          "path": "plugins/ttadk/hertz",
+          "object_id": "921a61cfa38490b91c77306aa9ad7bfc89c1082a"
+        }
+      },
+      "integrity": "sha256-QPIrr/HejKsc75UTCUyyiriemWZyR7YNRtfdMT6w1cM="
+    },
+    "pkg:plugin:ttadk-plugin:ttadk/kitex@master#016cb2c30897": {
+      "name": "ttadk/kitex",
+      "install_order": 3,
+      "origin": "package",
+      "package_owner": "ttadk/backend",
+      "version_scheme": "ref",
+      "format": "ttadk-plugin",
+      "source_ref": "5e33116e14b3",
+      "source_alias": "ttadk-market",
+      "artifact": {
+        "ref": {
+          "type": "branch",
+          "value": "master"
+        },
+        "commit": "016cb2c3089768a41adc296a3d524a6309d0e06b",
+        "content_fingerprint": {
+          "type": "git-object",
+          "path": "plugins/ttadk/kitex",
+          "object_id": "4d28e3cbc587fadfa70fcd7c6c3fe41f87b157aa"
+        }
+      },
+      "integrity": "sha256-PlbeLVaZQyjCTLsRMU55dqxtaKSnEiNjyrLUOYWew0c="
+    },
+    "pkg:plugin:ttadk-plugin:ttadk/lark_cli@master#016cb2c30897": {
+      "name": "ttadk/lark_cli",
+      "install_order": 10,
+      "origin": "package",
+      "package_owner": "ttadk/backend",
+      "version_scheme": "ref",
+      "format": "ttadk-plugin",
+      "source_ref": "5e33116e14b3",
+      "source_alias": "ttadk-market",
+      "artifact": {
+        "ref": {
+          "type": "branch",
+          "value": "master"
+        },
+        "commit": "016cb2c3089768a41adc296a3d524a6309d0e06b",
+        "content_fingerprint": {
+          "type": "git-object",
+          "path": "plugins/ttadk/lark_cli",
+          "object_id": "17508b731a1102185b5a112ac3532d0fe6a54164"
+        }
+      },
+      "integrity": "sha256-m17thorjY8GXLdT5tgSv2e5+1sExl9jJ1cNSUAMJOvY="
+    },
+    "pkg:plugin:ttadk-plugin:ttadk/overpass@master#016cb2c30897": {
+      "name": "ttadk/overpass",
+      "install_order": 4,
+      "origin": "package",
+      "package_owner": "ttadk/backend",
+      "version_scheme": "ref",
+      "format": "ttadk-plugin",
+      "source_ref": "5e33116e14b3",
+      "source_alias": "ttadk-market",
+      "artifact": {
+        "ref": {
+          "type": "branch",
+          "value": "master"
+        },
+        "commit": "016cb2c3089768a41adc296a3d524a6309d0e06b",
+        "content_fingerprint": {
+          "type": "git-object",
+          "path": "plugins/ttadk/overpass",
+          "object_id": "5be64597ff7834b82131ce8c84c4899e15b0267d"
+        }
+      },
+      "integrity": "sha256-cKzwIVTsMg15wb+RxhUoGuMbLC2ytHPtPNaendULNzg="
+    },
+    "pkg:plugin:ttadk-plugin:ttadk/tiktok-guidelines@master#016cb2c30897": {
+      "name": "ttadk/tiktok-guidelines",
+      "install_order": 8,
+      "origin": "package",
+      "package_owner": "ttadk/backend",
+      "version_scheme": "ref",
+      "format": "ttadk-plugin",
+      "source_ref": "5e33116e14b3",
+      "source_alias": "ttadk-market",
+      "artifact": {
+        "ref": {
+          "type": "branch",
+          "value": "master"
+        },
+        "commit": "016cb2c3089768a41adc296a3d524a6309d0e06b",
+        "content_fingerprint": {
+          "type": "git-object",
+          "path": "plugins/ttadk/tiktok-guidelines",
+          "object_id": "7e45a655c94df289df1e1c836301858d75342f92"
+        }
+      },
+      "integrity": "sha256-dMh35Ky/4dD39ZnGcycqJdBgDXwlsatzmnC4lihUD0Q="
+    }
+  },
+  "plugin_packages": {
+    "ttadk/backend": {
+      "resolved": {
+        "version_scheme": "ref",
+        "source_ref": "5e33116e14b3",
+        "manifest_digest": "sha256-HL5xuvBuYYvDr5ksWqXBgXnG+Upp3uzhUs6QRlb2+qA=",
+        "source_alias": "ttadk-market",
+        "artifact": {
+          "ref": {
+            "type": "branch",
+            "value": "master"
+          },
+          "commit": "016cb2c3089768a41adc296a3d524a6309d0e06b",
+          "content_fingerprint": {
+            "type": "git-object",
+            "path": "presets/ttadk/backend.json",
+            "object_id": "50a6c1c50558195f166d20ef92616ffb5658cc64"
+          }
+        },
+        "integrity": "sha256-TvUBUI1Pb4OtUAIWQeoc58OpUZ7bTp1QP0qe74FQQlk="
+      },
+      "resolved_plugins": [
+        "ttadk/backend-sdk",
+        "ttadk/backend-test",
+        "ttadk/bits-unit-test-gen",
+        "ttadk/common-test",
+        "ttadk/core",
+        "ttadk/gdp",
+        "ttadk/gdpa",
+        "ttadk/hertz",
+        "ttadk/kitex",
+        "ttadk/lark_cli",
+        "ttadk/overpass",
+        "ttadk/tiktok-guidelines"
+      ]
+    }
+  },
+  "sources": {
+    "5e33116e14b3": {
+      "default_ref": {
+        "type": "branch",
+        "value": "master"
+      },
+      "format": "ttadk-plugin",
+      "layout": {
+        "package_path_template": "presets/{namespace_path}/{name}.json",
+        "plugin_path_template": "plugins/{namespace_path}/{name}"
+      },
+      "mode": "index",
+      "provider": "default",
+      "type": "git",
+      "url": "git@code.byted.org:tiktok/ttadk_plugin_market.git"
+    }
+  }
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import heapq
 import json
 import logging
 from datetime import datetime, timezone
@@ -30,6 +31,50 @@ RESULT_TEXT_ALIASES = {
 
 def prediction_memory_samples_path(base_dir: Optional[str] = None):
     return get_default_paths(base_dir).runtime_file('prediction_memory_odds_samples.json')
+
+
+def _load_team_alias_map(base_dir: Optional[str] = None) -> Dict[str, Dict[str, str]]:
+    path = get_default_paths(base_dir).alias_map_path
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+
+    out: Dict[str, Dict[str, str]] = {}
+    for league, mapping in raw.items():
+        if not isinstance(mapping, dict):
+            continue
+        league_key = str(league or '').strip()
+        if not league_key:
+            continue
+        league_map: Dict[str, str] = {}
+        for canonical, aliases in mapping.items():
+            canonical_name = str(canonical or '').strip()
+            if not canonical_name:
+                continue
+            league_map[canonical_name] = canonical_name
+            if isinstance(aliases, list):
+                for alias in aliases:
+                    alias_name = str(alias or '').strip()
+                    if alias_name:
+                        league_map[alias_name] = canonical_name
+        out[league_key] = league_map
+    return out
+
+
+def _normalize_team_name(league_code: str, name: str, alias_map: Optional[Dict[str, Dict[str, str]]] = None) -> str:
+    raw_name = str(name or '').strip()
+    if not raw_name:
+        return ''
+    mapping = alias_map or {}
+    league_map = mapping.get(str(league_code or '').strip(), {})
+    if isinstance(league_map, dict) and raw_name in league_map:
+        return league_map.get(raw_name, raw_name)
+    return raw_name
 
 
 def _parse_datetime(value: Any) -> datetime:
@@ -91,12 +136,19 @@ def _candidate_sort_key(match_id: str, entry: Dict[str, Any]) -> Tuple[datetime,
     return archived_at, match_date, match_id
 
 
-def _result_identity(league_code: Any, match_date: Any, home_team: Any, away_team: Any) -> Tuple[str, str, str, str]:
+def _result_identity(
+    league_code: Any,
+    match_date: Any,
+    home_team: Any,
+    away_team: Any,
+    alias_map: Optional[Dict[str, Dict[str, str]]] = None,
+) -> Tuple[str, str, str, str]:
+    normalized_league = str(league_code or '').strip()
     return (
-        str(league_code or '').strip(),
+        normalized_league,
         str(match_date or '').strip(),
-        str(home_team or '').strip(),
-        str(away_team or '').strip(),
+        _normalize_team_name(normalized_league, str(home_team or '').strip(), alias_map or {}),
+        _normalize_team_name(normalized_league, str(away_team or '').strip(), alias_map or {}),
     )
 
 
@@ -105,6 +157,7 @@ def _build_sample_row(
     entry: Dict[str, Any],
     results_by_match_id: Dict[str, Dict[str, Any]],
     results_by_identity: Dict[Tuple[str, str, str, str], Dict[str, Any]],
+    alias_map: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> Optional[Dict[str, Any]]:
     full_prediction = entry.get('full_prediction') if isinstance(entry.get('full_prediction'), dict) else {}
     league_code = str(entry.get('league') or full_prediction.get('league_code') or '').strip()
@@ -119,7 +172,7 @@ def _build_sample_row(
     home_team = entry.get('home_team') or full_prediction.get('home_team')
     away_team = entry.get('away_team') or full_prediction.get('away_team')
     actual_row = results_by_match_id.get(match_id) or results_by_identity.get(
-        _result_identity(league_code, match_date, home_team, away_team)
+        _result_identity(league_code, match_date, home_team, away_team, alias_map)
     ) or {}
     actual_winner_code = str(
         actual_row.get('actual_winner')
@@ -165,6 +218,7 @@ def _build_sample_row(
 
 def build_prediction_memory_samples(base_dir: Optional[str] = None, limit: int = 100) -> Dict[str, Any]:
     archive = PredictionArchiveStore(base_dir).load()
+    alias_map = _load_team_alias_map(base_dir)
 
     try:
         from result_manager import ResultManager
@@ -179,12 +233,14 @@ def build_prediction_memory_samples(base_dir: Optional[str] = None, limit: int =
         if isinstance(item, dict) and item.get('match_id')
     }
     results_by_identity = {
-        _result_identity(item.get('league'), item.get('match_date'), item.get('home_team'), item.get('away_team')): item
+        _result_identity(item.get('league'), item.get('match_date'), item.get('home_team'), item.get('away_team'), alias_map): item
         for item in results
         if isinstance(item, dict)
     }
 
-    candidates: List[Dict[str, Any]] = []
+    sample_limit = max(0, int(limit))
+    top_candidates: List[Tuple[Tuple[datetime, datetime, str], Dict[str, Any]]] = []
+    total_candidates = 0
     seen_ids = set()
     for archive_key, archived in archive.items():
         if not isinstance(archived, dict):
@@ -192,14 +248,21 @@ def build_prediction_memory_samples(base_dir: Optional[str] = None, limit: int =
         match_id = _resolve_archive_match_id(str(archive_key), archived)
         if not match_id or match_id in seen_ids:
             continue
-        sample_row = _build_sample_row(match_id, archived, results_by_match_id, results_by_identity)
+        sample_row = _build_sample_row(match_id, archived, results_by_match_id, results_by_identity, alias_map)
         if not isinstance(sample_row, dict):
             continue
         seen_ids.add(match_id)
-        candidates.append(sample_row)
+        total_candidates += 1
+        sort_key = sample_row['_sort_key']
+        if sample_limit <= 0:
+            continue
+        if len(top_candidates) < sample_limit:
+            heapq.heappush(top_candidates, (sort_key, sample_row))
+            continue
+        if sort_key > top_candidates[0][0]:
+            heapq.heapreplace(top_candidates, (sort_key, sample_row))
 
-    candidates.sort(key=lambda item: item['_sort_key'], reverse=True)
-    selected = candidates[: max(0, int(limit))]
+    selected = [item for _sort_key, item in sorted(top_candidates, key=lambda pair: pair[0], reverse=True)]
 
     records_by_league: Dict[str, List[Dict[str, Any]]] = {}
     completed_samples = 0
@@ -213,7 +276,7 @@ def build_prediction_memory_samples(base_dir: Optional[str] = None, limit: int =
     return {
         'updated_at': datetime.now().isoformat(),
         'limit': limit,
-        'total_candidates': len(candidates),
+        'total_candidates': total_candidates,
         'completed_samples': completed_samples,
         'records_by_league': records_by_league,
     }

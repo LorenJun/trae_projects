@@ -693,30 +693,38 @@ def sync_rag_index(base_dir: Optional[str] = None, limit: int = 200) -> Dict[str
     return build_hybrid_rag_index(base_dir=base_dir, limit=limit)
 
 
+def _load_rag_artifacts(base_dir: Optional[str] = None, limit: int = 200) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    cases_path = rag_cases_path(base_dir)
+    index_path = rag_index_path(base_dir)
+    cases_payload: Optional[Dict[str, Any]] = None
+    index_payload: Optional[Dict[str, Any]] = None
+
+    if cases_path.exists() and index_path.exists():
+        try:
+            maybe_cases = json.loads(cases_path.read_text(encoding="utf-8"))
+            maybe_index = json.loads(index_path.read_text(encoding="utf-8"))
+            if isinstance(maybe_cases, dict) and "cases" in maybe_cases:
+                cases_payload = maybe_cases
+            if isinstance(maybe_index, dict) and "document_frequencies" in maybe_index:
+                index_payload = maybe_index
+        except Exception:
+            cases_payload = None
+            index_payload = None
+
+    if cases_payload is None or index_payload is None:
+        rebuilt = build_hybrid_rag_index(base_dir=base_dir, limit=limit)
+        cases_payload = rebuilt if isinstance(rebuilt, dict) else {}
+        index_payload = rebuilt.get("index", {}) if isinstance(rebuilt, dict) else {}
+
+    return cases_payload, index_payload
+
+
 def load_rag_cases(base_dir: Optional[str] = None, limit: int = 200) -> Dict[str, Any]:
-    path = rag_cases_path(base_dir)
-    if not path.exists():
-        return build_hybrid_rag_index(base_dir=base_dir, limit=limit)
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return build_hybrid_rag_index(base_dir=base_dir, limit=limit)
-    if not isinstance(payload, dict) or "cases" not in payload:
-        return build_hybrid_rag_index(base_dir=base_dir, limit=limit)
-    return payload
+    return _load_rag_artifacts(base_dir=base_dir, limit=limit)[0]
 
 
 def load_rag_index(base_dir: Optional[str] = None, limit: int = 200) -> Dict[str, Any]:
-    path = rag_index_path(base_dir)
-    if not path.exists():
-        return build_hybrid_rag_index(base_dir=base_dir, limit=limit).get("index", {})
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return build_hybrid_rag_index(base_dir=base_dir, limit=limit).get("index", {})
-    if not isinstance(payload, dict) or "document_frequencies" not in payload:
-        return build_hybrid_rag_index(base_dir=base_dir, limit=limit).get("index", {})
-    return payload
+    return _load_rag_artifacts(base_dir=base_dir, limit=limit)[1]
 
 
 def _idf(term: str, *, total_docs: int, document_frequencies: Dict[str, int]) -> float:
@@ -795,8 +803,8 @@ def _infer_season_key(value: Any) -> str:
     if parsed is None:
         return ""
     if parsed.month >= FOOTBALL_SEASON_START_MONTH:
-        return f"{parsed.year}-{parsed.year + 1}"
-    return f"{parsed.year - 1}-{parsed.year}"
+        return f"{parsed.year}-{parsed.year + 1:04d}"
+    return f"{parsed.year - 1}-{parsed.year:04d}"
 
 
 def _season_distance(query_season: str, doc_season: str) -> Optional[int]:
@@ -1038,8 +1046,7 @@ def retrieve_hybrid_context(
     top_k: int = 5,
     min_score: float = 0.75,
 ) -> Dict[str, Any]:
-    cases_payload = load_rag_cases(base_dir=base_dir, limit=200)
-    index_payload = load_rag_index(base_dir=base_dir, limit=200)
+    cases_payload, index_payload = _load_rag_artifacts(base_dir=base_dir, limit=200)
     documents = cases_payload.get("cases") if isinstance(cases_payload, dict) else []
     if not isinstance(documents, list):
         documents = []
@@ -1080,7 +1087,8 @@ def retrieve_hybrid_context(
             "market_case": 0.55,
             "upset_case": 0.3,
         }.get(case_type, 0.0)
-        total_score = bm25 + structured_bonus + market_bonus + type_bias
+        temporal_bonus = float(temporal_signals.get("temporal_bonus") or 0.0)
+        total_score = bm25 + structured_bonus + market_bonus + type_bias + temporal_bonus
         ranked_docs.append((total_score, bm25, market_bonus, structured_bonus, doc, temporal_signals))
 
     ranked_docs.sort(
@@ -1113,6 +1121,7 @@ def retrieve_structured_cases(
     away_team: str,
     market_snapshot: Optional[Dict[str, Any]],
     match_id: str = "",
+    match_date: str = "",
     top_k: int = 5,
 ) -> Dict[str, Any]:
     result = retrieve_hybrid_context(
@@ -1122,6 +1131,7 @@ def retrieve_structured_cases(
         away_team=away_team,
         market_snapshot=market_snapshot,
         match_id=match_id,
+        match_date=match_date,
         analysis_context=None,
         top_k=top_k,
     )
