@@ -564,6 +564,9 @@ class DataCollector:
                 'serie_a': '意甲',
                 'bundesliga': '德甲',
                 'ligue_1': '法甲',
+                'allsvenskan': '瑞典超',
+                'eliteserien': '挪超',
+                'veikkausliiga': '芬超',
             }.get(league, '')
             if not league_cn:
                 return []

@@ -428,6 +428,167 @@ class ResultManagerTest(unittest.TestCase):
         self.assertEqual(reanalysis["delta_summary"], {})
         self.assertEqual(reanalysis["generated_from"]["files"], [])
 
+    def test_build_rag_replay_samples_filters_missing_fields_and_duplicates(self):
+        archive = self.manager.prediction_archive_store.load()
+        archive["la_liga_20260511_巴塞罗那_皇家马德里"].update(
+            {
+                "actual_score": "2-1",
+                "actual_winner": "home",
+                "market_snapshot": {"欧赔": {"final": {"home": 2.1, "draw": 3.2, "away": 3.5}}},
+                "full_prediction": {
+                    "league_code": "la_liga",
+                    "home_team": "巴塞罗那",
+                    "away_team": "皇家马德里",
+                    "retrieved_memory_explanation": "baseline summary",
+                    "rag_decision": {"available": True, "risk_bonus": 3, "confidence_penalty": 0.01, "scenario_tags": ["market_case_opposes_pick"]},
+                },
+            }
+        )
+        archive["dup-entry"] = {
+            "match_id": "la_liga_20260511_巴塞罗那_皇家马德里",
+            "league": "la_liga",
+            "match_date": "2026-05-11",
+            "home_team": "巴塞罗那",
+            "away_team": "皇家马德里",
+            "actual_score": "2-1",
+            "actual_winner": "home",
+            "prediction": "主胜",
+            "market_snapshot": {"欧赔": {"final": {"home": 2.2, "draw": 3.1, "away": 3.4}}},
+            "full_prediction": {
+                "league_code": "la_liga",
+                "home_team": "巴塞罗那",
+                "away_team": "皇家马德里",
+                "retrieved_memory_explanation": "dup baseline",
+                "rag_decision": {"available": True},
+            },
+        }
+        archive["missing-result"] = {
+            "match_id": "missing-result",
+            "league": "la_liga",
+            "match_date": "2026-05-12",
+            "home_team": "奥萨苏纳",
+            "away_team": "马竞",
+            "prediction": "平局",
+            "market_snapshot": {"欧赔": {"final": {"home": 2.8, "draw": 2.9, "away": 2.6}}},
+            "full_prediction": {"retrieved_memory_explanation": "baseline", "rag_decision": {"available": True}},
+        }
+        archive["missing-market"] = {
+            "match_id": "missing-market",
+            "league": "la_liga",
+            "match_date": "2026-05-13",
+            "home_team": "赫塔费",
+            "away_team": "马洛卡",
+            "prediction": "主胜",
+            "actual_score": "1-0",
+            "actual_winner": "home",
+            "full_prediction": {"retrieved_memory_explanation": "baseline", "rag_decision": {"available": True}},
+        }
+        archive["missing-baseline"] = {
+            "match_id": "missing-baseline",
+            "league": "la_liga",
+            "match_date": "2026-05-14",
+            "home_team": "瓦伦西亚",
+            "away_team": "塞维利亚",
+            "prediction": "客胜",
+            "actual_score": "0-2",
+            "actual_winner": "away",
+            "market_snapshot": {"欧赔": {"final": {"home": 2.4, "draw": 3.0, "away": 2.9}}},
+        }
+        self.manager.prediction_archive_store.save(archive)
+
+        report = self.manager.build_rag_replay_samples(league="la_liga")
+
+        self.assertEqual(report["sample_source"], "archive")
+        self.assertEqual(report["replayable_count"], 1)
+        self.assertEqual(len(report["samples"]), 1)
+        self.assertEqual(report["samples"][0]["match_id"], "la_liga_20260511_巴塞罗那_皇家马德里")
+        skip_reasons = {item["match_id"]: item["skip_reason"] for item in report["skipped"]}
+        self.assertEqual(skip_reasons["missing-result"], "missing_actual_result")
+        self.assertEqual(skip_reasons["missing-market"], "missing_market_snapshot")
+        self.assertEqual(skip_reasons["missing-baseline"], "missing_baseline_rag_fields")
+        self.assertEqual(skip_reasons["la_liga_20260511_巴塞罗那_皇家马德里"], "duplicate_match")
+
+    def test_evaluate_rag_replay_is_read_only_and_aggregates(self):
+        archive = self.manager.prediction_archive_store.load()
+        archive["la_liga_20260511_巴塞罗那_皇家马德里"].update(
+            {
+                "actual_score": "2-1",
+                "actual_winner": "home",
+                "market_snapshot": {"欧赔": {"final": {"home": 2.1, "draw": 3.2, "away": 3.5}}},
+                "full_prediction": {
+                    "league_code": "la_liga",
+                    "home_team": "巴塞罗那",
+                    "away_team": "皇家马德里",
+                    "retrieved_memory_explanation": "baseline summary",
+                    "rag_decision": {"available": True, "risk_bonus": 3, "confidence_penalty": 0.01, "scenario_tags": ["market_case_opposes_pick"]},
+                },
+            }
+        )
+        self.manager.prediction_archive_store.save(archive)
+        archive_before = Path(self.manager.prediction_archive_file).read_text(encoding="utf-8")
+        memory_before = self.memory_path.read_text(encoding="utf-8")
+
+        class DummyRagService:
+            def __init__(self, base_dir=None):
+                self.base_dir = base_dir
+
+            def retrieve_match_memory(self, **kwargs):
+                return {
+                    "available": True,
+                    "mode": "hybrid-structured-bm25-v2",
+                    "summary": {
+                        "retrieved_count": 3,
+                        "completed_similar_case_count": 2,
+                        "market_case_count": 1,
+                        "home_win_rate": 1.0,
+                        "draw_rate": 0.0,
+                        "away_win_rate": 0.0,
+                        "avg_market_total_goals": 3.4,
+                        "direction_ou_priority": {
+                            "preferred_scores": ["2-1", "1-0"],
+                            "current_score_overlap": ["2-1"],
+                        },
+                        "live_market_followup": {"applied": False, "reason": "unit-test"},
+                    },
+                    "similar_cases": [{"match_id": "hist-1"}, {"match_id": "hist-2"}],
+                    "market_cases": [{"match_id": "market-1"}],
+                    "upset_cases": [{"match_id": "upset-1"}],
+                }
+
+            def build_lightweight_decision(self, **kwargs):
+                return {
+                    "available": True,
+                    "risk_bonus": 5,
+                    "confidence_penalty": 0.03,
+                    "scenario_tags": ["upset_case_cluster", "similar_cases_low_hit_rate"],
+                }
+
+        with patch("domain.rag.HybridRAGService", DummyRagService):
+            report = self.manager.evaluate_rag_replay(league="la_liga", include_matches=True)
+
+        self.assertTrue(report["read_only"])
+        self.assertEqual(report["sample_source"], "archive")
+        self.assertEqual(report["overall"]["sample_count"], 1)
+        self.assertEqual(report["overall"]["replayed_count"], 1)
+        self.assertEqual(report["overall"]["skipped_count"], 0)
+        self.assertEqual(report["overall"]["decision_changed_count"], 1)
+        self.assertEqual(report["overall"]["baseline_market_opposes_pick_count"], 1)
+        self.assertEqual(report["overall"]["replay_upset_case_cluster_count"], 1)
+        self.assertEqual(report["overall"]["baseline_win_hit_rate"], 100.0)
+        self.assertEqual(report["overall"]["replay_win_hit_rate"], 100.0)
+        self.assertEqual(len(report["matches"]), 1)
+        self.assertEqual(report["matches"][0]["replay"]["retrieved_memory"]["similar_case_temporal"][0]["match_id"], "hist-1")
+        self.assertIn("temporal_bonus", report["matches"][0]["replay"]["retrieved_memory"]["similar_case_temporal"][0])
+        match_payload = report["matches"][0]
+        self.assertEqual(match_payload["status"], "replayed")
+        self.assertIn("rag_decision", match_payload["changed_fields"])
+        self.assertEqual(match_payload["replay"]["supported_winner_key"], "home")
+        self.assertEqual(match_payload["replay"]["preferred_scores"], ["2-1", "1-0"])
+        self.assertEqual(match_payload["replay"]["retrieved_memory"]["similar_case_ids"], ["hist-1", "hist-2"])
+        self.assertEqual(report["by_league"]["la_liga"]["replayed_count"], 1)
+        self.assertEqual(Path(self.manager.prediction_archive_file).read_text(encoding="utf-8"), archive_before)
+        self.assertEqual(self.memory_path.read_text(encoding="utf-8"), memory_before)
+
     def test_apply_reanalysis_predictions_updates_completed_note_and_archive(self):
         (self.base_dir / "la_liga" / "teams_2025-26.md").write_text(
             "\n".join(

@@ -70,11 +70,27 @@ def _league_slug(league: str) -> str:
         "欧罗巴": "europa_league",
         "欧冠": "champions_league",
         "欧协联": "conference_league",
+        "瑞超": "allsvenskan",
+        "瑞典超": "allsvenskan",
+        "挪超": "eliteserien",
+        "芬超": "veikkausliiga",
     }
     if name in mapping:
         return mapping[name]
     # Fallback for other leagues: keep it readable but safe for filesystem
     return _safe_filename(name).lower() or "other"
+
+
+def _normalize_okooo_league_name(league: str) -> str:
+    """Map project league labels/codes to the labels shown on okooo pages."""
+    text = (league or "").strip()
+    mapping = {
+        "allsvenskan": "瑞典超",
+        "eliteserien": "挪超",
+        "veikkausliiga": "芬超",
+        "瑞超": "瑞典超",
+    }
+    return mapping.get(text, text)
 
 
 def _now_stamp() -> str:
@@ -431,7 +447,7 @@ def _ensure_daily_schedule_cache(league: str, match_date: str) -> Optional[Path]
         return None
     try:
         cp = subprocess.run(
-            ["python3", str(script_path), "--league", league, "--date", match_date],
+            ["python3", str(script_path), "--league", _normalize_okooo_league_name(league), "--date", match_date],
             cwd=str(Path(__file__).resolve().parent),
             capture_output=True,
             text=True,
@@ -479,10 +495,13 @@ def _find_match_id_from_schedule_cache(
                 continue
             home_compact = re.sub(r"\s+", "", str(row.get("home_team") or ""))
             away_compact = re.sub(r"\s+", "", str(row.get("away_team") or ""))
-            if not home_compact or not away_compact:
+            raw_compact = re.sub(r"\s+", "", str(row.get("raw_text") or row.get("text") or ""))
+            if not (home_compact or raw_compact) or not (away_compact or raw_compact):
                 continue
-            home_match = any(tok and home_compact.find(tok) >= 0 for tok in t1_tokens)
-            away_match = any(tok and away_compact.find(tok) >= 0 for tok in t2_tokens)
+            # Some cup schedule rows expose the stage (e.g. "决赛") as home_team,
+            # while the actual home team only appears in raw_text.
+            home_match = any(tok and (home_compact.find(tok) >= 0 or raw_compact.find(tok) >= 0) for tok in t1_tokens)
+            away_match = any(tok and (away_compact.find(tok) >= 0 or raw_compact.find(tok) >= 0) for tok in t2_tokens)
             if not home_match or not away_match:
                 continue
             score = 20.0 + (0.5 if current_date else 0.0)
@@ -499,6 +518,50 @@ def _find_match_id_from_schedule_cache(
                 "_source": "daily_schedule_cache",
             }
     return best if best.get("match_id") else {}
+
+
+def _find_match_id_via_online_search(
+    league: str,
+    team1: str,
+    team2: str,
+    alias_table: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Fallback to direct online lookup when schedule cache is unavailable."""
+    try:
+        from okooo_match_finder import OkoooMatchFinder
+    except Exception:
+        return {}
+
+    alias_table = alias_table or {}
+    finder = OkoooMatchFinder()
+    league_hint = _normalize_okooo_league_name(league)
+    team1_candidates = _team_aliases(alias_table, league, team1) or [team1]
+    team2_candidates = _team_aliases(alias_table, league, team2) or [team2]
+
+    seen_pairs: set[tuple[str, str]] = set()
+    for home_name in team1_candidates:
+        for away_name in team2_candidates:
+            pair = (str(home_name).strip(), str(away_name).strip())
+            if not pair[0] or not pair[1] or pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            try:
+                match_id = finder.find_match_id(pair[0], pair[1], league_hint=league_hint)
+            except Exception:
+                continue
+            if not match_id:
+                continue
+            return {
+                "match_id": str(match_id),
+                "schedule_row": {
+                    "mid": str(match_id),
+                    "href": f"https://m.okooo.com/match/history.php?MatchID={match_id}",
+                    "text": f"{pair[0]} vs {pair[1]}",
+                },
+                "_source": "online_match_finder",
+                "_matched_alias_pair": {"home_team": pair[0], "away_team": pair[1]},
+            }
+    return {}
 
 
 def _team_aliases(alias_table: Dict[str, Any], league: str, team_name: str) -> list[str]:
@@ -1383,6 +1446,7 @@ def _open_ready(bu: BrowserUse, url: str, settle_seconds: float = 2.5) -> str:
 
 
 def _mobile_league_url(league: str) -> str | None:
+    league = _normalize_okooo_league_name(league)
     mapping = {
         "英超": "https://m.okooo.com/saishi/17/",
         "意甲": "https://m.okooo.com/saishi/23/",
@@ -1394,6 +1458,9 @@ def _mobile_league_url(league: str) -> str | None:
         "欧罗巴": "https://m.okooo.com/saishi/679/",
         "中超": "https://m.okooo.com/saishi/649/",
         "英冠": "https://m.okooo.com/saishi/133/",
+        "瑞典超": "https://m.okooo.com/saishi/40/",
+        "挪超": "https://m.okooo.com/saishi/20/",
+        "芬超": "https://m.okooo.com/saishi/41/",
     }
     return mapping.get(league)
 
@@ -2624,6 +2691,7 @@ def _find_match_id(
                     return found_local
         return {}
 
+    display_league = _normalize_okooo_league_name(league)
     bu.open(REMEN_URL)
 
     # Click the league entry by visible text.
@@ -2636,7 +2704,7 @@ def _find_match_id(
   el.click();
   return JSON.stringify({clicked:true, tag:el.tagName});
 })()
-""" % json.dumps(league, ensure_ascii=False)
+""" % json.dumps(display_league, ensure_ascii=False)
     bu.eval_json(click_league)
     time.sleep(2.0)
 
@@ -2677,6 +2745,14 @@ def _find_match_id(
             )
             if isinstance(cached, dict) and cached.get("match_id"):
                 return cached
+            online = _find_match_id_via_online_search(
+                league=league,
+                team1=team1,
+                team2=team2,
+                alias_table=alias_table or {},
+            )
+            if isinstance(online, dict) and online.get("match_id"):
+                return online
     if not isinstance(found, dict) or not found.get("rows"):
         raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
 

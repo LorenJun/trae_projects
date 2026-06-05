@@ -103,6 +103,7 @@ FORMAL_COMMANDS = (
     "result-sync-daemon",
     "accuracy",
     "apply-reanalysis",
+    "rag-replay-eval",
     "sync-pending-results-review",
     "build-season-master-review",
     "refresh-repo-docs",
@@ -138,6 +139,7 @@ COMMAND_AGENT_ROLES = {
     "result-sync-daemon": ["result_tracker"],
     "accuracy": ["result_tracker"],
     "apply-reanalysis": ["result_tracker"],
+    "rag-replay-eval": ["result_tracker"],
     "sync-pending-results-review": ["result_tracker"],
     "build-season-master-review": ["result_tracker"],
     "refresh-repo-docs": ["result_tracker"],
@@ -914,10 +916,63 @@ def run_openclaw_predict_match_lite(args):
         print(f"大小球: 待补真实盘口 ({reason})")
 
 
+def is_fourteen_issue_request(args) -> bool:
+    league = str(getattr(args, "league", "") or "").strip().lower()
+    issue = str(getattr(args, "issue", "") or "").strip()
+    return bool(issue) or league in {
+        "ctzc_14",
+        "fourteen_matches",
+        "fourteen_issue",
+        "14场",
+        "14match",
+        "14_matches",
+    }
+
+
+def run_openclaw_predict_fourteen_issue(args):
+    def _execute():
+        from domain.fourteen_issue_prediction import analyze_issue
+
+        issue = str(getattr(args, "issue", "") or "").strip()
+        if not issue:
+            raise ValueError("14场赛事预测必须传 --issue，例如 26082")
+        return analyze_issue(
+            base_dir=EUROPE_LEAGUES_ROOT,
+            issue=issue,
+            notice_url=getattr(args, "issue_notice_url", "") or "",
+            output_path=getattr(args, "issue_output", "") or "",
+            force_refresh_odds=not bool(getattr(args, "no_refresh_odds", False)),
+            okooo_driver=getattr(args, "okooo_driver", "local-chrome"),
+            okooo_headed=bool(getattr(args, "okooo_headed", False)),
+            write_output=not bool(getattr(args, "no_write", False)),
+        )
+
+    if args.json:
+        result, captured_stdout, captured_stderr = run_quietly(_execute)
+        emit_response(
+            build_json_result("predict-schedule-14", result, captured_stdout, captured_stderr),
+            as_json=True,
+        )
+        return
+
+    result = _execute()
+    print(f"第{result['issue']}期 14场预测完成")
+    print(f"总场次: {result['match_count']}")
+    print(f"成功: {result['success_count']}  阻断: {result['blocked_count']}  失败: {result['error_count']}")
+    if result.get("output_path"):
+        print(f"输出文件: {result['output_path']}")
+
+
 def run_openclaw_predict_schedule(args):
+    if is_fourteen_issue_request(args):
+        run_openclaw_predict_fourteen_issue(args)
+        return
+
     def _execute():
         from domain.predictor import DomainPredictor
 
+        if not str(getattr(args, "date", "") or "").strip():
+            raise ValueError("predict-schedule 普通联赛模式必须传 --date")
         leagues, league_config = validate_leagues(args.league)
         predictor = DomainPredictor()
         base_date = datetime.strptime(args.date, "%Y-%m-%d")
@@ -1215,6 +1270,46 @@ def run_openclaw_apply_reanalysis(args):
 
     result = _execute()
     print(f"replay apply: applied={result.get('applied_count', 0)} skipped={result.get('skipped_count', 0)}")
+
+
+def run_openclaw_rag_replay_eval(args):
+    def _execute():
+        from result_manager import ResultManager
+
+        manager = ResultManager()
+        result = manager.evaluate_rag_replay(
+            league=str(getattr(args, "league", "") or "").strip(),
+            since=str(getattr(args, "since", "") or "").strip(),
+            until=str(getattr(args, "until", "") or "").strip(),
+            limit=int(getattr(args, "limit", 0) or 0),
+            match_ids=list(getattr(args, "match_id", []) or []),
+            include_matches=bool(getattr(args, "include_matches", False)),
+            sample_source=str(getattr(args, "sample_source", "auto") or "auto").strip(),
+            strict=bool(getattr(args, "strict", False)),
+        )
+        if isinstance(result, dict):
+            result.setdefault("runtime_profile", get_command_runtime_profile("rag-replay-eval"))
+        return result
+
+    if args.json:
+        result, captured_stdout, captured_stderr = run_quietly(_execute)
+        emit_response(
+            build_json_result("rag-replay-eval", result, captured_stdout, captured_stderr),
+            as_json=True,
+        )
+        return
+
+    report = _execute()
+    overall = report.get("overall") if isinstance(report, dict) else {}
+    print(
+        "rag replay eval: "
+        f"samples={overall.get('sample_count', 0)} "
+        f"replayed={overall.get('replayed_count', 0)} "
+        f"skipped={overall.get('skipped_count', 0)} "
+        f"changed={overall.get('decision_changed_count', 0)}"
+    )
+
+
 def run_openclaw_rag_rebuild(args):
     def _execute():
         from domain.rag import HybridRAGService
@@ -1684,6 +1779,7 @@ def build_parser():
 常用示例:
   %(prog)s predict-match --league la_liga --home-team 巴塞罗那 --away-team 皇家马德里 --date 2026-05-11 --json
   %(prog)s predict-schedule --league la_liga --date 2026-05-11 --days 2 --json
+  %(prog)s predict-schedule --issue 26082 --json
   %(prog)s collect-data --league la_liga --date 2026-05-11 --json
   %(prog)s pending-results --days-back 14 --json
   %(prog)s save-result --match-id la_liga_20260511_巴塞罗那_皇家马德里 --home-score 2 --away-score 1 --json
@@ -1729,8 +1825,14 @@ def build_parser():
 
     parser_predict_schedule = subparsers.add_parser("predict-schedule", help="按日期批量生成预测并按批次写回")
     parser_predict_schedule.add_argument("--league", help="联赛代码；留空表示全部联赛")
-    parser_predict_schedule.add_argument("--date", required=True, help="开始日期 YYYY-MM-DD")
+    parser_predict_schedule.add_argument("--date", default="", help="开始日期 YYYY-MM-DD；14场模式可不传")
     parser_predict_schedule.add_argument("--days", type=int, default=1, help="连续处理天数")
+    parser_predict_schedule.add_argument("--issue", default="", help="传统足彩 14 场期号；传入后走独立 14 场预测链")
+    parser_predict_schedule.add_argument("--issue-notice-url", default="", help="可选：传统足彩公告 URL；不传则自动抓最新期次公告")
+    parser_predict_schedule.add_argument("--issue-output", default="", help="可选：14 场预测 markdown 输出路径")
+    parser_predict_schedule.add_argument("--okooo-driver", default="local-chrome", help="14场模式抓取澳客快照的 driver（默认 local-chrome）")
+    parser_predict_schedule.add_argument("--okooo-headed", action="store_true", help="14场模式是否有头运行（仅 browser-use 生效）")
+    parser_predict_schedule.add_argument("--no-refresh-odds", action="store_true", help="14场模式不主动刷新澳客实时赔率")
     parser_predict_schedule.add_argument("--no-write", action="store_true", help="只输出批量预测结果，不写入 teams/统计")
     add_json_flag(parser_predict_schedule)
 
@@ -1772,6 +1874,17 @@ def build_parser():
     parser_apply_reanalysis.add_argument("--dry-run", action="store_true", help="仅预览候选，不写入")
     parser_apply_reanalysis.add_argument("--refresh-accuracy", action="store_true", help="apply 后刷新官方准确率")
     add_json_flag(parser_apply_reanalysis)
+
+    parser_rag_replay_eval = subparsers.add_parser("rag-replay-eval", help="对历史归档执行只读 RAG 回放评估")
+    parser_rag_replay_eval.add_argument("--league", default="", help="联赛代码")
+    parser_rag_replay_eval.add_argument("--since", default="", help="起始日期 YYYY-MM-DD")
+    parser_rag_replay_eval.add_argument("--until", default="", help="结束日期 YYYY-MM-DD")
+    parser_rag_replay_eval.add_argument("--limit", type=int, default=0, help="最多评估的可回放样本数")
+    parser_rag_replay_eval.add_argument("--match-id", action="append", default=[], help="只评估指定比赛 ID，可重复传参")
+    parser_rag_replay_eval.add_argument("--include-matches", action="store_true", help="输出逐场对比结果")
+    parser_rag_replay_eval.add_argument("--sample-source", choices=("auto", "archive"), default="auto", help="样本来源，默认 auto")
+    parser_rag_replay_eval.add_argument("--strict", action="store_true", help="遇到回放异常时直接失败，不跳过")
+    add_json_flag(parser_rag_replay_eval)
 
     parser_sync_review = subparsers.add_parser("sync-pending-results-review", help="一键执行待回填检查、结果刷新与复盘总结更新")
     parser_sync_review.add_argument("--days-back", type=int, default=30, help="向前查询的天数")
@@ -1951,6 +2064,8 @@ def main():
         run_openclaw_accuracy(args)
     elif args.command == "apply-reanalysis":
         run_openclaw_apply_reanalysis(args)
+    elif args.command == "rag-replay-eval":
+        run_openclaw_rag_replay_eval(args)
     elif args.command == "sync-pending-results-review":
         run_openclaw_sync_pending_results_review(args)
     elif args.command == "build-season-master-review":

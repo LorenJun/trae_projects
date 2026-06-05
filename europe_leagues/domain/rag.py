@@ -528,6 +528,7 @@ class HybridRAGService:
         away_team: str,
         market_snapshot: Optional[Dict[str, Any]],
         match_id: str = "",
+        match_date: str = "",
         analysis_context: Optional[Dict[str, Any]] = None,
         historical_odds_reference: Optional[Dict[str, Any]] = None,
         predicted_outcome: Optional[str] = None,
@@ -542,6 +543,7 @@ class HybridRAGService:
             away_team=away_team,
             market_snapshot=market_snapshot,
             match_id=match_id,
+            match_date=match_date,
             analysis_context=analysis_context,
             top_k=top_k,
         )

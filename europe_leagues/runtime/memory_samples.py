@@ -1,12 +1,11 @@
-"""模块说明：把滚动记忆、预测归档与已完赛结果同步为结构化赔率样本。"""
+"""模块说明：把预测归档与已完赛结果同步为结构化赔率样本。"""
 
 from __future__ import annotations
 
 import json
 import logging
-import re
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 from runtime.paths import get_default_paths
 from storage import PredictionArchiveStore
@@ -19,62 +18,153 @@ WINNER_TEXT = {
     'draw': '平局',
 }
 
+RESULT_TEXT_ALIASES = {
+    '主胜': '主胜',
+    '客胜': '客胜',
+    '平局': '平局',
+    'home': '主胜',
+    'away': '客胜',
+    'draw': '平局',
+}
+
 
 def prediction_memory_samples_path(base_dir: Optional[str] = None):
     return get_default_paths(base_dir).runtime_file('prediction_memory_odds_samples.json')
 
 
-def _prediction_memory_key_to_match_id(memory_key: str) -> Optional[str]:
-    parts = str(memory_key or '').split('|')
-    if len(parts) != 4:
-        return None
-    league_code, match_date, home_team, away_team = parts
-    if not (league_code and match_date and home_team and away_team):
-        return None
-    return f"{league_code}_{match_date.replace('-', '')}_{home_team}_{away_team}"
+def _parse_datetime(value: Any) -> datetime:
+    raw = str(value or '').strip()
+    if not raw:
+        return datetime.min
+    try:
+        dt = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+    except Exception:
+        try:
+            dt = datetime.strptime(raw[:19], '%Y-%m-%dT%H:%M:%S')
+        except Exception:
+            try:
+                dt = datetime.strptime(raw[:10], '%Y-%m-%d')
+            except Exception:
+                return datetime.min
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
-def _extract_prediction_memory_entries(content: str, limit: int) -> List[Dict[str, str]]:
-    from domain.persistence import PredictionPersistenceService
+def _normalize_actual_result(value: Any) -> str:
+    return RESULT_TEXT_ALIASES.get(str(value or '').strip(), '')
 
-    marker = re.search(
-        r'<!-- prediction-memory:start -->\n(?P<body>.*?)<!-- prediction-memory:end -->',
-        content,
-        re.DOTALL,
+
+def _resolve_archive_match_id(archive_key: str, entry: Dict[str, Any]) -> str:
+    full_prediction = entry.get('full_prediction') if isinstance(entry.get('full_prediction'), dict) else {}
+    return str(
+        entry.get('match_id')
+        or entry.get('internal_match_id')
+        or entry.get('teams_match_id')
+        or entry.get('external_match_id')
+        or full_prediction.get('match_id')
+        or full_prediction.get('internal_match_id')
+        or full_prediction.get('teams_match_id')
+        or archive_key
+        or ''
+    ).strip()
+
+
+def _extract_market_snapshot(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    market_snapshot = entry.get('market_snapshot')
+    if isinstance(market_snapshot, dict):
+        return market_snapshot
+    full_prediction = entry.get('full_prediction') if isinstance(entry.get('full_prediction'), dict) else {}
+    market_snapshot = full_prediction.get('market_snapshot')
+    return market_snapshot if isinstance(market_snapshot, dict) else None
+
+
+def _candidate_sort_key(match_id: str, entry: Dict[str, Any]) -> Tuple[datetime, datetime, str]:
+    full_prediction = entry.get('full_prediction') if isinstance(entry.get('full_prediction'), dict) else {}
+    archived_at = _parse_datetime(
+        entry.get('archived_at')
+        or entry.get('saved_at')
+        or full_prediction.get('timestamp')
+        or full_prediction.get('archived_at')
     )
-    if not marker:
-        return []
-    entries: List[Dict[str, str]] = []
-    for block in PredictionPersistenceService._extract_memory_entry_lines(marker.group('body')):
-        normalized = PredictionPersistenceService._unescape_memory_entry_text(block)
-        lines = [line.strip() for line in normalized.splitlines() if line.strip()]
-        if not lines:
-            continue
-        first_line = lines[0]
-        if not first_line.startswith('- ['):
-            continue
-        memory_key = first_line.split(']', 1)[0][3:]
-        memory_id = ''
-        for line in lines[1:]:
-            memory_id_match = re.search(r'记忆ID:\s*([^|]+?)(?=\s*\||$)', line)
-            if memory_id_match:
-                memory_id = str(memory_id_match.group(1) or '').strip()
-                break
-        entries.append({'memory_key': memory_key, 'memory_id': memory_id})
-        if len(entries) >= limit:
-            break
-    return entries
+    match_date = _parse_datetime(entry.get('match_date') or full_prediction.get('match_date'))
+    return archived_at, match_date, match_id
+
+
+def _result_identity(league_code: Any, match_date: Any, home_team: Any, away_team: Any) -> Tuple[str, str, str, str]:
+    return (
+        str(league_code or '').strip(),
+        str(match_date or '').strip(),
+        str(home_team or '').strip(),
+        str(away_team or '').strip(),
+    )
+
+
+def _build_sample_row(
+    match_id: str,
+    entry: Dict[str, Any],
+    results_by_match_id: Dict[str, Dict[str, Any]],
+    results_by_identity: Dict[Tuple[str, str, str, str], Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    full_prediction = entry.get('full_prediction') if isinstance(entry.get('full_prediction'), dict) else {}
+    league_code = str(entry.get('league') or full_prediction.get('league_code') or '').strip()
+    if not league_code:
+        return None
+
+    market_snapshot = _extract_market_snapshot(entry)
+    if not isinstance(market_snapshot, dict):
+        return None
+
+    match_date = entry.get('match_date') or full_prediction.get('match_date')
+    home_team = entry.get('home_team') or full_prediction.get('home_team')
+    away_team = entry.get('away_team') or full_prediction.get('away_team')
+    actual_row = results_by_match_id.get(match_id) or results_by_identity.get(
+        _result_identity(league_code, match_date, home_team, away_team)
+    ) or {}
+    actual_winner_code = str(
+        actual_row.get('actual_winner')
+        or entry.get('actual_winner')
+        or full_prediction.get('actual_winner')
+        or ''
+    ).strip()
+    actual_result = WINNER_TEXT.get(actual_winner_code, '') or _normalize_actual_result(
+        actual_row.get('actual_result')
+        or entry.get('actual_result')
+        or full_prediction.get('actual_result')
+    )
+    actual_score = str(
+        actual_row.get('actual_score')
+        or entry.get('actual_score')
+        or full_prediction.get('actual_score')
+        or ''
+    ).strip()
+
+    prediction = str(entry.get('prediction') or full_prediction.get('prediction') or '').strip()
+    confidence = entry.get('confidence') if entry.get('confidence') is not None else full_prediction.get('confidence')
+    archived_at = entry.get('archived_at') or entry.get('saved_at') or full_prediction.get('timestamp') or ''
+
+    return {
+        'match_id': match_id,
+        'league_code': league_code,
+        'match_date': match_date,
+        'home_team': home_team,
+        'away_team': away_team,
+        'actual_score': actual_score,
+        'actual_result': actual_result,
+        '欧赔': market_snapshot.get('欧赔', {}),
+        '亚值': market_snapshot.get('亚值', {}),
+        '大小球': market_snapshot.get('大小球', {}),
+        '凯利': market_snapshot.get('凯利', {}),
+        'source': 'prediction_memory',
+        'archived_at': archived_at,
+        'prediction': prediction,
+        'confidence': confidence,
+        '_sort_key': _candidate_sort_key(match_id, entry),
+    }
 
 
 def build_prediction_memory_samples(base_dir: Optional[str] = None, limit: int = 100) -> Dict[str, Any]:
-    paths = get_default_paths(base_dir)
-    memory_path = paths.memory_file
     archive = PredictionArchiveStore(base_dir).load()
-    try:
-        content = memory_path.read_text(encoding='utf-8')
-    except Exception as exc:
-        logger.warning('读取 MEMORY.md 失败，无法构建滚动记忆赔率样本: %s', exc)
-        content = ''
 
     try:
         from result_manager import ResultManager
@@ -83,97 +173,47 @@ def build_prediction_memory_samples(base_dir: Optional[str] = None, limit: int =
         logger.warning('读取比赛结果失败，滚动记忆赔率样本将缺少完赛标签: %s', exc)
         results = []
 
-    results_map = {
+    results_by_match_id = {
         str(item.get('match_id') or ''): item
         for item in results
         if isinstance(item, dict) and item.get('match_id')
     }
+    results_by_identity = {
+        _result_identity(item.get('league'), item.get('match_date'), item.get('home_team'), item.get('away_team')): item
+        for item in results
+        if isinstance(item, dict)
+    }
 
-    records_by_league: Dict[str, List[Dict[str, Any]]] = {}
-    total_candidates = 0
-    completed_samples = 0
+    candidates: List[Dict[str, Any]] = []
     seen_ids = set()
-
-    for memory_entry in _extract_prediction_memory_entries(content, limit):
-        memory_key = memory_entry.get('memory_key') or ''
-        memory_id = str(memory_entry.get('memory_id') or '').strip()
-        match_id = memory_id or _prediction_memory_key_to_match_id(memory_key)
-        if not match_id or match_id in seen_ids:
-            continue
-        seen_ids.add(match_id)
-        total_candidates += 1
-
-        archived = archive.get(match_id)
-        if not isinstance(archived, dict) and memory_id:
-            for archive_key, archive_value in archive.items():
-                if not isinstance(archive_value, dict):
-                    continue
-                candidates = {
-                    str(archive_key).strip(),
-                    str(archive_value.get('match_id') or '').strip(),
-                    str(archive_value.get('external_match_id') or '').strip(),
-                    str(archive_value.get('internal_match_id') or '').strip(),
-                }
-                full_prediction = archive_value.get('full_prediction')
-                if isinstance(full_prediction, dict):
-                    candidates.add(str(full_prediction.get('match_id') or '').strip())
-                if memory_id in candidates:
-                    archived = archive_value
-                    match_id = str(memory_id)
-                    break
+    for archive_key, archived in archive.items():
         if not isinstance(archived, dict):
             continue
-        league_code = str(archived.get('league') or '').strip()
-        if not league_code:
+        match_id = _resolve_archive_match_id(str(archive_key), archived)
+        if not match_id or match_id in seen_ids:
             continue
-
-        market_snapshot = archived.get('market_snapshot')
-        if not isinstance(market_snapshot, dict) and isinstance(archived.get('full_prediction'), dict):
-            market_snapshot = archived['full_prediction'].get('market_snapshot')
-        if not isinstance(market_snapshot, dict):
+        sample_row = _build_sample_row(match_id, archived, results_by_match_id, results_by_identity)
+        if not isinstance(sample_row, dict):
             continue
+        seen_ids.add(match_id)
+        candidates.append(sample_row)
 
-        actual_row = results_map.get(match_id) or {}
-        archived_prediction = archived.get('full_prediction') if isinstance(archived.get('full_prediction'), dict) else {}
-        actual_winner_code = str(
-            actual_row.get('actual_winner')
-            or archived.get('actual_winner')
-            or archived_prediction.get('actual_winner')
-            or ''
-        ).strip()
-        actual_result = WINNER_TEXT.get(actual_winner_code, '')
-        actual_score = str(
-            actual_row.get('actual_score')
-            or archived.get('actual_score')
-            or archived_prediction.get('actual_score')
-            or ''
-        ).strip()
-        if actual_result and actual_score:
+    candidates.sort(key=lambda item: item['_sort_key'], reverse=True)
+    selected = candidates[: max(0, int(limit))]
+
+    records_by_league: Dict[str, List[Dict[str, Any]]] = {}
+    completed_samples = 0
+    for item in selected:
+        if item['actual_result'] and item['actual_score']:
             completed_samples += 1
-
-        records_by_league.setdefault(league_code, []).append(
-            {
-                'match_id': match_id,
-                'match_date': archived.get('match_date'),
-                'home_team': archived.get('home_team'),
-                'away_team': archived.get('away_team'),
-                'actual_score': actual_score,
-                'actual_result': actual_result,
-                '欧赔': market_snapshot.get('欧赔', {}),
-                '亚值': market_snapshot.get('亚值', {}),
-                '大小球': market_snapshot.get('大小球', {}),
-                '凯利': market_snapshot.get('凯利', {}),
-                'source': 'prediction_memory',
-                'archived_at': archived.get('archived_at'),
-                'prediction': archived.get('prediction'),
-                'confidence': archived.get('confidence'),
-            }
-        )
+        league_code = item.pop('league_code')
+        item.pop('_sort_key', None)
+        records_by_league.setdefault(league_code, []).append(item)
 
     return {
         'updated_at': datetime.now().isoformat(),
         'limit': limit,
-        'total_candidates': total_candidates,
+        'total_candidates': len(candidates),
         'completed_samples': completed_samples,
         'records_by_league': records_by_league,
     }

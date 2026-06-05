@@ -223,6 +223,10 @@ class PredictionPersistenceService:
                 stripped = line.strip()
                 if stripped.startswith('预测:'):
                     prediction_line = stripped if stripped.startswith('  ') else f'  {stripped}'
+                elif '预测:' in stripped and not prediction_line:
+                    prediction_text = str(stripped.split('预测:', 1)[1] or '').strip()
+                    if prediction_text:
+                        prediction_line = f'  预测: {prediction_text}'
                 elif stripped.startswith('盘口:'):
                     market_lines.extend(market_lines_from_text(stripped.replace('盘口:', '', 1).strip()))
                 elif stripped.startswith('◦ '):

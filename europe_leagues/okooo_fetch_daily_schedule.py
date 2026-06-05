@@ -27,6 +27,10 @@ def _league_code(league_cn: str) -> str:
         "意甲": "serie_a",
         "德甲": "bundesliga",
         "法甲": "ligue_1",
+        "瑞超": "allsvenskan",
+        "瑞典超": "allsvenskan",
+        "挪超": "eliteserien",
+        "芬超": "veikkausliiga",
     }
     return mapping.get((league_cn or "").strip(), "other")
 

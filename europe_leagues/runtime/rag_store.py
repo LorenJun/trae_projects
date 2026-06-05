@@ -20,6 +20,7 @@ WINNER_TEXT_TO_CODE = {"主胜": "home", "平局": "draw", "客胜": "away"}
 WINNER_CODE_TO_TEXT = {"home": "主胜", "draw": "平局", "away": "客胜"}
 EURO_COMPETITION_CODES = {"europa_league", "champions_league", "conference_league", "uefa_super_cup"}
 DOMESTIC_LEAGUE_CODES = {"premier_league", "la_liga", "serie_a", "bundesliga", "ligue_1"}
+FOOTBALL_SEASON_START_MONTH = 7
 LEAGUE_CN_NAMES = {
     "premier_league": "英超",
     "la_liga": "西甲",
@@ -766,6 +767,91 @@ def _market_similarity_bonus(doc: Dict[str, Any], query: Dict[str, Any]) -> floa
     return max(0.0, 3.5 - min(3.5, distance))
 
 
+def _parse_match_datetime(value: Any) -> Optional[datetime]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    normalized = text.replace("/", "-").replace(".", "-").replace("T", " ")
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1]
+    normalized = re.sub(r"\s+", " ", normalized)
+    candidates = [
+        "%Y-%m-%d",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m",
+    ]
+    for fmt in candidates:
+        try:
+            return datetime.strptime(normalized, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _infer_season_key(value: Any) -> str:
+    parsed = _parse_match_datetime(value)
+    if parsed is None:
+        return ""
+    if parsed.month >= FOOTBALL_SEASON_START_MONTH:
+        return f"{parsed.year}-{parsed.year + 1}"
+    return f"{parsed.year - 1}-{parsed.year}"
+
+
+def _season_distance(query_season: str, doc_season: str) -> Optional[int]:
+    query_match = re.match(r"^(\d{4})-(\d{4})$", str(query_season or "").strip())
+    doc_match = re.match(r"^(\d{4})-(\d{4})$", str(doc_season or "").strip())
+    if not query_match or not doc_match:
+        return None
+    return abs(int(query_match.group(1)) - int(doc_match.group(1)))
+
+
+def _month_gap(query_date: Any, doc_date: Any) -> Optional[float]:
+    query_dt = _parse_match_datetime(query_date)
+    doc_dt = _parse_match_datetime(doc_date)
+    if query_dt is None or doc_dt is None:
+        return None
+    if doc_dt > query_dt:
+        return None
+    days_gap = abs((query_dt - doc_dt).days)
+    return days_gap / 30.0
+
+
+def _temporal_bonus(doc: Dict[str, Any], query: Dict[str, Any]) -> Dict[str, Any]:
+    query_date = query.get("match_date")
+    doc_date = doc.get("match_date")
+    query_dt = _parse_match_datetime(query_date)
+    doc_dt = _parse_match_datetime(doc_date)
+    query_season = str(query.get("season") or "").strip()
+    doc_season = str(doc.get("season") or _infer_season_key(doc_date)).strip()
+    season_bonus = 0.0
+    season_match = False
+    season_distance = _season_distance(query_season, doc_season)
+    if query_dt is not None and doc_dt is not None and doc_dt > query_dt:
+        season_distance = None
+    elif season_distance == 0:
+        season_bonus = 0.35
+        season_match = True
+    elif season_distance == 1:
+        season_bonus = 0.12
+
+    time_decay_bonus = 0.0
+    month_gap = _month_gap(query_date, doc_date)
+    if month_gap is not None:
+        time_decay_bonus = max(0.0, 0.25 - min(0.25, month_gap * 0.02))
+
+    return {
+        "season": doc_season,
+        "season_match": season_match,
+        "season_distance": season_distance,
+        "month_gap": round(month_gap, 4) if month_gap is not None else None,
+        "season_bonus": round(season_bonus, 4),
+        "time_decay_bonus": round(time_decay_bonus, 4),
+        "temporal_bonus": round(season_bonus + time_decay_bonus, 4),
+    }
+
+
 def _structured_bonus(doc: Dict[str, Any], query: Dict[str, Any]) -> float:
     score = 0.0
     doc_league = str(doc.get("league_code") or "").strip()
@@ -801,6 +887,7 @@ def _build_query(
     away_team: str,
     market_snapshot: Optional[Dict[str, Any]],
     match_id: str = "",
+    match_date: str = "",
     analysis_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     analysis_context = analysis_context if isinstance(analysis_context, dict) else {}
@@ -827,8 +914,11 @@ def _build_query(
         if str(item).strip()
     )
     competition_bucket = _competition_bucket(str(league_code or ""), competition_stage_name)
+    normalized_match_date = str(match_date or analysis_context.get("match_date") or "").strip()
     return {
         "match_id": str(match_id or "").strip(),
+        "match_date": normalized_match_date,
+        "season": _infer_season_key(normalized_match_date),
         "league_code": str(league_code or "").strip(),
         "home_team": str(home_team or "").strip(),
         "away_team": str(away_team or "").strip(),
@@ -851,13 +941,21 @@ def _build_query(
     }
 
 
-def _format_doc_result(doc: Dict[str, Any], score: float, bm25: float, market_bonus: float, structured_bonus: float) -> Dict[str, Any]:
+def _format_doc_result(
+    doc: Dict[str, Any],
+    score: float,
+    bm25: float,
+    market_bonus: float,
+    structured_bonus: float,
+    temporal_signals: Dict[str, Any],
+) -> Dict[str, Any]:
     return {
         "match_id": doc.get("match_id"),
         "league_code": doc.get("league_code"),
         "league_name": doc.get("league_name"),
         "competition_stage_name": doc.get("competition_stage_name"),
         "match_date": doc.get("match_date"),
+        "season": temporal_signals.get("season") or _infer_season_key(doc.get("match_date")),
         "home_team": doc.get("home_team"),
         "away_team": doc.get("away_team"),
         "prediction": doc.get("prediction"),
@@ -874,18 +972,29 @@ def _format_doc_result(doc: Dict[str, Any], score: float, bm25: float, market_bo
         "bm25_score": round(float(bm25), 4),
         "market_bonus": round(float(market_bonus), 4),
         "structured_bonus": round(float(structured_bonus), 4),
+        "season_bonus": round(float(temporal_signals.get("season_bonus") or 0.0), 4),
+        "time_decay_bonus": round(float(temporal_signals.get("time_decay_bonus") or 0.0), 4),
+        "temporal_bonus": round(float(temporal_signals.get("temporal_bonus") or 0.0), 4),
+        "season_match": bool(temporal_signals.get("season_match")),
+        "season_distance": temporal_signals.get("season_distance"),
+        "month_gap": temporal_signals.get("month_gap"),
         "text": doc.get("text"),
     }
 
 
-def _select_top_group(ranked_docs: List[Tuple[float, float, float, float, Dict[str, Any]]], case_type: str, top_k: int, min_score: float) -> List[Dict[str, Any]]:
+def _select_top_group(
+    ranked_docs: List[Tuple[float, float, float, float, Dict[str, Any], Dict[str, Any]]],
+    case_type: str,
+    top_k: int,
+    min_score: float,
+) -> List[Dict[str, Any]]:
     selected: List[Dict[str, Any]] = []
-    for total_score, bm25, market_bonus, structured_bonus, doc in ranked_docs:
+    for total_score, bm25, market_bonus, structured_bonus, doc, temporal_signals in ranked_docs:
         if str(doc.get("case_type") or "") != case_type:
             continue
         if total_score < min_score:
             continue
-        selected.append(_format_doc_result(doc, total_score, bm25, market_bonus, structured_bonus))
+        selected.append(_format_doc_result(doc, total_score, bm25, market_bonus, structured_bonus, temporal_signals))
         if len(selected) >= top_k:
             break
     return selected
@@ -924,6 +1033,7 @@ def retrieve_hybrid_context(
     away_team: str,
     market_snapshot: Optional[Dict[str, Any]],
     match_id: str = "",
+    match_date: str = "",
     analysis_context: Optional[Dict[str, Any]] = None,
     top_k: int = 5,
     min_score: float = 0.75,
@@ -939,6 +1049,7 @@ def retrieve_hybrid_context(
         away_team=away_team,
         market_snapshot=market_snapshot,
         match_id=match_id,
+        match_date=match_date,
         analysis_context=analysis_context,
     )
     inferred_context = _infer_query_competition_context(
@@ -953,7 +1064,7 @@ def retrieve_hybrid_context(
         query["competition_stage_name"] = inferred_context["competition_stage_name"]
     query_terms = _tokenize_text(query.get("text") or "")
 
-    ranked_docs: List[Tuple[float, float, float, float, Dict[str, Any]]] = []
+    ranked_docs: List[Tuple[float, float, float, float, Dict[str, Any], Dict[str, Any]]] = []
     for doc in documents:
         if not isinstance(doc, dict):
             continue
@@ -962,15 +1073,24 @@ def retrieve_hybrid_context(
         bm25 = _bm25_score(doc, query_terms, index_payload)
         structured_bonus = _structured_bonus(doc, query)
         market_bonus = _market_similarity_bonus(doc, query)
+        temporal_signals = _temporal_bonus(doc, query)
+        case_type = str(doc.get("case_type") or "")
         type_bias = {
             "prediction_case": 0.4,
             "market_case": 0.55,
             "upset_case": 0.3,
-        }.get(str(doc.get("case_type") or ""), 0.0)
+        }.get(case_type, 0.0)
         total_score = bm25 + structured_bonus + market_bonus + type_bias
-        ranked_docs.append((total_score, bm25, market_bonus, structured_bonus, doc))
+        ranked_docs.append((total_score, bm25, market_bonus, structured_bonus, doc, temporal_signals))
 
-    ranked_docs.sort(key=lambda item: item[0], reverse=True)
+    ranked_docs.sort(
+        key=lambda item: (
+            item[0],
+            float(item[5].get("temporal_bonus") or 0.0) if str(item[4].get("case_type") or "") == "prediction_case" else 0.0,
+            -float(item[5].get("month_gap") or 999.0) if str(item[4].get("case_type") or "") == "prediction_case" else -999.0,
+        ),
+        reverse=True,
+    )
     similar_cases = _select_top_group(ranked_docs, "prediction_case", top_k=max(1, top_k), min_score=min_score)
     market_cases = _select_top_group(ranked_docs, "market_case", top_k=max(1, min(3, top_k)), min_score=min_score)
     upset_cases = _select_top_group(ranked_docs, "upset_case", top_k=max(1, min(3, top_k)), min_score=min_score)

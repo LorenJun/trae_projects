@@ -1,6 +1,6 @@
 import unittest
 
-from okooo_fetch_daily_schedule import _parse_row_text
+from okooo_fetch_daily_schedule import _league_code, _parse_row_text
 
 
 class OkoooFetchDailyScheduleTest(unittest.TestCase):
@@ -15,6 +15,12 @@ class OkoooFetchDailyScheduleTest(unittest.TestCase):
         self.assertEqual(parsed["home_team"], "伯恩利")
         self.assertEqual(parsed["away_team"], "狼队")
         self.assertEqual(parsed["kickoff_time"], "23:00")
+
+    def test_league_code_supports_non_major_leagues(self):
+        self.assertEqual(_league_code("瑞超"), "allsvenskan")
+        self.assertEqual(_league_code("瑞典超"), "allsvenskan")
+        self.assertEqual(_league_code("挪超"), "eliteserien")
+        self.assertEqual(_league_code("芬超"), "veikkausliiga")
 
 
 if __name__ == "__main__":

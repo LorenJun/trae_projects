@@ -10,7 +10,9 @@ from okooo_save_snapshot import (
     _find_existing_snapshot_by_match_id,
     _find_match_id,
     _find_match_id_from_schedule_cache,
+    _mobile_league_url,
     _navigate_schedule_to_month,
+    _normalize_okooo_league_name,
     _parse_desktop_avg_row,
     _pick_preferred_europe_result,
     _select_best_schedule_row,
@@ -71,6 +73,17 @@ class OkoooSaveSnapshotTest(unittest.TestCase):
 
     def test_candidate_date_hints_strict_identity_keeps_only_requested_date(self):
         self.assertEqual(_candidate_date_hints("2026-05-18", "00:00", strict_identity=True), ["2026-05-18"])
+
+    def test_normalize_okooo_league_name_maps_runtime_labels(self):
+        self.assertEqual(_normalize_okooo_league_name("瑞超"), "瑞典超")
+        self.assertEqual(_normalize_okooo_league_name("allsvenskan"), "瑞典超")
+        self.assertEqual(_normalize_okooo_league_name("eliteserien"), "挪超")
+        self.assertEqual(_normalize_okooo_league_name("veikkausliiga"), "芬超")
+
+    def test_mobile_league_url_supports_non_major_leagues(self):
+        self.assertEqual(_mobile_league_url("瑞超"), "https://m.okooo.com/saishi/40/")
+        self.assertEqual(_mobile_league_url("挪超"), "https://m.okooo.com/saishi/20/")
+        self.assertEqual(_mobile_league_url("芬超"), "https://m.okooo.com/saishi/41/")
 
     def test_navigate_schedule_to_month_clicks_until_target_month(self):
         browser = _SequencedBrowser(
@@ -192,6 +205,43 @@ class OkoooSaveSnapshotTest(unittest.TestCase):
             (result.get("schedule_row") or {}).get("href"),
             "https://m.okooo.com/match/history.php?MatchID=1302914",
         )
+
+    def test_find_match_id_falls_back_to_online_match_finder(self):
+        browser = _DummyBrowser()
+
+        class _Finder:
+            def find_match_id(self, team1, team2, league_hint=None):
+                if team1 == "库普斯" and team2 == "国际图尔库" and league_hint == "芬超":
+                    return "1319001"
+                return None
+
+        with patch("okooo_save_snapshot._find_rows_fuzzy", return_value={"count": 0, "rows": []}), patch(
+            "okooo_save_snapshot._find_rows_anywhere_on_current_page",
+            return_value={"count": 0, "rows": []},
+        ), patch(
+            "okooo_save_snapshot._find_match_id_from_schedule_cache",
+            return_value={},
+        ), patch(
+            "okooo_match_finder.OkoooMatchFinder",
+            return_value=_Finder(),
+        ), patch("okooo_save_snapshot.time.sleep", return_value=None):
+            result = _find_match_id(
+                browser,
+                league="芬超",
+                team1="库奥皮奥",
+                team2="国际图尔库",
+                date_hint="2026-05-30",
+                time_hint="",
+                alias_table={
+                    "veikkausliiga": {
+                        "库奥皮奥": ["库普斯"],
+                        "国际图尔库": ["国际图尔库"],
+                    }
+                },
+            )
+
+        self.assertEqual(result["match_id"], "1319001")
+        self.assertEqual(result.get("_source"), "online_match_finder")
 
     def test_find_match_id_from_schedule_cache_skips_invalid_clicked_false_payload(self):
         with tempfile.TemporaryDirectory() as temp_dir:

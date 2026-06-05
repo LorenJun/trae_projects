@@ -820,6 +820,7 @@ class EnhancedPredictor:
             away_team=away_team,
             market_snapshot=self.postprocess_service.build_market_snapshot(current_odds),
             match_id=match_id,
+            match_date=match_date,
             analysis_context=analysis_context,
             historical_odds_reference=historical_odds_reference,
             predicted_outcome=main_prediction,

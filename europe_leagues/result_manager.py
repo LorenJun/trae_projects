@@ -2779,6 +2779,504 @@ class ResultManager:
             'top_win_accuracy_improvements': by_league_delta[:5],
         }
 
+    @staticmethod
+    def _rag_replay_prediction_text(predicted_winner_key: str) -> str:
+        return PREDICTED_WINNER_TEXT.get(str(predicted_winner_key or '').strip(), '')
+
+    @staticmethod
+    def _rag_replay_summary_from_memory(memory: Dict[str, Any]) -> Dict[str, Any]:
+        summary = memory.get('summary') if isinstance(memory.get('summary'), dict) else {}
+        similar_cases = memory.get('similar_cases') if isinstance(memory.get('similar_cases'), list) else []
+        market_cases = memory.get('market_cases') if isinstance(memory.get('market_cases'), list) else []
+        upset_cases = memory.get('upset_cases') if isinstance(memory.get('upset_cases'), list) else []
+        def _top_case_summary(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            results: List[Dict[str, Any]] = []
+            for item in items[:5]:
+                if not isinstance(item, dict):
+                    continue
+                match_id = str(item.get('match_id') or '').strip()
+                if not match_id:
+                    continue
+                results.append(
+                    {
+                        'match_id': match_id,
+                        'match_date': str(item.get('match_date') or '').strip(),
+                        'season': str(item.get('season') or '').strip(),
+                        'season_match': bool(item.get('season_match')),
+                        'season_bonus': round(float(item.get('season_bonus') or 0.0), 4),
+                        'time_decay_bonus': round(float(item.get('time_decay_bonus') or 0.0), 4),
+                        'temporal_bonus': round(float(item.get('temporal_bonus') or 0.0), 4),
+                    }
+                )
+            return results
+
+        top_similar_cases = _top_case_summary(similar_cases)
+        top_market_cases = _top_case_summary(market_cases)
+        top_upset_cases = _top_case_summary(upset_cases)
+        return {
+            'available': bool(summary or similar_cases or market_cases or upset_cases),
+            'mode': str(memory.get('mode') or '').strip(),
+            'retrieved_count': int(summary.get('retrieved_count', len(similar_cases) + len(market_cases) + len(upset_cases)) or 0),
+            'completed_similar_case_count': int(summary.get('completed_similar_case_count', 0) or 0),
+            'market_case_count': int(summary.get('market_case_count', len(market_cases)) or 0),
+            'upset_case_count': len(upset_cases),
+            'home_win_rate': round(float(summary.get('home_win_rate', 0.0) or 0.0), 4),
+            'draw_rate': round(float(summary.get('draw_rate', 0.0) or 0.0), 4),
+            'away_win_rate': round(float(summary.get('away_win_rate', 0.0) or 0.0), 4),
+            'avg_market_total_goals': summary.get('avg_market_total_goals'),
+            'similar_case_ids': [item['match_id'] for item in top_similar_cases],
+            'market_case_ids': [item['match_id'] for item in top_market_cases],
+            'upset_case_ids': [item['match_id'] for item in top_upset_cases],
+            'similar_case_temporal': top_similar_cases,
+            'market_case_temporal': top_market_cases,
+            'upset_case_temporal': top_upset_cases,
+            'preferred_scores': list((((summary.get('direction_ou_priority') or {}) if isinstance(summary.get('direction_ou_priority'), dict) else {}).get('preferred_scores') or []))[:3],
+            'current_score_overlap': list((((summary.get('direction_ou_priority') or {}) if isinstance(summary.get('direction_ou_priority'), dict) else {}).get('current_score_overlap') or []))[:3],
+            'live_market_followup': ResultManager._json_clone(summary.get('live_market_followup')),
+        }
+
+    @staticmethod
+    def _derive_replay_supported_outcome(summary: Dict[str, Any]) -> Optional[str]:
+        rates = {
+            'home': float(summary.get('home_win_rate', 0.0) or 0.0),
+            'draw': float(summary.get('draw_rate', 0.0) or 0.0),
+            'away': float(summary.get('away_win_rate', 0.0) or 0.0),
+        }
+        best_key = max(rates, key=rates.get)
+        if rates[best_key] <= 0:
+            return None
+        return best_key
+
+    @staticmethod
+    def _normalize_rag_replay_summary(summary: Dict[str, Any], *, league: Optional[str], generated_at: str) -> Dict[str, Any]:
+        sample_count = int(summary.get('sample_count', 0) or 0)
+        replayed_count = int(summary.get('replayed_count', 0) or 0)
+        skipped_count = int(summary.get('skipped_count', 0) or 0)
+        baseline_memory_available_count = int(summary.get('baseline_memory_available_count', 0) or 0)
+        replay_memory_available_count = int(summary.get('replay_memory_available_count', 0) or 0)
+        comparable_top_case_count = int(summary.get('comparable_top_case_count', 0) or 0)
+        top_case_overlap_total = int(summary.get('top_case_overlap_total', 0) or 0)
+        baseline_win_hit_count = int(summary.get('baseline_win_hit_count', 0) or 0)
+        replay_win_hit_count = int(summary.get('replay_win_hit_count', 0) or 0)
+        baseline_score_hit_count = int(summary.get('baseline_score_hit_count', 0) or 0)
+        replay_score_hit_count = int(summary.get('replay_score_hit_count', 0) or 0)
+        return {
+            'league': league,
+            'sample_count': sample_count,
+            'replayed_count': replayed_count,
+            'skipped_count': skipped_count,
+            'skip_reasons': dict(sorted((summary.get('skip_reasons') or {}).items())),
+            'retrieval_coverage_rate': round(replay_memory_available_count / replayed_count * 100, 2) if replayed_count > 0 else 0.0,
+            'baseline_memory_available_rate': round(baseline_memory_available_count / replayed_count * 100, 2) if replayed_count > 0 else 0.0,
+            'replay_memory_available_rate': round(replay_memory_available_count / replayed_count * 100, 2) if replayed_count > 0 else 0.0,
+            'decision_changed_count': int(summary.get('decision_changed_count', 0) or 0),
+            'baseline_low_hit_rate_count': int(summary.get('baseline_low_hit_rate_count', 0) or 0),
+            'replay_low_hit_rate_count': int(summary.get('replay_low_hit_rate_count', 0) or 0),
+            'baseline_market_opposes_pick_count': int(summary.get('baseline_market_opposes_pick_count', 0) or 0),
+            'replay_market_opposes_pick_count': int(summary.get('replay_market_opposes_pick_count', 0) or 0),
+            'baseline_upset_case_cluster_count': int(summary.get('baseline_upset_case_cluster_count', 0) or 0),
+            'replay_upset_case_cluster_count': int(summary.get('replay_upset_case_cluster_count', 0) or 0),
+            'top_case_overlap_rate': round(top_case_overlap_total / comparable_top_case_count * 100, 2) if comparable_top_case_count > 0 else 0.0,
+            'top_case_overlap_total': top_case_overlap_total,
+            'comparable_top_case_count': comparable_top_case_count,
+            'baseline_win_hit_rate': round(baseline_win_hit_count / replayed_count * 100, 2) if replayed_count > 0 else 0.0,
+            'replay_win_hit_rate': round(replay_win_hit_count / replayed_count * 100, 2) if replayed_count > 0 else 0.0,
+            'win_hit_rate_delta': round((replay_win_hit_count - baseline_win_hit_count) / replayed_count * 100, 2) if replayed_count > 0 else 0.0,
+            'baseline_score_hit_rate': round(baseline_score_hit_count / replayed_count * 100, 2) if replayed_count > 0 else 0.0,
+            'replay_score_hit_rate': round(replay_score_hit_count / replayed_count * 100, 2) if replayed_count > 0 else 0.0,
+            'score_hit_rate_delta': round((replay_score_hit_count - baseline_score_hit_count) / replayed_count * 100, 2) if replayed_count > 0 else 0.0,
+            'generated_at': generated_at,
+        }
+
+    @staticmethod
+    def _build_rag_replay_delta_summary(overall: Dict[str, Any], by_league: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        by_league_delta: List[Dict[str, Any]] = []
+        for league_code, payload in (by_league or {}).items():
+            if not isinstance(payload, dict):
+                continue
+            by_league_delta.append(
+                {
+                    'league': league_code,
+                    'decision_changed_count': int(payload.get('decision_changed_count', 0) or 0),
+                    'baseline_memory_available_rate': round(float(payload.get('baseline_memory_available_rate', 0.0) or 0.0), 2),
+                    'replay_memory_available_rate': round(float(payload.get('replay_memory_available_rate', 0.0) or 0.0), 2),
+                    'memory_available_rate_delta': round(float(payload.get('replay_memory_available_rate', 0.0) or 0.0) - float(payload.get('baseline_memory_available_rate', 0.0) or 0.0), 2),
+                    'baseline_low_hit_rate_count': int(payload.get('baseline_low_hit_rate_count', 0) or 0),
+                    'replay_low_hit_rate_count': int(payload.get('replay_low_hit_rate_count', 0) or 0),
+                    'baseline_market_opposes_pick_count': int(payload.get('baseline_market_opposes_pick_count', 0) or 0),
+                    'replay_market_opposes_pick_count': int(payload.get('replay_market_opposes_pick_count', 0) or 0),
+                    'baseline_upset_case_cluster_count': int(payload.get('baseline_upset_case_cluster_count', 0) or 0),
+                    'replay_upset_case_cluster_count': int(payload.get('replay_upset_case_cluster_count', 0) or 0),
+                    'win_hit_rate_delta': round(float(payload.get('win_hit_rate_delta', 0.0) or 0.0), 2),
+                    'score_hit_rate_delta': round(float(payload.get('score_hit_rate_delta', 0.0) or 0.0), 2),
+                }
+            )
+        by_league_delta.sort(
+            key=lambda item: (
+                -float(item.get('memory_available_rate_delta', 0.0) or 0.0),
+                -float(item.get('win_hit_rate_delta', 0.0) or 0.0),
+                item.get('league') or '',
+            )
+        )
+        return {
+            'baseline_memory_available_rate': round(float(overall.get('baseline_memory_available_rate', 0.0) or 0.0), 2),
+            'replay_memory_available_rate': round(float(overall.get('replay_memory_available_rate', 0.0) or 0.0), 2),
+            'memory_available_rate_delta': round(float(overall.get('replay_memory_available_rate', 0.0) or 0.0) - float(overall.get('baseline_memory_available_rate', 0.0) or 0.0), 2),
+            'baseline_low_hit_rate_count': int(overall.get('baseline_low_hit_rate_count', 0) or 0),
+            'replay_low_hit_rate_count': int(overall.get('replay_low_hit_rate_count', 0) or 0),
+            'low_hit_rate_delta': int(overall.get('replay_low_hit_rate_count', 0) or 0) - int(overall.get('baseline_low_hit_rate_count', 0) or 0),
+            'baseline_market_opposes_pick_count': int(overall.get('baseline_market_opposes_pick_count', 0) or 0),
+            'replay_market_opposes_pick_count': int(overall.get('replay_market_opposes_pick_count', 0) or 0),
+            'market_opposes_pick_delta': int(overall.get('replay_market_opposes_pick_count', 0) or 0) - int(overall.get('baseline_market_opposes_pick_count', 0) or 0),
+            'baseline_upset_case_cluster_count': int(overall.get('baseline_upset_case_cluster_count', 0) or 0),
+            'replay_upset_case_cluster_count': int(overall.get('replay_upset_case_cluster_count', 0) or 0),
+            'upset_case_cluster_delta': int(overall.get('replay_upset_case_cluster_count', 0) or 0) - int(overall.get('baseline_upset_case_cluster_count', 0) or 0),
+            'decision_changed_count': int(overall.get('decision_changed_count', 0) or 0),
+            'win_hit_rate_delta': round(float(overall.get('win_hit_rate_delta', 0.0) or 0.0), 2),
+            'score_hit_rate_delta': round(float(overall.get('score_hit_rate_delta', 0.0) or 0.0), 2),
+            'top_memory_shifts': by_league_delta[:5],
+        }
+
+    def build_rag_replay_samples(
+        self,
+        *,
+        league: str = '',
+        since: str = '',
+        until: str = '',
+        limit: int = 0,
+        match_ids: Optional[List[str]] = None,
+        sample_source: str = 'auto',
+    ) -> Dict[str, Any]:
+        selected_league = str(league or '').strip()
+        selected_match_ids = {str(item or '').strip() for item in (match_ids or []) if str(item or '').strip()}
+        source_mode = str(sample_source or 'auto').strip() or 'auto'
+        if source_mode not in {'auto', 'archive'}:
+            raise ValueError(f'不支持的 sample_source: {source_mode}')
+
+        archive = self._load_prediction_archive()
+        included: List[Dict[str, Any]] = []
+        skipped: List[Dict[str, Any]] = []
+        seen_identities: set[str] = set()
+
+        def _within_range(match_date: str) -> bool:
+            text = str(match_date or '').strip()
+            if since and text and text < since:
+                return False
+            if until and text and text > until:
+                return False
+            return True
+
+        for archive_key, entry in archive.items():
+            if not isinstance(entry, dict):
+                continue
+            full_prediction = entry.get('full_prediction') if isinstance(entry.get('full_prediction'), dict) else {}
+            match_id = str(entry.get('match_id') or entry.get('teams_match_id') or entry.get('external_match_id') or archive_key).strip()
+            entry_league = str(entry.get('league') or full_prediction.get('league_code') or '').strip()
+            match_date = str(entry.get('match_date') or full_prediction.get('match_date') or '').strip()
+            home_team = str(entry.get('home_team') or full_prediction.get('home_team') or '').strip()
+            away_team = str(entry.get('away_team') or full_prediction.get('away_team') or '').strip()
+
+            if selected_league and entry_league != selected_league:
+                continue
+            if selected_match_ids and match_id not in selected_match_ids:
+                continue
+            if not _within_range(match_date):
+                continue
+
+            skip_reason = ''
+            identity = match_id or '|'.join([entry_league, match_date, home_team, away_team])
+            actual_score = str(entry.get('actual_score') or full_prediction.get('actual_score') or '').strip()
+            actual_winner = str(entry.get('actual_winner') or full_prediction.get('actual_winner') or '').strip() or (self._parse_score_to_winner(actual_score) or '')
+            market_snapshot = entry.get('market_snapshot') if isinstance(entry.get('market_snapshot'), dict) else full_prediction.get('market_snapshot') if isinstance(full_prediction.get('market_snapshot'), dict) else {}
+            prediction_text = str(entry.get('prediction') or full_prediction.get('prediction') or self._rag_replay_prediction_text(str(entry.get('predicted_winner') or full_prediction.get('predicted_winner') or ''))).strip()
+            top_scores = list(entry.get('top_scores') or full_prediction.get('top_scores') or [])
+            current_over_under = entry.get('over_under') if isinstance(entry.get('over_under'), dict) else full_prediction.get('over_under') if isinstance(full_prediction.get('over_under'), dict) else {}
+            baseline_explanation = str(full_prediction.get('retrieved_memory_explanation') or entry.get('retrieved_memory_explanation') or '').strip()
+            baseline_rag_decision = full_prediction.get('rag_decision') if isinstance(full_prediction.get('rag_decision'), dict) else entry.get('rag_decision') if isinstance(entry.get('rag_decision'), dict) else {}
+
+            if identity in seen_identities:
+                skip_reason = 'duplicate_match'
+            elif not actual_score or not actual_winner:
+                skip_reason = 'missing_actual_result'
+            elif not isinstance(market_snapshot, dict) or not market_snapshot:
+                skip_reason = 'missing_market_snapshot'
+            elif not prediction_text and not top_scores and not current_over_under:
+                skip_reason = 'missing_prediction_context'
+            elif not baseline_explanation and not baseline_rag_decision:
+                skip_reason = 'missing_baseline_rag_fields'
+
+            record = {
+                'match_id': match_id,
+                'league': entry_league,
+                'league_name': str(entry.get('league_name') or full_prediction.get('league_name') or LEAGUE_NAMES.get(entry_league, entry_league)).strip(),
+                'match_date': match_date,
+                'match_time': str(entry.get('match_time') or full_prediction.get('match_time') or '').strip(),
+                'home_team': home_team,
+                'away_team': away_team,
+                'actual_score': actual_score,
+                'actual_winner': actual_winner,
+                'actual_result': self._result_text(actual_winner, actual_score),
+                'prediction': prediction_text,
+                'predicted_winner': self._winner_key_from_text(str(entry.get('predicted_winner') or full_prediction.get('predicted_winner') or '')),
+                'predicted_scores': list(entry.get('predicted_scores') or full_prediction.get('predicted_scores') or []),
+                'top_scores': self._json_clone(top_scores),
+                'current_over_under': self._json_clone(current_over_under),
+                'market_snapshot': self._json_clone(market_snapshot),
+                'analysis_context': self._json_clone(full_prediction.get('analysis_context') if isinstance(full_prediction.get('analysis_context'), dict) else {}),
+                'historical_odds_reference': self._json_clone(full_prediction.get('historical_odds_reference') if isinstance(full_prediction.get('historical_odds_reference'), dict) else {}),
+                'baseline_retrieved_memory_explanation': baseline_explanation,
+                'baseline_rag_decision': self._json_clone(baseline_rag_decision),
+                'baseline_memory_available': bool(baseline_explanation or baseline_rag_decision),
+                'skip_reason': skip_reason,
+            }
+            if skip_reason:
+                skipped.append(record)
+                continue
+            seen_identities.add(identity)
+            included.append(record)
+            if limit and len(included) >= int(limit):
+                break
+
+        return {
+            'sample_source': 'archive',
+            'scope': {
+                'league': selected_league or None,
+                'since': since or None,
+                'until': until or None,
+                'match_ids': sorted(selected_match_ids),
+                'limit': int(limit or 0),
+            },
+            'sample_count': len(included) + len(skipped),
+            'replayable_count': len(included),
+            'skipped_count': len(skipped),
+            'samples': included,
+            'skipped': skipped,
+        }
+
+    def evaluate_rag_replay(
+        self,
+        *,
+        league: str = '',
+        since: str = '',
+        until: str = '',
+        limit: int = 0,
+        match_ids: Optional[List[str]] = None,
+        include_matches: bool = False,
+        sample_source: str = 'auto',
+        strict: bool = False,
+    ) -> Dict[str, Any]:
+        from domain.rag import HybridRAGService
+
+        generated_at = datetime.now().isoformat()
+        sample_bundle = self.build_rag_replay_samples(
+            league=league,
+            since=since,
+            until=until,
+            limit=limit,
+            match_ids=match_ids,
+            sample_source=sample_source,
+        )
+        rag_service = HybridRAGService(self.base_dir)
+        per_match: List[Dict[str, Any]] = []
+        replayed_matches: List[Dict[str, Any]] = []
+
+        def _build_skipped_payload(sample: Dict[str, Any]) -> Dict[str, Any]:
+            return {
+                'match_id': str(sample.get('match_id') or '').strip(),
+                'league': str(sample.get('league') or '').strip(),
+                'league_name': str(sample.get('league_name') or '').strip(),
+                'match_date': str(sample.get('match_date') or '').strip(),
+                'match_time': str(sample.get('match_time') or '').strip(),
+                'home_team': str(sample.get('home_team') or '').strip(),
+                'away_team': str(sample.get('away_team') or '').strip(),
+                'actual_result': str(sample.get('actual_result') or '').strip(),
+                'actual_score': str(sample.get('actual_score') or '').strip(),
+                'status': 'skipped',
+                'skip_reason': str(sample.get('skip_reason') or '').strip(),
+            }
+
+        for skipped in sample_bundle.get('skipped') or []:
+            if include_matches:
+                per_match.append(_build_skipped_payload(skipped))
+
+        for sample in sample_bundle.get('samples') or []:
+            try:
+                memory = rag_service.retrieve_match_memory(
+                    league_code=str(sample.get('league') or '').strip(),
+                    home_team=str(sample.get('home_team') or '').strip(),
+                    away_team=str(sample.get('away_team') or '').strip(),
+                    market_snapshot=self._json_clone(sample.get('market_snapshot') or {}),
+                    match_id=str(sample.get('match_id') or '').strip(),
+                    match_date=str(sample.get('match_date') or '').strip(),
+                    analysis_context=self._json_clone(sample.get('analysis_context') or {}),
+                    historical_odds_reference=self._json_clone(sample.get('historical_odds_reference') or {}),
+                    predicted_outcome=str(sample.get('prediction') or '').strip() or None,
+                    current_over_under=self._json_clone(sample.get('current_over_under') or {}),
+                    top_scores=self._json_clone(sample.get('top_scores') or []),
+                )
+                summary = self._rag_replay_summary_from_memory(memory)
+                decision = rag_service.build_lightweight_decision(
+                    summary=memory.get('summary') if isinstance(memory.get('summary'), dict) else {},
+                    similar_cases=memory.get('similar_cases') if isinstance(memory.get('similar_cases'), list) else [],
+                    market_cases=memory.get('market_cases') if isinstance(memory.get('market_cases'), list) else [],
+                    upset_cases=memory.get('upset_cases') if isinstance(memory.get('upset_cases'), list) else [],
+                    predicted_outcome=str(sample.get('prediction') or '').strip() or None,
+                )
+            except Exception as exc:
+                if strict:
+                    raise
+                skipped_payload = {
+                    **sample,
+                    'skip_reason': f'replay_error:{type(exc).__name__}',
+                }
+                if include_matches:
+                    per_match.append(_build_skipped_payload(skipped_payload))
+                continue
+
+            replay_memory_available = bool(summary.get('retrieved_count', 0) or summary.get('similar_case_ids') or summary.get('market_case_ids') or summary.get('upset_case_ids'))
+            replay_supported_winner = self._derive_replay_supported_outcome(summary)
+            replay_preferred_scores = list(summary.get('preferred_scores') or [])
+            baseline_tags = set(self._compact_text_list((sample.get('baseline_rag_decision') or {}).get('scenario_tags'), limit=10))
+            replay_tags = set(self._compact_text_list((decision or {}).get('scenario_tags'), limit=10))
+            baseline_top_case_ids = []
+            replay_top_case_ids = list(summary.get('similar_case_ids') or [])[:3]
+            changed_fields: List[str] = []
+            if self._json_clone(sample.get('baseline_rag_decision') or {}) != self._json_clone(decision or {}):
+                changed_fields.append('rag_decision')
+            if bool(sample.get('baseline_memory_available')) != bool(replay_memory_available):
+                changed_fields.append('memory_availability')
+            if replay_supported_winner and replay_supported_winner != str(sample.get('predicted_winner') or '').strip():
+                changed_fields.append('supported_outcome')
+            if replay_preferred_scores != list(sample.get('predicted_scores') or [])[:len(replay_preferred_scores)]:
+                changed_fields.append('preferred_scores')
+
+            match_payload = {
+                'match_id': str(sample.get('match_id') or '').strip(),
+                'league': str(sample.get('league') or '').strip(),
+                'league_name': str(sample.get('league_name') or '').strip(),
+                'match_date': str(sample.get('match_date') or '').strip(),
+                'match_time': str(sample.get('match_time') or '').strip(),
+                'home_team': str(sample.get('home_team') or '').strip(),
+                'away_team': str(sample.get('away_team') or '').strip(),
+                'actual_result': str(sample.get('actual_result') or '').strip(),
+                'actual_score': str(sample.get('actual_score') or '').strip(),
+                'status': 'replayed',
+                'skip_reason': '',
+                'baseline': {
+                    'prediction': str(sample.get('prediction') or '').strip(),
+                    'predicted_winner_key': str(sample.get('predicted_winner') or '').strip(),
+                    'predicted_winner': self._rag_replay_prediction_text(str(sample.get('predicted_winner') or '').strip()),
+                    'predicted_scores': list(sample.get('predicted_scores') or []),
+                    'retrieved_memory_explanation': str(sample.get('baseline_retrieved_memory_explanation') or '').strip(),
+                    'rag_decision': self._json_clone(sample.get('baseline_rag_decision') or {}),
+                    'memory_available': bool(sample.get('baseline_memory_available')),
+                    'win_hit': bool(sample.get('predicted_winner')) and str(sample.get('predicted_winner') or '').strip() == str(sample.get('actual_winner') or '').strip(),
+                    'score_hit': str(sample.get('actual_score') or '').strip() in {str(item).strip() for item in (sample.get('predicted_scores') or []) if str(item).strip()},
+                    'top_case_ids': baseline_top_case_ids,
+                },
+                'replay': {
+                    'retrieved_memory': summary,
+                    'rag_decision': self._json_clone(decision or {}),
+                    'memory_available': replay_memory_available,
+                    'supported_winner_key': replay_supported_winner or '',
+                    'supported_winner': self._rag_replay_prediction_text(replay_supported_winner or ''),
+                    'preferred_scores': replay_preferred_scores,
+                    'win_hit': bool(replay_supported_winner) and replay_supported_winner == str(sample.get('actual_winner') or '').strip(),
+                    'score_hit': str(sample.get('actual_score') or '').strip() in {str(item).strip() for item in replay_preferred_scores if str(item).strip()},
+                    'top_case_ids': replay_top_case_ids,
+                },
+                'changed_fields': changed_fields,
+            }
+            replayed_matches.append(match_payload)
+            if include_matches:
+                per_match.append(match_payload)
+
+        def _build_empty_summary() -> Dict[str, Any]:
+            return {
+                'sample_count': 0,
+                'replayed_count': 0,
+                'skipped_count': 0,
+                'skip_reasons': {},
+                'baseline_memory_available_count': 0,
+                'replay_memory_available_count': 0,
+                'decision_changed_count': 0,
+                'baseline_low_hit_rate_count': 0,
+                'replay_low_hit_rate_count': 0,
+                'baseline_market_opposes_pick_count': 0,
+                'replay_market_opposes_pick_count': 0,
+                'baseline_upset_case_cluster_count': 0,
+                'replay_upset_case_cluster_count': 0,
+                'comparable_top_case_count': 0,
+                'top_case_overlap_total': 0,
+                'baseline_win_hit_count': 0,
+                'replay_win_hit_count': 0,
+                'baseline_score_hit_count': 0,
+                'replay_score_hit_count': 0,
+            }
+
+        overall_raw = _build_empty_summary()
+        by_league_raw: Dict[str, Dict[str, Any]] = {}
+
+        def _summary_for_league(league_code: str) -> Dict[str, Any]:
+            return by_league_raw.setdefault(league_code, _build_empty_summary())
+
+        for skipped in sample_bundle.get('skipped') or []:
+            reason = str(skipped.get('skip_reason') or 'unknown').strip() or 'unknown'
+            for target in (overall_raw, _summary_for_league(str(skipped.get('league') or '').strip())):
+                target['sample_count'] += 1
+                target['skipped_count'] += 1
+                target['skip_reasons'][reason] = int(target['skip_reasons'].get(reason, 0) or 0) + 1
+
+        if len(replayed_matches) < int(sample_bundle.get('replayable_count', 0) or 0):
+            replay_errors = int(sample_bundle.get('replayable_count', 0) or 0) - len(replayed_matches)
+            if replay_errors > 0:
+                for _ in range(replay_errors):
+                    overall_raw['sample_count'] += 1
+                    overall_raw['skipped_count'] += 1
+                    overall_raw['skip_reasons']['replay_error'] = int(overall_raw['skip_reasons'].get('replay_error', 0) or 0) + 1
+
+        for match_payload in replayed_matches:
+            baseline = match_payload.get('baseline') if isinstance(match_payload.get('baseline'), dict) else {}
+            replay = match_payload.get('replay') if isinstance(match_payload.get('replay'), dict) else {}
+            baseline_tags = set(self._compact_text_list((baseline.get('rag_decision') or {}).get('scenario_tags'), limit=10))
+            replay_tags = set(self._compact_text_list((replay.get('rag_decision') or {}).get('scenario_tags'), limit=10))
+            overlap_count = len(set(baseline.get('top_case_ids') or []) & set(replay.get('top_case_ids') or []))
+            comparable_top_case_count = 1 if baseline.get('top_case_ids') and replay.get('top_case_ids') else 0
+            for target in (overall_raw, _summary_for_league(str(match_payload.get('league') or '').strip())):
+                target['sample_count'] += 1
+                target['replayed_count'] += 1
+                target['baseline_memory_available_count'] += 1 if baseline.get('memory_available') else 0
+                target['replay_memory_available_count'] += 1 if replay.get('memory_available') else 0
+                target['decision_changed_count'] += 1 if 'rag_decision' in (match_payload.get('changed_fields') or []) else 0
+                target['baseline_low_hit_rate_count'] += 1 if 'similar_cases_low_hit_rate' in baseline_tags else 0
+                target['replay_low_hit_rate_count'] += 1 if 'similar_cases_low_hit_rate' in replay_tags else 0
+                target['baseline_market_opposes_pick_count'] += 1 if 'market_case_opposes_pick' in baseline_tags else 0
+                target['replay_market_opposes_pick_count'] += 1 if 'market_case_opposes_pick' in replay_tags else 0
+                target['baseline_upset_case_cluster_count'] += 1 if 'upset_case_cluster' in baseline_tags else 0
+                target['replay_upset_case_cluster_count'] += 1 if 'upset_case_cluster' in replay_tags else 0
+                target['comparable_top_case_count'] += comparable_top_case_count
+                target['top_case_overlap_total'] += overlap_count
+                target['baseline_win_hit_count'] += 1 if baseline.get('win_hit') else 0
+                target['replay_win_hit_count'] += 1 if replay.get('win_hit') else 0
+                target['baseline_score_hit_count'] += 1 if baseline.get('score_hit') else 0
+                target['replay_score_hit_count'] += 1 if replay.get('score_hit') else 0
+
+        overall = self._normalize_rag_replay_summary(overall_raw, league=None, generated_at=generated_at)
+        by_league = {
+            league_code: self._normalize_rag_replay_summary(payload, league=league_code or None, generated_at=generated_at)
+            for league_code, payload in sorted(by_league_raw.items())
+        }
+        return {
+            'generated_at': generated_at,
+            'read_only': True,
+            'sample_source': sample_bundle.get('sample_source'),
+            'scope': sample_bundle.get('scope') or {},
+            'overall': overall,
+            'by_league': by_league,
+            'matches': per_match if include_matches else [],
+            'delta_summary': self._build_rag_replay_delta_summary(overall, by_league),
+        }
+
     def build_reanalysis_report(self) -> Dict[str, Any]:
         selected_by_league: Dict[str, Dict[str, Any]] = {}
         selected_global: Optional[Dict[str, Any]] = None

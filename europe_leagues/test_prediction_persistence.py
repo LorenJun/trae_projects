@@ -6,10 +6,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from domain.live import LiveRefreshService
+from domain.odds import HistoricalOddsReference
 from domain.persistence import PredictionPersistenceService
 from enhanced_prediction_workflow import EnhancedPredictor, validate_schedule_cache_payload
 from import_players_from_csv import import_csv
-from runtime.memory_samples import build_prediction_memory_samples
+from runtime.memory_samples import build_prediction_memory_samples, sync_prediction_memory_samples
 from runtime.paths import EuropeLeaguesPaths
 
 
@@ -1457,16 +1458,16 @@ class PredictionMemoryCleanupTest(unittest.TestCase):
         headlines = [line.strip() for line in content.splitlines() if line.strip().startswith("- [champions_league|")]
         self.assertEqual(len(headlines), 1)
 
-    def test_build_prediction_memory_samples_extracts_multiline_memory_id(self):
+    def test_build_prediction_memory_samples_ignores_memory_markdown_and_uses_archive_ids(self):
         self.memory_path.write_text(
             "\n".join(
                 [
                     "# Test Memory",
                     "",
                     "<!-- prediction-memory:start -->",
-                    "- [la_liga|2026-05-18|巴塞罗那|皇家贝蒂斯] 2026-05-18 西甲 巴塞罗那 vs 皇家贝蒂斯 | MatchID: 1302913",
+                    "- [la_liga|2026-05-18|巴萨|贝蒂斯] 2026-05-18 西甲 巴萨 vs 贝蒂斯 | MatchID: synthetic-id",
                     "  预测: 主胜 (45.0%) | 比分: 2-1 > 1-0 | 大小球: 待补真实盘口",
-                    "  · MatchID: 1302913 | 记忆ID: 1302913 | 更新时间: 2026-05-18 10:00:00",
+                    "  · MatchID: synthetic-id | 记忆ID: multiline-memory-id | 更新时间: 2026-05-18 10:00:00",
                     "<!-- prediction-memory:end -->",
                 ]
             )
@@ -1485,6 +1486,7 @@ class PredictionMemoryCleanupTest(unittest.TestCase):
                         "home_team": "巴塞罗那",
                         "away_team": "皇家贝蒂斯",
                         "market_snapshot": {"欧赔": {}, "亚值": {}, "大小球": {}, "凯利": {}},
+                        "archived_at": "2026-05-18T10:00:00",
                     }
                 },
                 ensure_ascii=False,
@@ -1496,8 +1498,146 @@ class PredictionMemoryCleanupTest(unittest.TestCase):
         payload = build_prediction_memory_samples(base_dir=str(self.base_dir))
         records = payload["records_by_league"]["la_liga"]
         sample_ids = {str(item.get("match_id") or "") for item in records}
-        self.assertIn("1302913", sample_ids)
-        self.assertNotIn("la_liga_20260518_巴塞罗那_皇家贝蒂斯", sample_ids)
+        self.assertEqual(sample_ids, {"1302913"})
+
+    def test_build_prediction_memory_samples_prefers_recent_archive_entries(self):
+        runtime_dir = self.base_dir / ".okooo-scraper" / "runtime"
+        archive_path = runtime_dir / "prediction_archive.json"
+        archive_path.write_text(
+            json.dumps(
+                {
+                    "m1": {
+                        "match_id": "m1",
+                        "league": "la_liga",
+                        "match_date": "2026-05-10",
+                        "home_team": "A",
+                        "away_team": "B",
+                        "market_snapshot": {"欧赔": {}, "亚值": {}, "大小球": {}, "凯利": {}},
+                        "archived_at": "2026-05-10T08:00:00",
+                    },
+                    "m2": {
+                        "match_id": "m2",
+                        "league": "la_liga",
+                        "match_date": "2026-05-11",
+                        "home_team": "C",
+                        "away_team": "D",
+                        "market_snapshot": {"欧赔": {}, "亚值": {}, "大小球": {}, "凯利": {}},
+                        "archived_at": "2026-05-11T08:00:00",
+                    },
+                    "m3": {
+                        "match_id": "m3",
+                        "league": "la_liga",
+                        "match_date": "2026-05-12",
+                        "home_team": "E",
+                        "away_team": "F",
+                        "market_snapshot": {"欧赔": {}, "亚值": {}, "大小球": {}, "凯利": {}},
+                        "archived_at": "2026-05-12T08:00:00",
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        payload = build_prediction_memory_samples(base_dir=str(self.base_dir), limit=2)
+        records = payload["records_by_league"]["la_liga"]
+        self.assertEqual([item["match_id"] for item in records], ["m3", "m2"])
+        self.assertEqual(payload["total_candidates"], 3)
+
+    def test_build_prediction_memory_samples_overlays_results_without_memory_markdown(self):
+        runtime_dir = self.base_dir / ".okooo-scraper" / "runtime"
+        archive_path = runtime_dir / "prediction_archive.json"
+        archive_path.write_text(
+            json.dumps(
+                {
+                    "1302913": {
+                        "match_id": "1302913",
+                        "league": "la_liga",
+                        "match_date": "2026-05-18",
+                        "home_team": "巴塞罗那",
+                        "away_team": "皇家贝蒂斯",
+                        "market_snapshot": {"欧赔": {}, "亚值": {}, "大小球": {}, "凯利": {}},
+                        "archived_at": "2026-05-18T10:00:00",
+                    }
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        teams_dir = self.base_dir / "la_liga"
+        teams_dir.mkdir(parents=True, exist_ok=True)
+        (teams_dir / "teams_2025-26.md").write_text(
+            "\n".join(
+                [
+                    "| 日期 | 时间 | 主队 | 比分 | 客队 | 备注 |",
+                    "|-----|------|-----|------|-----|------|",
+                    "| 2026-05-18 | 03:15 | 巴塞罗那 | 2-1 | 皇家贝蒂斯 | 已结束 |",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        payload = build_prediction_memory_samples(base_dir=str(self.base_dir))
+        record = payload["records_by_league"]["la_liga"][0]
+        self.assertEqual(record["match_id"], "1302913")
+        self.assertEqual(record["actual_result"], "主胜")
+        self.assertEqual(record["actual_score"], "2-1")
+        self.assertEqual(payload["completed_samples"], 1)
+
+    def test_sync_prediction_memory_samples_refreshes_runtime_file_for_odds_consumer(self):
+        runtime_dir = self.base_dir / ".okooo-scraper" / "runtime"
+        archive_path = runtime_dir / "prediction_archive.json"
+        archive_path.write_text(
+            json.dumps(
+                {
+                    "1302913": {
+                        "match_id": "1302913",
+                        "league": "la_liga",
+                        "match_date": "2026-05-18",
+                        "home_team": "巴塞罗那",
+                        "away_team": "皇家贝蒂斯",
+                        "market_snapshot": {"欧赔": {}, "亚值": {}, "大小球": {}, "凯利": {}},
+                        "archived_at": "2026-05-18T10:00:00",
+                        "actual_score": "2-1",
+                        "actual_winner": "home",
+                    }
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        payload = sync_prediction_memory_samples(base_dir=str(self.base_dir), limit=100)
+        self.assertEqual(payload["completed_samples"], 1)
+
+        ref = HistoricalOddsReference(["la_liga"], base_dir=str(self.base_dir))
+        self.assertEqual(ref.memory_history_counts["la_liga"], 1)
+        self.assertEqual(ref.get_league_record_count("la_liga"), 1)
+        self.assertEqual(ref.records_by_league["la_liga"][0]["match_id"], "1302913")
+        self.assertEqual(ref.records_by_league["la_liga"][0]["actual_result"], "主胜")
+
+    def test_normalize_memory_entry_layout_promotes_embedded_prediction_lines(self):
+        entry = "\n".join(
+            [
+                "- [la_liga|2026-05-15|皇家马德里|皇家奥维耶多] 2026-05-15 西甲 皇家马德里 vs 皇家奥维耶多 | MatchID: la_liga_20260515_皇家马德里_皇家奥维耶多",
+                "  ◦ 欧赔: 1.22/6.31/10.04->1.25/6.06/9.53",
+                "  ▲ 风险: 低(28) 客队抢分战意强于主队",
+                "  【临场更新】预测: 皇马胜 (55.0%) | 比分: 2-0 > 1-0 > 1-1 | 大小球: 小球 3.25 (86.2%) | 亚盘: 客队+1.75",
+                "  ■ 赛果: 主胜 2-0",
+                "  · MatchID: la_liga_20260515_皇家马德里_皇家奥维耶多 | 记忆ID: la_liga|2026-05-15|皇家马德里|皇家奥维耶多 | 更新时间: 2026-05-17 22:26:12",
+            ]
+        )
+
+        normalized = PredictionPersistenceService._normalize_memory_entry_layout(entry)
+        ok, issues = PredictionPersistenceService._validate_memory_entry_field_order(normalized)
+
+        self.assertIn("预测: 皇马胜 (55.0%) | 比分: 2-0 > 1-0 > 1-1 | 大小球: 小球 3.25 (86.2%) | 亚盘: 客队+1.75", normalized)
+        self.assertTrue(ok)
+        self.assertEqual(issues, [])
 
     def test_update_prediction_memory_only_rewrites_prediction_memory_block(self):
         before_prefix = "\n".join([

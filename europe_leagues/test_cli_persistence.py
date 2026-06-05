@@ -344,6 +344,59 @@ class CliPersistenceTest(unittest.TestCase):
             cli.get_command_runtime_profile("apply-reanalysis")["agent_roles"],
         )
 
+    def test_rag_replay_eval_passes_filters_and_flags(self):
+        captured = {}
+        calls = {}
+
+        class DummyReplayManager:
+            def evaluate_rag_replay(self, **kwargs):
+                calls.update(kwargs)
+                return {
+                    "generated_at": "2026-05-28T10:00:00",
+                    "read_only": True,
+                    "overall": {"sample_count": 3, "replayed_count": 2, "skipped_count": 1, "decision_changed_count": 1},
+                    "by_league": {},
+                    "delta_summary": {},
+                    "matches": [],
+                }
+
+        args = Namespace(
+            league="la_liga",
+            since="2026-05-01",
+            until="2026-05-31",
+            limit=5,
+            match_id=["la_liga_20260511_巴塞罗那_皇家马德里"],
+            include_matches=True,
+            sample_source="archive",
+            strict=True,
+            json=True,
+        )
+
+        with patch("result_manager.ResultManager", return_value=DummyReplayManager()), patch(
+            "app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)
+        ):
+            cli.run_openclaw_rag_replay_eval(args)
+
+        self.assertEqual(
+            calls,
+            {
+                "league": "la_liga",
+                "since": "2026-05-01",
+                "until": "2026-05-31",
+                "limit": 5,
+                "match_ids": ["la_liga_20260511_巴塞罗那_皇家马德里"],
+                "include_matches": True,
+                "sample_source": "archive",
+                "strict": True,
+            },
+        )
+        self.assertEqual(captured["payload"]["command"], "rag-replay-eval")
+        self.assertTrue(captured["payload"]["data"]["read_only"])
+        self.assertEqual(
+            captured["payload"]["data"]["runtime_profile"]["agent_roles"],
+            cli.get_command_runtime_profile("rag-replay-eval")["agent_roles"],
+        )
+
     def test_predict_match_passes_persist_flag_and_reuses_predictor_persisted_metadata(self):
         captured = {}
         calls = []
