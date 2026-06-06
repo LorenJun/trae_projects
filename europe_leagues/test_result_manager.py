@@ -847,7 +847,8 @@ class PredictionPersistenceServiceTest(unittest.TestCase):
             result_manager=DummyResultManager(),
         )
         result = {
-            "match_id": "external-999",
+            "match_id": "predict_cache_999",
+            "external_match_id": "999001",
             "league_code": "la_liga",
             "league_name": "西甲",
             "match_date": "2026-05-11",
@@ -898,7 +899,8 @@ class PredictionPersistenceServiceTest(unittest.TestCase):
             result_manager=manager,
         )
         cached = {
-            "match_id": "external-321",
+            "match_id": "cache_ref_321",
+            "external_match_id": "321001",
             "league_code": "europa_league",
             "league_name": "欧联",
             "match_date": "2026-05-17",
@@ -913,12 +915,12 @@ class PredictionPersistenceServiceTest(unittest.TestCase):
         with patch("domain.persistence.sync_prediction_memory_samples"), patch("domain.persistence.sync_rag_index"), patch("domain.persistence.register_prediction_result_sync") as mock_register:
             persisted = service.prepare_cached_prediction(cached, {"mode": "cache"}, "europa_league")
 
-        self.assertEqual(persisted["internal_match_id"], "external-321")
+        self.assertEqual(persisted["internal_match_id"], "cache_ref_321")
         self.assertEqual(persisted["storage_mode"], "runtime_only")
         self.assertTrue(persisted["persisted"]["archived"])
         self.assertTrue(persisted["persisted"]["memory_updated"])
         self.assertTrue(persisted["persisted"]["result_sync_registered"])
-        self.assertEqual(manager.saved, [("europa_league", "external-321", "runtime_only")])
+        self.assertEqual(manager.saved, [("europa_league", "cache_ref_321", "runtime_only")])
         mock_register.assert_called_once_with(str(self.base_dir), persisted)
 
     def test_prepare_cached_prediction_runtime_only_archive_failure_keeps_memory_and_sync(self):
@@ -941,7 +943,8 @@ class PredictionPersistenceServiceTest(unittest.TestCase):
             result_manager=DummyResultManager(),
         )
         cached = {
-            "match_id": "external-654",
+            "match_id": "cache_ref_654",
+            "external_match_id": "654001",
             "league_code": "europa_league",
             "league_name": "欧联",
             "match_date": "2026-05-18",
@@ -956,13 +959,54 @@ class PredictionPersistenceServiceTest(unittest.TestCase):
         with patch("domain.persistence.sync_prediction_memory_samples"), patch("domain.persistence.sync_rag_index"), patch("domain.persistence.register_prediction_result_sync") as mock_register:
             persisted = service.prepare_cached_prediction(cached, {"mode": "cache"}, "europa_league")
 
-        self.assertEqual(persisted["internal_match_id"], "external-654")
+        self.assertEqual(persisted["internal_match_id"], "cache_ref_654")
         self.assertEqual(persisted["storage_mode"], "runtime_only")
         self.assertFalse(persisted["persisted"]["archived"])
         self.assertTrue(persisted["persisted"]["memory_updated"])
         self.assertTrue(persisted["persisted"]["result_sync_registered"])
         self.assertEqual(persisted["persisted"]["error"], "archive failed")
         mock_register.assert_called_once_with(str(self.base_dir), persisted)
+
+    def test_prepare_cached_prediction_does_not_promote_internal_match_id_to_external(self):
+        class DummyResultManager:
+            def _find_existing_teams_match_id(self, league_code, match_date, home_team, away_team):
+                return ""
+
+            def _runtime_only_match_id(self, external_match_id, league_code, match_date, home_team, away_team):
+                return external_match_id or f"{league_code}_{match_date.replace('-', '')}_{home_team}_{away_team}"
+
+            def save_prediction_from_enhanced(self, result, league_code):
+                return {}
+
+            def update_accuracy_stats(self):
+                return {"overall": {}}
+
+        service = PredictionPersistenceService(
+            base_dir=str(self.base_dir),
+            cache=None,
+            result_manager=DummyResultManager(),
+        )
+        cached = {
+            "match_id": "world_cup_20260612_墨西哥_南非",
+            "league_code": "world_cup",
+            "league_name": "世界杯",
+            "match_date": "2026-06-12",
+            "home_team": "墨西哥",
+            "away_team": "南非",
+            "prediction": "主胜",
+            "confidence": 0.51,
+            "top_scores": [("1-0", 0.2)],
+            "over_under": {"available": False, "reason": "missing_real_market_line"},
+        }
+
+        with patch("domain.persistence.sync_prediction_memory_samples"), patch("domain.persistence.sync_rag_index"), patch(
+            "domain.persistence.register_prediction_result_sync"
+        ):
+            persisted = service.prepare_cached_prediction(cached, {"mode": "cache"}, "world_cup")
+
+        self.assertEqual(persisted["match_id"], "world_cup_20260612_墨西哥_南非")
+        self.assertEqual(persisted["internal_match_id"], "world_cup_20260612_墨西哥_南非")
+        self.assertEqual(persisted["external_match_id"], "")
 
     def test_persist_memory_only_prediction_sets_runtime_only_identity_without_archive(self):
         class DummyResultManager:
@@ -1007,7 +1051,8 @@ class ResultManagerArchiveTest(ResultManagerTest):
 
     def test_save_prediction_from_enhanced_archives_review_and_market_fields(self):
         enhanced_pred = {
-            "match_id": "external-123",
+            "match_id": "la_liga_20260511_巴塞罗那_皇家马德里",
+            "external_match_id": "123001",
             "match_date": "2026-05-11",
             "match_time": "03:00",
             "home_team": "巴塞罗那",
@@ -1094,7 +1139,8 @@ class ResultManagerArchiveTest(ResultManagerTest):
 
     def test_save_prediction_from_enhanced_preserves_zero_final_market_values(self):
         enhanced_pred = {
-            "match_id": "external-456",
+            "match_id": "la_liga_20260512_奥萨苏纳_马德里竞技",
+            "external_match_id": "456001",
             "match_date": "2026-05-12",
             "match_time": "03:00",
             "home_team": "奥萨苏纳",
@@ -1125,7 +1171,7 @@ class ResultManagerArchiveTest(ResultManagerTest):
             self.manager.save_prediction_from_enhanced(enhanced_pred, "la_liga")
 
         archive = self.manager.prediction_archive_store.load()
-        archived = next(item for item in archive.values() if item.get("external_match_id") == "external-456")
+        archived = next(item for item in archive.values() if item.get("external_match_id") == "456001")
         self.assertEqual(archived["predicted_ou"], {"side": "小", "line": 0.0})
         self.assertEqual(archived["market_snapshot"]["亚值"]["final"]["handicap_value"], 0.0)
         self.assertEqual(archived["market_snapshot"]["亚值"]["initial"]["handicap_value"], -0.25)
@@ -1136,8 +1182,8 @@ class ResultManagerArchiveTest(ResultManagerTest):
 
     def test_save_prediction_from_enhanced_prefers_precomputed_identity_fields(self):
         enhanced_pred = {
-            "match_id": "external-777",
-            "external_match_id": "external-777",
+            "match_id": "custom_runtime_match_777",
+            "external_match_id": "777001",
             "internal_match_id": "custom_internal_id",
             "teams_match_id": "la_liga_20260511_巴塞罗那_皇家马德里",
             "storage_mode": "league_sot",

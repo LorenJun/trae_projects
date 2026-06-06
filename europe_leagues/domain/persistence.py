@@ -36,6 +36,7 @@ from runtime.memory_dedupe import (
     validate_memory_entry,
 )
 from runtime.memory_samples import sync_prediction_memory_samples
+from runtime.match_ids import first_valid_external_match_id
 from runtime.paths import get_default_paths
 from runtime.rag_store import sync_rag_index
 from runtime.result_sync import LEAGUE_SOT_CODES, register_prediction_result_sync
@@ -596,7 +597,7 @@ class PredictionPersistenceService:
         alias_map = load_team_alias_map(None)
         normalized_home = normalize_team_name(league_code, home_team, alias_map) or home_team
         normalized_away = normalize_team_name(league_code, away_team, alias_map) or away_team
-        external_match_id = str(result.get('match_id') or result.get('external_match_id') or '').strip()
+        external_match_id = first_valid_external_match_id(result.get('external_match_id'))
         dedupe_id, display_identity = cls._canonical_memory_identity(result)
 
         entry_keys: set[str] = set()
@@ -1071,12 +1072,13 @@ class PredictionPersistenceService:
         actual_result = {'home': '主胜', 'away': '客胜', 'draw': '平局'}.get(actual_winner, '')
         rag_explanation = str(result.get('retrieved_memory_explanation') or '').replace('|', '/').strip()
         league_learning_summary = self._format_league_learning_summary(result)
-        external_match_id = str(
-            result.get('match_id')
-            or result.get('external_match_id')
-            or result.get('internal_match_id')
-            or ''
-        ).strip()
+        external_match_id = (
+            first_valid_external_match_id(
+                result.get('external_match_id'),
+                result.get('match_id'),
+            )
+            or str(result.get('internal_match_id') or result.get('teams_match_id') or result.get('match_id') or '').strip()
+        )
 
         entry_lines = [
             f'- [{key}] {match_date} {title} {home_team} vs {away_team}{(f" | MatchID: {external_match_id}") if external_match_id else ""}',
@@ -1211,14 +1213,15 @@ class PredictionPersistenceService:
             away_team,
         )
         realtime = result.get('realtime') if isinstance(result.get('realtime'), dict) else {}
-        external_match_id = str(result.get('external_match_id') or result.get('match_id') or '').strip()
+        external_match_id = first_valid_external_match_id(result.get('external_match_id'))
         if not external_match_id and realtime:
             okooo = realtime.get('okooo')
             if isinstance(okooo, dict):
-                external_match_id = str(okooo.get('match_id') or '').strip()
+                external_match_id = first_valid_external_match_id(okooo.get('match_id'))
         internal_match_id = str(result.get('internal_match_id') or '').strip()
         if not internal_match_id:
-            internal_match_id = teams_match_id or self.result_manager._runtime_only_match_id(
+            explicit_match_id = str(result.get('match_id') or '').strip()
+            internal_match_id = teams_match_id or explicit_match_id or self.result_manager._runtime_only_match_id(
                 external_match_id,
                 league_code,
                 match_date,

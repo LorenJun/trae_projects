@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
+from runtime.match_ids import first_valid_external_match_id
 from storage.teams_md import TeamsMarkdownStore
 
 
@@ -241,13 +242,15 @@ def build_prediction_note(prediction: Dict[str, Any]) -> str:
     score_ou_note = format_score_ou_note(prediction)
     upset_note = format_upset_note(prediction.get('upset_potential'))
     applied_weights = prediction.get('applied_model_weights')
-    match_id = str(
-        prediction.get('match_id')
-        or prediction.get('external_match_id')
-        or prediction.get('internal_match_id')
-        or prediction.get('teams_match_id')
-        or ''
-    ).strip()
+    match_id = (
+        first_valid_external_match_id(
+            prediction.get('external_match_id'),
+            prediction.get('match_id'),
+        )
+        or str(prediction.get('internal_match_id') or '').strip()
+        or str(prediction.get('teams_match_id') or '').strip()
+        or str(prediction.get('match_id') or '').strip()
+    )
     match_id_note = f'MatchID:{match_id}' if match_id else ''
     dyn = ''
     if isinstance(applied_weights, dict) and 'has_enough_samples' in applied_weights:

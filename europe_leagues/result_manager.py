@@ -19,6 +19,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from agent_runtime_registry import get_runtime_profile
 from collectors.aliasing import load_team_alias_map
 from runtime.memory_samples import sync_prediction_memory_samples
+from runtime.match_ids import first_valid_external_match_id, normalize_external_match_id
 from runtime.paths import get_default_paths
 from runtime.rag_store import sync_rag_index
 from storage import AccuracyStatsStore, PredictionArchiveStore, TeamsMarkdownStore
@@ -319,7 +320,7 @@ class ResultManager:
                 prefixes.append(prefix)
 
         archive_payload = archive if isinstance(archive, dict) else self._load_prediction_archive()
-        external_match_id = str(prediction_data.get('external_match_id') or prediction_data.get('match_id') or '').strip()
+        external_match_id = first_valid_external_match_id(prediction_data.get('external_match_id'))
         if not external_match_id:
             return prefixes
 
@@ -327,12 +328,14 @@ class ResultManager:
             if not isinstance(archived, dict):
                 continue
             candidates = {
-                str(archived.get('match_id') or '').strip(),
-                str(archived.get('external_match_id') or '').strip(),
+                normalize_external_match_id(archived.get('match_id')),
+                normalize_external_match_id(archived.get('external_match_id')),
             }
             full_prediction = archived.get('full_prediction')
             if isinstance(full_prediction, dict):
-                candidates.add(str(full_prediction.get('match_id') or '').strip())
+                candidates.add(normalize_external_match_id(full_prediction.get('match_id')))
+                candidates.add(normalize_external_match_id(full_prediction.get('external_match_id')))
+            candidates.discard('')
             if external_match_id not in candidates:
                 continue
             archived_entry_keys, _ = PredictionPersistenceService._memory_identity_aliases(archived)
@@ -484,11 +487,10 @@ class ResultManager:
         return final_result
 
     def save_runtime_only_result(self, prediction_ref: Dict[str, Any], home_score: int, away_score: int) -> Dict[str, Any]:
-        external_match_id = str(
-            prediction_ref.get('external_match_id')
-            or prediction_ref.get('match_id')
-            or ''
-        ).strip()
+        external_match_id = first_valid_external_match_id(
+            prediction_ref.get('external_match_id'),
+            prediction_ref.get('match_id'),
+        )
         archive = self._load_prediction_archive()
         matched_key = ''
         matched_entry: Dict[str, Any] = {}
@@ -496,13 +498,15 @@ class ResultManager:
             if not isinstance(archived, dict):
                 continue
             candidates = {
-                str(archive_key).strip(),
-                str(archived.get('match_id') or '').strip(),
-                str(archived.get('external_match_id') or '').strip(),
+                normalize_external_match_id(archive_key),
+                normalize_external_match_id(archived.get('match_id')),
+                normalize_external_match_id(archived.get('external_match_id')),
             }
             full_prediction = archived.get('full_prediction')
             if isinstance(full_prediction, dict):
-                candidates.add(str(full_prediction.get('match_id') or '').strip())
+                candidates.add(normalize_external_match_id(full_prediction.get('match_id')))
+                candidates.add(normalize_external_match_id(full_prediction.get('external_match_id')))
+            candidates.discard('')
             if external_match_id and external_match_id in candidates:
                 matched_key = str(archive_key).strip()
                 matched_entry = dict(archived)
@@ -638,8 +642,13 @@ class ResultManager:
             'over_under': over_under or full_prediction.get('over_under') or {},
             'upset_potential': entry.get('upset_potential') if isinstance(entry.get('upset_potential'), dict) else full_prediction.get('upset_potential') or {},
             'applied_model_weights': full_prediction.get('applied_model_weights') if isinstance(full_prediction.get('applied_model_weights'), dict) else {},
-            'match_id': entry.get('external_match_id') or entry.get('match_id') or full_prediction.get('match_id') or '',
-            'external_match_id': entry.get('external_match_id') or full_prediction.get('match_id') or '',
+            'match_id': entry.get('match_id') or entry.get('internal_match_id') or full_prediction.get('internal_match_id') or '',
+            'external_match_id': first_valid_external_match_id(
+                entry.get('external_match_id'),
+                full_prediction.get('external_match_id'),
+                entry.get('match_id'),
+                full_prediction.get('match_id'),
+            ),
             'internal_match_id': entry.get('match_id') or entry.get('internal_match_id') or full_prediction.get('internal_match_id') or '',
             'teams_match_id': entry.get('teams_match_id') or full_prediction.get('teams_match_id') or '',
         }
@@ -1528,12 +1537,12 @@ class ResultManager:
                 fp_over_under = full_prediction.get('over_under') if isinstance(full_prediction.get('over_under'), dict) else {}
                 realtime = full_prediction.get('realtime') if isinstance(full_prediction.get('realtime'), dict) else {}
                 okooo = realtime.get('okooo') if isinstance(realtime.get('okooo'), dict) else {}
-                external_match_id = str(
-                    entry.get('external_match_id')
-                    or entry.get('match_id')
-                    or full_prediction.get('match_id')
-                    or ''
-                ).strip()
+                external_match_id = first_valid_external_match_id(
+                    entry.get('external_match_id'),
+                    full_prediction.get('external_match_id'),
+                    entry.get('match_id'),
+                    full_prediction.get('match_id'),
+                )
                 snapshot_path = str(
                     entry.get('snapshot_path')
                     or entry.get('source_snapshot')
@@ -1662,19 +1671,21 @@ class ResultManager:
         if not archive_key:
             return
         archive = self._load_prediction_archive()
-        external_match_id = str(prediction_data.get('external_match_id') or '').strip()
+        external_match_id = first_valid_external_match_id(prediction_data.get('external_match_id'))
         if external_match_id and not prediction_data.get('teams_match_id'):
             for key, archived in list(archive.items()):
                 if not isinstance(archived, dict):
                     continue
                 candidates = {
-                    str(key).strip(),
-                    str(archived.get('match_id') or '').strip(),
-                    str(archived.get('external_match_id') or '').strip(),
+                    normalize_external_match_id(key),
+                    normalize_external_match_id(archived.get('match_id')),
+                    normalize_external_match_id(archived.get('external_match_id')),
                 }
                 full_prediction = archived.get('full_prediction')
                 if isinstance(full_prediction, dict):
-                    candidates.add(str(full_prediction.get('match_id') or '').strip())
+                    candidates.add(normalize_external_match_id(full_prediction.get('match_id')))
+                    candidates.add(normalize_external_match_id(full_prediction.get('external_match_id')))
+                candidates.discard('')
                 if external_match_id in candidates and key != archive_key:
                     archive.pop(key, None)
         archive[archive_key] = prediction_data
@@ -3636,13 +3647,14 @@ class ResultManager:
         home_team = enhanced_pred.get('home_team', '')
         away_team = enhanced_pred.get('away_team', '')
         teams_match_id = str(enhanced_pred.get('teams_match_id') or '').strip() or self._find_existing_teams_match_id(league_code, match_date, home_team, away_team)
-        external_match_id = str(enhanced_pred.get('external_match_id') or enhanced_pred.get('match_id') or '').strip()
+        external_match_id = first_valid_external_match_id(enhanced_pred.get('external_match_id'))
         realtime = enhanced_pred.get('realtime')
         if not external_match_id and isinstance(realtime, dict):
             okooo = realtime.get('okooo')
             if isinstance(okooo, dict):
-                external_match_id = str(okooo.get('match_id') or '').strip()
-        match_id = str(enhanced_pred.get('internal_match_id') or '').strip() or teams_match_id or self._runtime_only_match_id(external_match_id, league_code, match_date, home_team, away_team)
+                external_match_id = first_valid_external_match_id(okooo.get('match_id'))
+        explicit_match_id = str(enhanced_pred.get('match_id') or '').strip()
+        match_id = str(enhanced_pred.get('internal_match_id') or '').strip() or teams_match_id or explicit_match_id or self._runtime_only_match_id(external_match_id, league_code, match_date, home_team, away_team)
         storage_mode = str(enhanced_pred.get('storage_mode') or '').strip() or ('league_sot' if teams_match_id else 'runtime_only')
         enhanced_pred['teams_match_id'] = teams_match_id
         enhanced_pred['internal_match_id'] = match_id
