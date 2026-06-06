@@ -27,6 +27,7 @@ def _league_code(league_cn: str) -> str:
         "意甲": "serie_a",
         "德甲": "bundesliga",
         "法甲": "ligue_1",
+        "世界杯": "world_cup",
         "瑞超": "allsvenskan",
         "瑞典超": "allsvenskan",
         "挪超": "eliteserien",
@@ -136,8 +137,6 @@ def main() -> None:
     league_cn = (args.league or "").strip()
     league_code = _league_code(league_cn)
     league_url = _mobile_league_url(league_cn)
-    if not league_url:
-        raise SystemExit(f"不支持的联赛: {league_cn}（缺少 mobile 赛程 URL 映射）")
 
     _ensure_local_chrome(args.chrome_port, args.chrome_path, args.chrome_user_data_dir)
     s = LocalChromeSession(args.chrome_port, session_name=f"schedule_{league_code}")
@@ -154,11 +153,14 @@ def main() -> None:
   return JSON.stringify({clicked:true});
 })()
 """ % json.dumps(league_cn, ensure_ascii=False)
-        s.eval_json(click_league_js)
+        click_league_result = s.eval_json(click_league_js)
         time.sleep(2.0)
 
         # Fallback: open league schedule URL directly if needed.
-        s.open(league_url)
+        if league_url:
+            s.open(league_url)
+        elif not (isinstance(click_league_result, dict) and click_league_result.get("clicked")):
+            raise SystemExit(f"不支持的联赛: {league_cn}（缺少 mobile 赛程 URL 映射，且热门赛事点击失败）")
 
         # Wait for match anchors to appear (mobile schedule sometimes lazy-loads).
         for _ in range(12):

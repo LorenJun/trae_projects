@@ -66,6 +66,8 @@ def _league_slug(league: str) -> str:
         "西甲": "la_liga",
         "德甲": "bundesliga",
         "法甲": "ligue_1",
+        "世界杯": "world_cup",
+        "world_cup": "world_cup",
         "欧联": "europa_league",
         "欧罗巴": "europa_league",
         "欧冠": "champions_league",
@@ -85,6 +87,7 @@ def _normalize_okooo_league_name(league: str) -> str:
     """Map project league labels/codes to the labels shown on okooo pages."""
     text = (league or "").strip()
     mapping = {
+        "world_cup": "世界杯",
         "allsvenskan": "瑞典超",
         "eliteserien": "挪超",
         "veikkausliiga": "芬超",
@@ -1453,6 +1456,7 @@ def _mobile_league_url(league: str) -> str | None:
         "西甲": "https://m.okooo.com/saishi/8/",
         "德甲": "https://m.okooo.com/saishi/35/",
         "法甲": "https://m.okooo.com/saishi/34/",
+        "世界杯": "https://m.okooo.com/saishi/772/",
         "欧冠": "https://m.okooo.com/saishi/7/",
         "欧联": "https://m.okooo.com/saishi/679/",
         "欧罗巴": "https://m.okooo.com/saishi/679/",
