@@ -71,6 +71,13 @@ cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py collect-data --league premier_league --date 2026-05-24 --json
 ```
 
+身份字段说明：
+
+- `external_match_id`：澳客真实比赛 ID，只接受纯数字
+- `internal_match_id`：项目内部比赛键，形如 `league_YYYYMMDD_主队_客队`
+- `teams_match_id`：SoT 行身份，通常与 canonical 内部比赛键一致
+- 访问澳客赔率页或直接抓快照时，必须传纯数字 `external_match_id`
+
 ### 3. 单场预测
 
 ```bash

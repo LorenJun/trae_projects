@@ -44,6 +44,13 @@
 4. `domain/live.py` 与 `domain/odds.py` 会在预测前注入快照，必要时补抓真实盘口线
 5. 预测输出中的 `over_under.line_source=snapshot_final` 代表真实盘口已成功接入正式链
 
+当前身份字段约定也已收敛：
+
+- `external_match_id` 只表示澳客真实比赛 ID，必须是纯数字
+- `internal_match_id` 表示项目内部比赛键，可为 `league_YYYYMMDD_主队_客队`
+- `teams_match_id` 表示 SoT 行身份，通常与 canonical 内部比赛键一致
+- 访问澳客赔率页、历史页、快照页时，只允许使用纯数字 `external_match_id`
+
 当前链路已显式防御：
 
 - 错误月份导致的日期定位失败
