@@ -64,6 +64,7 @@
 - 错误 `match_id` 导致的串场快照
 - `match_id` 命中但主客队/日期不一致的旧文件复用
 - 图形验证页/滑块验证页误判为正常页面
+- 命中验证页后在同一路径上持续重试打转
 
 关键文件：
 
@@ -225,11 +226,26 @@ europe_leagues/
 - `docs/upset_warning_guide.md`
 - `../debug-local-odds-access.md`
 
+当前 okooo 相关自动化测试命令：
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 -m unittest test_okooo_save_snapshot test_okooo_mobile_access test_okooo_fetch_daily_schedule test_okooo_browser
+```
+
+如需显式运行 Playwright 烟雾测试：
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+OKOOO_BROWSER_E2E=1 python3 -m unittest test_okooo_browser
+```
+
 其中与澳客访问和实时赔率最相关的当前结论是：
 
 - 正式快照链默认走 `local-chrome`
 - 默认访问口径是 `iPhone Safari UA + Referer: https://m.okooo.com/`
-- 公共移动设备池由 `okooo_mobile_access.py` 统一维护，当前为 `100` 组随机 profile
+- 公共移动设备池由 `okooo_mobile_access.py` 统一维护，当前为 `500` 组 `iPhone Safari` profile，分布在多个 iPhone device pool 上
+- 命中验证页后，当前入口路径会快速返回 `verification_required` 并停止本路径重试；随后会做 1 次 fresh mobile pool 重入，若仍失败则停止，不会无限打转
 - 正式 `predict-match` 已验证可稳定拿到真实欧赔、亚值、大小球、凯利数据
 - `premier_league / 伯恩利 vs 狼队 / 2026-05-24 / MatchID=1296105` 已验证真实盘口回流后可修正最终预测方向
 

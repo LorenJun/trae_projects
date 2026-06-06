@@ -179,7 +179,7 @@ python3 prediction_system.py refresh-repo-docs --json
 - 默认 `okooo-driver`：`local-chrome`
 - 默认请求特征：`iPhone Safari UA + Referer: https://m.okooo.com/`
 - 默认 no-cache 头与 cache-bust 参数
-- 公共设备池：`okooo_mobile_access.py` 统一维护，当前为 `100` 组随机 `iPhone Safari` profile
+- 公共设备池：`okooo_mobile_access.py` 统一维护，当前为 `500` 组 `iPhone Safari` profile，分布在多个 iPhone device pool 上
 - 联赛页定位已支持自动翻月、按日期分组抽取整天赛程、同日多场下按主客队精确锁定目标比赛
 - 正式主动访问的移动端 URL 只允许以下形态：
   - 欧赔：`https://m.okooo.com/match/odds.php?MatchID=<external_match_id>`
@@ -187,8 +187,23 @@ python3 prediction_system.py refresh-repo-docs --json
   - 历史/赛果：`https://m.okooo.com/match/history.php?MatchID=<external_match_id>`
   - `overunder.php` / `daxiao.php` 只作为大小球 fallback，不是默认主入口
 - 当前阻断识别除了 `403/405` 文字页，也覆盖 `请进行验证 / 滑动到最右边 / 拖动滑块 / 验证码` 及 `canvas / verify iframe / 大图验证` 等图形验证页特征
+- 命中验证页后，当前入口路径会快速返回 `verification_required` 并停止本路径重试；随后会做 1 次 fresh mobile pool 重入，若仍失败则停止，不会无限打转
 
 如果本机默认浏览器或裸 `curl` 访问 `odds.php` 返回 `403/405`，不代表正式链不可用；优先确认是否绕过了公共访问策略。
+
+当前 okooo 相关自动化测试命令：
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 -m unittest test_okooo_save_snapshot test_okooo_mobile_access test_okooo_fetch_daily_schedule test_okooo_browser
+```
+
+如需显式运行 Playwright 烟雾测试：
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+OKOOO_BROWSER_E2E=1 python3 -m unittest test_okooo_browser
+```
 
 ## 大小球当前规则
 

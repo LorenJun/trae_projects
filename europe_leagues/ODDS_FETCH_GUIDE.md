@@ -38,13 +38,14 @@
 - 赛程缓存目录：`.okooo-scraper/schedules/<league>/`
 - 默认快照 driver：`local-chrome`
 - 默认访问策略：`iPhone Safari UA + Referer: https://m.okooo.com/`
-- 公共移动设备池：`okooo_mobile_access.py` 统一维护，当前为 `100` 组随机 `iPhone Safari` profile，统一 `viewport={"width": 1080, "height": 720}`
+- 公共移动设备池：`okooo_mobile_access.py` 统一维护，当前为 `500` 组 `iPhone Safari` profile，分布在多个 iPhone device pool 上，`viewport` 与 `device_scale_factor` 会随设备池变化
 - 日赛程脚本已支持自动翻月到目标年月、按日期分组抽取整天赛程并清洗操作按钮噪声
 - 快照脚本已支持按 `日期 + 主客队 + 时间` 精确锁定目标比赛行，避免同日多场 `23:00` 误命中
 - 快照读取链路新增身份校验：只有 `match_id + 主客队 + match_date` 一致时才复用旧快照
 - 预测链已支持预测前快照注水与 `missing_real_line` 场景下的正式补抓
 - 直连移动端页面时，正式链的主动访问入口统一通过 `runtime.match_ids.build_okooo_match_url()` 构造 URL；非纯数字 ID 会被直接拦截
 - 阻断页识别除了 `403/405` 文本页，也覆盖 `请进行验证 / 滑动到最右边 / 拖动滑块 / 验证码` 与 `canvas / verify iframe / 大图验证` 等图形验证页
+- 命中验证页时，当前入口路径会尽快返回 `verification_required` 并停止本路径连续重试；随后会触发 1 次 fresh mobile pool 重入，若仍命中验证则停止，不会无限打转
 
 ## 当前访问策略
 
@@ -56,7 +57,7 @@
 - `iPhone Safari` 风格 UA
 - `Referer: https://m.okooo.com/`
 - no-cache 头
-- 每次请求从 `100` 组移动 profile 池中随机取一个
+- 每次请求都会从 `500` 组移动 profile 池中选择 profile，并优先在 fresh-pool 恢复时切到不同 `device_pool_id`
 
 如果本机浏览器能打开、脚本却访问失败，优先排查是否绕过了这套公共策略，而不是先怀疑 DNS 或系统代理。
 
@@ -117,6 +118,20 @@ python3 prediction_system.py harness-run \
   --away-team 狼队 \
   --time 23:00 \
   --json
+```
+
+### 6. 运行完整 okooo 自动化测试
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 -m unittest test_okooo_save_snapshot test_okooo_mobile_access test_okooo_fetch_daily_schedule test_okooo_browser
+```
+
+如需显式运行 Playwright 烟雾测试：
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+OKOOO_BROWSER_E2E=1 python3 -m unittest test_okooo_browser
 ```
 
 ## 预测输出检查点
@@ -201,7 +216,8 @@ python3 prediction_system.py harness-run \
 1. 是否缺少移动端 UA
 2. 是否缺少 `Referer: https://m.okooo.com/`
 3. 是否没有走仓库里的公共移动 profile 策略
-4. 是否命中了浏览器扩展、隐私防护或旧缓存
+4. 是否已经返回 `verification_required` 且 fresh mobile pool 重入也失败
+5. 是否命中了浏览器扩展、隐私防护或旧缓存
 
 排障结论见仓库根文档：`debug-local-odds-access.md`
 
