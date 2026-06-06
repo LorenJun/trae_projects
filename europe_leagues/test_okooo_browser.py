@@ -3,27 +3,33 @@
 
 测试使用 Playwright 获取澳客网赔率数据"""
 
+import os
 import re
 import sys
-sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent / 'venv_browser' / 'lib' / 'python3.12' / 'site-packages'))
+import unittest
+from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+sys.path.insert(0, str(Path(__file__).resolve().parent / 'venv_browser' / 'lib' / 'python3.12' / 'site-packages'))
 
 from okooo_mobile_access import cache_busted_okooo_url, mobile_context_options, mobile_headers, random_mobile_profile
+
+try:
+    from playwright.sync_api import sync_playwright
+except Exception:
+    sync_playwright = None
+
 
 def parse_handicap(handicap_text: str):
     """解析盘口文本为数值"""
     if not handicap_text:
         return None
-    
+
     try:
         text = handicap_text.strip()
-        
-        # 数字直接解析
+
         if re.match(r'^-?\d+\.?\d*$', text):
             return float(text)
-        
-        # 中文盘口映射
+
         handicap_map = {
             "平手": 0,
             "平手/半球": 0.25,
@@ -44,23 +50,25 @@ def parse_handicap(handicap_text: str):
             "受让一球/球半": -1.25,
             "受让球半": -1.5,
         }
-        
+
         if text in handicap_map:
             return handicap_map[text]
-        
-        # 尝试提取数字
+
         numbers = re.findall(r'-?\d+\.?\d*', text)
         if numbers:
             return float(numbers[0])
-            
+
     except Exception:
         pass
-    
+
     return None
 
 
 def fetch_okooo_odds(match_id: str):
     """使用 Playwright 获取澳客网赔率数据"""
+    if sync_playwright is None:
+        raise RuntimeError("Playwright is unavailable in this environment")
+
     odds_data = {
         "home_win_initial": None,
         "draw_initial": None,
@@ -75,13 +83,11 @@ def fetch_okooo_odds(match_id: str):
         "asian_home_water_final": None,
         "asian_away_water_final": None,
     }
-    
-    # 欧赔页面 - 使用移动端
+
     ouzhi_url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
-    
+
     with sync_playwright() as p:
         profile = random_mobile_profile()
-        # 启动浏览器
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -90,12 +96,9 @@ def fetch_okooo_odds(match_id: str):
                 '--disable-features=IsolateOrigins,site-per-process',
             ]
         )
-        
-        # 创建上下文 - 使用移动端 User-Agent
+
         context = browser.new_context(**mobile_context_options(profile=profile))
         context.set_extra_http_headers(mobile_headers(profile=profile))
-        
-        # 添加反检测脚本
         context.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', {
                 get: () => undefined
@@ -105,61 +108,49 @@ def fetch_okooo_odds(match_id: str):
             });
             window.chrome = { runtime: {} };
         """)
-        
+
         page = context.new_page()
-        
+
         try:
             print(f"[INFO] 访问欧赔页面: {ouzhi_url}")
-            
-            # 访问欧赔页面
             response = page.goto(cache_busted_okooo_url(ouzhi_url, profile=profile), wait_until='networkidle', timeout=30000)
             print(f"[INFO] 页面状态: {response.status if response else 'Unknown'}")
-            
-            # 等待页面加载
             page.wait_for_timeout(5000)
-            
-            # 获取页面内容
             page_content = page.content()
-            
-            # 检查是否被阻断
+
             if "访问被阻断" in page_content or "安全威胁" in page_content or "阻断" in page_content:
                 print("[WARN] 澳客网访问被阻断")
                 browser.close()
                 return None
-            
-            # 检查是否需要验证码
+
             if "验证码" in page_content or "captcha" in page_content.lower():
                 print("[WARN] 需要验证码")
                 browser.close()
                 return None
-            
+
             print("[INFO] 页面加载成功，开始解析数据...")
-            
-            # 尝试多种方式提取欧赔数据
-            # 方式1: 使用选择器查找表格
+
             try:
                 tables = page.query_selector_all('table')
                 print(f"[INFO] 找到 {len(tables)} 个表格")
-                
+
                 for table_idx, table in enumerate(tables):
                     rows = table.query_selector_all('tr')
                     print(f"[INFO] 表格 {table_idx}: {len(rows)} 行")
-                    
+
                     for row in rows:
                         cells = row.query_selector_all('td, th')
                         if len(cells) >= 6:
                             cell_texts = [c.inner_text().strip() for c in cells]
                             print(f"  行数据: {cell_texts}")
-                            
-                            # 查找包含"平均"的行
+
                             if any('平均' in text for text in cell_texts):
                                 print(f"  [FOUND] 平均赔率行: {cell_texts}")
-                                # 提取数字
                                 numbers = []
                                 for text in cell_texts:
                                     matches = re.findall(r'\d+\.\d+', text)
                                     numbers.extend(matches)
-                                
+
                                 if len(numbers) >= 6:
                                     odds_data["home_win_initial"] = float(numbers[0])
                                     odds_data["draw_initial"] = float(numbers[1])
@@ -171,8 +162,7 @@ def fetch_okooo_odds(match_id: str):
                                     break
             except Exception as e:
                 print(f"[WARN] 表格解析失败: {e}")
-            
-            # 方式2: 使用正则表达式
+
             if odds_data["home_win_final"] is None:
                 print("[INFO] 尝试正则表达式解析...")
                 avg_lines = re.findall(r'平均\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)', page_content)
@@ -186,22 +176,18 @@ def fetch_okooo_odds(match_id: str):
                         odds_data["home_win_initial"] = float(avg_lines[1][0])
                         odds_data["draw_initial"] = float(avg_lines[1][1])
                         odds_data["away_win_initial"] = float(avg_lines[1][2])
-            
-            # 访问亚盘页面
+
             if odds_data["home_win_final"] is not None:
                 yazhi_url = f"https://m.okooo.com/match/handicap.php?MatchID={match_id}"
                 print(f"\n[INFO] 访问亚盘页面: {yazhi_url}")
-                
+
                 page.goto(cache_busted_okooo_url(yazhi_url, profile=profile), wait_until='networkidle', timeout=30000)
                 page.wait_for_timeout(5000)
-                
                 page_content = page.content()
-                
-                # 检查是否被阻断
+
                 if "访问被阻断" in page_content or "安全威胁" in page_content:
                     print("[WARN] 亚盘页面访问被阻断")
                 else:
-                    # 解析亚盘数据
                     try:
                         tables = page.query_selector_all('table')
                         for table in tables:
@@ -219,13 +205,13 @@ def fetch_okooo_odds(match_id: str):
                                             numbers.extend(matches)
                                             if not handicap_text and any(kw in text for kw in ['球', '手', '/']):
                                                 handicap_text = text
-                                        
+
                                         if len(numbers) >= 6:
                                             odds_data["asian_home_water_initial"] = float(numbers[0])
                                             odds_data["asian_away_water_initial"] = float(numbers[2])
                                             odds_data["asian_home_water_final"] = float(numbers[3])
                                             odds_data["asian_away_water_final"] = float(numbers[5])
-                                            
+
                                             if handicap_text:
                                                 odds_data["asian_handicap_initial"] = parse_handicap(handicap_text)
                                                 odds_data["asian_handicap_final"] = parse_handicap(handicap_text)
@@ -233,41 +219,64 @@ def fetch_okooo_odds(match_id: str):
                                             break
                     except Exception as e:
                         print(f"[WARN] 亚盘解析失败: {e}")
-            
+
             browser.close()
-            
+
         except Exception as e:
             print(f"[ERROR] 访问页面失败: {e}")
             browser.close()
             return None
-    
+
     return odds_data
 
 
-if __name__ == "__main__":
-    # 测试水晶宫 vs 西汉姆联的比赛 (MatchID: 1260336)
+class OkoooBrowserTest(unittest.TestCase):
+    def test_parse_handicap_maps_common_values(self):
+        self.assertEqual(parse_handicap("半球"), 0.5)
+        self.assertEqual(parse_handicap("受让半球"), -0.5)
+        self.assertEqual(parse_handicap("平手/半球"), 0.25)
+
+    def test_parse_handicap_parses_numeric_text(self):
+        self.assertEqual(parse_handicap("1.25"), 1.25)
+        self.assertEqual(parse_handicap("-0.75"), -0.75)
+
+    def test_parse_handicap_returns_none_for_unknown_text(self):
+        self.assertIsNone(parse_handicap("未知盘口"))
+        self.assertIsNone(parse_handicap(""))
+
+    @unittest.skipUnless(os.environ.get("OKOOO_BROWSER_E2E") == "1", "set OKOOO_BROWSER_E2E=1 to run Playwright smoke test")
+    def test_fetch_okooo_odds_smoke(self):
+        result = fetch_okooo_odds("1260336")
+        self.assertTrue(result is None or isinstance(result, dict))
+
+
+def _run_manual_demo() -> None:
     match_id = "1260336"
-    
+
     print("=" * 60)
     print("测试获取澳客网赔率数据")
     print("=" * 60)
     print(f"比赛ID: {match_id}")
-    print(f"比赛: 水晶宫 vs 西汉姆联")
+    print("比赛: 水晶宫 vs 西汉姆联")
     print()
-    
+
     result = fetch_okooo_odds(match_id)
-    
+
     print("\n" + "=" * 60)
     print("结果:")
     print("=" * 60)
-    
+
     if result:
-        print(f"\n欧赔数据:")
+        print("\n欧赔数据:")
         print(f"  初始: 主 {result['home_win_initial']} / 平 {result['draw_initial']} / 客 {result['away_win_initial']}")
         print(f"  即时: 主 {result['home_win_final']} / 平 {result['draw_final']} / 客 {result['away_win_final']}")
-        
-        print(f"\n亚盘数据:")
+
+        print("\n亚盘数据:")
         print(f"  初始: 主水 {result['asian_home_water_initial']} / 盘口 {result['asian_handicap_initial']} / 客水 {result['asian_away_water_initial']}")
         print(f"  即时: 主水 {result['asian_home_water_final']} / 盘口 {result['asian_handicap_final']} / 客水 {result['asian_away_water_final']}")
     else:
         print("获取数据失败")
+
+
+if __name__ == "__main__":
+    _run_manual_demo()

@@ -32,6 +32,7 @@ from websocket import create_connection
 
 from okooo_mobile_access import (
     OkoooMobileProfile,
+    available_mobile_profiles,
     cache_busted_okooo_url,
     fresh_mobile_profile,
     is_okooo_mobile_url,
@@ -1082,7 +1083,7 @@ class BrowserUse:
     def _close_session_best_effort(self) -> None:
         try:
             cp = self._run_once(["browser-use", "--session", self.session, "close"], timeout=30)
-            _ = cp.returncode  # best-effort
+            _ = cp.returncode
         except Exception:
             pass
 
@@ -1099,7 +1100,6 @@ class BrowserUse:
 
         combined = (out + "\n" + err).strip()
         if "already running with different config" in combined:
-            # Auto-recover: close the stale session and retry once.
             self._close_session_best_effort()
             cp2 = self._run_once(cmd, timeout=timeout)
             out2 = (cp2.stdout or "").strip()
@@ -1120,9 +1120,7 @@ class BrowserUse:
         return self.run("state", timeout=60)
 
     def eval_json(self, js_expr: str) -> Dict[str, Any]:
-        # Expect the command prints a JSON string (or "result: ...") on stdout.
         out = self.run("eval", js_expr, timeout=90)
-        # Try to parse the last JSON-looking line.
         lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
         payload = lines[-1] if lines else ""
         payload = payload.removeprefix("result:").strip()
@@ -1135,8 +1133,13 @@ class BrowserUse:
         try:
             self.run("close", timeout=30)
         except Exception:
-            # best-effort
             pass
+
+
+@dataclass(frozen=True)
+class VerificationRecoveryContext:
+    mobile_profile: OkoooMobileProfile | None = None
+    mobile_profile_meta: Dict[str, Any] | None = None
 
 
 class LocalChromeSession:
@@ -1355,6 +1358,29 @@ def _mobile_profile_meta(profile: Any) -> Dict[str, Any]:
         "device_name": profile.device_name,
         "user_agent": profile.user_agent,
     }
+
+
+def _mobile_profile_from_meta(meta: Dict[str, Any]) -> OkoooMobileProfile | None:
+    if not isinstance(meta, dict):
+        return None
+    wanted_profile_id = str(meta.get("profile_id") or "").strip()
+    wanted_pool_id = str(meta.get("device_pool_id") or "").strip()
+    for profile in available_mobile_profiles():
+        if wanted_profile_id and profile.profile_id == wanted_profile_id:
+            return profile
+    for profile in available_mobile_profiles():
+        if wanted_pool_id and profile.device_pool_id == wanted_pool_id:
+            return profile
+    return None
+
+
+def _build_verification_recovery_context(data: Dict[str, Any]) -> VerificationRecoveryContext:
+    meta = data.get("mobile_profile") if isinstance(data, dict) else None
+    profile = _mobile_profile_from_meta(meta if isinstance(meta, dict) else {})
+    return VerificationRecoveryContext(
+        mobile_profile=profile,
+        mobile_profile_meta=dict(meta) if isinstance(meta, dict) else None,
+    )
 
 
 def _mark_verification_required(data: Dict[str, Any], client: Any = None) -> Dict[str, Any]:
@@ -3166,6 +3192,38 @@ def _run_with_retries(
     return _annotate_attempts(last_data, attempts)
 
 
+def _run_with_verification_reentry(
+    runner: Callable[[Callable[[str], Any], str], Dict[str, Any]],
+    client_factory: Callable[[str], Any],
+    session_prefix: str,
+) -> Dict[str, Any]:
+    first = runner(client_factory, session_prefix)
+    if not _is_verification_required_payload(first):
+        return first
+
+    recovery = _build_verification_recovery_context(first)
+    if recovery.mobile_profile is None:
+        return first
+
+    def recovered_client_factory(session_name: str) -> Any:
+        client = client_factory(session_name)
+        try:
+            client.mobile_profile = recovery.mobile_profile
+        except Exception:
+            pass
+        return client
+
+    second = runner(recovered_client_factory, f"{session_prefix}_freshpool")
+    if isinstance(second, dict):
+        second["verification_reentry_count"] = 1
+        second["reentry_from_mobile_profile"] = recovery.mobile_profile_meta or _mobile_profile_meta(recovery.mobile_profile)
+        existing_reentry_profile = second.get("reentry_mobile_profile") if isinstance(second.get("reentry_mobile_profile"), dict) else None
+        second["reentry_mobile_profile"] = existing_reentry_profile or _mobile_profile_meta(getattr(second, "mobile_profile", None))
+        if not _is_verification_required_payload(second):
+            second["reentered_after_verification"] = True
+    return second
+
+
 def _extract_kelly_with_fallback(match_id: str, client_factory: Callable[[str], Any], session_prefix: str) -> Dict[str, Any]:
     first = _run_with_retries(
         "kelly_tab",
@@ -3475,10 +3533,10 @@ def main() -> None:
             "away_team": args.team2,
             "match_time": found["schedule_row"].get("text", ""),
             "schedule": found["schedule_row"],
-            "欧赔": _extract_europe_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_eu"),
-            "亚值": _extract_asian_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_as"),
-            "大小球": _extract_totals_with_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_ou"),
-            "凯利": _extract_kelly_full_fallback(match_id, found["schedule_row"]["href"], client_factory, f"{session_prefix}_ke"),
+            "欧赔": _run_with_verification_reentry(lambda cf, sp: _extract_europe_with_fallback(match_id, found["schedule_row"]["href"], cf, sp), client_factory, f"{session_prefix}_eu"),
+            "亚值": _run_with_verification_reentry(lambda cf, sp: _extract_asian_with_fallback(match_id, found["schedule_row"]["href"], cf, sp), client_factory, f"{session_prefix}_as"),
+            "大小球": _run_with_verification_reentry(lambda cf, sp: _extract_totals_with_fallback(match_id, found["schedule_row"]["href"], cf, sp), client_factory, f"{session_prefix}_ou"),
+            "凯利": _run_with_verification_reentry(lambda cf, sp: _extract_kelly_full_fallback(match_id, found["schedule_row"]["href"], cf, sp), client_factory, f"{session_prefix}_ke"),
         }
         if args.overwrite:
             payload["_note"] = "overwrite=true: same event writes to a stable filename"

@@ -20,6 +20,7 @@ from okooo_save_snapshot import (
     _parse_desktop_avg_row,
     _pick_preferred_europe_result,
     _run_with_retries,
+    _run_with_verification_reentry,
     _select_best_schedule_row,
     _time_tokens,
 )
@@ -106,6 +107,91 @@ class OkoooSaveSnapshotTest(unittest.TestCase):
 
         self.assertEqual(result["status"], "verification_required")
         self.assertEqual(mocked.call_count, 1)
+
+    def test_run_with_verification_reentry_returns_success_from_fresh_pool(self):
+        profiles = available_mobile_profiles()
+        blocked_profile = profiles[0]
+        recovered_profile = fresh_mobile_profile(blocked_profile)
+        factory_profiles = []
+
+        def client_factory(_session):
+            client = _DummyRetryClient(None)
+            factory_profiles.append(client)
+            return client
+
+        calls = []
+
+        def runner(factory, session_prefix):
+            client = factory(f"{session_prefix}_1")
+            calls.append((session_prefix, getattr(client.mobile_profile, "profile_id", None)))
+            if len(calls) == 1:
+                return {
+                    "blocked": True,
+                    "verification_required": True,
+                    "status": "verification_required",
+                    "error": "verification_required",
+                    "mobile_profile": {
+                        "profile_id": blocked_profile.profile_id,
+                        "device_pool_id": blocked_profile.device_pool_id,
+                        "device_name": blocked_profile.device_name,
+                        "user_agent": blocked_profile.user_agent,
+                    },
+                }
+            client.mobile_profile = recovered_profile
+            return {
+                "found": True,
+                "parsed": True,
+                "mobile_profile": {
+                    "profile_id": recovered_profile.profile_id,
+                    "device_pool_id": recovered_profile.device_pool_id,
+                    "device_name": recovered_profile.device_name,
+                    "user_agent": recovered_profile.user_agent,
+                },
+                "reentry_mobile_profile": {
+                    "profile_id": recovered_profile.profile_id,
+                    "device_pool_id": recovered_profile.device_pool_id,
+                    "device_name": recovered_profile.device_name,
+                    "user_agent": recovered_profile.user_agent,
+                },
+            }
+
+        result = _run_with_verification_reentry(runner, client_factory, "eu")
+
+        self.assertTrue(result["reentered_after_verification"])
+        self.assertEqual(result["verification_reentry_count"], 1)
+        self.assertEqual(result["reentry_from_mobile_profile"]["profile_id"], blocked_profile.profile_id)
+        self.assertEqual(result["reentry_mobile_profile"]["profile_id"], recovered_profile.profile_id)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1][1], blocked_profile.profile_id)
+
+    def test_run_with_verification_reentry_stops_after_one_failed_reentry(self):
+        blocked_profile = available_mobile_profiles()[0]
+        calls = []
+
+        def client_factory(_session):
+            return _DummyRetryClient(None)
+
+        def runner(factory, session_prefix):
+            client = factory(f"{session_prefix}_1")
+            calls.append((session_prefix, getattr(client.mobile_profile, "profile_id", None)))
+            return {
+                "blocked": True,
+                "verification_required": True,
+                "status": "verification_required",
+                "error": "verification_required",
+                "mobile_profile": {
+                    "profile_id": blocked_profile.profile_id,
+                    "device_pool_id": blocked_profile.device_pool_id,
+                    "device_name": blocked_profile.device_name,
+                    "user_agent": blocked_profile.user_agent,
+                },
+            }
+
+        result = _run_with_verification_reentry(runner, client_factory, "eu")
+
+        self.assertEqual(result["status"], "verification_required")
+        self.assertEqual(result["verification_reentry_count"], 1)
+        self.assertEqual(len(calls), 2)
 
     def test_pick_preferred_europe_result_prefers_multi_company_consensus(self):
         average = {
