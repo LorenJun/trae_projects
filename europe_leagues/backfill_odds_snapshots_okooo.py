@@ -31,6 +31,8 @@ from typing import Dict, List, Optional, Tuple
 import requests
 
 from okooo_mobile_access import cache_busted_okooo_url, mobile_headers, random_mobile_profile
+from runtime.match_ids import build_okooo_match_url, require_external_match_id
+from runtime.okooo_access import is_okooo_blocked_text
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -388,14 +390,15 @@ class OddsSnapshotBackfill:
         }
         
         # 欧赔页面 - 使用移动端
-        ouzhi_url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
+        match_id = require_external_match_id(match_id, field_name="external_match_id")
+        ouzhi_url = build_okooo_match_url("odds", match_id)
         
         try:
             page_content = self._browser_use_open_and_state(ouzhi_url, timeout=45)
             if page_content:
                 
                 # 检查是否被阻断
-                if "访问被阻断" in page_content or "安全威胁" in page_content:
+                if is_okooo_blocked_text(page_content):
                     print("  [WARN] 澳客网访问被阻断")
                     return odds_data
                 
@@ -434,14 +437,14 @@ class OddsSnapshotBackfill:
             print(f"  [WARN] 获取欧赔失败: {e}")
         
         # 亚盘页面
-        yazhi_url = f"https://m.okooo.com/match/handicap.php?MatchID={match_id}"
+        yazhi_url = build_okooo_match_url("handicap", match_id)
         
         try:
             page_content = self._browser_use_open_and_state(yazhi_url, timeout=45)
             if page_content:
                 
                 # 检查是否被阻断
-                if "访问被阻断" in page_content or "安全威胁" in page_content:
+                if is_okooo_blocked_text(page_content):
                     return odds_data
                 
                 # 解析亚盘数据
@@ -465,9 +468,9 @@ class OddsSnapshotBackfill:
 
         # 凯利指数页面（优先抓取平均凯利：主/平/客）
         kelly_urls = [
-            f"https://m.okooo.com/match/kelly.php?MatchID={match_id}",
-            f"https://m.okooo.com/match/kellyindex.php?MatchID={match_id}",
-            f"https://m.okooo.com/match/kelly_index.php?MatchID={match_id}",
+            build_okooo_match_url("kelly", match_id),
+            build_okooo_match_url("kellyindex", match_id),
+            build_okooo_match_url("kelly_index", match_id),
         ]
         for kelly_url in kelly_urls:
             try:
@@ -491,11 +494,11 @@ class OddsSnapshotBackfill:
 
         # 大小球页面（总进球 O/U）
         ou_urls = [
-            f"https://m.okooo.com/match/goal.php?MatchID={match_id}",
-            f"https://m.okooo.com/match/goals.php?MatchID={match_id}",
-            f"https://m.okooo.com/match/total.php?MatchID={match_id}",
-            f"https://m.okooo.com/match/daxiaoqiu.php?MatchID={match_id}",
-            f"https://m.okooo.com/match/ou.php?MatchID={match_id}",
+            build_okooo_match_url("goal", match_id),
+            build_okooo_match_url("goals", match_id),
+            build_okooo_match_url("total", match_id),
+            build_okooo_match_url("daxiaoqiu", match_id),
+            build_okooo_match_url("ou", match_id),
         ]
         for ou_url in ou_urls:
             try:
@@ -604,9 +607,9 @@ class OddsSnapshotBackfill:
             "captured_at": captured_at,
             "sources": {
                 "fixture": f"https://tzuqiu.cc/competitions/{fixture.competition_id}/fixture.do",
-                "europe_odds": f"https://m.okooo.com/match/odds.php?MatchID={fixture.okooo_match_id}" if fixture.okooo_match_id else "",
-                "asian_odds": f"https://m.okooo.com/match/handicap.php?MatchID={fixture.okooo_match_id}" if fixture.okooo_match_id else "",
-                "kelly": odds.get("kelly_source_url") or (f"https://m.okooo.com/match/kelly.php?MatchID={fixture.okooo_match_id}" if fixture.okooo_match_id else ""),
+                "europe_odds": build_okooo_match_url("odds", fixture.okooo_match_id) if fixture.okooo_match_id else "",
+                "asian_odds": build_okooo_match_url("handicap", fixture.okooo_match_id) if fixture.okooo_match_id else "",
+                "kelly": odds.get("kelly_source_url") or (build_okooo_match_url("kelly", fixture.okooo_match_id) if fixture.okooo_match_id else ""),
                 "over_under": odds.get("over_under_source_url") or "",
             },
             "胜平负赔率": {

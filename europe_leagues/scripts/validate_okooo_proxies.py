@@ -45,6 +45,7 @@ from okooo_mobile_access import (  # noqa: E402
     mobile_headers,
     random_mobile_profile,
 )
+from runtime.match_ids import build_okooo_match_url  # noqa: E402
 
 
 DEFAULT_MATCH_ID = "1302914"
@@ -151,7 +152,7 @@ def parse_args() -> argparse.Namespace:
 def target_url_from_args(args: argparse.Namespace) -> str:
     if args.url:
         return args.url.strip()
-    return f"https://m.okooo.com/match/odds.php?MatchID={args.match_id}"
+    return build_okooo_match_url("odds", args.match_id)
 
 
 def should_use_direct_mode(args: argparse.Namespace) -> bool:

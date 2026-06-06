@@ -10,8 +10,9 @@ from typing import Dict, List, Optional
 
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 
-
 from okooo_mobile_access import cache_busted_okooo_url, mobile_context_options, mobile_headers, random_mobile_profile
+from runtime.match_ids import build_okooo_match_url, require_external_match_id
+from runtime.okooo_access import is_okooo_blocked_text
 
 # 博彩公司ID映射
 BOOKMAKER_MAP = {
@@ -213,20 +214,71 @@ class OkoooPlaywrightHelper:
             
             # 检查是否被阻断
             content = self.page.content()
-            if "访问被阻断" in content or "安全威胁" in content or "405" in content:
+            if self._is_verification_page(content):
                 print("  [WARN] 页面访问被阻断，尝试刷新...")
                 time.sleep(2)
                 self.page.reload(wait_until='networkidle', timeout=60000)
                 time.sleep(wait_time)
+                content = self.page.content()
+                if self._is_verification_page(content):
+                    print("  [WARN] 刷新后仍为验证页，终止当前抓取")
+                    return False
             
             return True
         except Exception as e:
             print(f"  [ERROR] 导航失败: {e}")
             return False
+
+    def _is_verification_page(self, content: str) -> bool:
+        if is_okooo_blocked_text(content):
+            return True
+        if not self.page:
+            return False
+        try:
+            payload = self.page.evaluate(
+                """
+() => {
+  const norm = (s) => String(s || '').replace(/\\s+/g, ' ').trim();
+  const bodyText = norm(document.body?.innerText || '');
+  const html = String(document.documentElement?.outerHTML || '');
+  const title = String(document.title || '');
+  const hasVerifyIframe = Array.from(document.querySelectorAll('iframe')).some((el) => {
+    const attrs = `${el.id || ''} ${el.className || ''} ${el.src || ''}`.toLowerCase();
+    return /(verify|captcha|geetest|aliyun|nc_|vcode)/.test(attrs);
+  });
+  const hasVerifyImage = Array.from(document.querySelectorAll('img')).some((el) => {
+    const attrs = `${el.id || ''} ${el.className || ''} ${el.src || ''} ${el.alt || ''}`.toLowerCase();
+    const width = Number(el.naturalWidth || el.width || 0);
+    const height = Number(el.naturalHeight || el.height || 0);
+    return /(verify|captcha|geetest|aliyun|slider|nc_)/.test(attrs) && Math.max(width, height) >= 200;
+  });
+  return {
+    blocked: [
+      '访问被阻断',
+      '安全威胁',
+      '您的访问被阻断',
+      '请进行验证',
+      '滑动到最右边',
+      '拖动滑块',
+      '请按住滑块',
+      '验证码'
+    ].some((marker) => bodyText.includes(marker) || title.includes(marker))
+      || title.includes('405')
+      || (html.includes('<canvas') && /(verify|captcha|geetest|aliyun|nc_|slider)/i.test(html))
+      || hasVerifyIframe
+      || hasVerifyImage
+  };
+}
+"""
+            )
+        except Exception:
+            return False
+        return bool(isinstance(payload, dict) and payload.get("blocked"))
     
     def extract_odds_data(self, match_id: str) -> Optional[Dict]:
         """从澳客网提取赔率数据"""
-        url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
+        match_id = require_external_match_id(match_id, field_name="external_match_id")
+        url = build_okooo_match_url("odds", match_id)
         
         if not self.navigate(url, wait_time=6):
             return None

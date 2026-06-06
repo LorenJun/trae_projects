@@ -4,17 +4,22 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from okooo_mobile_access import available_mobile_profiles, fresh_mobile_profile
 from okooo_live_snapshot import refresh_snapshot
 from okooo_save_snapshot import (
     _candidate_date_hints,
+    _extract_europe_with_fallback,
     _find_existing_snapshot_by_match_id,
     _find_match_id,
     _find_match_id_from_schedule_cache,
+    _is_blocked_text,
+    _is_verification_required_payload,
     _mobile_league_url,
     _navigate_schedule_to_month,
     _normalize_okooo_league_name,
     _parse_desktop_avg_row,
     _pick_preferred_europe_result,
+    _run_with_retries,
     _select_best_schedule_row,
     _time_tokens,
 )
@@ -38,7 +43,70 @@ class _SequencedBrowser:
         return self._responses.pop(0)
 
 
+class _DummyRetryClient:
+    def __init__(self, profile):
+        self.mobile_profile = profile
+
+    def close(self):
+        return None
+
+
 class OkoooSaveSnapshotTest(unittest.TestCase):
+    def test_fresh_mobile_profile_prefers_new_device_pool(self):
+        current = available_mobile_profiles()[0]
+        rotated = fresh_mobile_profile(current)
+        self.assertNotEqual(rotated.profile_id, current.profile_id)
+        self.assertNotEqual(rotated.device_pool_id, current.device_pool_id)
+
+    def test_is_blocked_text_detects_slider_verification_dom(self):
+        html = """
+        <html>
+          <body>
+            <div>为了更好的访问体验，请进行验证</div>
+            <div>请按住滑块，拖动到最右边</div>
+            <canvas id="aliyunCaptcha"></canvas>
+            <iframe src="https://verify.example/captcha"></iframe>
+            <img src="/verify/slider.png" width="320" height="180" />
+          </body>
+        </html>
+        """
+        self.assertTrue(_is_blocked_text(html))
+
+    def test_run_with_retries_marks_verification_required_and_stops_after_first_blocked(self):
+        profiles = available_mobile_profiles()
+        factory_calls = []
+
+        def client_factory(_session):
+            profile = profiles[len(factory_calls) % len(profiles)]
+            factory_calls.append(profile.profile_id)
+            return _DummyRetryClient(profile)
+
+        def extractor(_client, _match_id):
+            return {"blocked": True, "url": "https://m.okooo.com/match/odds.php?MatchID=1315851"}
+
+        result = _run_with_retries("europe_mobile", "unit_blocked", client_factory, extractor, "1315851")
+
+        self.assertTrue(_is_verification_required_payload(result))
+        self.assertEqual(result["status"], "verification_required")
+        self.assertEqual(result["error"], "verification_required")
+        self.assertEqual(result["retry_strategy"], "stop_after_verification")
+        self.assertEqual(len(result["_attempts"]), 1)
+        self.assertEqual(result["_attempts"][0]["stop_reason"], "verification_required")
+        self.assertEqual(factory_calls, [result["mobile_profile"]["profile_id"]])
+
+    def test_extract_europe_with_fallback_stops_after_verification_required(self):
+        blocked_payload = {
+            "blocked": True,
+            "verification_required": True,
+            "status": "verification_required",
+            "error": "verification_required",
+        }
+        with patch("okooo_save_snapshot._run_with_retries", side_effect=[blocked_payload]) as mocked:
+            result = _extract_europe_with_fallback("1315851", "https://m.okooo.com/match/history.php?MatchID=1315851", lambda _s: None, "eu")
+
+        self.assertEqual(result["status"], "verification_required")
+        self.assertEqual(mocked.call_count, 1)
+
     def test_pick_preferred_europe_result_prefers_multi_company_consensus(self):
         average = {
             "found": True,

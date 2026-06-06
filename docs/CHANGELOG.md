@@ -2,7 +2,7 @@
 title: 仓库变更日志
 owner: trae_projects
 version: v1
-last_updated: 2026-05-20
+last_updated: 2026-06-06
 ---
 
 # CHANGELOG
@@ -13,6 +13,54 @@ last_updated: 2026-05-20
 - 代码：`/Users/bytedance/trae_projects/europe_leagues`
 - 技能：`/Users/bytedance/trae_projects/.trae/skills`
 - 文档：仓库根与 `europe_leagues/` 下相关 `md`
+
+---
+
+## 2026-06-06
+
+### 1. 正式 URL 构造收口到纯数字 external_match_id
+
+本轮补齐了澳客移动端 URL 的统一构造入口，避免内部比赛键被误拼进 `MatchID`。
+
+当前固定口径：
+- 正式主动访问的移动端 URL 统一走 `runtime.match_ids.build_okooo_match_url()`
+- 仅允许纯数字 `external_match_id`
+- `internal_match_id / teams_match_id` 仅保留给项目内部定位、归档和写回，不再允许直接访问澳客页面
+
+当前正式页面形态：
+- 欧赔：`https://m.okooo.com/match/odds.php?MatchID=<external_match_id>`
+- 亚值：`https://m.okooo.com/match/handicap.php?MatchID=<external_match_id>`
+- 历史：`https://m.okooo.com/match/history.php?MatchID=<external_match_id>`
+- `overunder.php` / `daxiao.php` 只保留为大小球 fallback
+
+关联文件：
+- `europe_leagues/runtime/match_ids.py`
+- `europe_leagues/okooo_save_snapshot.py`
+- `europe_leagues/runtime/result_sync.py`
+- `europe_leagues/okooo_playwright_helper.py`
+
+### 2. 澳客验证页识别扩展
+
+本轮把澳客风控识别从“只看文字阻断页”扩展到“同时识别图形验证页”。
+
+新增识别范围：
+- `请进行验证`
+- `滑动到最右边`
+- `拖动滑块`
+- `请按住滑块`
+- `验证码`
+- `canvas / verify iframe / 大图验证` 等 DOM 特征
+
+并修正导航行为：
+- `navigate()` 命中疑似验证页后会刷新一次
+- 刷新后仍是验证页则直接返回失败，不再误当作成功页面继续解析
+
+关联文件：
+- `europe_leagues/runtime/okooo_access.py`
+- `europe_leagues/okooo_playwright_helper.py`
+- `europe_leagues/okooo_match_finder.py`
+- `europe_leagues/test_okooo_save_snapshot.py`
+- `europe_leagues/test_result_sync.py`
 
 ---
 

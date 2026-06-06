@@ -25,6 +25,8 @@ from typing import Dict, List, Optional, Tuple
 import requests
 
 from okooo_mobile_access import cache_busted_okooo_url, mobile_context_options, mobile_headers, random_mobile_profile
+from runtime.match_ids import build_okooo_match_url, require_external_match_id
+from runtime.okooo_access import is_okooo_blocked_text
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -157,7 +159,8 @@ class OddsSnapshotBackfill:
                 page = context.new_page()
                 
                 # 欧赔页面
-                ouzhi_url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
+                match_id = require_external_match_id(match_id, field_name="external_match_id")
+                ouzhi_url = build_okooo_match_url("odds", match_id)
                 
                 try:
                     page.goto(cache_busted_okooo_url(ouzhi_url, profile=profile), wait_until='networkidle', timeout=30000)
@@ -167,7 +170,7 @@ class OddsSnapshotBackfill:
                     page_content = page.content()
                     
                     # 检查是否被阻断
-                    if "访问被阻断" in page_content or "安全威胁" in page_content:
+                    if is_okooo_blocked_text(page_content):
                         print("  [WARN] 澳客网访问被阻断")
                         context.close()
                         browser.close()

@@ -50,6 +50,12 @@
 - `internal_match_id` 表示项目内部比赛键，可为 `league_YYYYMMDD_主队_客队`
 - `teams_match_id` 表示 SoT 行身份，通常与 canonical 内部比赛键一致
 - 访问澳客赔率页、历史页、快照页时，只允许使用纯数字 `external_match_id`
+- 正式链的主动访问入口统一通过 `runtime.match_ids.build_okooo_match_url()` 构造移动端 URL，不再允许手工拼接内部 `match_id`
+- 当前正式移动端页面形态：
+  - 欧赔：`https://m.okooo.com/match/odds.php?MatchID=<external_match_id>`
+  - 亚值：`https://m.okooo.com/match/handicap.php?MatchID=<external_match_id>`
+  - 大小球 fallback：`https://m.okooo.com/match/overunder.php?MatchID=<external_match_id>`
+  - 历史/赛果：`https://m.okooo.com/match/history.php?MatchID=<external_match_id>`
 
 当前链路已显式防御：
 
@@ -57,6 +63,7 @@
 - 同日多场比赛误点
 - 错误 `match_id` 导致的串场快照
 - `match_id` 命中但主客队/日期不一致的旧文件复用
+- 图形验证页/滑块验证页误判为正常页面
 
 关键文件：
 

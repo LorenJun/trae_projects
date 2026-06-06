@@ -129,6 +129,22 @@ def random_mobile_profile() -> OkoooMobileProfile:
     return random.choice(OKOOO_MOBILE_PROFILES)
 
 
+def fresh_mobile_profile(current: OkoooMobileProfile | None = None) -> OkoooMobileProfile:
+    if current is None:
+        return random_mobile_profile()
+    cross_pool = [
+        profile
+        for profile in OKOOO_MOBILE_PROFILES
+        if profile.profile_id != current.profile_id and profile.device_pool_id != current.device_pool_id
+    ]
+    if cross_pool:
+        return random.choice(cross_pool)
+    rotated = [profile for profile in OKOOO_MOBILE_PROFILES if profile.profile_id != current.profile_id]
+    if rotated:
+        return random.choice(rotated)
+    return current
+
+
 def available_mobile_profiles() -> tuple[OkoooMobileProfile, ...]:
     return OKOOO_MOBILE_PROFILES
 

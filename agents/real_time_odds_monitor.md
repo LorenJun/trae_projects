@@ -21,6 +21,8 @@
 - 若后续将本文方案落地，输出仍应回到 `teams_2025-26.md` 与 `.okooo-scraper/runtime/`
 - 当前澳客访问默认口径是 `local-chrome + iPhone Safari UA + Referer: https://m.okooo.com/`
 - 当前公共移动设备池统一由 `okooo_mobile_access.py` 提供，规模为 `100` 组随机 profile
+- 正式移动端 URL 只允许使用纯数字 `external_match_id` 构造
+- `internal_match_id / teams_match_id` 不允许直接拼接到 `MatchID`
 - 欧赔正式输出优先 `multi_company_consensus`，`99家平均` 仅作为 fallback
 
 ---

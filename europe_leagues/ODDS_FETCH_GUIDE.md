@@ -12,7 +12,7 @@
 本指南的目标是把：
 
 - 赛程定位
-- `match_id` 获取
+- `external_match_id` 获取
 - 实时快照抓取
 - 大小球真实盘口定位
 - 正式预测链路接入
@@ -22,7 +22,7 @@
 ## 当前主流程
 
 1. 先定位比赛：联赛、主客队、日期，必要时补 `match_time`
-2. 优先调用 `prediction_system.py collect-data`，或抓当天赛程获取 `match_id`
+2. 优先调用 `prediction_system.py collect-data`，或抓当天赛程获取纯数字 `external_match_id`
 3. 必要时用 `okooo_save_snapshot.py` 显式生成实时快照 JSON
 4. 预测链会优先注入已有快照；若真实盘口线缺失，会按严格身份补抓快照
 5. 再通过 `prediction_system.py predict-match` 或 `harness-run --pipeline match_prediction` 进入正式预测链
@@ -30,9 +30,10 @@
 
 ## 关键事实
 
-- 欧赔入口：`https://m.okooo.com/match/odds.php?MatchID=<MatchID>`
-- 亚值入口：`https://m.okooo.com/match/handicap.php?MatchID=<MatchID>`
+- 欧赔入口：`https://m.okooo.com/match/odds.php?MatchID=<external_match_id>`
+- 亚值入口：`https://m.okooo.com/match/handicap.php?MatchID=<external_match_id>`
 - 大小球真实位置：`handicap.php` 页面内的 `大小球` tab
+- 历史/赛果入口：`https://m.okooo.com/match/history.php?MatchID=<external_match_id>`
 - 快照目录：`.okooo-scraper/snapshots/<league>/`
 - 赛程缓存目录：`.okooo-scraper/schedules/<league>/`
 - 默认快照 driver：`local-chrome`
@@ -42,6 +43,8 @@
 - 快照脚本已支持按 `日期 + 主客队 + 时间` 精确锁定目标比赛行，避免同日多场 `23:00` 误命中
 - 快照读取链路新增身份校验：只有 `match_id + 主客队 + match_date` 一致时才复用旧快照
 - 预测链已支持预测前快照注水与 `missing_real_line` 场景下的正式补抓
+- 直连移动端页面时，正式链的主动访问入口统一通过 `runtime.match_ids.build_okooo_match_url()` 构造 URL；非纯数字 ID 会被直接拦截
+- 阻断页识别除了 `403/405` 文本页，也覆盖 `请进行验证 / 滑动到最右边 / 拖动滑块 / 验证码` 与 `canvas / verify iframe / 大图验证` 等图形验证页
 
 ## 当前访问策略
 
@@ -59,7 +62,7 @@
 
 ## 推荐命令
 
-### 1. 先抓当天赛程并拿到 MatchID
+### 1. 先抓当天赛程并拿到 external_match_id
 
 ```bash
 cd /Users/bytedance/trae_projects
@@ -73,7 +76,7 @@ cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py collect-data --league premier_league --date 2026-05-24 --json
 ```
 
-### 3. 用 MatchID 直接抓快照
+### 3. 用 external_match_id 直接抓快照
 
 ```bash
 cd /Users/bytedance/trae_projects
@@ -154,6 +157,7 @@ python3 prediction_system.py harness-run \
 6. `/ou/`、`overunder.php`、`daxiao.php` 只作为 fallback
 7. 最终进入正式预测流程时，优先使用 CLI，而不是直接 import 底层预测类
 8. 当 `line_source=missing_real_line` 时，应先排查错误 `match_id`、坏赛程缓存或串场快照，而不是直接回退默认盘口
+9. `internal_match_id / teams_match_id` 只能用于项目内部定位或写回，不能直接拿去访问任何 `m.okooo.com/match/*.php?MatchID=...` 页面
 
 ## 当前闭环位置
 
@@ -213,7 +217,7 @@ python3 prediction_system.py harness-run \
 
 - 更新 `okooo_team_aliases.json`
 - 先跑 `okooo_fetch_daily_schedule.py`
-- 已知 MatchID 后直接传 `--match-id`
+- 已知纯数字 `external_match_id` 后直接传 `--match-id`
 
 ### 5. 为什么抓到了快照但预测里还是 `missing_real_line`？
 

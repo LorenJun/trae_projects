@@ -74,15 +74,21 @@ purpose: "负责从正式实时源采集足球比赛所需的结构化数据，�
 关键入口：
 
 - 热门赛事：`https://m.okooo.com/saishi/remen/`
-- 欧赔：`https://m.okooo.com/match/odds.php?MatchID=<id>`
-- 亚值：`https://m.okooo.com/match/handicap.php?MatchID=<id>`
+- 欧赔：`https://m.okooo.com/match/odds.php?MatchID=<external_match_id>`
+- 亚值：`https://m.okooo.com/match/handicap.php?MatchID=<external_match_id>`
+- 历史/赛果：`https://m.okooo.com/match/history.php?MatchID=<external_match_id>`
 - 大小球：`亚值页面内的「大小球」tab`
 
 当前用途：
 
-- 定位 `match_id`
+- 定位纯数字 `external_match_id`
 - 抓取欧赔、亚值、大小球、凯利
 - 输出实时快照 JSON
+
+约束：
+
+- 直连澳客页面时只能使用纯数字 `external_match_id`
+- `internal_match_id / teams_match_id` 只允许用于项目内部定位和写回，不允许直接拼到 `MatchID`
 
 当前项目脚本：
 

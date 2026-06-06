@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from collectors.aliasing import load_team_alias_map, normalize_team_name
+from runtime.match_ids import build_okooo_match_url, first_valid_external_match_id
+from runtime.okooo_access import is_okooo_blocked_text
 from runtime.paths import get_default_paths
 from storage.teams_md import TeamsMarkdownStore
 
@@ -412,23 +414,20 @@ def _build_teams_match_id(payload: Dict[str, Any]) -> str:
 
 
 def _resolve_external_match_id(payload: Dict[str, Any]) -> str:
-    explicit = str(payload.get("match_id") or "").strip()
-    if explicit and not explicit.startswith(FALLBACK_MATCH_ID_PREFIXES):
-        return explicit
-    candidate = str(payload.get("external_match_id") or "").strip()
-    if candidate and not candidate.startswith(FALLBACK_MATCH_ID_PREFIXES):
+    candidate = first_valid_external_match_id(payload.get("external_match_id"))
+    if candidate:
         return candidate
     realtime = payload.get("realtime")
     if isinstance(realtime, dict):
         okooo = realtime.get("okooo")
         if isinstance(okooo, dict):
-            candidate = str(okooo.get("match_id") or "").strip()
-            if candidate and not candidate.startswith(FALLBACK_MATCH_ID_PREFIXES):
+            candidate = first_valid_external_match_id(okooo.get("match_id"))
+            if candidate:
                 return candidate
     full_prediction = payload.get("full_prediction")
     if isinstance(full_prediction, dict):
-        candidate = str(full_prediction.get("match_id") or "").strip()
-        if candidate and not candidate.startswith(FALLBACK_MATCH_ID_PREFIXES):
+        candidate = first_valid_external_match_id(full_prediction.get("external_match_id"))
+        if candidate:
             return candidate
     return ""
 
@@ -699,7 +698,7 @@ def _parse_direct_result_title(title: str) -> Dict[str, str]:
 
 
 def _extract_match_result_direct_payload(client: Any, match_id: str) -> Dict[str, Any]:
-    history_url = f"https://m.okooo.com/match/history.php?MatchID={match_id}"
+    history_url = build_okooo_match_url("history", match_id)
     client.open(history_url)
     time.sleep(2.5)
     state_text = ""
@@ -707,15 +706,24 @@ def _extract_match_result_direct_payload(client: Any, match_id: str) -> Dict[str
         state_text = client.state()
     except Exception:
         state_text = ""
-    blocked = any(
-        marker in (state_text or "")
-        for marker in ("访问被阻断", "安全威胁", "您的访问被阻断", "Sorry, your request has been blocked", "<title>405</title>")
-    )
+    blocked = is_okooo_blocked_text(state_text)
     payload = client.eval_json(
         r"""
 (() => {
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
   const blockedText = norm(document.body?.innerText || '');
+  const html = String(document.documentElement?.outerHTML || '');
+  const title = String(document.title || '');
+  const hasVerifyIframe = Array.from(document.querySelectorAll('iframe')).some((el) => {
+    const attrs = `${el.id || ''} ${el.className || ''} ${el.src || ''}`.toLowerCase();
+    return /(verify|captcha|geetest|aliyun|nc_|vcode)/.test(attrs);
+  });
+  const hasVerifyImage = Array.from(document.querySelectorAll('img')).some((el) => {
+    const attrs = `${el.id || ''} ${el.className || ''} ${el.src || ''} ${el.alt || ''}`.toLowerCase();
+    const width = Number(el.naturalWidth || el.width || 0);
+    const height = Number(el.naturalHeight || el.height || 0);
+    return /(verify|captcha|geetest|aliyun|slider|nc_)/.test(attrs) && Math.max(width, height) >= 200;
+  });
   const selectors = [
     '.page-fixed-top .page-nav',
     '.page-nav',
@@ -737,8 +745,21 @@ def _extract_match_result_direct_payload(client: Any, match_id: str) -> Dict[str
     }
   }
   return JSON.stringify({
-    title: document.title || '',
-    blocked: blockedText.includes('访问被阻断') || blockedText.includes('安全威胁') || (document.title || '').includes('405'),
+    title,
+    blocked: [
+      '访问被阻断',
+      '安全威胁',
+      '您的访问被阻断',
+      '请进行验证',
+      '滑动到最右边',
+      '拖动滑块',
+      '请按住滑块',
+      '验证码'
+    ].some((marker) => blockedText.includes(marker) || title.includes(marker))
+      || title.includes('405')
+      || (html.includes('<canvas') && /(verify|captcha|geetest|aliyun|nc_|slider)/i.test(html))
+      || hasVerifyIframe
+      || hasVerifyImage,
     body_head: blockedText.slice(0, 2000),
     candidates,
   });
@@ -753,7 +774,7 @@ def _extract_match_result_direct_payload(client: Any, match_id: str) -> Dict[str
 
 
 def _fetch_match_result_direct_by_match_id(base_dir: Optional[str], external_match_id: str) -> Optional[Dict[str, Any]]:
-    wanted_id = str(external_match_id or "").strip()
+    wanted_id = first_valid_external_match_id(external_match_id)
     if not wanted_id:
         return None
     try:
@@ -785,8 +806,8 @@ def _fetch_match_result_direct_by_match_id(base_dir: Optional[str], external_mat
                 client = BrowserUse(session=f"result_sync_{wanted_id}_{int(time.time())}")
             payload = _extract_match_result_direct_payload(client, wanted_id)
             if payload.get("blocked"):
-                last_error = "blocked"
-                continue
+                last_error = "verification_required"
+                break
             title_teams = _parse_direct_result_title(str(payload.get("title") or ""))
             candidates = payload.get("candidates", [])
             parsed: Optional[Dict[str, Any]] = None
@@ -842,7 +863,7 @@ def _fetch_match_by_match_id(
     match_date: str,
     external_match_id: str,
 ) -> Optional[Dict[str, Any]]:
-    wanted_id = str(external_match_id or "").strip()
+    wanted_id = first_valid_external_match_id(external_match_id)
     if not wanted_id:
         return None
     try:
@@ -900,7 +921,7 @@ def _result_matches_entry(entry: Dict[str, Any], item: Dict[str, Any]) -> bool:
 
 
 def _match_finished_item(entry: Dict[str, Any], finished: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    wanted_id = str(entry.get("external_match_id") or entry.get("match_id") or "").strip()
+    wanted_id = first_valid_external_match_id(entry.get("external_match_id"))
     for item in finished:
         if _result_matches_entry(entry, item):
             return item

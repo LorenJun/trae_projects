@@ -6,8 +6,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from runtime.result_sync import (
+    _fetch_match_result_direct_by_match_id,
     _match_finished_item,
     _merge_registry_entry,
+    _resolve_external_match_id,
     migrate_result_sync_registry_match_ids,
     register_prediction_result_sync,
     sync_due_prediction_results,
@@ -105,6 +107,22 @@ class ResultSyncTest(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_resolve_external_match_id_ignores_internal_match_id_fallback(self):
+        payload = {
+            "match_id": "world_cup_20260612_墨西哥_南非",
+            "external_match_id": "",
+            "full_prediction": {"match_id": "123456", "external_match_id": ""},
+        }
+        self.assertEqual(_resolve_external_match_id(payload), "")
+
+    def test_fetch_match_result_direct_by_match_id_rejects_non_digit_id(self):
+        self.assertIsNone(
+            _fetch_match_result_direct_by_match_id(
+                base_dir=str(self.base_dir),
+                external_match_id="world_cup_20260612_墨西哥_南非",
+            )
+        )
 
     def test_sync_due_results_refreshes_schedule_from_teams_and_auto_updates(self):
         with patch("runtime.result_sync._fetch_match_by_match_id", return_value=None), patch(

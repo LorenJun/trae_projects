@@ -163,6 +163,9 @@ python3 prediction_system.py accuracy --refresh --json
 - 正式快照链默认走 `local-chrome`
 - 默认请求口径已统一为 `iPhone Safari UA + Referer: https://m.okooo.com/`
 - 公共移动设备池由 `europe_leagues/okooo_mobile_access.py` 统一维护，当前为 `100` 组随机 profile
+- 正式主动访问的移动端页面统一通过 `europe_leagues/runtime/match_ids.py` 构造，只允许纯数字 `external_match_id`
+- `internal_match_id / teams_match_id` 不允许再直接拼到澳客 `MatchID`
+- 当前阻断识别已覆盖文字风控页和滑块/图形验证页
 - 已验证正式 `predict-match` 可稳定拿到真实欧赔、亚值、大小球、凯利数据
 
 如仓库级说明与代码冲突，以这些实现为准：

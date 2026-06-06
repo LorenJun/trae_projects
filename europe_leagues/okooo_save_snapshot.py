@@ -33,10 +33,13 @@ from websocket import create_connection
 from okooo_mobile_access import (
     OkoooMobileProfile,
     cache_busted_okooo_url,
+    fresh_mobile_profile,
     is_okooo_mobile_url,
     mobile_headers,
     random_mobile_profile,
 )
+from runtime.match_ids import build_okooo_match_url, require_external_match_id
+from runtime.okooo_access import is_okooo_blocked_text
 
 REMEN_URL = "https://m.okooo.com/saishi/remen/"
 # Retry faster by default. For transient rendering issues we still retry, but
@@ -1109,7 +1112,7 @@ class BrowserUse:
         raise RuntimeError(f"browser-use failed: {' '.join(cmd)}\n{tail}")
 
     def open(self, url: str) -> None:
-        profile = random_mobile_profile() if is_okooo_mobile_url(url) else None
+        profile = fresh_mobile_profile(self.mobile_profile) if is_okooo_mobile_url(url) else None
         self.mobile_profile = profile
         self.run("open", cache_busted_okooo_url(url, profile=profile), timeout=90, use_headed=self.headed)
 
@@ -1161,7 +1164,7 @@ class LocalChromeSession:
     def _connect_if_needed(self, url: str = "about:blank") -> None:
         if self.ws:
             return
-        profile = random_mobile_profile() if is_okooo_mobile_url(url) else None
+        profile = fresh_mobile_profile(self.mobile_profile) if is_okooo_mobile_url(url) else None
         self.mobile_profile = profile
         # Create a blank target first, then navigate with explicit mobile headers
         # and referrer. Opening the okooo mobile URL as the initial target can be
@@ -1230,7 +1233,7 @@ class LocalChromeSession:
         if not self.ws:
             self._connect_if_needed(url)
         if is_okooo_mobile_url(url):
-            self.mobile_profile = random_mobile_profile()
+            self.mobile_profile = fresh_mobile_profile(self.mobile_profile)
             self._apply_okooo_mobile_profile(self.mobile_profile)
         self._navigate(url)
         time.sleep(3.5)
@@ -1340,18 +1343,41 @@ def _ensure_local_chrome(port: int, chrome_path: str, user_data_dir: str) -> Dic
 
 
 def _is_blocked_text(text: str) -> bool:
-    text = text or ""
-    return (
-        "访问被阻断" in text
-        or "安全威胁" in text
-        or "您的访问被阻断" in text
-        or "Sorry, your request has been blocked" in text
-        or "<title>405</title>" in text
-    )
+    return is_okooo_blocked_text(text)
+
+
+def _mobile_profile_meta(profile: Any) -> Dict[str, Any]:
+    if not isinstance(profile, OkoooMobileProfile):
+        return {}
+    return {
+        "profile_id": profile.profile_id,
+        "device_pool_id": profile.device_pool_id,
+        "device_name": profile.device_name,
+        "user_agent": profile.user_agent,
+    }
+
+
+def _mark_verification_required(data: Dict[str, Any], client: Any = None) -> Dict[str, Any]:
+    out = dict(data) if isinstance(data, dict) else {"error": str(data)}
+    out["blocked"] = True
+    out["verification_required"] = True
+    out["status"] = "verification_required"
+    out["error"] = "verification_required"
+    profile_meta = _mobile_profile_meta(getattr(client, "mobile_profile", None))
+    if profile_meta:
+        out["mobile_profile"] = profile_meta
+    out.setdefault("retry_strategy", "stop_after_verification")
+    return out
+
+
+def _is_verification_required_payload(data: Dict[str, Any]) -> bool:
+    if not isinstance(data, dict):
+        return False
+    return bool(data.get("verification_required")) or str(data.get("status") or "").strip() == "verification_required"
 
 
 def _is_success_payload(data: Dict[str, Any]) -> bool:
-    if data.get("blocked"):
+    if data.get("blocked") or _is_verification_required_payload(data):
         return False
     if data.get("found") is False:
         return False
@@ -1386,9 +1412,9 @@ def _should_stop_retrying_from_payload(data: Dict[str, Any]) -> tuple[bool, str]
     """Return (stop_now, reason) for a non-success payload."""
     if not isinstance(data, dict):
         return False, ""
-    if data.get("blocked"):
+    if data.get("blocked") or _is_verification_required_payload(data):
         # Repeating the exact same extractor/session is usually wasteful; move to fallback path.
-        return True, "blocked"
+        return True, "verification_required"
     err = data.get("error")
     if isinstance(err, str):
         kind = _classify_retry_error_message(err)
@@ -1445,6 +1471,52 @@ def _open_ready(bu: BrowserUse, url: str, settle_seconds: float = 2.5) -> str:
         state_text = bu.state()
     except Exception:
         state_text = ""
+    try:
+        verification = bu.eval_json(
+            r"""
+(() => {
+  const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+  const bodyText = norm(document.body?.innerText || '');
+  const html = String(document.documentElement?.outerHTML || '');
+  const title = String(document.title || '');
+  const hasVerifyIframe = Array.from(document.querySelectorAll('iframe')).some((el) => {
+    const attrs = `${el.id || ''} ${el.className || ''} ${el.src || ''}`.toLowerCase();
+    return /(verify|captcha|geetest|aliyun|nc_|vcode)/.test(attrs);
+  });
+  const hasVerifyImage = Array.from(document.querySelectorAll('img')).some((el) => {
+    const attrs = `${el.id || ''} ${el.className || ''} ${el.src || ''} ${el.alt || ''}`.toLowerCase();
+    const width = Number(el.naturalWidth || el.width || 0);
+    const height = Number(el.naturalHeight || el.height || 0);
+    return /(verify|captcha|geetest|aliyun|slider|nc_)/.test(attrs) && Math.max(width, height) >= 200;
+  });
+  const blocked = [
+    '访问被阻断',
+    '安全威胁',
+    '您的访问被阻断',
+    '请进行验证',
+    '滑动到最右边',
+    '拖动滑块',
+    '请按住滑块',
+    '验证码'
+  ].some((marker) => bodyText.includes(marker) || title.includes(marker))
+    || title.includes('405')
+    || (html.includes('<canvas') && /(verify|captcha|geetest|aliyun|nc_|slider)/i.test(html))
+    || hasVerifyIframe
+    || hasVerifyImage;
+  return JSON.stringify({
+    blocked,
+    bodyText: bodyText.slice(0, 500),
+    title: title.slice(0, 200),
+  });
+})()
+"""
+        )
+    except Exception:
+        verification = {}
+    if isinstance(verification, dict) and verification.get("blocked"):
+        body_text = str(verification.get("bodyText") or "").strip()
+        title = str(verification.get("title") or "").strip()
+        state_text = "\n".join(part for part in (state_text, title, body_text, "请进行验证") if part)
     return state_text
 
 
@@ -1492,7 +1564,34 @@ def _click_visible_text(bu: BrowserUse, labels: list[str], settle_seconds: float
 def _parse_europe_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
     js = r"""
 (() => {
-  const blocked = (document.body?.innerText||'').includes('访问被阻断') || (document.title||'').includes('405');
+  const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+  const bodyText = norm(document.body?.innerText || '');
+  const html = String(document.documentElement?.outerHTML || '');
+  const title = String(document.title || '');
+  const hasVerifyIframe = Array.from(document.querySelectorAll('iframe')).some((el) => {
+    const attrs = `${el.id || ''} ${el.className || ''} ${el.src || ''}`.toLowerCase();
+    return /(verify|captcha|geetest|aliyun|nc_|vcode)/.test(attrs);
+  });
+  const hasVerifyImage = Array.from(document.querySelectorAll('img')).some((el) => {
+    const attrs = `${el.id || ''} ${el.className || ''} ${el.src || ''} ${el.alt || ''}`.toLowerCase();
+    const width = Number(el.naturalWidth || el.width || 0);
+    const height = Number(el.naturalHeight || el.height || 0);
+    return /(verify|captcha|geetest|aliyun|slider|nc_)/.test(attrs) && Math.max(width, height) >= 200;
+  });
+  const blocked = [
+    '访问被阻断',
+    '安全威胁',
+    '您的访问被阻断',
+    '请进行验证',
+    '滑动到最右边',
+    '拖动滑块',
+    '请按住滑块',
+    '验证码'
+  ].some((marker) => bodyText.includes(marker) || title.includes(marker))
+    || title.includes('405')
+    || (html.includes('<canvas') && /(verify|captcha|geetest|aliyun|nc_|slider)/i.test(html))
+    || hasVerifyIframe
+    || hasVerifyImage;
   if (blocked) return JSON.stringify({blocked:true});
   const body = document.body?.innerText || '';
   const lines = body.split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
@@ -2773,7 +2872,8 @@ def _find_match_id(
 
 
 def _extract_europe(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
+    match_id = require_external_match_id(match_id, field_name="external_match_id")
+    url = build_okooo_match_url("odds", match_id)
     state_text = _open_ready(bu, url, settle_seconds=3.0)
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
@@ -2783,7 +2883,8 @@ def _extract_europe(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
 
 
 def _extract_asian(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    url = f"https://m.okooo.com/match/handicap.php?MatchID={match_id}"
+    match_id = require_external_match_id(match_id, field_name="external_match_id")
+    url = build_okooo_match_url("handicap", match_id)
     state_text = _open_ready(bu, url, settle_seconds=3.0)
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
@@ -2798,7 +2899,8 @@ def _extract_totals_from_asian_page(bu: BrowserUse, match_id: str) -> Dict[str, 
     User-provided evidence shows O/U is nested under the 亚值 page instead of
     always being exposed as a dedicated mobile path.
     """
-    url = f"https://m.okooo.com/match/handicap.php?MatchID={match_id}"
+    match_id = require_external_match_id(match_id, field_name="external_match_id")
+    url = build_okooo_match_url("handicap", match_id)
     state_text = _open_ready(bu, url, settle_seconds=3.0)
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
@@ -2813,6 +2915,7 @@ def _extract_totals_from_asian_page(bu: BrowserUse, match_id: str) -> Dict[str, 
 
 
 def _extract_totals(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
+    match_id = require_external_match_id(match_id, field_name="external_match_id")
     # Prefer the mobile asian page's inner "大小球" tab. This matches the actual
     # UI observed in recent screenshots and is more reliable than guessing a
     # standalone totals route.
@@ -2822,7 +2925,7 @@ def _extract_totals(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
 
     # Fallback: dedicated totals page if available on mobile.
     # Some setups route to /overunder.php, others to /daxiao.php; try first path.
-    primary = f"https://m.okooo.com/match/overunder.php?MatchID={match_id}"
+    primary = build_okooo_match_url("overunder", match_id)
     state_text = _open_ready(bu, primary, settle_seconds=3.0)
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": primary, "_state_excerpt": state_text[:500]}
@@ -2831,7 +2934,7 @@ def _extract_totals(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
         data["url"] = primary
         return data
 
-    alt = f"https://m.okooo.com/match/daxiao.php?MatchID={match_id}"
+    alt = build_okooo_match_url("daxiao", match_id)
     state_text2 = _open_ready(bu, alt, settle_seconds=3.0)
     if _is_blocked_text(state_text2):
         return {"blocked": True, "url": alt, "_state_excerpt": state_text2[:500]}
@@ -2842,7 +2945,8 @@ def _extract_totals(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
 
 def _extract_kelly_from_odds_tab(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
     # Prefer tab navigation because direct kelly.php is sometimes blocked.
-    url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
+    match_id = require_external_match_id(match_id, field_name="external_match_id")
+    url = build_okooo_match_url("odds", match_id)
     state_text = _open_ready(bu, url, settle_seconds=3.0)
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
@@ -2860,7 +2964,8 @@ def _extract_kelly_from_odds_tab(bu: BrowserUse, match_id: str) -> Dict[str, Any
 
 
 def _extract_kelly_direct(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    url = f"https://m.okooo.com/match/kelly.php?MatchID={match_id}"
+    match_id = require_external_match_id(match_id, field_name="external_match_id")
+    url = build_okooo_match_url("kelly", match_id)
     state_text = _open_ready(bu, url, settle_seconds=3.0)
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
@@ -2920,7 +3025,8 @@ def _extract_kelly_from_history_flow(bu: BrowserUse, history_url: str) -> Dict[s
 
 
 def _extract_europe_mobile_alt(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
+    match_id = require_external_match_id(match_id, field_name="external_match_id")
+    url = build_okooo_match_url("odds", match_id)
     state_text = _open_ready(bu, url, settle_seconds=4.0)
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
@@ -2961,7 +3067,8 @@ def _extract_europe_mobile_alt(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
 
 
 def _extract_asian_mobile_alt(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    url = f"https://m.okooo.com/match/handicap.php?MatchID={match_id}"
+    match_id = require_external_match_id(match_id, field_name="external_match_id")
+    url = build_okooo_match_url("handicap", match_id)
     state_text = _open_ready(bu, url, settle_seconds=4.0)
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
@@ -2972,7 +3079,8 @@ def _extract_asian_mobile_alt(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
 
 
 def _extract_totals_mobile_alt(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    url = f"https://m.okooo.com/match/overunder.php?MatchID={match_id}"
+    match_id = require_external_match_id(match_id, field_name="external_match_id")
+    url = build_okooo_match_url("overunder", match_id)
     state_text = _open_ready(bu, url, settle_seconds=4.0)
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
@@ -3002,6 +3110,8 @@ def _run_with_retries(
         stop_reason = ""
         try:
             data = extractor(bu, *extractor_args)
+            if isinstance(data, dict) and data.get("blocked"):
+                data = _mark_verification_required(data, bu)
             last_data = data
             success = _is_success_payload(data)
             stop_now, stop_reason = _should_stop_retrying_from_payload(data)
@@ -3011,6 +3121,7 @@ def _run_with_retries(
                     "client": bu.__class__.__name__,
                     "success": success,
                     "blocked": bool(isinstance(data, dict) and data.get("blocked")),
+                    "verification_required": bool(isinstance(data, dict) and _is_verification_required_payload(data)),
                     "found": None if not isinstance(data, dict) else data.get("found"),
                     "parsed": None if not isinstance(data, dict) else data.get("parsed"),
                     "stop_retry": stop_now,
@@ -3023,12 +3134,15 @@ def _run_with_retries(
             last_data = {"error": str(exc)}
             kind = _classify_retry_error_message(str(exc))
             stop_now = kind in {
+                "blocked",
                 "cdp_connection_refused",
                 "chrome_port_unavailable",
                 "chrome_start_failed",
                 "chrome_binary_missing",
                 "browser_use_missing",
             }
+            if kind == "blocked":
+                last_data = _mark_verification_required(last_data, bu)
             attempts.append(
                 {
                     "attempt": index,
@@ -3036,8 +3150,9 @@ def _run_with_retries(
                     "success": False,
                     "error": str(exc),
                     "error_kind": kind,
+                    "verification_required": kind == "blocked",
                     "stop_retry": stop_now,
-                    "stop_reason": kind if stop_now else None,
+                    "stop_reason": "verification_required" if kind == "blocked" else (kind if stop_now else None),
                 }
             )
         finally:
@@ -3059,6 +3174,8 @@ def _extract_kelly_with_fallback(match_id: str, client_factory: Callable[[str], 
         _extract_kelly_from_odds_tab,
         match_id,
     )
+    if _is_verification_required_payload(first):
+        return first
     if _is_success_payload(first):
         return first
 
@@ -3069,6 +3186,9 @@ def _extract_kelly_with_fallback(match_id: str, client_factory: Callable[[str], 
         _extract_kelly_direct,
         match_id,
     )
+    if _is_verification_required_payload(second):
+        second["_fallback_from"] = "odds_tab"
+        return second
     if _is_success_payload(second):
         second["_fallback_from"] = "odds_tab"
         return second
@@ -3082,13 +3202,21 @@ def _extract_europe_with_fallback(match_id: str, history_url: str, client_factor
         return _score_europe_payload(data) >= (3, 2, 2)
 
     first = _run_with_retries("europe_mobile", f"{session_prefix}_mobile", client_factory, _extract_europe, match_id)
+    if _is_verification_required_payload(first):
+        return first
     if _prefer_consensus(first):
         return first
     second = _run_with_retries("europe_history", f"{session_prefix}_history", client_factory, _extract_europe_from_history_flow, history_url)
+    if _is_verification_required_payload(second):
+        second["_fallback_from"] = "mobile_direct"
+        return second
     if _prefer_consensus(second):
         second["_fallback_from"] = "mobile_direct"
         return second
     third = _run_with_retries("europe_mobile_alt", f"{session_prefix}_mobile_alt", client_factory, _extract_europe_mobile_alt, match_id)
+    if _is_verification_required_payload(third):
+        third["_fallback_from"] = "history_tab"
+        return third
     if _prefer_consensus(third):
         third["_fallback_from"] = "history_tab"
         return third
@@ -3110,13 +3238,21 @@ def _extract_asian_with_fallback(match_id: str, history_url: str, client_factory
         return int(consensus.get("company_count") or 0) >= 2
 
     first = _run_with_retries("asian_mobile", f"{session_prefix}_mobile", client_factory, _extract_asian, match_id)
+    if _is_verification_required_payload(first):
+        return first
     if _prefer_consensus(first):
         return first
     second = _run_with_retries("asian_history", f"{session_prefix}_history", client_factory, _extract_asian_from_history_flow, history_url)
+    if _is_verification_required_payload(second):
+        second["_fallback_from"] = "mobile_direct"
+        return second
     if _prefer_consensus(second):
         second["_fallback_from"] = "mobile_direct"
         return second
     third = _run_with_retries("asian_mobile_alt", f"{session_prefix}_mobile_alt", client_factory, _extract_asian_mobile_alt, match_id)
+    if _is_verification_required_payload(third):
+        third["_fallback_from"] = "history_tab"
+        return third
     if _is_success_payload(third):
         third["_fallback_from"] = "history_tab"
         return third
@@ -3128,13 +3264,21 @@ def _extract_asian_with_fallback(match_id: str, history_url: str, client_factory
 
 def _extract_totals_with_fallback(match_id: str, history_url: str, client_factory: Callable[[str], Any], session_prefix: str) -> Dict[str, Any]:
     first = _run_with_retries("totals_mobile", f"{session_prefix}_mobile", client_factory, _extract_totals, match_id)
+    if _is_verification_required_payload(first):
+        return first
     if _is_success_payload(first):
         return first
     second = _run_with_retries("totals_history", f"{session_prefix}_history", client_factory, _extract_totals_from_history_flow, history_url)
+    if _is_verification_required_payload(second):
+        second["_fallback_from"] = "mobile_direct"
+        return second
     if _is_success_payload(second):
         second["_fallback_from"] = "mobile_direct"
         return second
     third = _run_with_retries("totals_mobile_alt", f"{session_prefix}_mobile_alt", client_factory, _extract_totals_mobile_alt, match_id)
+    if _is_verification_required_payload(third):
+        third["_fallback_from"] = "history_tab"
+        return third
     if _is_success_payload(third):
         third["_fallback_from"] = "history_tab"
         return third
@@ -3143,13 +3287,21 @@ def _extract_totals_with_fallback(match_id: str, history_url: str, client_factor
 
 def _extract_kelly_full_fallback(match_id: str, history_url: str, client_factory: Callable[[str], Any], session_prefix: str) -> Dict[str, Any]:
     first = _extract_kelly_with_fallback(match_id, client_factory, session_prefix)
+    if _is_verification_required_payload(first):
+        return first
     if _is_success_payload(first):
         return first
     second = _run_with_retries("kelly_history", f"{session_prefix}_history", client_factory, _extract_kelly_from_history_flow, history_url)
+    if _is_verification_required_payload(second):
+        second["_fallback_from"] = "mobile_direct"
+        return second
     if _is_success_payload(second):
         second["_fallback_from"] = "mobile_direct"
         return second
     third = _run_with_retries("kelly_mobile_alt", f"{session_prefix}_mobile_alt", client_factory, _extract_europe_mobile_alt, match_id)
+    if _is_verification_required_payload(third):
+        third["_fallback_from"] = "history_tab"
+        return third
     if _is_success_payload(third) and third.get("kelly"):
         return {
             "found": True,

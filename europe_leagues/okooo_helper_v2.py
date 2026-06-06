@@ -12,6 +12,8 @@ from typing import Dict, List, Optional
 from playwright.sync_api import sync_playwright
 
 from okooo_mobile_access import cache_busted_okooo_url, mobile_context_options, mobile_headers, random_mobile_profile
+from runtime.match_ids import build_okooo_match_url, require_external_match_id
+from runtime.okooo_access import is_okooo_blocked_text
 
 
 class OkoooScraper:
@@ -84,7 +86,8 @@ class OkoooScraper:
         Returns:
             包含赔率数据的字典
         """
-        url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
+        match_id = require_external_match_id(match_id, field_name="external_match_id")
+        url = build_okooo_match_url("odds", match_id)
         
         try:
             # 访问页面
@@ -106,6 +109,10 @@ class OkoooScraper:
             # 等待AJAX数据加载
             print("  等待数据加载...")
             time.sleep(8)
+            page_content = self.page.content()
+            if is_okooo_blocked_text(page_content):
+                print("  [WARN] 页面进入验证/阻断态")
+                return None
             
             # 使用JavaScript提取数据
             odds_data = self.page.evaluate("""
@@ -225,6 +232,7 @@ def get_okooo_odds(match_id: str, headless: bool = True) -> Optional[Dict]:
     Returns:
         赔率数据字典或None
     """
+    match_id = require_external_match_id(match_id, field_name="external_match_id")
     with OkoooScraper(headless=headless) as scraper:
         return scraper.extract_odds(match_id)
 

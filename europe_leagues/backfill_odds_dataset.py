@@ -21,6 +21,8 @@ import requests
 from playwright.sync_api import sync_playwright
 
 from okooo_mobile_access import cache_busted_okooo_url, mobile_context_options, mobile_headers, random_mobile_profile
+from runtime.match_ids import build_okooo_match_url, require_external_match_id
+from runtime.okooo_access import is_okooo_blocked_text
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -136,7 +138,8 @@ class OddsBackfill:
 
     def fetch_okooo_odds(self, match_id: str) -> Optional[Dict]:
         """使用 Playwright 从 okooo.com 获取赔率数据"""
-        url = f"https://m.okooo.com/match/odds.php?MatchID={match_id}"
+        match_id = require_external_match_id(match_id, field_name="external_match_id")
+        url = build_okooo_match_url("odds", match_id)
         
         try:
             with sync_playwright() as p:
@@ -148,6 +151,10 @@ class OddsBackfill:
                 
                 page.goto(cache_busted_okooo_url(url, profile=profile), wait_until="networkidle", timeout=30000)
                 page.wait_for_timeout(3000)
+                if is_okooo_blocked_text(page.content()):
+                    print(f"[WARN] 澳客页面进入验证/阻断态: {match_id}")
+                    browser.close()
+                    return None
                 
                 # 提取表格数据
                 rows = page.query_selector_all("table tbody tr")

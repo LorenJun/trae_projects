@@ -77,6 +77,7 @@ python3 prediction_system.py collect-data --league premier_league --date 2026-05
 - `internal_match_id`：项目内部比赛键，形如 `league_YYYYMMDD_主队_客队`
 - `teams_match_id`：SoT 行身份，通常与 canonical 内部比赛键一致
 - 访问澳客赔率页或直接抓快照时，必须传纯数字 `external_match_id`
+- 正式链的主动访问入口统一通过 `runtime.match_ids.build_okooo_match_url()` 构造 URL，不再允许把内部 `match_id` / `teams_match_id` 直接拼到 `MatchID=...`
 
 ### 3. 单场预测
 
@@ -180,6 +181,12 @@ python3 prediction_system.py refresh-repo-docs --json
 - 默认 no-cache 头与 cache-bust 参数
 - 公共设备池：`okooo_mobile_access.py` 统一维护，当前为 `100` 组随机 `iPhone Safari` profile
 - 联赛页定位已支持自动翻月、按日期分组抽取整天赛程、同日多场下按主客队精确锁定目标比赛
+- 正式主动访问的移动端 URL 只允许以下形态：
+  - 欧赔：`https://m.okooo.com/match/odds.php?MatchID=<external_match_id>`
+  - 亚值：`https://m.okooo.com/match/handicap.php?MatchID=<external_match_id>`
+  - 历史/赛果：`https://m.okooo.com/match/history.php?MatchID=<external_match_id>`
+  - `overunder.php` / `daxiao.php` 只作为大小球 fallback，不是默认主入口
+- 当前阻断识别除了 `403/405` 文字页，也覆盖 `请进行验证 / 滑动到最右边 / 拖动滑块 / 验证码` 及 `canvas / verify iframe / 大图验证` 等图形验证页特征
 
 如果本机默认浏览器或裸 `curl` 访问 `odds.php` 返回 `403/405`，不代表正式链不可用；优先确认是否绕过了公共访问策略。
 

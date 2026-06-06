@@ -9,6 +9,8 @@ import time
 from playwright.sync_api import sync_playwright
 
 from okooo_mobile_access import cache_busted_okooo_url, mobile_context_options, mobile_headers, random_mobile_profile
+from runtime.match_ids import build_okooo_match_url, require_external_match_id
+from runtime.okooo_access import is_okooo_blocked_text
 
 
 def search_okooo_match(team1_name, team2_name, league_name=None):
@@ -166,14 +168,15 @@ def verify_match_id(match_id, expected_teams=None):
         page = context.new_page()
         
         try:
-            url = f'https://m.okooo.com/match/odds.php?MatchID={match_id}'
+            match_id = require_external_match_id(match_id, field_name="external_match_id")
+            url = build_okooo_match_url("odds", match_id)
             page.goto(cache_busted_okooo_url(url, profile=profile), wait_until='domcontentloaded', timeout=30000)
             page.wait_for_timeout(3000)
             
             title = page.title()
             
             # 检查是否是405错误
-            if '405' in title or 'blocked' in page.content().lower():
+            if '405' in title or is_okooo_blocked_text(page.content()):
                 print(f"✗ 比赛ID {match_id} 被阻断或无效")
                 return None
             
