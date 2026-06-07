@@ -30,10 +30,16 @@
 
 ## 关键事实
 
-- 欧赔入口：`https://m.okooo.com/match/odds.php?MatchID=<external_match_id>`
-- 亚值入口：`https://m.okooo.com/match/handicap.php?MatchID=<external_match_id>`
-- 大小球真实位置：`handicap.php` 页面内的 `大小球` tab
-- 历史/赛果入口：`https://m.okooo.com/match/history.php?MatchID=<external_match_id>`
+- 唯一盘口抓取链路：单会话 hub 真实导航。先暖一次 `m.okooo.com` 首页养 cookie，再落地该场 hub 页 `history.php`，在同一会话里按真人路径点击导航：
+  - 点 `亚指` 链接整页跳转到 `handicap.php`，解析亚盘后，在同页点内嵌 `大小球` tab 解析大小球
+  - 回到 hub，点 `欧指` 链接整页跳转到 `odds.php`，解析欧赔后，在同页点 `凯利` tab 解析凯利
+  - 一次会话拿回欧赔 / 亚值 / 大小球 / 凯利四盘，不再为每个盘口冷启动新浏览器或直接深链跳深页
+- hub 入口：`https://m.okooo.com/match/history.php?MatchID=<external_match_id>`
+- 各盘口落地页（由 hub 内点击导航到达，不直接深链）：
+  - 欧赔 / 凯利：`odds.php`
+  - 亚值 / 大小球：`handicap.php`
+- 大小球真实位置：`handicap.php` 页面内的 `大小球` tab；不存在独立可用的 `overunder.php` / `daxiao.php`（空页面）
+- 已移除所有深链回退 extractor 与回退编排（`_extract_odds_bundle` / `_extract_*_with_fallback` / `_extract_*_mobile_alt` / history-tab 流等），编排层 `_extract_all_markets_with_fallback` 现在只跑一次 hub，hub 没解析到的盘口按原样（`blocked` / `found:false`）返回
 - 快照目录：`.okooo-scraper/snapshots/<league>/`
 - 赛程缓存目录：`.okooo-scraper/schedules/<league>/`
 - 默认快照 driver：`local-chrome`
@@ -43,9 +49,9 @@
 - 快照脚本已支持按 `日期 + 主客队 + 时间` 精确锁定目标比赛行，避免同日多场 `23:00` 误命中
 - 快照读取链路新增身份校验：只有 `match_id + 主客队 + match_date` 一致时才复用旧快照
 - 预测链已支持预测前快照注水与 `missing_real_line` 场景下的正式补抓
-- 直连移动端页面时，正式链的主动访问入口统一通过 `runtime.match_ids.build_okooo_match_url()` 构造 URL；非纯数字 ID 会被直接拦截
 - 阻断页识别除了 `403/405` 文本页，也覆盖 `请进行验证 / 滑动到最右边 / 拖动滑块 / 验证码` 与 `canvas / verify iframe / 大图验证` 等图形验证页
-- 命中验证页时，当前入口路径会尽快返回 `verification_required` 并停止本路径连续重试；随后会触发 1 次 fresh mobile pool 重入，若仍命中验证则停止，不会无限打转
+- hub 链路在每次整页跳转后（→`handicap.php`、→`odds.php`）以及解析完四盘后都做强阻断判定（`_page_blocked_now`），任意盘口命中验证墙都会把 `blocked` 上抛到顶层，确保熔断与换池重入正常触发，避免中途撞墙被当成「没开盘」而静默丢数据
+- 命中验证页时，当前入口路径会尽快返回 `verification_required` 并停止本路径连续重试；同时会打开基于 `match_id + market_family` 的 TTL breaker，并在市场页访问前执行最小间隔节流，避免持续撞验证页
 
 ## 当前访问策略
 
@@ -168,8 +174,8 @@ OKOOO_BROWSER_E2E=1 python3 -m unittest test_okooo_browser
 2. 未知 `match_id` 时优先用 `collect-data` 或 `okooo_fetch_daily_schedule.py` 落赛程 JSON
 3. 球队简称差异统一依赖 `okooo_team_aliases.json`
 4. 若联赛页停在错误月份，优先依赖脚本自动翻月，不要手工假设日期标签可直接点击
-5. 大小球优先走 `handicap.php -> 大小球 tab`
-6. `/ou/`、`overunder.php`、`daxiao.php` 只作为 fallback
+5. 四盘盘口统一走单会话 hub 真实导航（`history.php` → 点 `亚指`/`欧指` 跳转 → 页内点 `大小球`/`凯利` tab）；已无深链回退路径，hub 失败的盘口保持 `blocked`/`found:false` 原样
+6. 大小球只存在于 `handicap.php` 内的 `大小球` tab；`overunder.php`、`daxiao.php` 是空页面，不作为来源
 7. 最终进入正式预测流程时，优先使用 CLI，而不是直接 import 底层预测类
 8. 当 `line_source=missing_real_line` 时，应先排查错误 `match_id`、坏赛程缓存或串场快照，而不是直接回退默认盘口
 9. `internal_match_id / teams_match_id` 只能用于项目内部定位或写回，不能直接拿去访问任何 `m.okooo.com/match/*.php?MatchID=...` 页面
@@ -216,8 +222,9 @@ OKOOO_BROWSER_E2E=1 python3 -m unittest test_okooo_browser
 1. 是否缺少移动端 UA
 2. 是否缺少 `Referer: https://m.okooo.com/`
 3. 是否没有走仓库里的公共移动 profile 策略
-4. 是否已经返回 `verification_required` 且 fresh mobile pool 重入也失败
-5. 是否命中了浏览器扩展、隐私防护或旧缓存
+4. 是否已经返回 `verification_required` 且同一 `match_id + market_family` 的 TTL breaker 仍处于打开状态
+5. 是否因为最小间隔节流导致访问被主动延后
+6. 是否命中了浏览器扩展、隐私防护或旧缓存
 
 排障结论见仓库根文档：`debug-local-odds-access.md`
 

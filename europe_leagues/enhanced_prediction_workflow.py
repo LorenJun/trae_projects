@@ -204,6 +204,12 @@ LEAGUE_CONFIG = {
         'teams': [],
         'avg_goals': 2.7
     },
+    'friendly': {
+        'name': '友谊赛',
+        'code': 'friendly',
+        'teams': [],
+        'avg_goals': 2.7
+    },
     'world_cup': {
         'name': '世界杯',
         'code': 'world_cup',
@@ -889,6 +895,7 @@ class EnhancedPredictor:
         *,
         persist: bool = True,
         write_teams: bool = True,
+        league_name_override: str = '',
     ) -> Dict[str, Any]:
         """生成预测并按批次决定是否写回 teams 与刷新统计。"""
         schedule_load_status = 'provided'
@@ -946,6 +953,10 @@ class EnhancedPredictor:
                 match_id=match_id,
             )
 
+            analysis_context = {}
+            if league_name_override:
+                analysis_context["competition_type"] = "friendly"
+                analysis_context["okooo_league_name_override"] = league_name_override
             pred = self.predict_match(
                 home,
                 away,
@@ -954,6 +965,7 @@ class EnhancedPredictor:
                 current_odds=current_odds,
                 match_id=match_id,
                 match_time=match_time,
+                analysis_context=analysis_context,
                 persist=False,
                 # We already attempted a live refresh above in this loop; avoid double refreshing.
                 force_refresh_odds=False,

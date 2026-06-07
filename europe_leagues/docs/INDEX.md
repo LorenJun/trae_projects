@@ -59,10 +59,13 @@
 
 - 默认快照 driver：`local-chrome`
 - 默认请求特征：`iPhone Safari UA + Referer: https://m.okooo.com/`
-- 默认移动 profile 池：`../okooo_mobile_access.py`，当前为 `100` 组随机 profile
+- 默认移动 profile 池：`../okooo_mobile_access.py`，当前为 `500` 组 `iPhone Safari` profile，分布在多个 iPhone device pool 上
 - 正式主动访问的移动端 URL 统一由 `runtime.match_ids.build_okooo_match_url()` 构造，只接受纯数字 `external_match_id`
 - `internal_match_id / teams_match_id` 只允许在项目内部使用，不能再拼进澳客 `MatchID`
+- 盘口抓取统一走单会话 hub 真实导航：暖首页 → `history.php` → 点 `亚指`/`欧指` 整页跳转 → 页内点 `大小球`/`凯利` tab，一次会话拿回四盘；已移除所有深链回退路径
 - 阻断检测现在同时覆盖文字风控页和滑块/图形验证页
+- 命中验证页后，当前入口路径会快速返回 `verification_required` 并停止本路径重试；同时会打开基于 `match_id + market_family` 的 TTL breaker，并在市场页访问前执行最小间隔节流，避免持续撞验证页
+- hub 链路在每次整页跳转后及解析完四盘后都做强阻断判定，任意盘口命中验证墙都会上抛顶层 `blocked` 触发熔断与换池重入，避免中途撞墙静默丢数据
 - 欧赔解析：优先 `multi_company_consensus`，`99家平均` 仅作为 fallback
 - 已验证样例：`la_liga / 埃尔切 vs 赫塔费 / MatchID=1302914` 可稳定拿到真实欧赔、亚值、大小球、凯利
 

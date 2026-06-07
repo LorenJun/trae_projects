@@ -181,13 +181,15 @@ python3 prediction_system.py refresh-repo-docs --json
 - 默认 no-cache 头与 cache-bust 参数
 - 公共设备池：`okooo_mobile_access.py` 统一维护，当前为 `500` 组 `iPhone Safari` profile，分布在多个 iPhone device pool 上
 - 联赛页定位已支持自动翻月、按日期分组抽取整天赛程、同日多场下按主客队精确锁定目标比赛
-- 正式主动访问的移动端 URL 只允许以下形态：
-  - 欧赔：`https://m.okooo.com/match/odds.php?MatchID=<external_match_id>`
-  - 亚值：`https://m.okooo.com/match/handicap.php?MatchID=<external_match_id>`
-  - 历史/赛果：`https://m.okooo.com/match/history.php?MatchID=<external_match_id>`
-  - `overunder.php` / `daxiao.php` 只作为大小球 fallback，不是默认主入口
+- 盘口抓取统一走单会话 hub 真实导航：暖首页 → 落地 hub 页 `history.php` → 点 `亚指`/`欧指` 整页跳转 → 页内点 `大小球`/`凯利` tab，一次会话拿回四盘；已移除所有深链回退路径
+- 各盘口落地页（由 hub 内点击导航到达，不直接深链）：
+  - hub 入口：`https://m.okooo.com/match/history.php?MatchID=<external_match_id>`
+  - 欧赔 / 凯利：`https://m.okooo.com/match/odds.php?MatchID=<external_match_id>`
+  - 亚值 / 大小球：`https://m.okooo.com/match/handicap.php?MatchID=<external_match_id>`（大小球为页内 tab）
+  - `overunder.php` / `daxiao.php` 是空页面，不作为来源
 - 当前阻断识别除了 `403/405` 文字页，也覆盖 `请进行验证 / 滑动到最右边 / 拖动滑块 / 验证码` 及 `canvas / verify iframe / 大图验证` 等图形验证页特征
-- 命中验证页后，当前入口路径会快速返回 `verification_required` 并停止本路径重试；随后会做 1 次 fresh mobile pool 重入，若仍失败则停止，不会无限打转
+- 命中验证页后，当前入口路径会快速返回 `verification_required` 并停止本路径重试；同时会打开基于 `match_id + market_family` 的 TTL breaker，并在市场页访问前执行最小间隔节流，避免持续撞验证页
+- hub 链路在每次整页跳转（→`handicap.php`、→`odds.php`）后及解析完四盘后都做强阻断判定，任意盘口命中验证墙都会把 `blocked` 上抛到顶层触发熔断与换池重入，避免中途撞墙被当成「没开盘」而静默丢数据
 
 如果本机默认浏览器或裸 `curl` 访问 `odds.php` 返回 `403/405`，不代表正式链不可用；优先确认是否绕过了公共访问策略。
 

@@ -50,12 +50,11 @@
 - `internal_match_id` 表示项目内部比赛键，可为 `league_YYYYMMDD_主队_客队`
 - `teams_match_id` 表示 SoT 行身份，通常与 canonical 内部比赛键一致
 - 访问澳客赔率页、历史页、快照页时，只允许使用纯数字 `external_match_id`
-- 正式链的主动访问入口统一通过 `runtime.match_ids.build_okooo_match_url()` 构造移动端 URL，不再允许手工拼接内部 `match_id`
+- 盘口抓取统一走单会话 hub 真实导航：暖首页 → 落地 hub 页 `history.php` → 点 `亚指`/`欧指` 整页跳转 → 页内点 `大小球`/`凯利` tab，一次会话拿回四盘；已移除所有深链回退路径
 - 当前正式移动端页面形态：
-  - 欧赔：`https://m.okooo.com/match/odds.php?MatchID=<external_match_id>`
-  - 亚值：`https://m.okooo.com/match/handicap.php?MatchID=<external_match_id>`
-  - 大小球 fallback：`https://m.okooo.com/match/overunder.php?MatchID=<external_match_id>`
-  - 历史/赛果：`https://m.okooo.com/match/history.php?MatchID=<external_match_id>`
+  - hub 入口（盘口导航起点）：`https://m.okooo.com/match/history.php?MatchID=<external_match_id>`
+  - 欧赔 / 凯利落地页（由 hub 点 `欧指` 跳转到达）：`https://m.okooo.com/match/odds.php?MatchID=<external_match_id>`
+  - 亚值 / 大小球落地页（由 hub 点 `亚指` 跳转到达，大小球为页内 tab）：`https://m.okooo.com/match/handicap.php?MatchID=<external_match_id>`
 
 当前链路已显式防御：
 
@@ -245,7 +244,8 @@ OKOOO_BROWSER_E2E=1 python3 -m unittest test_okooo_browser
 - 正式快照链默认走 `local-chrome`
 - 默认访问口径是 `iPhone Safari UA + Referer: https://m.okooo.com/`
 - 公共移动设备池由 `okooo_mobile_access.py` 统一维护，当前为 `500` 组 `iPhone Safari` profile，分布在多个 iPhone device pool 上
-- 命中验证页后，当前入口路径会快速返回 `verification_required` 并停止本路径重试；随后会做 1 次 fresh mobile pool 重入，若仍失败则停止，不会无限打转
+- 命中验证页后，当前入口路径会快速返回 `verification_required` 并停止本路径重试；同时会打开基于 `match_id + market_family` 的 TTL breaker，并在市场页访问前执行最小间隔节流，避免持续撞验证页
+- hub 链路在每次整页跳转（→`handicap.php`、→`odds.php`）后及解析完四盘后都做强阻断判定，任意盘口命中验证墙都会把 `blocked` 上抛到顶层触发熔断与换池重入，避免中途撞墙被当成「没开盘」而静默丢数据
 - 正式 `predict-match` 已验证可稳定拿到真实欧赔、亚值、大小球、凯利数据
 - `premier_league / 伯恩利 vs 狼队 / 2026-05-24 / MatchID=1296105` 已验证真实盘口回流后可修正最终预测方向
 

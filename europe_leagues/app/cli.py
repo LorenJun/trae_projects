@@ -16,6 +16,7 @@ import shutil
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 # 添加项目路径
 EUROPE_LEAGUES_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -102,6 +103,48 @@ def cleanup_invalid_schedule_cache_files(leagues=None, dates=None):
             deleted_files.append(str(file_path))
 
     return {"deleted_count": len(deleted_files), "deleted_files": deleted_files}
+
+
+FORMAL_LEAGUE_ALIASES = {}
+
+
+REFERENCE_ONLY_LEAGUE_ALIASES = {
+    "friendly": "friendly",
+    "friendlies": "friendly",
+    "international_friendly": "friendly",
+    "友谊赛": "friendly",
+}
+
+
+REFERENCE_ONLY_LEAGUE_DISPLAY_NAMES = {
+    "friendly": "友谊赛",
+}
+
+
+def normalize_formal_league_code(league_code: Optional[str]) -> str:
+    text = str(league_code or "").strip()
+    if not text:
+        return ""
+    return FORMAL_LEAGUE_ALIASES.get(text.lower(), FORMAL_LEAGUE_ALIASES.get(text, text))
+
+
+def normalize_reference_only_league_code(league_code: Optional[str]) -> str:
+    text = str(league_code or "").strip()
+    if not text:
+        return ""
+    return REFERENCE_ONLY_LEAGUE_ALIASES.get(text.lower(), REFERENCE_ONLY_LEAGUE_ALIASES.get(text, ""))
+
+
+def reference_only_league_display_name(league_code: Optional[str]) -> str:
+    canonical = normalize_reference_only_league_code(league_code)
+    return REFERENCE_ONLY_LEAGUE_DISPLAY_NAMES.get(canonical, str(league_code or "").strip())
+
+
+def is_reference_only_league_request(league_code: Optional[str]) -> bool:
+    text = str(league_code or "").strip()
+    if not text:
+        return False
+    return bool(normalize_reference_only_league_code(text))
 
 
 FORMAL_COMMANDS = (
@@ -649,6 +692,7 @@ def validate_leagues(league_code=None):
     from domain.predictor import LEAGUE_CONFIG
 
     if league_code:
+        league_code = normalize_formal_league_code(league_code)
         if league_code not in LEAGUE_CONFIG:
             raise ValueError(f"无效的联赛代码: {league_code}")
         return [league_code], LEAGUE_CONFIG
@@ -819,10 +863,24 @@ def run_openclaw_predict_match(args):
 
         predictor = DomainPredictor()
         ctx = load_analysis_context_file(getattr(args, "context_file", ""))
+        if not isinstance(ctx, dict):
+            ctx = {}
+        requested_league = str(getattr(args, "league", "") or "").strip()
+        reference_only = is_reference_only_league_request(requested_league)
+        resolved_league = normalize_formal_league_code(requested_league)
+        reference_only_code = normalize_reference_only_league_code(requested_league)
+        reference_only_name = reference_only_league_display_name(requested_league)
+        if reference_only:
+            ctx.setdefault("competition_type", "friendly")
+            ctx.setdefault("okooo_league_name_override", reference_only_name)
+            runtime_league_code = reference_only_code
+        else:
+            runtime_league_code = resolved_league
+        persist = not bool(getattr(args, "no_write", False)) and not reference_only
         result = predictor.predict_match(
             home_team=args.home_team,
             away_team=args.away_team,
-            league_code=args.league,
+            league_code=runtime_league_code,
             match_date=args.date,
             match_id=getattr(args, "match_id", "") or "",
             force_refresh_odds=not getattr(args, "no_refresh_odds", False),
@@ -831,12 +889,24 @@ def run_openclaw_predict_match(args):
             match_time=getattr(args, "match_time", "") or "",
             league_hint=getattr(args, "league_hint", None),
             analysis_context=ctx,
-            persist=not bool(getattr(args, "no_write", False)),
+            persist=persist,
         )
-        if args.no_write:
+        if not persist:
             result["persisted"] = {"enabled": False, "archived": False, "memory_updated": False}
         else:
             result.setdefault("persisted", {"enabled": True, "archived": False, "memory_updated": False})
+        if reference_only:
+            result["reference_only"] = True
+            result["league_code"] = reference_only_code
+            result["league_name"] = reference_only_name
+            result["league_request"] = requested_league
+            result["runtime_league_code"] = runtime_league_code
+            okooo_state = result.get("realtime", {}).get("okooo") if isinstance(result.get("realtime"), dict) else {}
+            if not str(result.get("match_id") or okooo_state.get("match_id") or "").strip():
+                result["reference_only_live_market_notice"] = {
+                    "reason": "friendly_match_requires_explicit_match_id_for_live_market",
+                    "message": "当前友谊赛缺少稳定的自动 match_id 来源；如需实时盘口，请显式提供 match_id。",
+                }
         result.setdefault("runtime_profile", get_command_runtime_profile("predict-match"))
         return result
 
@@ -986,11 +1056,40 @@ def run_openclaw_predict_schedule(args):
 
         if not str(getattr(args, "date", "") or "").strip():
             raise ValueError("predict-schedule 普通联赛模式必须传 --date")
-        leagues, league_config = validate_leagues(args.league)
-        predictor = DomainPredictor()
+        requested_league = str(getattr(args, "league", "") or "").strip()
         base_date = datetime.strptime(args.date, "%Y-%m-%d")
         updates = []
         runtime_profile = get_command_runtime_profile("predict-schedule")
+        reference_only = is_reference_only_league_request(requested_league)
+        if reference_only:
+            reference_only_code = normalize_reference_only_league_code(requested_league)
+            reference_only_name = reference_only_league_display_name(requested_league)
+            return {
+                "updates": [
+                    {
+                        "league": reference_only_code,
+                        "league_name": reference_only_name,
+                        "match_date": base_date.strftime("%Y-%m-%d"),
+                        "teams_file": None,
+                        "updated": False,
+                        "prediction_count": 0,
+                        "accuracy_refreshed": False,
+                        "persisted": {
+                            "enabled": False,
+                            "archived": False,
+                            "memory_updated": False,
+                            "result_sync_registered": False,
+                        },
+                        "schedule_source_status": "unsupported",
+                        "schedule_source_reason": "reference_only_schedule_unavailable",
+                        "runtime_profile": runtime_profile,
+                    }
+                ],
+                "schedule_cache_cleanup": {"deleted_count": 0, "deleted_files": []},
+            }
+        leagues, league_config = validate_leagues(requested_league)
+        predictor = DomainPredictor()
+        league_name_override = ""
         persist = not bool(getattr(args, "no_write", False))
         target_dates = [
             (base_date + timedelta(days=day_offset)).strftime("%Y-%m-%d")
@@ -1006,6 +1105,7 @@ def run_openclaw_predict_schedule(args):
                     match_date,
                     persist=persist,
                     write_teams=persist,
+                    league_name_override=league_name_override,
                 )
                 if isinstance(report, dict):
                     teams_file = report.get("teams_file")
@@ -1069,10 +1169,13 @@ def run_openclaw_collect_data(args):
     def _execute():
         from collectors.sporttery import DataCollector
 
+        if is_reference_only_league_request(args.league):
+            raise ValueError("友谊赛入口不支持 collect-data；请使用 predict-match 并显式提供上下文或 match_id。")
         collector = DataCollector()
-        matches = asyncio.run(collector.collect_league_data(args.league, args.date, use_cache=not args.no_cache))
+        league_code = normalize_formal_league_code(args.league)
+        matches = asyncio.run(collector.collect_league_data(league_code, args.date, use_cache=not args.no_cache))
         return {
-            "league": args.league,
+            "league": league_code,
             "date": args.date,
             "count": len(matches),
             "matches": [serialize_match_data(match) for match in matches],

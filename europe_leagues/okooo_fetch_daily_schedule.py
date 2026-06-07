@@ -28,6 +28,7 @@ def _league_code(league_cn: str) -> str:
         "德甲": "bundesliga",
         "法甲": "ligue_1",
         "世界杯": "world_cup",
+        "友谊赛": "friendly",
         "瑞超": "allsvenskan",
         "瑞典超": "allsvenskan",
         "挪超": "eliteserien",

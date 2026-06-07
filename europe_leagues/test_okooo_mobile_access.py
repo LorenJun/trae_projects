@@ -3,6 +3,7 @@ from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
 from okooo_mobile_access import available_mobile_profiles, cache_busted_okooo_url, mobile_headers, random_mobile_profile
+from runtime.okooo_access import open_okooo_verification_breaker, read_okooo_verification_breaker, wait_for_okooo_market_slot
 
 
 class OkoooMobileAccessTest(unittest.TestCase):
@@ -73,6 +74,27 @@ class OkoooMobileAccessTest(unittest.TestCase):
         se_profiles = [profile for profile in profiles if profile.device_pool_id == "iphone_se"]
         self.assertEqual(len(se_profiles), 100)
         self.assertGreater(len({profile.user_agent for profile in se_profiles}), 50)
+
+    def test_verification_breaker_opens_and_expires(self):
+        with patch("runtime.okooo_access.time.time", side_effect=[1000.0, 1000.0, 2001.0]):
+            opened = open_okooo_verification_breaker("/tmp/okooo_access_test", "1315851", "odds_family", ttl_seconds=10)
+            active = read_okooo_verification_breaker("/tmp/okooo_access_test", "1315851", "odds_family")
+            expired = read_okooo_verification_breaker("/tmp/okooo_access_test", "1315851", "odds_family")
+
+        self.assertEqual(opened["match_id"], "1315851")
+        self.assertTrue(active["open"])
+        self.assertFalse(expired["open"])
+
+    def test_wait_for_okooo_market_slot_returns_zero_when_no_wait_needed(self):
+        with patch("runtime.okooo_access._load_runtime_json", return_value={"last_access_at": 1000.0}), patch(
+            "runtime.okooo_access._save_runtime_json"
+        ), patch("runtime.okooo_access.time.time", side_effect=[1002.0, 1002.0]), patch(
+            "runtime.okooo_access.time.sleep"
+        ) as mock_sleep:
+            waited = wait_for_okooo_market_slot("/tmp/okooo_access_throttle")
+
+        self.assertEqual(waited, 0.0)
+        mock_sleep.assert_not_called()
 
 
 if __name__ == "__main__":

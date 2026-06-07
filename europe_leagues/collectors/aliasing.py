@@ -8,6 +8,7 @@ from typing import Dict, Optional
 from runtime.paths import get_default_paths
 
 LEAGUE_ALIAS_KEYS = {
+    'friendly': ('friendly', '友谊赛'),
     'europa_league': ('europa_league', '欧联', '欧罗巴'),
     'champions_league': ('champions_league', '欧冠'),
     'conference_league': ('conference_league', '欧协联'),

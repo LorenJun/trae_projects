@@ -39,6 +39,7 @@ LEAGUE_NAMES = {
     'bundesliga': '德甲联赛',
     'ligue_1': '法甲联赛',
     'la_liga': '西甲联赛',
+    'friendly': '友谊赛',
     'europa_league': '欧联',
     'champions_league': '欧冠',
     'conference_league': '欧协联',
@@ -51,6 +52,7 @@ LEAGUE_SHORT_NAMES = {
     'bundesliga': '德甲',
     'ligue_1': '法甲',
     'la_liga': '西甲',
+    'friendly': '友谊赛',
     'europa_league': '欧联',
     'champions_league': '欧冠',
     'conference_league': '欧协联',
@@ -58,12 +60,14 @@ LEAGUE_SHORT_NAMES = {
 }
 
 COMPETITION_ALIASES = {
+    'friendly': ('friendly', '友谊赛'),
     'europa_league': ('europa_league', '欧联', '欧罗巴'),
     'champions_league': ('champions_league', '欧冠'),
     'conference_league': ('conference_league', '欧协联'),
 }
 
 SNAPSHOT_DIR_ALIASES = {
+    'friendly': ('friendly', 'world_cup', '友谊赛'),
     'europa_league': ('europa_league', '欧联', '欧罗巴'),
     'champions_league': ('champions_league', '欧冠'),
     'conference_league': ('conference_league', '欧协联'),

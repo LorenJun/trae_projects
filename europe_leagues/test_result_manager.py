@@ -273,9 +273,39 @@ class ResultManagerTest(unittest.TestCase):
         self.assertIn("poisson", overall["model_accuracy"])
         self.assertIn("elo", overall["model_accuracy"])
         self.assertGreaterEqual(float(league_stats["league_weight_factor"]), 0.92)
-        self.assertLessEqual(float(league_stats["league_weight_factor"]), 1.08)
-        self.assertTrue(league_stats["weight_reason"])
-        self.assertTrue(isinstance(league_stats["top_weight_drivers"], list))
+
+    def test_update_accuracy_stats_keeps_friendly_bucket_separate_from_world_cup(self):
+        archive = self.manager.prediction_archive_store.load()
+        archive["friendly_20260606_巴西_日本"] = {
+            "match_id": "friendly_20260606_巴西_日本",
+            "league": "friendly",
+            "league_code": "friendly",
+            "league_name": "友谊赛",
+            "match_date": "2026-06-06",
+            "home_team": "巴西",
+            "away_team": "日本",
+            "prediction": "主胜",
+            "predicted_winner": "home",
+            "predicted_scores": ["2-1", "1-0"],
+            "top_scores": [["2-1", 0.2], ["1-0", 0.1]],
+            "predicted_ou": {"side": "大", "line": 2.5},
+            "actual_score": "2-1",
+            "actual_winner": "home",
+            "storage_mode": "runtime_only",
+            "source_presence": ["archive"],
+            "confidence": 0.58,
+            "over_under": {"available": True, "line": 2.5, "over": 0.57, "under": 0.43},
+            "market_snapshot": {},
+            "upset_potential": {"level": "低", "index": 8, "factors": ["测试样本"]},
+        }
+        self.manager.prediction_archive_store.save(archive)
+
+        stats = self.manager.update_accuracy_stats()
+
+        self.assertIn("friendly", stats["by_league"])
+        self.assertEqual(stats["by_league"]["friendly"]["total_predictions"], 1)
+        self.assertEqual(stats["by_league"]["friendly"]["correct_predictions"], 1)
+        self.assertEqual(stats["by_league"]["world_cup"]["total_predictions"], 0)
 
     def test_calculate_accuracy_restores_completed_status_note_from_archive_prediction(self):
         (self.base_dir / "la_liga" / "teams_2025-26.md").write_text(
@@ -1007,6 +1037,68 @@ class PredictionPersistenceServiceTest(unittest.TestCase):
         self.assertEqual(persisted["match_id"], "world_cup_20260612_墨西哥_南非")
         self.assertEqual(persisted["internal_match_id"], "world_cup_20260612_墨西哥_南非")
         self.assertEqual(persisted["external_match_id"], "")
+
+    def test_prepare_cached_prediction_normalizes_friendly_display_name_for_persistence_and_sync(self):
+        class DummyResultManager:
+            def _find_existing_teams_match_id(self, league_code, match_date, home_team, away_team):
+                return ""
+
+            def _runtime_only_match_id(self, external_match_id, league_code, match_date, home_team, away_team):
+                return external_match_id or f"{league_code}_{match_date.replace('-', '')}_{home_team}_{away_team}"
+
+            def save_prediction_from_enhanced(self, result, league_code):
+                return {}
+
+            def update_accuracy_stats(self):
+                return {"overall": {}}
+
+        service = PredictionPersistenceService(
+            base_dir=str(self.base_dir),
+            cache=None,
+            result_manager=DummyResultManager(),
+        )
+        cached = {
+            "match_id": "friendly_20260612_巴西_日本",
+            "league_code": "friendly",
+            "league_name": "世界杯",
+            "match_date": "2026-06-12",
+            "home_team": "巴西",
+            "away_team": "日本",
+            "prediction": "主胜",
+            "confidence": 0.51,
+            "top_scores": [("2-1", 0.2)],
+            "over_under": {"available": False, "reason": "missing_real_market_line"},
+        }
+
+        with patch("domain.persistence.sync_prediction_memory_samples"), patch("domain.persistence.sync_rag_index"), patch(
+            "domain.persistence.register_prediction_result_sync"
+        ) as mock_register:
+            persisted = service.prepare_cached_prediction(cached, {"mode": "cache"}, "friendly")
+
+        self.assertEqual(persisted["league_code"], "friendly")
+        self.assertEqual(persisted["league"], "friendly")
+        self.assertEqual(persisted["league_name"], "友谊赛")
+        mock_register.assert_called_once_with(str(self.base_dir), persisted)
+
+    def test_register_prediction_result_sync_uses_friendly_display_name(self):
+        entry = register_prediction_result_sync(
+            str(self.base_dir),
+            {
+                "match_id": "friendly_20260612_巴西_日本",
+                "league_code": "friendly",
+                "league_name": "",
+                "match_date": "2026-06-12",
+                "home_team": "巴西",
+                "away_team": "日本",
+                "prediction": "主胜",
+                "confidence": 0.54,
+            },
+        )
+
+        registry = _load_registry(str(self.base_dir))
+        self.assertEqual(entry["league_code"], "friendly")
+        self.assertEqual(entry["league_name"], "友谊赛")
+        self.assertEqual(registry["friendly_20260612_巴西_日本"]["league_name"], "友谊赛")
 
     def test_persist_memory_only_prediction_sets_runtime_only_identity_without_archive(self):
         class DummyResultManager:

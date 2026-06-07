@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 MATCH_DURATION_HOURS = 2
 RESULT_SYNC_DELAY_HOURS = 2
 DEFAULT_FALLBACK_KICKOFF = "23:59"
-FALLBACK_MATCH_ID_PREFIXES = ("premier_league_", "la_liga_", "serie_a_", "bundesliga_", "ligue_1_", "world_cup_")
+FALLBACK_MATCH_ID_PREFIXES = ("premier_league_", "la_liga_", "serie_a_", "bundesliga_", "ligue_1_", "world_cup_", "friendly_")
 
 LEAGUE_NAME_MAP = {
     "premier_league": "英超",
@@ -28,6 +28,7 @@ LEAGUE_NAME_MAP = {
     "serie_a": "意甲",
     "bundesliga": "德甲",
     "ligue_1": "法甲",
+    "friendly": "友谊赛",
     "europa_league": "欧联",
     "champions_league": "欧冠",
     "conference_league": "欧协联",

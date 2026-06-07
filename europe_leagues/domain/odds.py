@@ -18,6 +18,7 @@ from runtime.memory_samples import load_prediction_memory_samples
 logger = logging.getLogger(__name__)
 
 EXTERNAL_SNAPSHOT_DIR_ALIASES = {
+    'friendly': ['friendly', 'world_cup', '友谊赛'],
     'europa_league': ['europa_league', '欧联', '欧罗巴'],
     'champions_league': ['champions_league', '欧冠'],
     'conference_league': ['conference_league', '欧协联'],
@@ -208,6 +209,7 @@ def auto_fetch_okooo_totals_if_needed(
     okooo_headed: bool = False,
     match_time: str = '',
     match_id: str = '',
+    league_name_override: str = '',
 ) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
     diag: Dict[str, Any] = {'attempted': False, 'ok': False}
     enabled = os.environ.get('OKOOO_AUTO_TOTALS', '1').strip() not in ('0', 'false', 'False')
@@ -253,6 +255,7 @@ def auto_fetch_okooo_totals_if_needed(
                 headed=bool(okooo_headed),
                 match_time=match_time or '',
                 strict_identity=True,
+                league_name_override=league_name_override or '',
             )
             if not refreshed:
                 last_error = 'snapshot_not_found'

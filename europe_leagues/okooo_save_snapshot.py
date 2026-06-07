@@ -39,14 +39,42 @@ from okooo_mobile_access import (
     mobile_headers,
     random_mobile_profile,
 )
-from runtime.match_ids import build_okooo_match_url, require_external_match_id
-from runtime.okooo_access import is_okooo_blocked_text
+from runtime.okooo_access import (
+    is_okooo_blocked_text,
+    open_okooo_verification_breaker,
+    read_okooo_verification_breaker,
+    wait_for_okooo_market_slot,
+)
 
 REMEN_URL = "https://m.okooo.com/saishi/remen/"
 # Retry faster by default. For transient rendering issues we still retry, but
 # we avoid long fixed backoffs when the failure is clearly non-recoverable.
 RETRY_DELAYS = [0.6, 1.4, 3.0]
 CLICK_SETTLE_SECONDS = 2.5
+# Extra dwell on the handicap page after parsing 亚盘 and before clicking the
+# inner 大小球 tab, so the asian numbers settle and the tab switch is less likely
+# to look like rapid automated clicking.
+ASIAN_TO_TOTALS_DWELL_SECONDS = 2.0
+# Before a freshly-opened (cookie-less) session deep-links into a match odds page
+# (handicap.php / odds.php), first land on a shallow okooo page so cookies and a
+# natural referer are established. Cold browsers that request a deep odds page as
+# their very first navigation are the most obvious bot signal and get blocked.
+WARM_LANDING_URL = "https://m.okooo.com/"
+WARM_UP_DWELL_SECONDS = 2.0
+MARKET_FAMILY_ODDS = "odds_family"
+MARKET_FAMILY_ASIAN = "asian_family"
+MARKET_FAMILY_TOTALS = "totals_family"
+# Single shared breaker family for the all-markets hub session: when one warm
+# session pulls 欧赔/凯利/亚值/大小球 off the match hub page, a verification wall
+# blocks all of them at once, so they share one breaker key.
+MARKET_FAMILY_HUB = "hub_family"
+# Dwell after switching to each tab on the hub page before parsing, so the tab
+# content renders and the click cadence stays human-like.
+HUB_TAB_DWELL_SECONDS = 2.0
+# The hub (history.php) exposes 亚指/欧指 as real navigation links that load the
+# handicap.php / odds.php pages. Clicking them triggers a full page load, so we
+# wait longer than an in-page tab switch before parsing the destination.
+HUB_NAV_SETTLE_SECONDS = 3.5
 
 
 def _default_data_root() -> Path:
@@ -71,6 +99,8 @@ def _league_slug(league: str) -> str:
         "德甲": "bundesliga",
         "法甲": "ligue_1",
         "世界杯": "world_cup",
+        "友谊赛": "friendly",
+        "friendly": "friendly",
         "world_cup": "world_cup",
         "欧联": "europa_league",
         "欧罗巴": "europa_league",
@@ -92,12 +122,29 @@ def _normalize_okooo_league_name(league: str) -> str:
     text = (league or "").strip()
     mapping = {
         "world_cup": "世界杯",
+        "friendly": "友谊赛",
+        "friendlies": "友谊赛",
+        "international_friendly": "友谊赛",
+        "友谊赛": "友谊赛",
         "allsvenskan": "瑞典超",
         "eliteserien": "挪超",
         "veikkausliiga": "芬超",
         "瑞超": "瑞典超",
     }
     return mapping.get(text, text)
+
+
+SCHEDULE_PAGE_LEAGUE_SLUGS = {
+    "premier_league",
+    "la_liga",
+    "serie_a",
+    "bundesliga",
+    "ligue_1",
+}
+
+
+def _prefers_online_team_search(league: str) -> bool:
+    return _mobile_league_url(league) is None
 
 
 def _now_stamp() -> str:
@@ -574,16 +621,21 @@ def _find_match_id_via_online_search(
 def _team_aliases(alias_table: Dict[str, Any], league: str, team_name: str) -> list[str]:
     if not team_name:
         return []
+    league_slug = _league_slug(league)
     league_keys = [
         str(league or "").strip(),
-        _league_slug(league),
+        league_slug,
     ]
-    if _league_slug(league) == "europa_league":
+    if league_slug == "europa_league":
         league_keys.extend(["欧联", "欧罗巴"])
-    elif _league_slug(league) == "champions_league":
+    elif league_slug == "champions_league":
         league_keys.extend(["欧冠"])
-    elif _league_slug(league) == "conference_league":
+    elif league_slug == "conference_league":
         league_keys.extend(["欧协联"])
+    elif league_slug == "world_cup":
+        league_keys.extend(["世界杯"])
+    elif league_slug == "friendly":
+        league_keys.extend(["友谊赛"])
 
     out = [team_name]
     if isinstance(alias_table, dict):
@@ -593,7 +645,18 @@ def _team_aliases(alias_table: Dict[str, Any], league: str, team_name: str) -> l
             for a in aliases or []:
                 if a and isinstance(a, str):
                     out.append(a)
-    # De-dup while preserving order.
+        if league_slug in ("world_cup", "friendly"):
+            for league_key, league_map in alias_table.items():
+                if not isinstance(league_map, dict):
+                    continue
+                for canonical_name, aliases in league_map.items():
+                    alias_values = aliases if isinstance(aliases, list) else []
+                    names = [str(canonical_name or "").strip()] + [str(item or "").strip() for item in alias_values]
+                    if str(team_name).strip() not in names:
+                        continue
+                    for item in names:
+                        if item:
+                            out.append(item)
     seen = set()
     uniq = []
     for x in out:
@@ -1349,6 +1412,56 @@ def _is_blocked_text(text: str) -> bool:
     return is_okooo_blocked_text(text)
 
 
+def _page_blocked_now(bu: BrowserUse) -> bool:
+    """Strong in-page verification-wall check for use mid-flow.
+
+    The per-market 亚盘/大小球/凯利 parsers only detect the literal "访问被阻断"
+    text and a "405" title, so a slider/captcha/geetest wall that appears after
+    an in-page navigation would be misread as "no data". This mirrors the rich
+    detection used by _open_ready (wall text + slider/captcha keywords + verify
+    iframe/canvas/large image) so a mid-flow wall is caught and propagated.
+    """
+    try:
+        result = bu.eval_json(
+            r"""
+(() => {
+  const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+  const bodyText = norm(document.body?.innerText || '');
+  const html = String(document.documentElement?.outerHTML || '');
+  const title = String(document.title || '');
+  const hasVerifyIframe = Array.from(document.querySelectorAll('iframe')).some((el) => {
+    const attrs = `${el.id || ''} ${el.className || ''} ${el.src || ''}`.toLowerCase();
+    return /(verify|captcha|geetest|aliyun|nc_|vcode)/.test(attrs);
+  });
+  const hasVerifyImage = Array.from(document.querySelectorAll('img')).some((el) => {
+    const attrs = `${el.id || ''} ${el.className || ''} ${el.src || ''} ${el.alt || ''}`.toLowerCase();
+    const width = Number(el.naturalWidth || el.width || 0);
+    const height = Number(el.naturalHeight || el.height || 0);
+    return /(verify|captcha|geetest|aliyun|slider|nc_)/.test(attrs) && Math.max(width, height) >= 200;
+  });
+  const blocked = [
+    '访问被阻断',
+    '安全威胁',
+    '您的访问被阻断',
+    '请进行验证',
+    '滑动到最右边',
+    '拖动滑块',
+    '请按住滑块',
+    '验证码'
+  ].some((marker) => bodyText.includes(marker) || title.includes(marker))
+    || title.includes('405')
+    || (html.includes('<canvas') && /(verify|captcha|geetest|aliyun|nc_|slider)/i.test(html))
+    || hasVerifyIframe
+    || hasVerifyImage;
+  return JSON.stringify({blocked});
+})()
+"""
+        )
+    except Exception:
+        return False
+    return bool(isinstance(result, dict) and result.get("blocked"))
+
+
 def _mobile_profile_meta(profile: Any) -> Dict[str, Any]:
     if not isinstance(profile, OkoooMobileProfile):
         return {}
@@ -1490,7 +1603,32 @@ def _pick_preferred_europe_result(*candidates: Dict[str, Any]) -> Dict[str, Any]
     return best or {}
 
 
+def _warm_up_session(bu: BrowserUse) -> None:
+    """Land on a shallow okooo page once per session before deep-linking.
+
+    A freshly created browser has no cookies; navigating straight to a deep
+    odds page (handicap.php / odds.php) as the very first request is the most
+    obvious automation signal and reliably trips okooo's verification wall.
+    Opening the mobile home page first lets cookies and a natural navigation
+    history settle, mimicking a real user who browses in before viewing odds.
+    Guarded by a per-session flag so repeated _open_ready calls within the same
+    session (e.g. tab switches) do not re-warm.
+    """
+    if getattr(bu, "_okooo_warmed", False):
+        return
+    try:
+        bu.open(WARM_LANDING_URL)
+        time.sleep(WARM_UP_DWELL_SECONDS)
+    except Exception:
+        pass
+    try:
+        setattr(bu, "_okooo_warmed", True)
+    except Exception:
+        pass
+
+
 def _open_ready(bu: BrowserUse, url: str, settle_seconds: float = 2.5) -> str:
+    _warm_up_session(bu)
     bu.open(url)
     time.sleep(settle_seconds)
     try:
@@ -1554,7 +1692,8 @@ def _mobile_league_url(league: str) -> str | None:
         "西甲": "https://m.okooo.com/saishi/8/",
         "德甲": "https://m.okooo.com/saishi/35/",
         "法甲": "https://m.okooo.com/saishi/34/",
-        "世界杯": "https://m.okooo.com/saishi/772/",
+        "世界杯": "https://m.okooo.com/saishi/16/",
+        "友谊赛": "https://m.okooo.com/saishi/851/",
         "欧冠": "https://m.okooo.com/saishi/7/",
         "欧联": "https://m.okooo.com/saishi/679/",
         "欧罗巴": "https://m.okooo.com/saishi/679/",
@@ -1618,7 +1757,13 @@ def _parse_europe_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
     || (html.includes('<canvas') && /(verify|captcha|geetest|aliyun|nc_|slider)/i.test(html))
     || hasVerifyIframe
     || hasVerifyImage;
-  if (blocked) return JSON.stringify({blocked:true});
+  // Tighten the verification verdict: a real odds.php view is dense with x.xx
+  // odds numbers. Right after navigating from the hub the 欧赔 table can flash a
+  // transient view that trips a verification keyword without the page actually
+  // being walled. Only treat it as blocked when the verification signal fires
+  // AND the page lacks a meaningful amount of odds data.
+  const oddsHits = (bodyText.match(/\d{1,2}\.\d{2}/g) || []).length;
+  if (blocked && oddsHits < 6) return JSON.stringify({blocked:true});
   const body = document.body?.innerText || '';
   const lines = body.split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
   const compact = body.replace(/\s+/g, ' ').trim();
@@ -2475,243 +2620,6 @@ def _parse_kelly_anywhere_on_page(bu: BrowserUse) -> Dict[str, Any]:
     return bu.eval_json(js)
 
 
-def _parse_desktop_avg_row(row_cells: list[str]) -> Dict[str, Any]:
-    def pick_triplet(idx: int) -> dict[str, float | None] | None:
-        if idx >= len(row_cells):
-            return None
-        cell = (row_cells[idx] or "").strip()
-        if not cell:
-            return None
-        nums = [float(x) for x in re.findall(r"\d{1,2}\.\d{2}", cell)]
-        if len(nums) >= 3:
-            return {"home": nums[0], "draw": nums[1], "away": nums[2]}
-        return None
-
-    def pick_float(idx: int) -> float | None:
-        if idx >= len(row_cells):
-            return None
-        match = re.search(r"\d+\.\d+", row_cells[idx] or "")
-        if not match:
-            return None
-        return float(match.group(0))
-
-    # Desktop okooo odds row layout observed:
-    # [0]序号 [1]公司 [2:5]初赔 [5:8]即时 [8]变化图 [9:12]概率 [12:15]凯利 [15]赔付率
-    compact_initial = pick_triplet(1)
-    compact_final = pick_triplet(2)
-    if compact_initial and compact_final:
-        initial = compact_initial
-        final = compact_final
-    else:
-        initial = {"home": pick_float(2), "draw": pick_float(3), "away": pick_float(4)}
-        final = {"home": pick_float(5), "draw": pick_float(6), "away": pick_float(7)}
-    kelly = {"home": pick_float(12), "draw": pick_float(13), "away": pick_float(14)}
-    payout_rate = pick_float(15)
-    delta = {
-        "home": None if initial["home"] is None or final["home"] is None else round(final["home"] - initial["home"], 4),
-        "draw": None if initial["draw"] is None or final["draw"] is None else round(final["draw"] - initial["draw"], 4),
-        "away": None if initial["away"] is None or final["away"] is None else round(final["away"] - initial["away"], 4),
-    }
-    return {
-        "found": True,
-        "initial": initial,
-        "final": final,
-        "delta": delta,
-        "kelly": kelly,
-        "payout_rate": payout_rate,
-        "_row_cells": row_cells,
-    }
-
-
-def _parse_desktop_europe_rows(rows: list[list[str]]) -> Dict[str, Any]:
-    alias_map = {
-        "bet365": "Bet365",
-        "皇冠": "皇冠",
-        "pinnacle": "Pinnacle",
-        "平博": "平博",
-        "sbobet": "SBOBET",
-        "12bet": "12BET",
-        "易胜博": "易胜博",
-        "威廉.希尔": "威廉希尔",
-        "威廉希尔": "威廉希尔",
-        "立博": "立博",
-        "bwin": "Bwin",
-        "interwetten": "Interwetten",
-        "伟德": "伟德",
-        "韦德": "伟德",
-        "香港马会": "香港马会",
-        "澳门彩票": "澳门彩票",
-        "澳门": "澳门彩票",
-        "明陞": "明陞",
-        "利记": "利记",
-    }
-    priority = {
-        "Bet365": 9,
-        "皇冠": 8,
-        "Pinnacle": 8,
-        "澳门彩票": 7,
-        "易胜博": 6,
-        "威廉希尔": 6,
-        "立博": 5,
-        "Interwetten": 4,
-        "Bwin": 4,
-        "平博": 4,
-        "SBOBET": 4,
-        "12BET": 4,
-        "伟德": 3,
-        "香港马会": 3,
-        "明陞": 3,
-        "利记": 3,
-    }
-
-    def normalize_company(text: str) -> str | None:
-        s = (text or "").strip()
-        s = s.split(" ")[0]
-        s = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff\.]", "", s)
-        low = s.lower()
-        for alias, norm in alias_map.items():
-            if alias in low or alias in s:
-                return norm
-        return None
-
-    def pick_float(cells: list[str], idx: int) -> float | None:
-        if idx >= len(cells):
-            return None
-        match = re.search(r"\d+\.\d+", cells[idx] or "")
-        if not match:
-            return None
-        try:
-            return float(match.group(0))
-        except Exception:
-            return None
-
-    def median(vals: list[float]) -> float | None:
-        arr = sorted(v for v in vals if isinstance(v, (int, float)))
-        if not arr:
-            return None
-        mid = len(arr) // 2
-        if len(arr) % 2:
-            return float(arr[mid])
-        return float((arr[mid - 1] + arr[mid]) / 2.0)
-
-    def weighted_avg(items: list[dict], getter) -> float | None:
-        total = 0.0
-        total_w = 0.0
-        for item in items:
-            v = getter(item)
-            w = float(item.get("_priority") or 1.0)
-            if v is None:
-                continue
-            total += float(v) * w
-            total_w += w
-        return round(total / total_w, 4) if total_w > 0 else None
-
-    def near(v: float | None, med: float | None, pct: float) -> bool:
-        if v is None or med is None or med <= 0:
-            return False
-        return abs(float(v) - med) / med <= pct
-
-    seen: set[tuple[Any, ...]] = set()
-    candidates: list[dict[str, Any]] = []
-    for cells in rows or []:
-        if len(cells) < 8:
-            continue
-        company = normalize_company(cells[1] if len(cells) > 1 else "")
-        if not company:
-            continue
-        initial = {"home": pick_float(cells, 2), "draw": pick_float(cells, 3), "away": pick_float(cells, 4)}
-        final = {"home": pick_float(cells, 5), "draw": pick_float(cells, 6), "away": pick_float(cells, 7)}
-        vals = [initial["home"], initial["draw"], initial["away"], final["home"], final["draw"], final["away"]]
-        if any(v is None or v <= 1.01 or v >= 80 for v in vals):
-            continue
-        key = (
-            company,
-            round(float(initial["home"]), 4),
-            round(float(initial["draw"]), 4),
-            round(float(initial["away"]), 4),
-            round(float(final["home"]), 4),
-            round(float(final["draw"]), 4),
-            round(float(final["away"]), 4),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        candidates.append(
-            {
-                "company": company,
-                "initial": initial,
-                "final": final,
-                "delta": {
-                    "home": round(float(final["home"]) - float(initial["home"]), 4),
-                    "draw": round(float(final["draw"]) - float(initial["draw"]), 4),
-                    "away": round(float(final["away"]) - float(initial["away"]), 4),
-                },
-                "_priority": priority.get(company, 1),
-                "_row_cells": cells,
-            }
-        )
-
-    if not candidates:
-        return {"found": False}
-
-    med_home = median([float(x["final"]["home"]) for x in candidates])
-    med_draw = median([float(x["final"]["draw"]) for x in candidates])
-    med_away = median([float(x["final"]["away"]) for x in candidates])
-    filtered = [
-        x
-        for x in candidates
-        if near(x["final"]["home"], med_home, 0.22)
-        and near(x["final"]["draw"], med_draw, 0.28)
-        and near(x["final"]["away"], med_away, 0.28)
-    ]
-    if not filtered:
-        filtered = candidates
-
-    initial = {
-        "home": weighted_avg(filtered, lambda x: x["initial"]["home"]),
-        "draw": weighted_avg(filtered, lambda x: x["initial"]["draw"]),
-        "away": weighted_avg(filtered, lambda x: x["initial"]["away"]),
-    }
-    final = {
-        "home": weighted_avg(filtered, lambda x: x["final"]["home"]),
-        "draw": weighted_avg(filtered, lambda x: x["final"]["draw"]),
-        "away": weighted_avg(filtered, lambda x: x["final"]["away"]),
-    }
-    filtered_names = [x["company"] for x in sorted(filtered, key=lambda x: (-int(x["_priority"]), x["company"]))]
-    all_names = [x["company"] for x in sorted(candidates, key=lambda x: (-int(x["_priority"]), x["company"]))]
-    return {
-        "found": True,
-        "parsed": True,
-        "company": filtered_names[0] if filtered_names else "",
-        "company_mode": "multi_company_consensus" if len(filtered) > 1 else "single_company",
-        "initial": initial,
-        "final": final,
-        "delta": {
-            "home": None if initial["home"] is None or final["home"] is None else round(float(final["home"]) - float(initial["home"]), 4),
-            "draw": None if initial["draw"] is None or final["draw"] is None else round(float(final["draw"]) - float(initial["draw"]), 4),
-            "away": None if initial["away"] is None or final["away"] is None else round(float(final["away"]) - float(initial["away"]), 4),
-        },
-        "consensus": {
-            "mode": "multi_company_consensus" if len(filtered) > 1 else "single_company",
-            "company_count": len(candidates),
-            "filtered_company_count": len(filtered),
-            "companies": filtered_names,
-            "all_companies": all_names,
-            "final_median": {"home": med_home, "draw": med_draw, "away": med_away},
-        },
-        "companies": [
-            {
-                "company": x["company"],
-                "initial": x["initial"],
-                "final": x["final"],
-                "delta": x["delta"],
-                "_row_cells": x["_row_cells"],
-            }
-            for x in sorted(candidates, key=lambda x: (-int(x["_priority"]), x["company"]))
-        ],
-    }
-
-
 def _find_match_id(
     bu: Any,
     league: str,
@@ -2722,6 +2630,17 @@ def _find_match_id(
     alias_table: Dict[str, Any] | None = None,
     strict_identity: bool = False,
 ) -> Dict[str, Any]:
+    online_search_only = _prefers_online_team_search(league)
+    if online_search_only:
+        online = _find_match_id_via_online_search(
+            league=league,
+            team1=team1,
+            team2=team2,
+            alias_table=alias_table or {},
+        )
+        if isinstance(online, dict) and online.get("match_id"):
+            return online
+
     def find_rows_in_section(date_hint_current: str, time_hint_current: str) -> Dict[str, Any]:
         return _find_rows_in_date_section(
             bu,
@@ -2864,7 +2783,7 @@ def _find_match_id(
     if (not isinstance(found, dict) or not found.get("rows")) and time_hint and not strict_identity:
         found = search_with_candidates(relax_time=True)
     if not isinstance(found, dict) or not found.get("rows"):
-        if not strict_identity:
+        if not strict_identity or online_search_only:
             cached = _find_match_id_from_schedule_cache(
                 league=league,
                 team1=team1,
@@ -2883,6 +2802,8 @@ def _find_match_id(
             if isinstance(online, dict) and online.get("match_id"):
                 return online
     if not isinstance(found, dict) or not found.get("rows"):
+        if online_search_only:
+            raise RuntimeError(f"未通过球队搜索或赛程缓存找到 {team1} 和 {team2} 的比赛ID")
         raise RuntimeError(f"未在联赛赛程中找到包含 {team1} 和 {team2} 的比赛行(可尝试补充别名/时间)")
 
     best = found.get("_best_row") if isinstance(found.get("_best_row"), dict) else _select_best_schedule_row(
@@ -2897,223 +2818,109 @@ def _find_match_id(
     return {"match_id": best["mid"], "schedule_row": best}
 
 
-def _extract_europe(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    match_id = require_external_match_id(match_id, field_name="external_match_id")
-    url = build_okooo_match_url("odds", match_id)
-    state_text = _open_ready(bu, url, settle_seconds=3.0)
-    if _is_blocked_text(state_text):
-        return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
-    data = _parse_europe_on_current_page(bu)
-    data["url"] = url
-    return data
+def _extract_all_markets_from_hub(bu: BrowserUse, history_url: str) -> Dict[str, Any]:
+    """One warm session, real in-page navigation: pull all four markets.
 
+    The per-match hub (history.php?MatchID=...) is a stats page, not an odds
+    page: it exposes 亚指 and 欧指 as real navigation links. Clicking 亚指 loads
+    handicap.php (亚盘 + an inner 大小球 tab); clicking 欧指 loads odds.php (欧赔
+    + an inner 凯利 tab). Doing this inside one warm session mimics a real user
+    landing on the match page and tabbing between markets, which keeps cookies
+    and referer chains intact and avoids the cold deep-link that trips okooo's
+    verification wall.
 
-def _extract_asian(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    match_id = require_external_match_id(match_id, field_name="external_match_id")
-    url = build_okooo_match_url("handicap", match_id)
-    state_text = _open_ready(bu, url, settle_seconds=3.0)
-    if _is_blocked_text(state_text):
-        return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
-    data = _parse_asian_on_current_page(bu)
-    data["url"] = url
-    return data
-
-
-def _extract_totals_from_asian_page(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    """Extract totals from the mobile asian-handicap page's inner '大小球' tab.
-
-    User-provided evidence shows O/U is nested under the 亚值 page instead of
-    always being exposed as a dedicated mobile path.
+    Returns a bundle dict keyed by market; on a verification wall it returns a
+    single blocked payload that the caller maps onto every market.
     """
-    match_id = require_external_match_id(match_id, field_name="external_match_id")
-    url = build_okooo_match_url("handicap", match_id)
-    state_text = _open_ready(bu, url, settle_seconds=3.0)
-    if _is_blocked_text(state_text):
-        return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
-
-    # First click the nested tab on the asian page.
-    click_result = _click_visible_text(bu, ["大小球", "大/小", "总进球"], settle_seconds=CLICK_SETTLE_SECONDS)
-    data = _parse_totals_on_current_page(bu)
-    data["url"] = url
-    data["_flow"] = "asian_inner_tab"
-    data["_click"] = click_result
-    return data
-
-
-def _extract_totals(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    match_id = require_external_match_id(match_id, field_name="external_match_id")
-    # Prefer the mobile asian page's inner "大小球" tab. This matches the actual
-    # UI observed in recent screenshots and is more reliable than guessing a
-    # standalone totals route.
-    data0 = _extract_totals_from_asian_page(bu, match_id)
-    if data0.get("found"):
-        return data0
-
-    # Fallback: dedicated totals page if available on mobile.
-    # Some setups route to /overunder.php, others to /daxiao.php; try first path.
-    primary = build_okooo_match_url("overunder", match_id)
-    state_text = _open_ready(bu, primary, settle_seconds=3.0)
-    if _is_blocked_text(state_text):
-        return {"blocked": True, "url": primary, "_state_excerpt": state_text[:500]}
-    data = _parse_totals_on_current_page(bu)
-    if data.get("found"):
-        data["url"] = primary
-        return data
-
-    alt = build_okooo_match_url("daxiao", match_id)
-    state_text2 = _open_ready(bu, alt, settle_seconds=3.0)
-    if _is_blocked_text(state_text2):
-        return {"blocked": True, "url": alt, "_state_excerpt": state_text2[:500]}
-    data2 = _parse_totals_on_current_page(bu)
-    data2["url"] = alt
-    return data2
-
-
-def _extract_kelly_from_odds_tab(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    # Prefer tab navigation because direct kelly.php is sometimes blocked.
-    match_id = require_external_match_id(match_id, field_name="external_match_id")
-    url = build_okooo_match_url("odds", match_id)
-    state_text = _open_ready(bu, url, settle_seconds=3.0)
-    if _is_blocked_text(state_text):
-        return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
-
-    click_result = _click_visible_text(bu, ["凯利", "凯利指数"], settle_seconds=CLICK_SETTLE_SECONDS)
-
-    # Give the tab content a moment to render (especially on local-chrome/CDP).
-    time.sleep(2.0)
-    data = _parse_kelly_on_current_page(bu)
-    if isinstance(data, dict) and data.get("found") is False:
-        data = _parse_kelly_anywhere_on_page(bu)
-    data["url"] = url
-    data["_click"] = click_result
-    return data
-
-
-def _extract_kelly_direct(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    match_id = require_external_match_id(match_id, field_name="external_match_id")
-    url = build_okooo_match_url("kelly", match_id)
-    state_text = _open_ready(bu, url, settle_seconds=3.0)
-    if _is_blocked_text(state_text):
-        return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
-    data = _parse_kelly_on_current_page(bu)
-    if isinstance(data, dict) and data.get("found") is False:
-        data = _parse_kelly_anywhere_on_page(bu)
-    data["url"] = url
-    return data
-
-
-def _extract_europe_from_history_flow(bu: BrowserUse, history_url: str) -> Dict[str, Any]:
     state_text = _open_ready(bu, history_url, settle_seconds=3.0)
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": history_url, "_state_excerpt": state_text[:500]}
-    click_result = _click_visible_text(bu, ["欧赔", "欧指", "赔率"])
-    data = _parse_europe_on_current_page(bu)
-    data["url"] = history_url
-    data["_flow"] = "history_tab"
-    data["_click"] = click_result
-    return data
 
+    def _cur_url() -> str:
+        try:
+            return str(bu.eval_json("(() => JSON.stringify({u: location.href}))()").get("u") or "")
+        except Exception:
+            return ""
 
-def _extract_asian_from_history_flow(bu: BrowserUse, history_url: str) -> Dict[str, Any]:
-    state_text = _open_ready(bu, history_url, settle_seconds=3.0)
-    if _is_blocked_text(state_text):
-        return {"blocked": True, "url": history_url, "_state_excerpt": state_text[:500]}
-    click_result = _click_visible_text(bu, ["亚盘", "亚值", "让球"])
-    data = _parse_asian_on_current_page(bu)
-    data["url"] = history_url
-    data["_flow"] = "history_tab"
-    data["_click"] = click_result
-    return data
+    # 1) 亚指 nav link -> handicap.php. Parse 亚盘, then the inner 大小球 tab.
+    asian_click = _click_visible_text(bu, ["亚指", "亚盘", "亚值"], settle_seconds=HUB_NAV_SETTLE_SECONDS)
+    asian_url = _cur_url()
+    if _page_blocked_now(bu):
+        return {"blocked": True, "url": asian_url or history_url, "_blocked_at": "hub_nav_yazhi"}
+    asian = _parse_asian_on_current_page(bu)
+    asian["url"] = asian_url or history_url
+    asian["_flow"] = "hub_nav_yazhi"
+    asian["_click"] = asian_click
 
+    time.sleep(ASIAN_TO_TOTALS_DWELL_SECONDS)
+    totals_click = _click_visible_text(bu, ["大小球", "大/小", "总进球"], settle_seconds=CLICK_SETTLE_SECONDS)
+    totals = _parse_totals_on_current_page(bu)
+    totals["url"] = _cur_url() or asian_url or history_url
+    totals["_flow"] = "hub_nav_yazhi_inner"
+    totals["_click"] = totals_click
 
-def _extract_totals_from_history_flow(bu: BrowserUse, history_url: str) -> Dict[str, Any]:
-    state_text = _open_ready(bu, history_url, settle_seconds=3.0)
-    if _is_blocked_text(state_text):
-        return {"blocked": True, "url": history_url, "_state_excerpt": state_text[:500]}
-    click_result = _click_visible_text(bu, ["大小球", "大小", "大/小", "总进球"])
-    data = _parse_totals_on_current_page(bu)
-    data["url"] = history_url
-    data["_flow"] = "history_tab"
-    data["_click"] = click_result
-    return data
+    # 2) Back to hub, then 欧指 nav link -> odds.php. Parse 欧赔, then 凯利 tab.
+    _open_ready(bu, history_url, settle_seconds=2.0)
+    europe_click = _click_visible_text(bu, ["欧指", "欧赔", "赔率"], settle_seconds=HUB_NAV_SETTLE_SECONDS)
+    europe_url = _cur_url()
+    if _page_blocked_now(bu):
+        return {"blocked": True, "url": europe_url or history_url, "_blocked_at": "hub_nav_ouzhi"}
+    # 欧赔 sometimes renders a transient/empty view right after navigation, which
+    # the parser's blocked-keyword heuristics can misread as a verification wall.
+    # Explicitly click the 欧赔/初赔 main tab to force the odds table to render,
+    # then re-parse after a short settle and keep the better-scored result.
+    europe = _parse_europe_on_current_page(bu)
+    if not _is_success_payload(europe) or _score_europe_payload(europe) < (3, 2, 2):
+        europe_tab_click = _click_visible_text(bu, ["欧赔", "初赔", "欧指"], settle_seconds=CLICK_SETTLE_SECONDS)
+        time.sleep(HUB_TAB_DWELL_SECONDS)
+        europe_retry = _parse_europe_on_current_page(bu)
+        europe = _pick_preferred_europe_result(europe, europe_retry)
+        europe["_tab_click"] = europe_tab_click
+    europe["url"] = europe_url or history_url
+    europe["_flow"] = "hub_nav_ouzhi"
+    europe["_click"] = europe_click
 
+    kelly_click = _click_visible_text(bu, ["凯利", "凯利指数"], settle_seconds=CLICK_SETTLE_SECONDS)
+    kelly = _parse_kelly_on_current_page(bu)
+    if isinstance(kelly, dict) and kelly.get("found") is False:
+        kelly = _parse_kelly_anywhere_on_page(bu)
+    kelly["url"] = _cur_url() or europe_url or history_url
+    kelly["_flow"] = "hub_nav_ouzhi_inner"
+    kelly["_click"] = kelly_click
 
-def _extract_kelly_from_history_flow(bu: BrowserUse, history_url: str) -> Dict[str, Any]:
-    state_text = _open_ready(bu, history_url, settle_seconds=3.0)
-    if _is_blocked_text(state_text):
-        return {"blocked": True, "url": history_url, "_state_excerpt": state_text[:500]}
-    click_result = _click_visible_text(bu, ["凯利"])
-    data = _parse_kelly_on_current_page(bu)
-    data["url"] = history_url
-    data["_flow"] = "history_tab"
-    data["_click"] = click_result
-    return data
+    # If any per-market parser hit a verification wall mid-flow, escalate to a
+    # top-level blocked payload so _run_with_retries opens the breaker and the
+    # verification-reentry (fresh device pool) path can recover. Without this the
+    # wall would be silently swallowed as "no data" and four markets returned empty.
+    blocked_markets = [
+        name
+        for name, payload in (("asian", asian), ("totals", totals), ("europe", europe), ("kelly", kelly))
+        if isinstance(payload, dict) and payload.get("blocked")
+    ]
+    if blocked_markets:
+        return {
+            "blocked": True,
+            "url": history_url,
+            "_blocked_at": ",".join(blocked_markets),
+            "europe": europe,
+            "kelly": kelly,
+            "asian": asian,
+            "totals": totals,
+        }
 
-
-def _extract_europe_mobile_alt(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    match_id = require_external_match_id(match_id, field_name="external_match_id")
-    url = build_okooo_match_url("odds", match_id)
-    state_text = _open_ready(bu, url, settle_seconds=4.0)
-    if _is_blocked_text(state_text):
-        return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
-    row_info = bu.eval_json(
-        r"""
-(() => {
-  const rows=[...document.querySelectorAll('tr')];
-  const out = [];
-  for (const row of rows) {
-    const tds=[...row.querySelectorAll('td')].map(td=>(td.innerText||'').replace(/\s+/g,' ').trim());
-    if (tds.length >= 8) out.push(tds);
-  }
-  const avg=rows.find(r=>(r.innerText||'').includes('99家平均'));
-  const avg_tds = avg ? [...avg.querySelectorAll('td')].map(td=>(td.innerText||'').replace(/\s+/g,' ').trim()) : [];
-  return JSON.stringify({found: out.length > 0 || avg_tds.length > 0, rows: out, avg_tds});
-})()
-"""
-    )
-    row_data = _parse_desktop_europe_rows(row_info.get("rows") or [])
-    body_data = _parse_europe_on_current_page(bu)
-    avg_data: Dict[str, Any] = {}
-    if row_info.get("avg_tds"):
-        avg_data = _parse_desktop_avg_row(row_info["avg_tds"])
-        avg_data.setdefault("parsed", True)
-        avg_data.setdefault("company", "99家平均")
-        avg_data.setdefault("company_mode", "average_row_fallback")
-        avg_data.setdefault(
-            "consensus",
-            {"mode": "average_row_fallback", "company_count": 0, "filtered_company_count": 0, "companies": [], "all_companies": []},
-        )
-        avg_data.setdefault("companies", [])
-    data = _pick_preferred_europe_result(row_data, body_data, avg_data)
-    if not data:
-        data = avg_data or body_data or row_data or {"found": False}
-    data["url"] = url
-    data["_flow"] = "mobile_direct_alt"
-    return data
-
-
-def _extract_asian_mobile_alt(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    match_id = require_external_match_id(match_id, field_name="external_match_id")
-    url = build_okooo_match_url("handicap", match_id)
-    state_text = _open_ready(bu, url, settle_seconds=4.0)
-    if _is_blocked_text(state_text):
-        return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
-    data = _parse_asian_on_current_page(bu)
-    data["url"] = url
-    data["_flow"] = "mobile_direct_alt"
-    return data
-
-
-def _extract_totals_mobile_alt(bu: BrowserUse, match_id: str) -> Dict[str, Any]:
-    match_id = require_external_match_id(match_id, field_name="external_match_id")
-    url = build_okooo_match_url("overunder", match_id)
-    state_text = _open_ready(bu, url, settle_seconds=4.0)
-    if _is_blocked_text(state_text):
-        return {"blocked": True, "url": url, "_state_excerpt": state_text[:500]}
-    data = _parse_totals_on_current_page(bu)
-    data["url"] = url
-    data["_flow"] = "mobile_direct_alt"
-    return data
+    return {
+        "found": (
+            _is_success_payload(europe)
+            or _is_success_payload(kelly)
+            or _is_success_payload(asian)
+            or _is_success_payload(totals)
+        ),
+        "url": history_url,
+        "europe": europe,
+        "kelly": kelly,
+        "asian": asian,
+        "totals": totals,
+    }
 
 
 def _run_with_retries(
@@ -3122,15 +2929,37 @@ def _run_with_retries(
     client_factory: Callable[[str], Any],
     extractor,
     *extractor_args: str,
+    market_family: str = "",
+    base_dir: str = "",
+    breaker_match_id: str = "",
 ) -> Dict[str, Any]:
     attempts: list[Dict[str, Any]] = []
     last_data: Dict[str, Any] = {"found": False}
     max_attempts = len(RETRY_DELAYS)
+    match_id_hint = str(breaker_match_id or (extractor_args[0] if extractor_args else "") or "").strip()
+
+    if base_dir and market_family and match_id_hint:
+        breaker = read_okooo_verification_breaker(base_dir, match_id_hint, market_family)
+        if breaker.get("open"):
+            return {
+                "blocked": True,
+                "verification_required": True,
+                "status": "verification_required",
+                "error": "ttl_circuit_open",
+                "retry_strategy": "ttl_circuit_open",
+                "breaker_open": True,
+                "market_family": market_family,
+                "breaker_expires_at": breaker.get("expires_at"),
+                "match_id": match_id_hint,
+                "_attempts": [],
+            }
 
     # Always retry with fresh sessions. Headed mode is preferred because it is
     # empirically less likely to be blocked on okooo mobile pages.
     for index, delay in enumerate(RETRY_DELAYS, start=1):
         session = f"{session_prefix}_{datetime.now().strftime('%H%M%S')}_{index}"
+        if base_dir and market_family:
+            wait_for_okooo_market_slot(base_dir)
         bu = client_factory(session)
         stop_now = False
         stop_reason = ""
@@ -3138,6 +2967,13 @@ def _run_with_retries(
             data = extractor(bu, *extractor_args)
             if isinstance(data, dict) and data.get("blocked"):
                 data = _mark_verification_required(data, bu)
+                if base_dir and market_family and match_id_hint:
+                    open_okooo_verification_breaker(
+                        base_dir,
+                        match_id_hint,
+                        market_family,
+                        details={"mobile_profile": data.get("mobile_profile")},
+                    )
             last_data = data
             success = _is_success_payload(data)
             stop_now, stop_reason = _should_stop_retrying_from_payload(data)
@@ -3169,6 +3005,13 @@ def _run_with_retries(
             }
             if kind == "blocked":
                 last_data = _mark_verification_required(last_data, bu)
+                if base_dir and market_family and match_id_hint:
+                    open_okooo_verification_breaker(
+                        base_dir,
+                        match_id_hint,
+                        market_family,
+                        details={"mobile_profile": last_data.get("mobile_profile")},
+                    )
             attempts.append(
                 {
                     "attempt": index,
@@ -3224,155 +3067,35 @@ def _run_with_verification_reentry(
     return second
 
 
-def _extract_kelly_with_fallback(match_id: str, client_factory: Callable[[str], Any], session_prefix: str) -> Dict[str, Any]:
-    first = _run_with_retries(
-        "kelly_tab",
-        f"{session_prefix}_tab",
+def _extract_all_markets_with_fallback(match_id: str, history_url: str, client_factory: Callable[[str], Any], session_prefix: str, *, base_dir: str = "") -> Dict[str, Any]:
+    """One warm hub session, real in-page navigation, all four markets.
+
+    The only supported flow: warm a session, land on the per-match hub
+    (history.php), click 亚指/欧指 to navigate to the real odds pages, and tab
+    between 大小球/凯利 in-page. There is no deep-link fallback — any market the
+    hub cannot parse is returned as-is (blocked/found:false). On a hub
+    verification wall every market inherits the blocked payload so the
+    breaker/reentry machinery still applies.
+    """
+    hub = _run_with_retries(
+        "all_markets_hub",
+        f"{session_prefix}_hub",
         client_factory,
-        _extract_kelly_from_odds_tab,
-        match_id,
+        _extract_all_markets_from_hub,
+        history_url,
+        market_family=MARKET_FAMILY_HUB,
+        base_dir=base_dir,
+        breaker_match_id=match_id,
     )
-    if _is_verification_required_payload(first):
-        return first
-    if _is_success_payload(first):
-        return first
+    if _is_verification_required_payload(hub):
+        return {"europe": hub, "kelly": hub, "asian": hub, "totals": hub}
 
-    second = _run_with_retries(
-        "kelly_direct",
-        f"{session_prefix}_direct",
-        client_factory,
-        _extract_kelly_direct,
-        match_id,
-    )
-    if _is_verification_required_payload(second):
-        second["_fallback_from"] = "odds_tab"
-        return second
-    if _is_success_payload(second):
-        second["_fallback_from"] = "odds_tab"
-        return second
+    europe = dict(hub.get("europe") or {}) if isinstance(hub, dict) else {}
+    kelly = dict(hub.get("kelly") or {}) if isinstance(hub, dict) else {}
+    asian = dict(hub.get("asian") or {}) if isinstance(hub, dict) else {}
+    totals = dict(hub.get("totals") or {}) if isinstance(hub, dict) else {}
 
-    # keep more informative result
-    return second if second.get("_attempts") else first
-
-
-def _extract_europe_with_fallback(match_id: str, history_url: str, client_factory: Callable[[str], Any], session_prefix: str) -> Dict[str, Any]:
-    def _prefer_consensus(data: Dict[str, Any]) -> bool:
-        return _score_europe_payload(data) >= (3, 2, 2)
-
-    first = _run_with_retries("europe_mobile", f"{session_prefix}_mobile", client_factory, _extract_europe, match_id)
-    if _is_verification_required_payload(first):
-        return first
-    if _prefer_consensus(first):
-        return first
-    second = _run_with_retries("europe_history", f"{session_prefix}_history", client_factory, _extract_europe_from_history_flow, history_url)
-    if _is_verification_required_payload(second):
-        second["_fallback_from"] = "mobile_direct"
-        return second
-    if _prefer_consensus(second):
-        second["_fallback_from"] = "mobile_direct"
-        return second
-    third = _run_with_retries("europe_mobile_alt", f"{session_prefix}_mobile_alt", client_factory, _extract_europe_mobile_alt, match_id)
-    if _is_verification_required_payload(third):
-        third["_fallback_from"] = "history_tab"
-        return third
-    if _prefer_consensus(third):
-        third["_fallback_from"] = "history_tab"
-        return third
-    preferred = _pick_preferred_europe_result(third, second, first)
-    if preferred:
-        return preferred
-    return third if third.get("_attempts") else (second if second.get("_attempts") else first)
-
-
-def _extract_asian_with_fallback(match_id: str, history_url: str, client_factory: Callable[[str], Any], session_prefix: str) -> Dict[str, Any]:
-    def _prefer_consensus(data: Dict[str, Any]) -> bool:
-        if not _is_success_payload(data):
-            return False
-        if not isinstance(data, dict):
-            return False
-        if data.get("company_mode") == "multi_company_consensus":
-            return True
-        consensus = data.get("consensus") if isinstance(data.get("consensus"), dict) else {}
-        return int(consensus.get("company_count") or 0) >= 2
-
-    first = _run_with_retries("asian_mobile", f"{session_prefix}_mobile", client_factory, _extract_asian, match_id)
-    if _is_verification_required_payload(first):
-        return first
-    if _prefer_consensus(first):
-        return first
-    second = _run_with_retries("asian_history", f"{session_prefix}_history", client_factory, _extract_asian_from_history_flow, history_url)
-    if _is_verification_required_payload(second):
-        second["_fallback_from"] = "mobile_direct"
-        return second
-    if _prefer_consensus(second):
-        second["_fallback_from"] = "mobile_direct"
-        return second
-    third = _run_with_retries("asian_mobile_alt", f"{session_prefix}_mobile_alt", client_factory, _extract_asian_mobile_alt, match_id)
-    if _is_verification_required_payload(third):
-        third["_fallback_from"] = "history_tab"
-        return third
-    if _is_success_payload(third):
-        third["_fallback_from"] = "history_tab"
-        return third
-    for candidate in (second, first):
-        if _is_success_payload(candidate):
-            return candidate
-    return third if third.get("_attempts") else (second if second.get("_attempts") else first)
-
-
-def _extract_totals_with_fallback(match_id: str, history_url: str, client_factory: Callable[[str], Any], session_prefix: str) -> Dict[str, Any]:
-    first = _run_with_retries("totals_mobile", f"{session_prefix}_mobile", client_factory, _extract_totals, match_id)
-    if _is_verification_required_payload(first):
-        return first
-    if _is_success_payload(first):
-        return first
-    second = _run_with_retries("totals_history", f"{session_prefix}_history", client_factory, _extract_totals_from_history_flow, history_url)
-    if _is_verification_required_payload(second):
-        second["_fallback_from"] = "mobile_direct"
-        return second
-    if _is_success_payload(second):
-        second["_fallback_from"] = "mobile_direct"
-        return second
-    third = _run_with_retries("totals_mobile_alt", f"{session_prefix}_mobile_alt", client_factory, _extract_totals_mobile_alt, match_id)
-    if _is_verification_required_payload(third):
-        third["_fallback_from"] = "history_tab"
-        return third
-    if _is_success_payload(third):
-        third["_fallback_from"] = "history_tab"
-        return third
-    return third if third.get("_attempts") else (second if second.get("_attempts") else first)
-
-
-def _extract_kelly_full_fallback(match_id: str, history_url: str, client_factory: Callable[[str], Any], session_prefix: str) -> Dict[str, Any]:
-    first = _extract_kelly_with_fallback(match_id, client_factory, session_prefix)
-    if _is_verification_required_payload(first):
-        return first
-    if _is_success_payload(first):
-        return first
-    second = _run_with_retries("kelly_history", f"{session_prefix}_history", client_factory, _extract_kelly_from_history_flow, history_url)
-    if _is_verification_required_payload(second):
-        second["_fallback_from"] = "mobile_direct"
-        return second
-    if _is_success_payload(second):
-        second["_fallback_from"] = "mobile_direct"
-        return second
-    third = _run_with_retries("kelly_mobile_alt", f"{session_prefix}_mobile_alt", client_factory, _extract_europe_mobile_alt, match_id)
-    if _is_verification_required_payload(third):
-        third["_fallback_from"] = "history_tab"
-        return third
-    if _is_success_payload(third) and third.get("kelly"):
-        return {
-            "found": True,
-            "initial": None,
-            "final": third.get("kelly"),
-            "delta": None,
-            "payout_rate": third.get("payout_rate"),
-            "url": third.get("url"),
-            "_flow": "mobile_odds_row_fallback",
-            "_fallback_from": "history_tab",
-            "_attempts": third.get("_attempts", []),
-        }
-    return third if third.get("_attempts") else (second if second.get("_attempts") else first)
+    return {"europe": europe, "kelly": kelly, "asian": asian, "totals": totals}
 
 
 def main() -> None:
@@ -3533,11 +3256,25 @@ def main() -> None:
             "away_team": args.team2,
             "match_time": found["schedule_row"].get("text", ""),
             "schedule": found["schedule_row"],
-            "欧赔": _run_with_verification_reentry(lambda cf, sp: _extract_europe_with_fallback(match_id, found["schedule_row"]["href"], cf, sp), client_factory, f"{session_prefix}_eu"),
-            "亚值": _run_with_verification_reentry(lambda cf, sp: _extract_asian_with_fallback(match_id, found["schedule_row"]["href"], cf, sp), client_factory, f"{session_prefix}_as"),
-            "大小球": _run_with_verification_reentry(lambda cf, sp: _extract_totals_with_fallback(match_id, found["schedule_row"]["href"], cf, sp), client_factory, f"{session_prefix}_ou"),
-            "凯利": _run_with_verification_reentry(lambda cf, sp: _extract_kelly_full_fallback(match_id, found["schedule_row"]["href"], cf, sp), client_factory, f"{session_prefix}_ke"),
+            "欧赔": None,
+            "亚值": None,
+            "大小球": None,
+            "凯利": None,
         }
+        # Single warm hub session: land on the home page, open the match hub
+        # once, then flip 欧赔/凯利/亚值/大小球 tabs in-page. Per-market fallbacks
+        # inside the wrapper handle anything the hub fails to parse.
+        all_markets = _run_with_verification_reentry(
+            lambda cf, sp: _extract_all_markets_with_fallback(match_id, found["schedule_row"]["href"], cf, sp, base_dir=str(_default_data_root().parent)),
+            client_factory,
+            f"{session_prefix}_all",
+        )
+        if isinstance(all_markets, dict):
+            payload["欧赔"] = all_markets.get("europe")
+            payload["凯利"] = all_markets.get("kelly")
+            payload["亚值"] = all_markets.get("asian")
+            payload["大小球"] = all_markets.get("totals")
+
         if args.overwrite:
             payload["_note"] = "overwrite=true: same event writes to a stable filename"
         if existing:

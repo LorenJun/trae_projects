@@ -567,6 +567,7 @@ class DataCollector:
                 'allsvenskan': '瑞典超',
                 'eliteserien': '挪超',
                 'veikkausliiga': '芬超',
+                'world_cup': '友谊赛',
             }.get(league, '')
             if not league_cn:
                 return []

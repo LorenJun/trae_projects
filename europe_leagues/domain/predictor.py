@@ -24,6 +24,7 @@ class DomainPredictor:
         *,
         persist: bool = True,
         write_teams: bool = True,
+        league_name_override: str = "",
     ) -> Dict[str, Any]:
         return self._predictor.generate_prediction_report(
             league_code,
@@ -31,6 +32,7 @@ class DomainPredictor:
             matches=matches,
             persist=persist,
             write_teams=write_teams,
+            league_name_override=league_name_override,
         )
 
 

@@ -14,12 +14,15 @@ LEAGUE_CODE_TO_CN = {
     "serie_a": "意甲",
     "bundesliga": "德甲",
     "ligue_1": "法甲",
+    "friendly": "友谊赛",
+    "world_cup": "世界杯",
     "europa_league": "欧联",
     "champions_league": "欧冠",
     "conference_league": "欧协联",
 }
 
 LEAGUE_SNAPSHOT_DIR_ALIASES = {
+    "friendly": ["friendly", "world_cup", "友谊赛"],
     "europa_league": ["europa_league", "欧联", "欧罗巴"],
     "champions_league": ["champions_league", "欧冠"],
     "conference_league": ["conference_league", "欧协联"],
@@ -46,6 +49,134 @@ def list_snapshot_dirs(base_dir: str, league_code: str) -> list[str]:
 
 def _normalize_text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _parse_compact_triplet(text: Any) -> Optional[Dict[str, float]]:
+    raw = _normalize_text(text)
+    if not raw:
+        return None
+    nums = [float(item) for item in re.findall(r"\d{1,2}\.\d{2}", raw)]
+    if len(nums) < 3:
+        return None
+    return {"home": nums[0], "draw": nums[1], "away": nums[2]}
+
+
+def _parse_handicap_text(text: Any) -> Optional[float]:
+    raw = _normalize_text(text).replace(" ", "")
+    if not raw:
+        return None
+    try:
+        if "/" in raw and not any(ch in raw for ch in "球平受让"):
+            parts = [float(item) for item in raw.split("/") if item]
+            if parts:
+                return sum(parts) / len(parts)
+        return float(raw)
+    except Exception:
+        pass
+    mapping = {
+        "平手": 0.0,
+        "平手/半球": -0.25,
+        "平/半": -0.25,
+        "半球": -0.5,
+        "半球/一球": -0.75,
+        "半/一": -0.75,
+        "一球": -1.0,
+        "一球/球半": -1.25,
+        "一/球半": -1.25,
+        "球半": -1.5,
+        "球半/两球": -1.75,
+        "两球": -2.0,
+        "两球/两球半": -2.25,
+        "两球半": -2.5,
+        "受让平手": 0.0,
+        "受让平手/半球": 0.25,
+        "受让平/半": 0.25,
+        "受让半球": 0.5,
+        "受让半球/一球": 0.75,
+        "受让半/一": 0.75,
+        "受让一球": 1.0,
+        "受让一球/球半": 1.25,
+        "受让一/球半": 1.25,
+        "受让球半": 1.5,
+        "受让球半/两球": 1.75,
+        "受让两球": 2.0,
+        "受让两球/两球半": 2.25,
+        "受让两球半": 2.5,
+    }
+    return mapping.get(raw)
+
+
+def _recover_europe_from_state_excerpt(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    excerpt = _normalize_text(block.get("_state_excerpt"))
+    if not excerpt:
+        return None
+    row_match = re.search(r"99家平均\s*((?:\d{1,2}\.\d{2}){3})\s*((?:\d{1,2}\.\d{2}){3})", excerpt)
+    if not row_match:
+        return None
+    initial = _parse_compact_triplet(row_match.group(1))
+    final = _parse_compact_triplet(row_match.group(2))
+    if not initial or not final:
+        return None
+    return {
+        "initial": initial,
+        "final": final,
+        "company_mode": "average_row_fallback",
+        "consensus": {
+            "mode": "average_row_fallback",
+            "company_count": 0,
+            "filtered_company_count": 0,
+            "companies": [],
+            "all_companies": [],
+        },
+        "companies": [],
+    }
+
+
+def _recover_asian_from_state_excerpt(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    excerpt = _normalize_text(block.get("_state_excerpt"))
+    if not excerpt:
+        return None
+    row_match = re.search(
+        r"平均指数\s*(\d+\.\d+)\s*([^\d\s]+)\s*(\d+\.\d+)\s*(\d+\.\d+)\s*([^\d\s]+)\s*(\d+\.\d+)",
+        excerpt,
+    )
+    if not row_match:
+        return None
+    initial_text = row_match.group(2).strip()
+    final_text = row_match.group(5).strip()
+    initial_value = _parse_handicap_text(initial_text)
+    final_value = _parse_handicap_text(final_text)
+    initial = {
+        "home_water": float(row_match.group(1)),
+        "handicap_text": initial_text,
+        "handicap_value": initial_value,
+        "handicap": initial_value,
+        "away_water": float(row_match.group(3)),
+    }
+    final = {
+        "home_water": float(row_match.group(4)),
+        "handicap_text": final_text,
+        "handicap_value": final_value,
+        "handicap": final_value,
+        "away_water": float(row_match.group(6)),
+    }
+    return {
+        "initial": initial,
+        "final": final,
+        "company_mode": "average_row_fallback",
+        "consensus": {
+            "mode": "average_row_fallback",
+            "company_count": 0,
+            "filtered_company_count": 0,
+            "companies": [],
+            "all_companies": [],
+            "final_handicap": final_value,
+            "final_handicap_text": final_text,
+            "initial_handicap": initial_value,
+            "initial_handicap_text": initial_text,
+        },
+        "companies": [],
+    }
 
 
 def _safe_filename(value: str) -> str:
@@ -97,11 +228,94 @@ def snapshot_matches_request(
     return True
 
 
+def _market_fetch_status(block: Any, *, market_key: str, normalized_block: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    payload = block if isinstance(block, dict) else {}
+    normalized = normalized_block if isinstance(normalized_block, dict) else {}
+    if not payload and not normalized:
+        return {"market": market_key, "status": "missing", "source": "missing_block"}
+    if normalized.get("initial") or normalized.get("final"):
+        if payload.get("_state_excerpt") or payload.get("blocked") or payload.get("verification_required"):
+            return {
+                "market": market_key,
+                "status": "available",
+                "source": "state_excerpt_recovery",
+            }
+        return {
+            "market": market_key,
+            "status": "available",
+            "source": normalized.get("company_mode") or normalized.get("_source") or "snapshot_reuse",
+        }
+    if payload.get("breaker_open"):
+        return {
+            "market": market_key,
+            "status": "verification_required",
+            "source": "ttl_circuit_open",
+            "market_family": payload.get("market_family"),
+            "breaker_expires_at": payload.get("breaker_expires_at"),
+        }
+    if payload.get("verification_required") or payload.get("blocked"):
+        return {
+            "market": market_key,
+            "status": "verification_required",
+            "source": "live_blocked",
+            "market_family": payload.get("market_family"),
+        }
+    if payload.get("found"):
+        return {
+            "market": market_key,
+            "status": "available",
+            "source": payload.get("_flow") or payload.get("_source") or "live_fetch",
+        }
+    if payload.get("_state_excerpt"):
+        return {
+            "market": market_key,
+            "status": "degraded",
+            "source": "state_excerpt_only",
+        }
+    return {
+        "market": market_key,
+        "status": "unavailable",
+        "source": payload.get("_flow") or payload.get("_source") or "live_fetch_not_found",
+    }
+
+
+def _build_market_fetch_status(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    payload = snapshot if isinstance(snapshot, dict) else {}
+    statuses = {
+        "欧赔": _market_fetch_status(payload.get("欧赔"), market_key="欧赔"),
+        "亚值": _market_fetch_status(payload.get("亚值"), market_key="亚值"),
+        "大小球": _market_fetch_status(payload.get("大小球"), market_key="大小球"),
+        "凯利": _market_fetch_status(payload.get("凯利"), market_key="凯利"),
+    }
+    available = [item for item in statuses.values() if item.get("status") == "available"]
+    degraded = [item for item in statuses.values() if item.get("status") == "degraded"]
+    verification = [item for item in statuses.values() if item.get("status") == "verification_required"]
+    unavailable = [item for item in statuses.values() if item.get("status") == "unavailable"]
+    return {
+        "by_market": statuses,
+        "market_coverage": {
+            "available_count": len(available),
+            "degraded_count": len(degraded),
+            "verification_required_count": len(verification),
+            "unavailable_count": len(unavailable),
+            "coverage_label": "full" if len(available) == 4 else "partial" if available else "none",
+        },
+    }
+
+
 def extract_current_odds(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     europe = snapshot.get("欧赔", {}) or {}
     asian = snapshot.get("亚值", {}) or {}
     kelly = snapshot.get("凯利", {}) or {}
     totals = snapshot.get("大小球", {}) or {}
+    if isinstance(europe, dict) and not any(isinstance(europe.get(key), dict) and europe.get(key) for key in ("initial", "final")):
+        recovered = _recover_europe_from_state_excerpt(europe)
+        if recovered:
+            europe = {**europe, **recovered}
+    if isinstance(asian, dict) and not any(isinstance(asian.get(key), dict) and asian.get(key) for key in ("initial", "final")):
+        recovered = _recover_asian_from_state_excerpt(asian)
+        if recovered:
+            asian = {**asian, **recovered}
     # okooo_save_snapshot.py stores totals as:
     #   {"found": true/false, "initial": {...}, "final": {...}, ...}
     # We normalize it to the nested schema used by prediction workflow.
@@ -140,6 +354,25 @@ def extract_current_odds(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         company_mode = totals.get("company_mode")
         if company_mode:
             totals_out["company_mode"] = company_mode
+    market_status = {
+        "by_market": {
+            "欧赔": _market_fetch_status(snapshot.get("欧赔"), market_key="欧赔", normalized_block=europe_out),
+            "亚值": _market_fetch_status(snapshot.get("亚值"), market_key="亚值", normalized_block=asian_out),
+            "大小球": _market_fetch_status(snapshot.get("大小球"), market_key="大小球", normalized_block=totals_out),
+            "凯利": _market_fetch_status(snapshot.get("凯利"), market_key="凯利", normalized_block={"initial": kelly.get("initial", {}), "final": kelly.get("final", {})}),
+        }
+    }
+    available = [item for item in market_status["by_market"].values() if item.get("status") == "available"]
+    degraded = [item for item in market_status["by_market"].values() if item.get("status") == "degraded"]
+    verification = [item for item in market_status["by_market"].values() if item.get("status") == "verification_required"]
+    unavailable = [item for item in market_status["by_market"].values() if item.get("status") == "unavailable"]
+    market_status["market_coverage"] = {
+        "available_count": len(available),
+        "degraded_count": len(degraded),
+        "verification_required_count": len(verification),
+        "unavailable_count": len(unavailable),
+        "coverage_label": "full" if len(available) == 4 else "partial" if available else "none",
+    }
     return {
         "match_id": snapshot.get("match_id"),
         "胜平负赔率": dict(europe_out),
@@ -148,6 +381,8 @@ def extract_current_odds(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "大小球": totals_out,
         "凯利": {"initial": kelly.get("initial", {}), "final": kelly.get("final", {})},
         "离散率": snapshot.get("离散率", {}) or {},
+        "market_fetch_status": market_status["by_market"],
+        "market_coverage": market_status["market_coverage"],
     }
 
 
@@ -240,9 +475,10 @@ def refresh_snapshot(
     headed: bool = False,
     match_time: str = "",
     strict_identity: bool = False,
+    league_name_override: str = "",
 ) -> Optional[Tuple[str, Dict[str, Any]]]:
     """Run okooo_save_snapshot.py to refresh odds and return (path, payload)."""
-    league_cn = LEAGUE_CODE_TO_CN.get(league_code, league_code)
+    league_cn = str(league_name_override or "").strip() or LEAGUE_CODE_TO_CN.get(league_code, league_code)
     script_path = os.path.join(base_dir, "okooo_save_snapshot.py")
     cmd = [
         "python3",

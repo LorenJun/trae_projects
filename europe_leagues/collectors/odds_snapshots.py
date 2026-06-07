@@ -9,6 +9,8 @@ import os
 from glob import glob
 from typing import Any, Dict, List, Optional
 
+from okooo_live_snapshot import extract_current_odds as extract_okooo_live_current_odds
+
 logger = logging.getLogger(__name__)
 
 LEAGUE_EXTERNAL_SNAPSHOT_ALIASES = {
@@ -49,55 +51,7 @@ class OddsSnapshotRepository:
 
     @staticmethod
     def extract_current_odds_live_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
-        europe = snapshot.get('欧赔', {}) or {}
-        asian = snapshot.get('亚值', {}) or {}
-        kelly = snapshot.get('凯利', {}) or {}
-        totals = snapshot.get('大小球', {}) or {}
-        euro_block = {
-            'initial': europe.get('initial', {}),
-            'final': europe.get('final', {}),
-        }
-        if isinstance(europe, dict):
-            if isinstance(europe.get('consensus'), dict):
-                euro_block['consensus'] = europe.get('consensus') or {}
-            if isinstance(europe.get('companies'), list):
-                euro_block['companies'] = europe.get('companies') or []
-            if europe.get('company_mode'):
-                euro_block['company_mode'] = europe.get('company_mode')
-        asian_block = {
-            'initial': asian.get('initial', {}),
-            'final': asian.get('final', {}),
-        }
-        if isinstance(asian, dict):
-            if isinstance(asian.get('consensus'), dict):
-                asian_block['consensus'] = asian.get('consensus') or {}
-            if isinstance(asian.get('companies'), list):
-                asian_block['companies'] = asian.get('companies') or []
-            if asian.get('company_mode'):
-                asian_block['company_mode'] = asian.get('company_mode')
-        ou_block = {
-            'initial': totals.get('initial', {}) if isinstance(totals, dict) else {},
-            'final': totals.get('final', {}) if isinstance(totals, dict) else {},
-        }
-        if isinstance(totals, dict):
-            if isinstance(totals.get('consensus'), dict):
-                ou_block['consensus'] = totals.get('consensus') or {}
-            if isinstance(totals.get('companies'), list):
-                ou_block['companies'] = totals.get('companies') or []
-            if totals.get('company_mode'):
-                ou_block['company_mode'] = totals.get('company_mode')
-        return {
-            'match_id': snapshot.get('match_id'),
-            '胜平负赔率': dict(euro_block),
-            '欧赔': euro_block,
-            '亚值': asian_block,
-            '大小球': ou_block,
-            '凯利': {
-                'initial': kelly.get('initial', {}),
-                'final': kelly.get('final', {}),
-            },
-            '离散率': snapshot.get('离散率', {}) or {},
-        }
+        return extract_okooo_live_current_odds(snapshot)
 
     def extract_current_odds_from_csv_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
         f = self._to_float

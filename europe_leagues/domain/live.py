@@ -166,6 +166,7 @@ class LiveRefreshService:
         okooo_headed: bool,
         match_time: str,
         match_id: str,
+        league_name_override: str = '',
     ) -> Optional[Dict[str, Any]]:
         if (
             not force_refresh_odds
@@ -203,6 +204,7 @@ class LiveRefreshService:
                     headed=bool(okooo_headed),
                     match_time=match_time or '',
                     strict_identity=True,
+                    league_name_override=league_name_override or '',
                 )
                 if not refreshed:
                     continue
@@ -271,6 +273,7 @@ class LiveRefreshService:
         okooo_headed: bool,
         match_time: str,
         diag_key: str,
+        league_name_override: str = '',
     ) -> Optional[Dict[str, Any]]:
         if not force_refresh_odds:
             realtime['context_applied'][diag_key] = {
@@ -294,6 +297,7 @@ class LiveRefreshService:
                 okooo_headed=bool(okooo_headed),
                 match_time=match_time or '',
                 match_id=realtime['okooo']['match_id'],
+                league_name_override=league_name_override or '',
             )
             # #region debug-point D:totals-fetch-result
             emit_local_debug_event({"sessionId":"snapshot-routing-chain","runId":"pre-fix","hypothesisId":"D","location":"domain/live.py:230","msg":"[DEBUG] totals fetch result","data":{"league_code":league_code,"home_team":home_team,"away_team":away_team,"match_date":match_date,"match_id":str((realtime or {}).get("okooo", {}).get("match_id") or ""),"diag":diag,"current_odds_totals_final_line":((current_odds or {}).get("大小球") or {}).get("final", {}).get("line"),"current_odds_match_id":str((current_odds or {}).get("match_id") or "") if isinstance(current_odds, dict) else ""}})
@@ -321,6 +325,7 @@ class LiveRefreshService:
     ) -> Dict[str, Any]:
         effective_match_date = match_date or datetime.now().strftime('%Y-%m-%d')
         effective_analysis_context = dict(analysis_context or {})
+        league_name_override = str(effective_analysis_context.get('okooo_league_name_override') or '').strip()
         realtime = self.build_realtime(match_id, okooo_driver, okooo_headed)
 
         self.fill_ewma_form(
@@ -352,6 +357,7 @@ class LiveRefreshService:
             okooo_headed=okooo_headed,
             match_time=match_time,
             match_id=str(realtime.get('okooo', {}).get('match_id') or match_id or ''),
+            league_name_override=league_name_override,
         )
         current_odds = self.ensure_totals_if_needed(
             league_code=league_code,
@@ -366,6 +372,7 @@ class LiveRefreshService:
             okooo_headed=okooo_headed,
             match_time=match_time,
             diag_key='okooo_totals_fetch',
+            league_name_override=league_name_override,
         )
         auto_enrich_team_context_if_enabled(
             base_dir=self.base_dir,

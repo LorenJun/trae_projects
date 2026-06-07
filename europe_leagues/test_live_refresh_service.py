@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+from collectors.odds_snapshots import OddsSnapshotRepository
 from domain.live import LiveRefreshService
 from domain.odds import auto_fetch_okooo_totals_if_needed
 
@@ -127,6 +128,63 @@ class LiveRefreshServiceTest(unittest.TestCase):
         self.assertEqual(realtime["context_applied"]["existing_snapshot_odds"]["ok"], True)
         self.assertEqual(realtime["okooo"]["match_id"], "1296096")
 
+    def test_hydrate_existing_snapshot_odds_recovers_market_from_state_excerpt(self):
+        realtime = self.service.build_realtime("1324786", "local-chrome", False)
+        payload = {
+            "match_id": "1324786",
+            "home_team": "比利时",
+            "away_team": "突尼斯",
+            "match_date": "2026-06-06",
+            "欧赔": {
+                "blocked": True,
+                "_state_excerpt": "99家平均\t1.275.1210.83\t1.315.188.96\t>",
+            },
+            "亚值": {
+                "blocked": True,
+                "_state_excerpt": "平均指数\t1.88球半1.90\t1.87球半2.09\t",
+            },
+        }
+
+        with patch("domain.live.find_snapshot_for_match", return_value=("/tmp/existing.json", payload)):
+            merged = self.service.hydrate_existing_snapshot_odds(
+                league_code="world_cup",
+                current_odds={},
+                realtime=realtime,
+                match_id="1324786",
+                home_team="比利时",
+                away_team="突尼斯",
+                match_date="2026-06-06",
+            )
+
+        self.assertEqual(merged["欧赔"]["initial"], {"home": 1.27, "draw": 5.12, "away": 10.83})
+        self.assertEqual(merged["欧赔"]["final"], {"home": 1.31, "draw": 5.18, "away": 8.96})
+        self.assertEqual(merged["亚值"]["initial"]["handicap_text"], "球半")
+        self.assertEqual(merged["亚值"]["final"]["handicap"], -1.5)
+        self.assertEqual(merged["亚值"]["final"]["away_water"], 2.09)
+
+    def test_odds_snapshot_repository_recovers_market_from_state_excerpt(self):
+        current_odds = OddsSnapshotRepository.extract_current_odds_live_snapshot(
+            {
+                "match_id": "1324786",
+                "欧赔": {
+                    "blocked": True,
+                    "_state_excerpt": "99家平均\t1.275.1210.83\t1.315.188.96\t>",
+                },
+                "亚值": {
+                    "blocked": True,
+                    "_state_excerpt": "平均指数\t1.88球半1.90\t1.87球半2.09\t",
+                },
+            }
+        )
+
+        self.assertEqual(current_odds["欧赔"]["final"]["home"], 1.31)
+        self.assertEqual(current_odds["亚值"]["final"]["handicap_text"], "球半")
+        self.assertEqual(current_odds["亚值"]["company_mode"], "average_row_fallback")
+        self.assertEqual(current_odds["market_fetch_status"]["欧赔"]["status"], "available")
+        self.assertEqual(current_odds["market_fetch_status"]["亚值"]["status"], "available")
+        self.assertEqual(current_odds["market_fetch_status"]["大小球"]["status"], "unavailable")
+        self.assertEqual(current_odds["market_coverage"]["coverage_label"], "partial")
+
     def test_prepare_prediction_inputs_skips_network_refresh_and_totals_fetch_when_force_refresh_odds_false(self):
         with patch.object(self.service, "refresh_live_snapshot", wraps=self.service.refresh_live_snapshot) as mock_refresh, patch.object(
             self.service, "ensure_totals_if_needed", wraps=self.service.ensure_totals_if_needed
@@ -183,6 +241,29 @@ class LiveRefreshServiceTest(unittest.TestCase):
 
         self.assertEqual(mock_refresh.call_args.kwargs["match_id"], "1300083")
         self.assertEqual(prepared["realtime"]["okooo"]["match_id"], "1300083")
+
+    def test_prepare_prediction_inputs_passes_friendly_lookup_override(self):
+        with patch("domain.live.find_snapshot_for_match", return_value=None), patch.object(
+            self.service, "refresh_live_snapshot", return_value={}
+        ) as mock_refresh, patch.object(
+            self.service, "ensure_totals_if_needed", return_value={}
+        ) as mock_totals, patch("domain.live.auto_enrich_team_context_if_enabled", return_value=None):
+            self.service.prepare_prediction_inputs(
+                home_team="比利时",
+                away_team="突尼斯",
+                league_code="friendly",
+                match_date="2026-06-06",
+                current_odds={},
+                match_id="",
+                force_refresh_odds=True,
+                okooo_driver="local-chrome",
+                okooo_headed=False,
+                match_time="21:00",
+                analysis_context={"competition_type": "friendly", "okooo_league_name_override": "友谊赛"},
+            )
+
+        self.assertEqual(mock_refresh.call_args.kwargs["league_name_override"], "友谊赛")
+        self.assertEqual(mock_totals.call_args.kwargs["league_name_override"], "友谊赛")
 
     def test_refresh_report_match_odds_uses_driver_chain_instead_of_hardcoded_local_chrome(self):
         payload = {

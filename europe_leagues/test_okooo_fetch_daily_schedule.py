@@ -21,6 +21,7 @@ class OkoooFetchDailyScheduleTest(unittest.TestCase):
         self.assertEqual(_league_code("瑞典超"), "allsvenskan")
         self.assertEqual(_league_code("挪超"), "eliteserien")
         self.assertEqual(_league_code("芬超"), "veikkausliiga")
+        self.assertEqual(_league_code("友谊赛"), "friendly")
 
 
 if __name__ == "__main__":

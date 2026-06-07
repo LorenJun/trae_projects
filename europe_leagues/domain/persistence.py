@@ -51,10 +51,12 @@ LEAGUE_DISPLAY_NAMES = {
     'serie_a': '意甲',
     'bundesliga': '德甲',
     'ligue_1': '法甲',
+    'friendly': '友谊赛',
     'europa_league': '欧联',
     'champions_league': '欧冠',
     'conference_league': '欧协联',
     'world_cup': '世界杯',
+    '友谊赛': '友谊赛',
     '欧联': '欧联',
     '欧冠': '欧冠',
     '欧协联': '欧协联',
@@ -1248,7 +1250,7 @@ class PredictionPersistenceService:
                 'side': '大' if over_under.get('over', 0) > over_under.get('under', 0) else '小',
                 'line': float(over_under.get('line')),
             }
-        league_name = str(result.get('league_name') or LEAGUE_DISPLAY_NAMES.get(league_code) or league_code)
+        league_name = str(LEAGUE_DISPLAY_NAMES.get(league_code) or result.get('league_name') or league_code)
         match_id = str(result.get('match_id') or '').strip() or internal_match_id
         return PredictionPersistencePayload(
             match_id=match_id,
@@ -1292,6 +1294,9 @@ class PredictionPersistenceService:
         result['internal_match_id'] = payload.internal_match_id
         result['teams_match_id'] = payload.teams_match_id
         result['storage_mode'] = payload.storage_mode
+        result['league_code'] = payload.league_code
+        result['league'] = payload.league_code
+        result['league_name'] = payload.league_name
         result['predicted_winner'] = payload.predicted_winner
 
     def _persist_prediction_side_effects(self, result: Dict[str, Any], league_code: str, *, register_result_sync: bool, sync_derivatives: bool) -> Dict[str, Any]:

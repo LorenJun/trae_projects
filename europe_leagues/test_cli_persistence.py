@@ -31,6 +31,11 @@ class DummySaveResultManager:
 
 
 class CliPersistenceTest(unittest.TestCase):
+    def test_validate_leagues_rejects_friendly_alias_as_non_formal_league(self):
+        with patch("domain.predictor.LEAGUE_CONFIG", {"world_cup": {"name": "世界杯"}}):
+            with self.assertRaises(ValueError):
+                cli.validate_leagues("友谊赛")
+
     def test_save_result_passes_force_flag(self):
         captured = {}
         DummySaveResultManager.saved_call = None
@@ -88,8 +93,8 @@ class CliPersistenceTest(unittest.TestCase):
         calls = []
 
         class DummyPredictor:
-            def generate_prediction_report(self, league_code, match_date, persist=True, write_teams=True):
-                calls.append((league_code, match_date, persist, write_teams))
+            def generate_prediction_report(self, league_code, match_date, persist=True, write_teams=True, league_name_override=""):
+                calls.append((league_code, match_date, persist, write_teams, league_name_override))
                 return {
                     "teams_file": f"/tmp/{league_code}_{match_date}.md",
                     "teams_updated": True,
@@ -128,8 +133,8 @@ class CliPersistenceTest(unittest.TestCase):
         self.assertEqual(data["schedule_cache_cleanup"], {"deleted_count": 2, "deleted_files": ["a.json", "b.json"]})
         mock_cleanup.assert_called_once_with(leagues=["premier_league"], dates=["2026-05-11", "2026-05-12"])
         self.assertEqual(len(updates), 2)
-        self.assertEqual(calls[0], ("premier_league", "2026-05-11", True, True))
-        self.assertEqual(calls[1], ("premier_league", "2026-05-12", True, True))
+        self.assertEqual(calls[0], ("premier_league", "2026-05-11", True, True, ""))
+        self.assertEqual(calls[1], ("premier_league", "2026-05-12", True, True, ""))
         self.assertTrue(all(item["updated"] for item in updates))
         self.assertTrue(all(item["prediction_count"] == 3 for item in updates))
         self.assertTrue(all(item["persisted"]["enabled"] for item in updates))
@@ -146,8 +151,8 @@ class CliPersistenceTest(unittest.TestCase):
         calls = []
 
         class DummyPredictor:
-            def generate_prediction_report(self, league_code, match_date, persist=True, write_teams=True):
-                calls.append((league_code, match_date, persist, write_teams))
+            def generate_prediction_report(self, league_code, match_date, persist=True, write_teams=True, league_name_override=""):
+                calls.append((league_code, match_date, persist, write_teams, league_name_override))
                 return {
                     "teams_file": None,
                     "teams_updated": False,
@@ -180,13 +185,38 @@ class CliPersistenceTest(unittest.TestCase):
         ):
             cli.run_openclaw_predict_schedule(args)
 
-        self.assertEqual(calls, [("premier_league", "2026-05-11", False, False)])
+        self.assertEqual(calls, [("premier_league", "2026-05-11", False, False, "")])
         data = captured["payload"]["data"]
         self.assertEqual(data["schedule_cache_cleanup"], {"deleted_count": 0, "deleted_files": []})
         update = data["updates"][0]
         self.assertFalse(update["updated"])
         self.assertFalse(update["accuracy_refreshed"])
         self.assertEqual(update["persisted"], {"enabled": False, "archived": False, "memory_updated": False, "result_sync_registered": False, "memory_update_count": 0, "result_sync_registration_count": 0})
+
+    def test_predict_schedule_reference_only_reports_unsupported_schedule_source(self):
+        captured = {}
+
+        args = Namespace(
+            league="友谊赛",
+            date="2026-06-06",
+            days=1,
+            no_write=False,
+            json=True,
+        )
+
+        with patch("domain.predictor.DomainPredictor") as mock_predictor, patch(
+            "domain.predictor.LEAGUE_CONFIG", {"world_cup": {"name": "世界杯"}}
+        ), patch("app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)):
+            cli.run_openclaw_predict_schedule(args)
+
+        mock_predictor.assert_not_called()
+        update = captured["payload"]["data"]["updates"][0]
+        self.assertEqual(update["league"], "friendly")
+        self.assertEqual(update["league_name"], "友谊赛")
+        self.assertFalse(update["persisted"]["enabled"])
+        self.assertEqual(update["schedule_source_status"], "unsupported")
+        self.assertEqual(update["schedule_source_reason"], "reference_only_schedule_unavailable")
+        self.assertEqual(captured["payload"]["data"]["schedule_cache_cleanup"], {"deleted_count": 0, "deleted_files": []})
 
     def test_collect_data_serializes_matches_and_runtime_profile(self):
         captured = {}
@@ -223,6 +253,17 @@ class CliPersistenceTest(unittest.TestCase):
         self.assertEqual(data["matches"][0]["match_id"], "m1")
         self.assertEqual(data["matches"][0]["sources"], ["mock"])
         self.assertEqual(data["runtime_profile"]["agent_roles"], ["data_collector"])
+
+    def test_collect_data_rejects_reference_only_friendly_entry(self):
+        args = Namespace(
+            league="友谊赛",
+            date="2026-06-06",
+            no_cache=False,
+            json=True,
+        )
+
+        with self.assertRaises(ValueError):
+            cli.run_openclaw_collect_data(args)
 
     def test_accuracy_refresh_uses_update_path(self):
         captured = {}
@@ -491,6 +532,63 @@ class CliPersistenceTest(unittest.TestCase):
         self.assertEqual(
             captured["payload"]["data"]["persisted"],
             {"enabled": False, "archived": False, "memory_updated": False},
+        )
+
+    def test_predict_match_friendly_alias_uses_dedicated_friendly_runtime_bucket(self):
+        captured = {}
+        calls = []
+
+        class DummyPredictor:
+            def predict_match(self, **kwargs):
+                calls.append(kwargs)
+                return {
+                    "home_team": kwargs["home_team"],
+                    "away_team": kwargs["away_team"],
+                    "league_name": "世界杯",
+                    "match_date": kwargs["match_date"],
+                    "prediction": "主胜",
+                    "confidence": 0.57,
+                    "final_probabilities": {"home_win": 0.48, "draw": 0.30, "away_win": 0.22},
+                    "over_under": {"available": False, "reason": "missing_real_market_line"},
+                }
+
+        args = Namespace(
+            home_team="比利时",
+            away_team="突尼斯",
+            league="友谊赛",
+            date="2026-06-06",
+            match_id="",
+            no_refresh_odds=False,
+            okooo_driver="local-chrome",
+            okooo_headed=False,
+            match_time="21:00",
+            league_hint=None,
+            context_file="",
+            no_write=False,
+            json=True,
+        )
+
+        with patch("domain.predictor.DomainPredictor", return_value=DummyPredictor()), patch(
+            "app.cli.load_analysis_context_file", return_value={}
+        ), patch("app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)):
+            cli.run_openclaw_predict_match(args)
+
+        self.assertEqual(calls[0]["league_code"], "friendly")
+        self.assertFalse(calls[0]["persist"])
+        self.assertEqual(calls[0]["analysis_context"]["competition_type"], "friendly")
+        self.assertEqual(calls[0]["analysis_context"]["okooo_league_name_override"], "友谊赛")
+        self.assertTrue(captured["payload"]["data"]["reference_only"])
+        self.assertEqual(captured["payload"]["data"]["league_code"], "friendly")
+        self.assertEqual(captured["payload"]["data"]["league_name"], "友谊赛")
+        self.assertEqual(captured["payload"]["data"]["runtime_league_code"], "friendly")
+        self.assertEqual(captured["payload"]["data"]["league_request"], "友谊赛")
+        self.assertEqual(
+            captured["payload"]["data"]["persisted"],
+            {"enabled": False, "archived": False, "memory_updated": False},
+        )
+        self.assertEqual(
+            captured["payload"]["data"]["reference_only_live_market_notice"]["reason"],
+            "friendly_match_requires_explicit_match_id_for_live_market",
         )
 
     def test_predict_match_blocked_defaults_to_non_archived_persisted_metadata(self):
