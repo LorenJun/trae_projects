@@ -49,8 +49,12 @@
 - 快照脚本已支持按 `日期 + 主客队 + 时间` 精确锁定目标比赛行，避免同日多场 `23:00` 误命中
 - 快照读取链路新增身份校验：只有 `match_id + 主客队 + match_date` 一致时才复用旧快照
 - 预测链已支持预测前快照注水与 `missing_real_line` 场景下的正式补抓
-- 阻断页识别除了 `403/405` 文本页，也覆盖 `请进行验证 / 滑动到最右边 / 拖动滑块 / 验证码` 与 `canvas / verify iframe / 大图验证` 等图形验证页
+- 阻断页识别除了 `403/405` 文本页，也覆盖 `请进行验证 / 滑动到最右边 / 拖动滑块 / 验证码` 与 `verify iframe / 大图验证`（验证特征图，长宽 ≥200px）等图形验证页
+- **强阻断判定 `_page_blocked_now` 带「赔率数字逃生阀」**：页面若已渲染出 ≥6 个 `x.xx` 形态赔率数字，则一律判为正常页、绝不判墙。真实滑块/验证码墙不可能渲染出完整赔率表（`odds.php` 实测有 ~270 个赔率数字），这一票否决保证「解析得到的真实数据」不被误判吞掉。曾因一条过宽的 `canvas + slider/verify` 弱规则把正常 `odds.php` 误判成墙，导致欧赔/凯利长期拿不到数据，该弱规则已删除
+- **凯利解析（`_parse_kelly_on_current_page`）逐公司行抽取**：凯利与欧赔在澳客是同构表（每家公司行布局 `[初始 主/平/客][最新 主/平/客][返还率]`），解析复用欧赔同款「逐公司行 + 多公司共识平均」逻辑——每行抽 6 个凯利值（凯利区间 0.3–2.5 校验）、中位数去离群后加权出三路共识，第 7 个数（0.8–1.2）单独识别为返还率 `payout_rate`。早期错误地只读单个 `99家平均` 聚合行的单 `td`，导致主/平/客三路被同一个返还率填充（已修复）。三路相等是列映射错误的强信号
 - hub 链路在每次整页跳转后（→`handicap.php`、→`odds.php`）以及解析完四盘后都做强阻断判定（`_page_blocked_now`），任意盘口命中验证墙都会把 `blocked` 上抛到顶层，确保熔断与换池重入正常触发，避免中途撞墙被当成「没开盘」而静默丢数据
+- 欧值(`odds.php`)若真撞墙，先做阶梯重试（`OUZHI_RETRY_WAITS`，默认 `3s → 5s → 10s`：等待后回 hub 重新点欧值再判墙）；阶梯耗尽仍撞墙且亚值/大小球已成功时，触发独立的换新设备指纹 odds-only 会话单独重抓欧赔/凯利（`--no-odds-fresh-session` 可关闭），恢复成功打 `_recovered_via: odds_fresh_session` 标记。亚值/大小球来自第一段会话，恢复段永不影响它们
+- odds.php 撞墙时只把欧赔/凯利标记 `blocked`，**保留同会话已拿到的真实亚值/大小球**，不再整轮丢弃；仅当亚值/大小球也全部失败时才把 `blocked` 上抛顶层触发熔断+换池重入
 - 命中验证页时，当前入口路径会尽快返回 `verification_required` 并停止本路径连续重试；同时会打开基于 `match_id + market_family` 的 TTL breaker，并在市场页访问前执行最小间隔节流，避免持续撞验证页
 
 ## 当前访问策略
@@ -98,6 +102,13 @@ python3 europe_leagues/okooo_save_snapshot.py \
   --out-dir /Users/bytedance/trae_projects/europe_leagues/.okooo-scraper/snapshots \
   --overwrite
 ```
+
+快照脚本的盘口抓取相关可选参数：
+
+- `--market-dwell <秒>`：每盘解析前的额外停留秒数（默认 `5.0`，等价环境变量 `OKOOO_MARKET_DWELL`），用于确保盘口数据渲染完整再读取
+- `--ouzhi-retry-waits <逗号秒列表>`：欧值(`odds.php`)撞墙后的阶梯重试等待（默认 `3,5,10`，等价环境变量 `OKOOO_OUZHI_RETRY_WAITS`）
+- `--no-odds-fresh-session`：关闭「odds.php 撞墙后换新设备指纹 odds-only 会话单独重抓欧赔/凯利」的恢复（默认开启）
+- `--odds-only`：独立冷会话只抓欧赔/凯利（`hub → 欧值 → odds.php → 凯利 tab`，全程不碰 `handicap.php`），用于隔离排查 odds.php 单端点问题
 
 ### 4. 用正式 CLI 跑最终预测
 

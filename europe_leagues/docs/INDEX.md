@@ -64,9 +64,12 @@
 - `internal_match_id / teams_match_id` 只允许在项目内部使用，不能再拼进澳客 `MatchID`
 - 盘口抓取统一走单会话 hub 真实导航：暖首页 → `history.php` → 点 `亚指`/`欧指` 整页跳转 → 页内点 `大小球`/`凯利` tab，一次会话拿回四盘；已移除所有深链回退路径
 - 阻断检测现在同时覆盖文字风控页和滑块/图形验证页
+- 强阻断判定 `_page_blocked_now` 带「赔率数字逃生阀」：页面已渲染出 ≥6 个 `x.xx` 赔率数字时一律判为正常页、绝不判墙（真实验证墙不会渲染完整赔率表），避免把真实数据误判吞掉；曾因过宽的 canvas 弱规则误判 `odds.php`，已删除
 - 命中验证页后，当前入口路径会快速返回 `verification_required` 并停止本路径重试；同时会打开基于 `match_id + market_family` 的 TTL breaker，并在市场页访问前执行最小间隔节流，避免持续撞验证页
 - hub 链路在每次整页跳转后及解析完四盘后都做强阻断判定，任意盘口命中验证墙都会上抛顶层 `blocked` 触发熔断与换池重入，避免中途撞墙静默丢数据
+- 欧值 `odds.php` 撞墙时仅标记欧赔/凯利 `blocked`、保留已拿到的亚值/大小球；按 `OUZHI_RETRY_WAITS`（默认 `3,5,10`）阶梯重试，仍失败则换新设备指纹 odds-only 会话单独重抓（可选参数 `--market-dwell` / `--ouzhi-retry-waits` / `--no-odds-fresh-session` / `--odds-only`）
 - 欧赔解析：优先 `multi_company_consensus`，`99家平均` 仅作为 fallback
+- 凯利解析：与欧赔同构表，逐公司行抽 `[初始 主/平/客][最新 主/平/客][返还率]` 并取多公司共识；三路（主/平/客）应彼此不同，若坍缩成同一个返还率即为列映射错误（已修复）
 - 已验证样例：`la_liga / 埃尔切 vs 赫塔费 / MatchID=1302914` 可稳定拿到真实欧赔、亚值、大小球、凯利
 
 ## 当前持久化边界
@@ -92,6 +95,14 @@
 - `champions_league`
 - `conference_league`
 - 其他杯赛 / 欧战扩展比赛
+
+### reference-only（不写滚动记忆）
+
+友谊赛 / 世界杯等 reference_only 联赛只做参考预测，没有联赛积分榜/战意上下文，**不写入滚动记忆、不进正式归档**：
+
+- 正式 `predict-match` 对这类联赛强制 `persist=False`
+- `predict-match-lite` 同样跳过持久化（`--league` 或 `--league-name` 命中 `is_reference_only_league_request` 即跳过），结果标记 `persisted.skipped_reason = "reference_only_league_not_persisted"`，无需手动加 `--no-write`
+- 直接跑 `okooo_save_snapshot.py` 快照脚本本就不碰 `MEMORY.md`，只落 `.okooo-scraper/snapshots/`
 
 ## 结果统计口径
 

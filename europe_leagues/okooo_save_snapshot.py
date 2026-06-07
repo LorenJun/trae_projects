@@ -18,6 +18,7 @@ from __future__ import annotations
 import atexit
 import argparse
 import json
+import os
 import re
 import subprocess
 import time
@@ -25,7 +26,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import requests
 from websocket import create_connection
@@ -75,6 +76,35 @@ HUB_TAB_DWELL_SECONDS = 2.0
 # handicap.php / odds.php pages. Clicking them triggers a full page load, so we
 # wait longer than an in-page tab switch before parsing the destination.
 HUB_NAV_SETTLE_SECONDS = 3.5
+# Extra dwell applied right before parsing each market (亚值/大小球/欧赔/凯利) so
+# the live odds table is fully rendered before we read it — this is on top of the
+# click/navigation settle above. Freely configurable via the OKOOO_MARKET_DWELL
+# env var or the --market-dwell CLI flag (which overrides this module global).
+MARKET_PARSE_DWELL_SECONDS = float(os.environ.get("OKOOO_MARKET_DWELL", "5.0"))
+
+
+def _parse_wait_ladder(raw: str, fallback: List[float]) -> List[float]:
+    out: List[float] = []
+    for part in str(raw).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            secs = float(part)
+        except ValueError:
+            continue
+        if secs > 0:
+            out.append(secs)
+    return out or list(fallback)
+
+
+# When odds.php lands on a verification wall, the wall is often transient. Before
+# giving up on 欧赔/凯利 we re-enter the odds page with escalating waits between
+# attempts (3s → 5s → 10s by default). Configurable via OKOOO_OUZHI_RETRY_WAITS
+# (comma-separated seconds) or the --ouzhi-retry-waits CLI flag.
+OUZHI_RETRY_WAITS = _parse_wait_ladder(
+    os.environ.get("OKOOO_OUZHI_RETRY_WAITS", "3,5,10"), [3.0, 5.0, 10.0]
+)
 
 
 def _default_data_root() -> Path:
@@ -1439,6 +1469,11 @@ def _page_blocked_now(bu: BrowserUse) -> bool:
     const height = Number(el.naturalHeight || el.height || 0);
     return /(verify|captcha|geetest|aliyun|slider|nc_)/.test(attrs) && Math.max(width, height) >= 200;
   });
+  // Escape valve: a real slider/captcha wall never renders a full odds table.
+  // If the page is dense with x.xx odds numbers, it is the genuine odds page —
+  // never treat it as a wall (this is what kept 欧赔/凯利 from being parsed).
+  const oddsHits = (bodyText.match(/\d{1,2}\.\d{2}/g) || []).length;
+  if (oddsHits >= 6) return JSON.stringify({blocked: false});
   const blocked = [
     '访问被阻断',
     '安全威胁',
@@ -1450,7 +1485,6 @@ def _page_blocked_now(bu: BrowserUse) -> bool:
     '验证码'
   ].some((marker) => bodyText.includes(marker) || title.includes(marker))
     || title.includes('405')
-    || (html.includes('<canvas') && /(verify|captcha|geetest|aliyun|nc_|slider)/i.test(html))
     || hasVerifyIframe
     || hasVerifyImage;
   return JSON.stringify({blocked});
@@ -2535,27 +2569,131 @@ def _parse_totals_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
 
 
 def _parse_kelly_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
+    # The 凯利 tab renders one row per bookmaker, structurally identical to the
+    # 欧赔 table: each company row carries [初始凯利 主/平/客][最新凯利 主/平/客]
+    # and a trailing 返还率. We harvest those per-company rows and build a
+    # multi-company consensus, mirroring _parse_europe_on_current_page, instead of
+    # reading a single 99家平均 aggregate cell (which only exposes the payout rate
+    # and collapsed all three outcomes onto the same number).
     js = r"""
 (() => {
   const blocked = (document.body?.innerText||'').includes('访问被阻断') || (document.title||'').includes('405');
   if (blocked) return JSON.stringify({blocked:true});
-  const tbl=[...document.querySelectorAll('table')].find(t=>t.innerText.includes('初始凯利') && t.innerText.includes('最新凯利') && t.innerText.includes('99家平均'));
-  if(!tbl) return JSON.stringify({found:false});
-  const row=[...tbl.querySelectorAll('tr')].find(tr=>(tr.innerText||'').includes('99家平均'));
-  if(!row) return JSON.stringify({found:false});
-  const tds=[...row.querySelectorAll('td')].map(td=>(td.innerText||'').trim());
-  const nums=(s)=>((s.match(/\d+\.\d{2}/g)||[]).map(parseFloat));
-  const init=nums(tds[1]||'');
-  const fin=nums(tds[2]||'');
-  const payout=nums(tds[3]||'');
-  const initial=init.length>=3?{home:init[0],draw:init[1],away:init[2]}:null;
-  const final=fin.length>=3?{home:fin[0],draw:fin[1],away:fin[2]}:null;
-  const delta=(a,b)=> (a==null||b==null) ? null : +(a-b).toFixed(4);
+
+  const aliasPairs = [
+    ['Bet365', 'Bet365'], ['bet365', 'Bet365'],
+    ['皇冠', '皇冠'], ['Pinnacle', 'Pinnacle'], ['平博', '平博'],
+    ['SBOBET', 'SBOBET'], ['SBO', 'SBOBET'], ['12BET', '12BET'],
+    ['易胜博', '易胜博'], ['威廉.希尔', '威廉希尔'], ['威廉希尔', '威廉希尔'],
+    ['立博', '立博'], ['Bwin', 'Bwin'], ['Interwetten', 'Interwetten'],
+    ['伟德', '伟德'], ['韦德', '伟德'], ['香港马会', '香港马会'],
+    ['澳门彩票', '澳门彩票'], ['澳门', '澳门彩票'], ['明陞', '明陞'], ['利记', '利记']
+  ];
+  const priority = {
+    'Bet365':9,'皇冠':8,'Pinnacle':8,'澳门彩票':7,'易胜博':6,'威廉希尔':6,
+    '立博':5,'Interwetten':4,'Bwin':4,'平博':4,'SBOBET':4,'12BET':4,
+    '伟德':3,'香港马会':3,'明陞':3,'利记':3
+  };
+  const round4 = (v) => +Number(v).toFixed(4);
+  const normalizeCompany = (name) => { const r = aliasPairs.find(x => x[0] === name); return r ? r[1] : name; };
+  const sanitizeText = (t) => (t || '').replace(/[!#＊*·•|｜]/g, '').replace(/\s+/g, ' ').trim();
+  const kellyRe = /\d+\.\d{2}/g;
+  const okKelly = (v) => Number.isFinite(v) && v >= 0.3 && v <= 2.5;
+  const median = (arr) => {
+    const vals = (arr || []).filter(v => Number.isFinite(v)).slice().sort((a, b) => a - b);
+    if (!vals.length) return null;
+    const mid = Math.floor(vals.length / 2);
+    return vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2;
+  };
+  const isNear = (v, med, pct) => Number.isFinite(v) && Number.isFinite(med) && med > 0 && Math.abs(v - med) / med <= pct;
+  const weightedAvg = (items, getter) => {
+    let sum = 0, wsum = 0;
+    for (const it of items || []) {
+      const val = getter(it); const w = it._priority || 1;
+      if (!Number.isFinite(val) || w <= 0) continue;
+      sum += val * w; wsum += w;
+    }
+    return wsum > 0 ? sum / wsum : null;
+  };
+
+  const parseLine = (line, alias) => {
+    const cleanLine = sanitizeText(line);
+    const cleanAlias = sanitizeText(alias);
+    const idx = cleanLine.toLowerCase().indexOf(cleanAlias.toLowerCase());
+    if (idx < 0) return null;
+    const company = normalizeCompany(alias);
+    const tail = cleanLine.slice(idx + cleanAlias.length).trim();
+    const nums = (tail.match(kellyRe) || []).map(parseFloat);
+    if (nums.length < 6) return null;
+    const initial = { home: nums[0], draw: nums[1], away: nums[2] };
+    const final = { home: nums[3], draw: nums[4], away: nums[5] };
+    const vals = [initial.home, initial.draw, initial.away, final.home, final.draw, final.away];
+    if (!vals.every(okKelly)) return null;
+    // The 7th number, when present, is the 返还率 (~0.8..1.2).
+    const payout = (nums[6] !== undefined && nums[6] >= 0.8 && nums[6] <= 1.2) ? nums[6] : null;
+    return {
+      company, initial, final,
+      delta: { home: round4(final.home - initial.home), draw: round4(final.draw - initial.draw), away: round4(final.away - initial.away) },
+      payout_rate: payout,
+      _priority: priority[company] || 1,
+      _matched_line: cleanLine,
+    };
+  };
+
+  const dedup = new Map();
+  const push = (item) => {
+    if (!item) return;
+    const key = [item.company, round4(item.initial.home), round4(item.initial.draw), round4(item.initial.away), round4(item.final.home), round4(item.final.draw), round4(item.final.away)].join('|');
+    if (!dedup.has(key)) dedup.set(key, item);
+  };
+
+  const aliases = aliasPairs.map(x => x[0]);
+  const tableRows = [...document.querySelectorAll('tr')].map(tr => (tr.innerText || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  for (const a of aliases) for (const line of tableRows) push(parseLine(line, a));
+  const bodyLines = (document.body?.innerText || '').split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  for (const a of aliases) for (const line of bodyLines) push(parseLine(line, a));
+
+  const companies = [...dedup.values()];
+  if (!companies.length) return JSON.stringify({found:false});
+
+  const medHome = median(companies.map(x => x.final.home));
+  const medDraw = median(companies.map(x => x.final.draw));
+  const medAway = median(companies.map(x => x.final.away));
+  let filtered = companies.filter(x => isNear(x.final.home, medHome, 0.28) && isNear(x.final.draw, medDraw, 0.30) && isNear(x.final.away, medAway, 0.30));
+  if (!filtered.length) filtered = companies;
+
+  const initial = {
+    home: round4(weightedAvg(filtered, x => x.initial.home)),
+    draw: round4(weightedAvg(filtered, x => x.initial.draw)),
+    away: round4(weightedAvg(filtered, x => x.initial.away)),
+  };
+  const final = {
+    home: round4(weightedAvg(filtered, x => x.final.home)),
+    draw: round4(weightedAvg(filtered, x => x.final.draw)),
+    away: round4(weightedAvg(filtered, x => x.final.away)),
+  };
+  const payoutVals = companies.map(x => x.payout_rate).filter(v => Number.isFinite(v));
+  const filteredNames = filtered.slice().sort((a, b) => (b._priority||1)-(a._priority||1) || a.company.localeCompare(b.company)).map(x => x.company);
+  const allCompanies = companies.slice().sort((a, b) => (b._priority||1)-(a._priority||1) || a.company.localeCompare(b.company))
+    .map(x => ({company:x.company, initial:x.initial, final:x.final, delta:x.delta, payout_rate:x.payout_rate}));
+
   return JSON.stringify({
     found:true,
+    company: filteredNames[0] || allCompanies[0]?.company || '',
+    company_mode: filtered.length > 1 ? 'multi_company_consensus' : 'single_company',
     initial, final,
-    delta: initial && final ? {home:delta(final.home, initial.home), draw:delta(final.draw, initial.draw), away:delta(final.away, initial.away)} : null,
-    payout_rate: (payout[0] ?? null)
+    delta:{ home: round4(final.home - initial.home), draw: round4(final.draw - initial.draw), away: round4(final.away - initial.away) },
+    payout_rate: payoutVals.length ? round4(median(payoutVals)) : null,
+    consensus:{
+      mode: filtered.length > 1 ? 'multi_company_consensus' : 'single_company',
+      company_count: allCompanies.length,
+      filtered_company_count: filtered.length,
+      companies: filteredNames,
+      all_companies: allCompanies.map(x => x.company),
+      final_median: {home: round4(medHome), draw: round4(medDraw), away: round4(medAway)},
+    },
+    companies: allCompanies,
+    _source:'multi_company_consensus',
   });
 })()
 """
@@ -2563,55 +2701,60 @@ def _parse_kelly_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
 
 
 def _parse_kelly_anywhere_on_page(bu: BrowserUse) -> Dict[str, Any]:
-    """Fallback: search any table row containing '99家平均' and try to infer initial/final kelly."""
+    """Fallback: scan any table/text row that exposes a full 主/平/客 kelly triplet.
+
+    Used when the per-company consensus parser finds no recognizable bookmaker
+    rows. We accept any row carrying at least six in-range (0.3..2.5) x.xx values
+    — first three are 初始凯利 主/平/客, next three 最新凯利 主/平/客, an optional
+    seventh is the 返还率. A 99家平均 aggregate row is preferred when present.
+    """
     js = r"""
 (() => {
   const blocked = (document.body?.innerText||'').includes('访问被阻断') || (document.title||'').includes('405');
   if (blocked) return JSON.stringify({blocked:true});
 
-  const rows = [...document.querySelectorAll('tr')].filter(tr => (tr.innerText||'').includes('99家平均'));
   const toNums = (s) => (String(s||'').match(/\d+\.\d{2}/g)||[]).map(parseFloat);
+  const okKelly = (v) => Number.isFinite(v) && v >= 0.3 && v <= 2.5;
+  const round4 = (v) => +Number(v).toFixed(4);
 
-  // Prefer a row whose ancestor table contains both labels.
-  const preferred = rows.find(r => {
-    const t = r.closest('table');
-    const it = t ? (t.innerText||'') : '';
-    return it.includes('初始凯利') && it.includes('最新凯利');
-  }) || null;
+  const buildFromNums = (nums, source) => {
+    if (nums.length < 6) return null;
+    const init = nums.slice(0, 3);
+    const fin = nums.slice(3, 6);
+    if (!init.every(okKelly) || !fin.every(okKelly)) return null;
+    const initial = {home:init[0], draw:init[1], away:init[2]};
+    const final = {home:fin[0], draw:fin[1], away:fin[2]};
+    const payout = (nums[6] !== undefined && nums[6] >= 0.8 && nums[6] <= 1.2) ? nums[6] : null;
+    return JSON.stringify({
+      found:true, initial, final,
+      delta:{home:round4(final.home-initial.home), draw:round4(final.draw-initial.draw), away:round4(final.away-initial.away)},
+      payout_rate:payout, _source:source
+    });
+  };
 
-  const candidates = preferred ? [preferred] : rows;
-
-  for (const row of candidates) {
+  const allRows = [...document.querySelectorAll('tr')];
+  const aggRows = allRows.filter(tr => (tr.innerText||'').includes('99家平均') || (tr.innerText||'').includes('平均'));
+  // Try aggregate rows first (most stable), then any other row.
+  for (const row of [...aggRows, ...allRows]) {
     const tds = [...row.querySelectorAll('td')].map(td => (td.innerText||'').trim());
-    // Pattern A: dedicated kelly table where tds[1], tds[2], tds[3] map to initial/final/payout.
-    if (tds.length >= 4) {
+    // Dedicated kelly table: tds[1]=初始(3) tds[2]=最新(3) tds[3]=返还率.
+    if (tds.length >= 3) {
       const init = toNums(tds[1]);
       const fin = toNums(tds[2]);
-      const payout = toNums(tds[3]);
-      const okTriplet = (arr) => arr.length >= 3 && arr.slice(0,3).every(v => v >= 0.3 && v <= 2.5);
-      const okPayout = (arr) => arr.length >= 1 && arr[0] >= 0.8 && arr[0] <= 1.2;
-      if (okTriplet(init) && okTriplet(fin)) {
-        const initial = {home:init[0], draw:init[1], away:init[2]};
-        const final = {home:fin[0], draw:fin[1], away:fin[2]};
-        const delta = {home:+(final.home-initial.home).toFixed(4), draw:+(final.draw-initial.draw).toFixed(4), away:+(final.away-initial.away).toFixed(4)};
-        return JSON.stringify({found:true, initial, final, delta, payout_rate: okPayout(payout) ? payout[0] : null, _source:'row_tds'});
+      if (init.length >= 3 && fin.length >= 3 && init.slice(0,3).every(okKelly) && fin.slice(0,3).every(okKelly)) {
+        const out = buildFromNums([...init.slice(0,3), ...fin.slice(0,3), ...toNums(tds[3]||'')], 'row_tds');
+        if (out) return out;
       }
     }
+    const out = buildFromNums(toNums(row.innerText), 'row_innerText');
+    if (out) return out;
+  }
 
-    // Pattern B: one-line numbers where first 3 are initial, next 3 are final, last is payout.
-    const allNums = toNums(row.innerText);
-    if (allNums.length >= 7) {
-      const init = allNums.slice(0, 3);
-      const fin = allNums.slice(3, 6);
-      const payout = allNums[6];
-      const okTriplet = (arr) => arr.every(v => v >= 0.3 && v <= 2.5);
-      if (okTriplet(init) && okTriplet(fin) && payout >= 0.8 && payout <= 1.2) {
-        const initial = {home:init[0], draw:init[1], away:init[2]};
-        const final = {home:fin[0], draw:fin[1], away:fin[2]};
-        const delta = {home:+(final.home-initial.home).toFixed(4), draw:+(final.draw-initial.draw).toFixed(4), away:+(final.away-initial.away).toFixed(4)};
-        return JSON.stringify({found:true, initial, final, delta, payout_rate:payout, _source:'row_innerText'});
-      }
-    }
+  // Last resort: scan body text lines.
+  const lines = (document.body?.innerText || '').split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  for (const line of lines) {
+    const out = buildFromNums(toNums(line), 'body_line');
+    if (out) return out;
   }
 
   return JSON.stringify({found:false});
@@ -2818,7 +2961,113 @@ def _find_match_id(
     return {"match_id": best["mid"], "schedule_row": best}
 
 
-def _extract_all_markets_from_hub(bu: BrowserUse, history_url: str) -> Dict[str, Any]:
+def _current_url(bu: BrowserUse) -> str:
+    try:
+        return str(bu.eval_json("(() => JSON.stringify({u: location.href}))()").get("u") or "")
+    except Exception:
+        return ""
+
+
+def _pull_odds_leg(bu: BrowserUse, history_url: str, dwell: float) -> Dict[str, Any]:
+    """From the hub, click 欧值 -> odds.php and parse 欧赔 + the inner 凯利 tab.
+
+    Returns a dict with keys ``europe`` and ``kelly``. On a verification wall (after
+    the OUZHI_RETRY_WAITS ladder is exhausted) both come back blocked; this never
+    touches the already-captured 亚值/大小球.
+    """
+    _open_ready(bu, history_url, settle_seconds=2.0)
+    europe_click = _click_visible_text(bu, ["欧值", "欧指", "欧赔", "赔率"], settle_seconds=HUB_NAV_SETTLE_SECONDS)
+    europe_url = _current_url(bu)
+
+    # The odds.php landing page often throws a transient verification wall. Rather
+    # than giving up immediately, re-enter the odds page with escalating waits
+    # (OUZHI_RETRY_WAITS, default 3s → 5s → 10s): wait, re-navigate from the hub,
+    # and re-check. Only after the ladder is exhausted do we mark 欧赔/凯利 blocked.
+    ouzhi_attempts = 0
+    if _page_blocked_now(bu):
+        for wait_secs in OUZHI_RETRY_WAITS:
+            ouzhi_attempts += 1
+            time.sleep(wait_secs)
+            _open_ready(bu, history_url, settle_seconds=2.0)
+            europe_click = _click_visible_text(bu, ["欧值", "欧指", "欧赔", "赔率"], settle_seconds=HUB_NAV_SETTLE_SECONDS)
+            europe_url = _current_url(bu)
+            if not _page_blocked_now(bu):
+                break
+
+    if _page_blocked_now(bu):
+        europe = {"blocked": True, "url": europe_url or history_url, "_blocked_at": "hub_nav_ouzhi", "_flow": "hub_nav_ouzhi", "_click": europe_click, "_ouzhi_retries": ouzhi_attempts}
+        kelly = {"blocked": True, "url": europe_url or history_url, "_blocked_at": "hub_nav_ouzhi", "_flow": "hub_nav_ouzhi_inner", "_ouzhi_retries": ouzhi_attempts}
+        return {"europe": europe, "kelly": kelly}
+
+    # 欧赔 sometimes renders a transient/empty view right after navigation, which
+    # the parser's blocked-keyword heuristics can misread as a verification wall.
+    # Explicitly click the 欧赔/初赔 main tab to force the odds table to render,
+    # then re-parse after a short settle and keep the better-scored result.
+    time.sleep(dwell)
+    europe = _parse_europe_on_current_page(bu)
+    if not _is_success_payload(europe) or _score_europe_payload(europe) < (3, 2, 2):
+        europe_tab_click = _click_visible_text(bu, ["欧赔", "初赔", "欧值", "欧指"], settle_seconds=CLICK_SETTLE_SECONDS)
+        time.sleep(HUB_TAB_DWELL_SECONDS)
+        europe_retry = _parse_europe_on_current_page(bu)
+        europe = _pick_preferred_europe_result(europe, europe_retry)
+        europe["_tab_click"] = europe_tab_click
+    europe["url"] = europe_url or history_url
+    europe["_flow"] = "hub_nav_ouzhi"
+    europe["_click"] = europe_click
+    if ouzhi_attempts:
+        europe["_ouzhi_retries"] = ouzhi_attempts
+
+    kelly_click = _click_visible_text(bu, ["凯利", "凯利指数"], settle_seconds=CLICK_SETTLE_SECONDS)
+    time.sleep(dwell)
+    kelly = _parse_kelly_on_current_page(bu)
+    if isinstance(kelly, dict) and kelly.get("found") is False:
+        kelly = _parse_kelly_anywhere_on_page(bu)
+    kelly["url"] = _current_url(bu) or europe_url or history_url
+    kelly["_flow"] = "hub_nav_ouzhi_inner"
+    kelly["_click"] = kelly_click
+    return {"europe": europe, "kelly": kelly}
+
+
+def _extract_odds_only_from_hub(bu: BrowserUse, history_url: str, market_dwell_seconds: Optional[float] = None) -> Dict[str, Any]:
+    """Fresh-session odds-only pass: warm, land on the hub, pull 欧赔 + 凯利.
+
+    Used to recover 欧赔/凯利 on a brand-new device fingerprint when the main hub
+    run salvaged 亚值/大小球 but odds.php was walled. Returns a bundle whose
+    ``found`` reflects only the odds markets; on a wall it returns a top-level
+    blocked payload so _run_with_retries opens the breaker / reentry can apply.
+    """
+    dwell = MARKET_PARSE_DWELL_SECONDS if market_dwell_seconds is None else float(market_dwell_seconds)
+    state_text = _open_ready(bu, history_url, settle_seconds=3.0)
+    if _is_blocked_text(state_text):
+        return {"blocked": True, "url": history_url, "_state_excerpt": state_text[:500]}
+
+    legs = _pull_odds_leg(bu, history_url, dwell)
+    europe = legs.get("europe") or {}
+    kelly = legs.get("kelly") or {}
+    blocked_markets = [
+        name for name, payload in (("europe", europe), ("kelly", kelly))
+        if isinstance(payload, dict) and payload.get("blocked")
+    ]
+    if blocked_markets and not (_is_success_payload(europe) or _is_success_payload(kelly)):
+        return {
+            "blocked": True,
+            "url": history_url,
+            "_blocked_at": ",".join(blocked_markets),
+            "europe": europe,
+            "kelly": kelly,
+        }
+    bundle = {
+        "found": _is_success_payload(europe) or _is_success_payload(kelly),
+        "url": history_url,
+        "europe": europe,
+        "kelly": kelly,
+    }
+    if blocked_markets:
+        bundle["_partial_blocked_at"] = ",".join(blocked_markets)
+    return bundle
+
+
+def _extract_all_markets_from_hub(bu: BrowserUse, history_url: str, market_dwell_seconds: Optional[float] = None) -> Dict[str, Any]:
     """One warm session, real in-page navigation: pull all four markets.
 
     The per-match hub (history.php?MatchID=...) is a stats page, not an odds
@@ -2829,9 +3078,14 @@ def _extract_all_markets_from_hub(bu: BrowserUse, history_url: str) -> Dict[str,
     and referer chains intact and avoids the cold deep-link that trips okooo's
     verification wall.
 
+    `market_dwell_seconds` is an extra settle applied right before parsing each
+    market (亚值/大小球/欧赔/凯利) so the live odds table is fully rendered; it
+    defaults to MARKET_PARSE_DWELL_SECONDS and is freely configurable.
+
     Returns a bundle dict keyed by market; on a verification wall it returns a
     single blocked payload that the caller maps onto every market.
     """
+    dwell = MARKET_PARSE_DWELL_SECONDS if market_dwell_seconds is None else float(market_dwell_seconds)
     state_text = _open_ready(bu, history_url, settle_seconds=3.0)
     if _is_blocked_text(state_text):
         return {"blocked": True, "url": history_url, "_state_excerpt": state_text[:500]}
@@ -2847,6 +3101,7 @@ def _extract_all_markets_from_hub(bu: BrowserUse, history_url: str) -> Dict[str,
     asian_url = _cur_url()
     if _page_blocked_now(bu):
         return {"blocked": True, "url": asian_url or history_url, "_blocked_at": "hub_nav_yazhi"}
+    time.sleep(dwell)
     asian = _parse_asian_on_current_page(bu)
     asian["url"] = asian_url or history_url
     asian["_flow"] = "hub_nav_yazhi"
@@ -2854,50 +3109,32 @@ def _extract_all_markets_from_hub(bu: BrowserUse, history_url: str) -> Dict[str,
 
     time.sleep(ASIAN_TO_TOTALS_DWELL_SECONDS)
     totals_click = _click_visible_text(bu, ["大小球", "大/小", "总进球"], settle_seconds=CLICK_SETTLE_SECONDS)
+    time.sleep(dwell)
     totals = _parse_totals_on_current_page(bu)
     totals["url"] = _cur_url() or asian_url or history_url
     totals["_flow"] = "hub_nav_yazhi_inner"
     totals["_click"] = totals_click
 
-    # 2) Back to hub, then 欧指 nav link -> odds.php. Parse 欧赔, then 凯利 tab.
-    _open_ready(bu, history_url, settle_seconds=2.0)
-    europe_click = _click_visible_text(bu, ["欧指", "欧赔", "赔率"], settle_seconds=HUB_NAV_SETTLE_SECONDS)
-    europe_url = _cur_url()
-    if _page_blocked_now(bu):
-        return {"blocked": True, "url": europe_url or history_url, "_blocked_at": "hub_nav_ouzhi"}
-    # 欧赔 sometimes renders a transient/empty view right after navigation, which
-    # the parser's blocked-keyword heuristics can misread as a verification wall.
-    # Explicitly click the 欧赔/初赔 main tab to force the odds table to render,
-    # then re-parse after a short settle and keep the better-scored result.
-    europe = _parse_europe_on_current_page(bu)
-    if not _is_success_payload(europe) or _score_europe_payload(europe) < (3, 2, 2):
-        europe_tab_click = _click_visible_text(bu, ["欧赔", "初赔", "欧指"], settle_seconds=CLICK_SETTLE_SECONDS)
-        time.sleep(HUB_TAB_DWELL_SECONDS)
-        europe_retry = _parse_europe_on_current_page(bu)
-        europe = _pick_preferred_europe_result(europe, europe_retry)
-        europe["_tab_click"] = europe_tab_click
-    europe["url"] = europe_url or history_url
-    europe["_flow"] = "hub_nav_ouzhi"
-    europe["_click"] = europe_click
+    # 2) Back to hub, then pull the odds leg (欧值 -> odds.php: 欧赔 + 凯利). This
+    # mirrors a real user tabbing to the odds page within the same warm session.
+    odds_legs = _pull_odds_leg(bu, history_url, dwell)
+    europe = odds_legs.get("europe") or {}
+    kelly = odds_legs.get("kelly") or {}
 
-    kelly_click = _click_visible_text(bu, ["凯利", "凯利指数"], settle_seconds=CLICK_SETTLE_SECONDS)
-    kelly = _parse_kelly_on_current_page(bu)
-    if isinstance(kelly, dict) and kelly.get("found") is False:
-        kelly = _parse_kelly_anywhere_on_page(bu)
-    kelly["url"] = _cur_url() or europe_url or history_url
-    kelly["_flow"] = "hub_nav_ouzhi_inner"
-    kelly["_click"] = kelly_click
-
-    # If any per-market parser hit a verification wall mid-flow, escalate to a
-    # top-level blocked payload so _run_with_retries opens the breaker and the
-    # verification-reentry (fresh device pool) path can recover. Without this the
-    # wall would be silently swallowed as "no data" and four markets returned empty.
+    asian_ok = _is_success_payload(asian)
+    totals_ok = _is_success_payload(totals)
     blocked_markets = [
         name
         for name, payload in (("asian", asian), ("totals", totals), ("europe", europe), ("kelly", kelly))
         if isinstance(payload, dict) and payload.get("blocked")
     ]
-    if blocked_markets:
+
+    # Escalate to a top-level blocked payload (which the caller maps onto every
+    # market and which opens the breaker + triggers verification-reentry) ONLY
+    # when a wall was hit and nothing useful was salvaged. If the handicap.php leg
+    # already returned real 亚值/大小球, preserve them and keep only the walled
+    # 欧赔/凯利 blocked, so a single odds.php wall no longer throws away good data.
+    if blocked_markets and not (asian_ok or totals_ok):
         return {
             "blocked": True,
             "url": history_url,
@@ -2908,12 +3145,12 @@ def _extract_all_markets_from_hub(bu: BrowserUse, history_url: str) -> Dict[str,
             "totals": totals,
         }
 
-    return {
+    bundle = {
         "found": (
             _is_success_payload(europe)
             or _is_success_payload(kelly)
-            or _is_success_payload(asian)
-            or _is_success_payload(totals)
+            or asian_ok
+            or totals_ok
         ),
         "url": history_url,
         "europe": europe,
@@ -2921,6 +3158,9 @@ def _extract_all_markets_from_hub(bu: BrowserUse, history_url: str) -> Dict[str,
         "asian": asian,
         "totals": totals,
     }
+    if blocked_markets:
+        bundle["_partial_blocked_at"] = ",".join(blocked_markets)
+    return bundle
 
 
 def _run_with_retries(
@@ -3067,7 +3307,7 @@ def _run_with_verification_reentry(
     return second
 
 
-def _extract_all_markets_with_fallback(match_id: str, history_url: str, client_factory: Callable[[str], Any], session_prefix: str, *, base_dir: str = "") -> Dict[str, Any]:
+def _extract_all_markets_with_fallback(match_id: str, history_url: str, client_factory: Callable[[str], Any], session_prefix: str, *, base_dir: str = "", odds_fresh_session_recovery: bool = True) -> Dict[str, Any]:
     """One warm hub session, real in-page navigation, all four markets.
 
     The only supported flow: warm a session, land on the per-match hub
@@ -3076,6 +3316,13 @@ def _extract_all_markets_with_fallback(match_id: str, history_url: str, client_f
     hub cannot parse is returned as-is (blocked/found:false). On a hub
     verification wall every market inherits the blocked payload so the
     breaker/reentry machinery still applies.
+
+    okooo guards odds.php (欧赔/凯利) more aggressively than handicap.php
+    (亚值/大小球). When the main hub run salvaged 亚值/大小球 but odds.php was
+    walled, and ``odds_fresh_session_recovery`` is set, we run a second
+    odds-only pass on a brand-new device fingerprint (a fresh client_factory
+    session mints a new mobile profile) and merge any recovered 欧赔/凯利 back in
+    without touching the already-captured 亚值/大小球.
     """
     hub = _run_with_retries(
         "all_markets_hub",
@@ -3095,10 +3342,40 @@ def _extract_all_markets_with_fallback(match_id: str, history_url: str, client_f
     asian = dict(hub.get("asian") or {}) if isinstance(hub, dict) else {}
     totals = dict(hub.get("totals") or {}) if isinstance(hub, dict) else {}
 
+    odds_walled = (europe.get("blocked") or kelly.get("blocked")) and not (
+        _is_success_payload(europe) or _is_success_payload(kelly)
+    )
+    salvaged_handicap = _is_success_payload(asian) or _is_success_payload(totals)
+    if odds_fresh_session_recovery and odds_walled and salvaged_handicap:
+        recovered = _run_with_verification_reentry(
+            lambda cf, sp: _run_with_retries(
+                "odds_only_hub",
+                f"{sp}_oddsonly",
+                cf,
+                _extract_odds_only_from_hub,
+                history_url,
+                market_family=MARKET_FAMILY_ODDS,
+                base_dir=base_dir,
+                breaker_match_id=match_id,
+            ),
+            client_factory,
+            f"{session_prefix}_oddsfresh",
+        )
+        if isinstance(recovered, dict) and not _is_verification_required_payload(recovered):
+            rec_europe = dict(recovered.get("europe") or {})
+            rec_kelly = dict(recovered.get("kelly") or {})
+            if _is_success_payload(rec_europe):
+                rec_europe["_recovered_via"] = "odds_fresh_session"
+                europe = rec_europe
+            if _is_success_payload(rec_kelly):
+                rec_kelly["_recovered_via"] = "odds_fresh_session"
+                kelly = rec_kelly
+
     return {"europe": europe, "kelly": kelly, "asian": asian, "totals": totals}
 
 
 def main() -> None:
+    global MARKET_PARSE_DWELL_SECONDS, OUZHI_RETRY_WAITS
     parser = argparse.ArgumentParser()
     parser.add_argument("--league", required=True, help="联赛名称（需与热门赛事页展示文本一致，如：法甲/英超/意甲...）")
     parser.add_argument("--team1", required=True, help="主队名称（用于赛程行匹配）")
@@ -3161,7 +3438,34 @@ def main() -> None:
         action="store_true",
         help="严格按请求日期+主客队(+时间)定位比赛，禁用相邻日期与宽松页面兜底。",
     )
+    parser.add_argument(
+        "--market-dwell",
+        type=float,
+        default=None,
+        help=f"每盘解析前的额外停留秒数（默认 {MARKET_PARSE_DWELL_SECONDS}，也可用 OKOOO_MARKET_DWELL 环境变量配置）。",
+    )
+    parser.add_argument(
+        "--ouzhi-retry-waits",
+        type=str,
+        default=None,
+        help="欧值(odds.php)撞验证墙后的阶梯重试等待秒数，逗号分隔（默认 3,5,10，也可用 OKOOO_OUZHI_RETRY_WAITS 环境变量配置）。",
+    )
+    parser.add_argument(
+        "--no-odds-fresh-session",
+        action="store_true",
+        help="禁用欧赔/凯利在 odds.php 撞墙后的『换新设备指纹会话单独重抓』恢复（默认开启，且不影响已拿到的亚值/大小球）。",
+    )
+    parser.add_argument(
+        "--odds-only",
+        action="store_true",
+        help="只抓欧赔/凯利：用一个独立冷会话直接走 hub→欧值→odds.php，完全不碰 handicap.php(亚值/大小球)，用于单独验证 odds.php 能否拿到。",
+    )
     args = parser.parse_args()
+
+    if args.market_dwell is not None:
+        MARKET_PARSE_DWELL_SECONDS = float(args.market_dwell)
+    if args.ouzhi_retry_waits is not None:
+        OUZHI_RETRY_WAITS = _parse_wait_ladder(args.ouzhi_retry_waits, OUZHI_RETRY_WAITS)
 
     event_name = f"{args.team1}vs{args.team2}"
     out_dir = Path(args.out_dir).resolve()
@@ -3264,16 +3568,43 @@ def main() -> None:
         # Single warm hub session: land on the home page, open the match hub
         # once, then flip 欧赔/凯利/亚值/大小球 tabs in-page. Per-market fallbacks
         # inside the wrapper handle anything the hub fails to parse.
-        all_markets = _run_with_verification_reentry(
-            lambda cf, sp: _extract_all_markets_with_fallback(match_id, found["schedule_row"]["href"], cf, sp, base_dir=str(_default_data_root().parent)),
-            client_factory,
-            f"{session_prefix}_all",
-        )
+        if args.odds_only:
+            # Independent cold session that only touches odds.php (hub → 欧值 →
+            # odds.php → 凯利 tab), never visiting handicap.php. Used to verify
+            # whether 欧赔/凯利 can be captured on their own, isolated from the
+            # handicap.php leg that may "warm" the IP first.
+            all_markets = _run_with_verification_reentry(
+                lambda cf, sp: _run_with_retries(
+                    "odds_only_hub",
+                    f"{sp}_oddsonly",
+                    cf,
+                    _extract_odds_only_from_hub,
+                    found["schedule_row"]["href"],
+                    market_family=MARKET_FAMILY_ODDS,
+                    base_dir=str(_default_data_root().parent),
+                    breaker_match_id=match_id,
+                ),
+                client_factory,
+                f"{session_prefix}_oddsonly",
+            )
+        else:
+            all_markets = _run_with_verification_reentry(
+                lambda cf, sp: _extract_all_markets_with_fallback(match_id, found["schedule_row"]["href"], cf, sp, base_dir=str(_default_data_root().parent), odds_fresh_session_recovery=not args.no_odds_fresh_session),
+                client_factory,
+                f"{session_prefix}_all",
+            )
         if isinstance(all_markets, dict):
-            payload["欧赔"] = all_markets.get("europe")
-            payload["凯利"] = all_markets.get("kelly")
-            payload["亚值"] = all_markets.get("asian")
-            payload["大小球"] = all_markets.get("totals")
+            if args.odds_only and _is_verification_required_payload(all_markets):
+                # Cold odds-only session was fully walled; record the blocked state
+                # on 欧赔/凯利 rather than leaving them null.
+                payload["欧赔"] = dict(all_markets)
+                payload["凯利"] = dict(all_markets)
+            else:
+                payload["欧赔"] = all_markets.get("europe")
+                payload["凯利"] = all_markets.get("kelly")
+                if not args.odds_only:
+                    payload["亚值"] = all_markets.get("asian")
+                    payload["大小球"] = all_markets.get("totals")
 
         if args.overwrite:
             payload["_note"] = "overwrite=true: same event writes to a stable filename"

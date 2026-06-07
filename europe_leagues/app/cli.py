@@ -928,6 +928,7 @@ def run_openclaw_predict_match(args):
         return
     print(f"预测: {result['prediction']}  信心: {result['confidence']:.2%}")
     print(f"主胜/平局/客胜: {result['final_probabilities']}")
+    _print_top_scores(result.get("top_scores"))
     over_under = result.get("over_under") if isinstance(result.get("over_under"), dict) else {}
     if over_under.get("available"):
         line = over_under.get("line")
@@ -963,8 +964,15 @@ def run_openclaw_predict_match_lite(args):
             okooo_driver=getattr(args, "okooo_driver", "local-chrome"),
             okooo_headed=bool(getattr(args, "okooo_headed", False)),
         )
-        if args.no_write:
+        # Reference-only competitions (友谊赛/etc.) are never written to the rolling
+        # memory, mirroring the formal predict-match path which forces persist=False
+        # for these leagues. They carry no standings context and would pollute the
+        # accuracy stats, so we skip persistence regardless of --no-write.
+        reference_only = is_reference_only_league_request(getattr(args, "league", "")) or is_reference_only_league_request(getattr(args, "league_name", ""))
+        if args.no_write or reference_only:
             result["persisted"] = {"enabled": False, "archived": False, "memory_updated": False}
+            if reference_only and not args.no_write:
+                result["persisted"]["skipped_reason"] = "reference_only_league_not_persisted"
         else:
             manager = ResultManager(EUROPE_LEAGUES_ROOT)
             service = PredictionPersistenceService(EUROPE_LEAGUES_ROOT, cache=None, result_manager=manager)
@@ -985,6 +993,7 @@ def run_openclaw_predict_match_lite(args):
     print(f"联赛: {result['league_name']}  日期: {result['match_date']}")
     print(f"预测: {result['prediction']}  信心: {result['confidence']:.2%}")
     print(f"主胜/平局/客胜: {result['all_probabilities']}")
+    _print_top_scores(result.get("top_scores"))
     over_under = result.get("over_under") if isinstance(result.get("over_under"), dict) else {}
     if over_under.get("available"):
         line = over_under.get("line")
@@ -997,6 +1006,23 @@ def run_openclaw_predict_match_lite(args):
     else:
         reason = str(over_under.get("reason") or "missing_real_market_line").strip()
         print(f"大小球: 待补真实盘口 ({reason})")
+
+
+def _print_top_scores(top_scores) -> None:
+    if not isinstance(top_scores, list) or not top_scores:
+        return
+    parts = []
+    for item in top_scores:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            score, conf = item[0], item[1]
+            try:
+                parts.append(f"{score} ({float(conf):.1%})")
+            except (TypeError, ValueError):
+                parts.append(str(score))
+        elif item:
+            parts.append(str(item))
+    if parts:
+        print(f"比分参考 (Top {len(parts)}): {' / '.join(parts)}")
 
 
 def is_fourteen_issue_request(args) -> bool:

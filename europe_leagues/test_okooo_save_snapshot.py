@@ -10,6 +10,8 @@ from okooo_live_snapshot import refresh_snapshot
 from okooo_save_snapshot import (
     _candidate_date_hints,
     _extract_all_markets_from_hub,
+    _extract_all_markets_with_fallback,
+    _extract_odds_only_from_hub,
     _find_existing_snapshot_by_match_id,
     _find_match_id,
     _find_match_id_from_schedule_cache,
@@ -186,17 +188,45 @@ class OkoooSaveSnapshotTest(unittest.TestCase):
         self.assertTrue(result["blocked"])
         self.assertEqual(result["_blocked_at"], "hub_nav_yazhi")
 
-    def test_extract_all_markets_from_hub_escalates_blocked_market_to_top_level(self):
-        asian = {"found": True, "parsed": True}
-        totals = {"found": True, "parsed": True}
-        europe = {"found": True, "parsed": True, "company_mode": "multi_company_consensus"}
-        kelly = {"blocked": True}
+    def test_extract_all_markets_from_hub_preserves_asian_when_odds_blocked(self):
+        asian = {"found": True, "parsed": True, "average_row": {"home": "0.90"}}
+        totals = {"found": True, "parsed": True, "line": "2.5"}
 
         with patch("okooo_save_snapshot._open_ready", return_value="ok"), patch(
             "okooo_save_snapshot._click_visible_text", return_value={"clicked": True}
-        ), patch("okooo_save_snapshot._page_blocked_now", return_value=False), patch(
-            "okooo_save_snapshot.time.sleep", return_value=None
         ), patch(
+            "okooo_save_snapshot.OUZHI_RETRY_WAITS", []
+        ), patch(
+            "okooo_save_snapshot._page_blocked_now", side_effect=[False, True, True]
+        ), patch("okooo_save_snapshot.time.sleep", return_value=None), patch(
+            "okooo_save_snapshot._parse_asian_on_current_page", return_value=dict(asian)
+        ), patch(
+            "okooo_save_snapshot._parse_totals_on_current_page", return_value=dict(totals)
+        ):
+            result = _extract_all_markets_from_hub(_DummyBrowser(), "https://m.okooo.com/match/history.php?MatchID=1")
+
+        self.assertNotIn("blocked", result)
+        self.assertTrue(result["found"])
+        self.assertEqual(result["_partial_blocked_at"], "europe,kelly")
+        self.assertTrue(result["asian"]["found"])
+        self.assertTrue(result["totals"]["found"])
+        self.assertTrue(result["europe"]["blocked"])
+        self.assertTrue(result["kelly"]["blocked"])
+
+    def test_extract_all_markets_from_hub_retries_ouzhi_then_recovers(self):
+        asian = {"found": True, "parsed": True}
+        totals = {"found": True, "parsed": True}
+        europe = {"found": True, "parsed": True, "company_mode": "multi_company_consensus"}
+        kelly = {"found": True, "parsed": True}
+
+        # asian leg clean; ouzhi first landing walled, then clean after one retry.
+        with patch("okooo_save_snapshot._open_ready", return_value="ok"), patch(
+            "okooo_save_snapshot._click_visible_text", return_value={"clicked": True}
+        ), patch(
+            "okooo_save_snapshot.OUZHI_RETRY_WAITS", [3.0, 5.0, 10.0]
+        ), patch(
+            "okooo_save_snapshot._page_blocked_now", side_effect=[False, True, False, False]
+        ), patch("okooo_save_snapshot.time.sleep", return_value=None), patch(
             "okooo_save_snapshot._parse_asian_on_current_page", return_value=dict(asian)
         ), patch(
             "okooo_save_snapshot._parse_totals_on_current_page", return_value=dict(totals)
@@ -205,16 +235,115 @@ class OkoooSaveSnapshotTest(unittest.TestCase):
         ), patch(
             "okooo_save_snapshot._parse_kelly_on_current_page", return_value=dict(kelly)
         ), patch(
-            "okooo_save_snapshot._parse_kelly_anywhere_on_page", return_value=dict(kelly)
-        ), patch(
             "okooo_save_snapshot._is_success_payload", return_value=True
         ), patch(
             "okooo_save_snapshot._score_europe_payload", return_value=(3, 2, 2)
         ):
             result = _extract_all_markets_from_hub(_DummyBrowser(), "https://m.okooo.com/match/history.php?MatchID=1")
 
+        self.assertNotIn("blocked", result)
+        self.assertTrue(result["europe"]["found"])
+        self.assertEqual(result["europe"]["_ouzhi_retries"], 1)
+
+    def test_extract_all_markets_from_hub_escalates_when_nothing_salvaged(self):
+        asian = {"found": False}
+        totals = {"found": False}
+
+        with patch("okooo_save_snapshot._open_ready", return_value="ok"), patch(
+            "okooo_save_snapshot._click_visible_text", return_value={"clicked": True}
+        ), patch(
+            "okooo_save_snapshot.OUZHI_RETRY_WAITS", []
+        ), patch(
+            "okooo_save_snapshot._page_blocked_now", side_effect=[False, True, True]
+        ), patch("okooo_save_snapshot.time.sleep", return_value=None), patch(
+            "okooo_save_snapshot._parse_asian_on_current_page", return_value=dict(asian)
+        ), patch(
+            "okooo_save_snapshot._parse_totals_on_current_page", return_value=dict(totals)
+        ):
+            result = _extract_all_markets_from_hub(_DummyBrowser(), "https://m.okooo.com/match/history.php?MatchID=1")
+
         self.assertTrue(result["blocked"])
-        self.assertIn("kelly", result["_blocked_at"])
+        self.assertEqual(result["_blocked_at"], "europe,kelly")
+
+    def test_extract_odds_only_from_hub_returns_blocked_when_walled(self):
+        with patch("okooo_save_snapshot._open_ready", return_value="ok"), patch(
+            "okooo_save_snapshot._is_blocked_text", return_value=False
+        ), patch(
+            "okooo_save_snapshot._click_visible_text", return_value={"clicked": True}
+        ), patch(
+            "okooo_save_snapshot.OUZHI_RETRY_WAITS", []
+        ), patch(
+            "okooo_save_snapshot._page_blocked_now", return_value=True
+        ), patch("okooo_save_snapshot.time.sleep", return_value=None):
+            result = _extract_odds_only_from_hub(_DummyBrowser(), "https://m.okooo.com/match/history.php?MatchID=1")
+
+        self.assertTrue(result["blocked"])
+        self.assertEqual(result["_blocked_at"], "europe,kelly")
+
+    def test_fallback_recovers_odds_on_fresh_session_keeps_handicap(self):
+        # Main hub run: 亚值/大小球 ok, 欧赔/凯利 walled.
+        hub_result = {
+            "found": True,
+            "asian": {"found": True, "parsed": True, "average_row": {"home": "0.90"}},
+            "totals": {"found": True, "parsed": True, "line": "2.5"},
+            "europe": {"blocked": True, "_blocked_at": "hub_nav_ouzhi"},
+            "kelly": {"blocked": True, "_blocked_at": "hub_nav_ouzhi"},
+            "_partial_blocked_at": "europe,kelly",
+        }
+        # Fresh odds-only pass: 欧赔/凯利 recovered on a new fingerprint.
+        odds_result = {
+            "found": True,
+            "europe": {"found": True, "parsed": True, "company_mode": "multi_company_consensus"},
+            "kelly": {"found": True, "parsed": True},
+        }
+
+        def fake_run_with_retries(_label, _sp, _cf, extractor, *_a, **_k):
+            if extractor is _extract_all_markets_from_hub:
+                return dict(hub_result)
+            return dict(odds_result)
+
+        with patch("okooo_save_snapshot._run_with_retries", side_effect=fake_run_with_retries), patch(
+            "okooo_save_snapshot._run_with_verification_reentry",
+            side_effect=lambda runner, cf, sp: runner(cf, sp),
+        ):
+            merged = _extract_all_markets_with_fallback(
+                "1315851", "https://m.okooo.com/match/history.php?MatchID=1315851",
+                lambda s: _DummyBrowser(), "sess",
+            )
+
+        # 亚值/大小球 preserved from the first run, 欧赔/凯利 recovered from fresh session.
+        self.assertTrue(merged["asian"]["found"])
+        self.assertTrue(merged["totals"]["found"])
+        self.assertTrue(merged["europe"]["found"])
+        self.assertTrue(merged["kelly"]["found"])
+        self.assertEqual(merged["europe"]["_recovered_via"], "odds_fresh_session")
+
+    def test_fallback_skips_fresh_session_when_disabled(self):
+        hub_result = {
+            "found": True,
+            "asian": {"found": True, "parsed": True},
+            "totals": {"found": True, "parsed": True},
+            "europe": {"blocked": True},
+            "kelly": {"blocked": True},
+        }
+
+        reentry_called = {"n": 0}
+
+        def fake_reentry(runner, cf, sp):
+            reentry_called["n"] += 1
+            return runner(cf, sp)
+
+        with patch("okooo_save_snapshot._run_with_retries", return_value=dict(hub_result)), patch(
+            "okooo_save_snapshot._run_with_verification_reentry", side_effect=fake_reentry
+        ):
+            merged = _extract_all_markets_with_fallback(
+                "1", "https://m.okooo.com/match/history.php?MatchID=1",
+                lambda s: _DummyBrowser(), "sess", odds_fresh_session_recovery=False,
+            )
+
+        self.assertEqual(reentry_called["n"], 0)
+        self.assertTrue(merged["europe"]["blocked"])
+        self.assertTrue(merged["asian"]["found"])
 
     def test_run_with_verification_reentry_stops_after_one_failed_reentry(self):
         blocked_profile = available_mobile_profiles()[0]

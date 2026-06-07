@@ -43,6 +43,7 @@
 3. `okooo_save_snapshot.py` 可按 `日期 + 主客队 + 时间` 精确锁定比赛行并抓取 `欧赔 / 亚值 / 大小球 / 凯利`
 4. `domain/live.py` 与 `domain/odds.py` 会在预测前注入快照，必要时补抓真实盘口线
 5. 预测输出中的 `over_under.line_source=snapshot_final` 代表真实盘口已成功接入正式链
+6. `predict-match` / `predict-match-lite` 的文本输出在「主胜/平局/客胜」之后会罗列 `比分参考 (Top N)`（带各比分置信度，数据来自结果里的 `top_scores`）
 
 当前身份字段约定也已收敛：
 
@@ -108,6 +109,14 @@
 
 - 项目根 `MEMORY.md`
 - `.okooo-scraper/runtime/*.json`
+
+### 3. reference-only competitions（不写滚动记忆）
+
+友谊赛 / 世界杯等 reference_only 联赛只做参考预测，没有积分榜/战意上下文，**不写滚动记忆、不进正式归档**：
+
+- 正式 `predict-match` 对这类联赛强制 `persist=False`
+- `predict-match-lite` 同样跳过（`--league`/`--league-name` 命中 `is_reference_only_league_request`），结果标 `persisted.skipped_reason = "reference_only_league_not_persisted"`，无需手动 `--no-write`
+- 直接跑 `okooo_save_snapshot.py` 快照脚本本就不写 `MEMORY.md`
 
 ## 预测与结果闭环
 
@@ -246,6 +255,9 @@ OKOOO_BROWSER_E2E=1 python3 -m unittest test_okooo_browser
 - 公共移动设备池由 `okooo_mobile_access.py` 统一维护，当前为 `500` 组 `iPhone Safari` profile，分布在多个 iPhone device pool 上
 - 命中验证页后，当前入口路径会快速返回 `verification_required` 并停止本路径重试；同时会打开基于 `match_id + market_family` 的 TTL breaker，并在市场页访问前执行最小间隔节流，避免持续撞验证页
 - hub 链路在每次整页跳转（→`handicap.php`、→`odds.php`）后及解析完四盘后都做强阻断判定，任意盘口命中验证墙都会把 `blocked` 上抛到顶层触发熔断与换池重入，避免中途撞墙被当成「没开盘」而静默丢数据
+- 强阻断判定 `_page_blocked_now` 带「赔率数字逃生阀」：页面已渲染出 ≥6 个 `x.xx` 赔率数字时一律判为正常页、绝不判墙（真实滑块/验证墙不会渲染完整赔率表），避免把解析得到的真实数据误判吞掉
+- 欧值 `odds.php` 撞墙时仅标记欧赔/凯利 `blocked`，保留同会话已拿到的真实亚值/大小球；并按 `OUZHI_RETRY_WAITS`（默认 `3,5,10`）阶梯重试，仍失败则触发换新设备指纹 odds-only 会话单独重抓（`--no-odds-fresh-session` 可关闭）
+- 快照脚本可选盘口参数：`--market-dwell`（每盘解析前停留秒数，默认 5，等价 `OKOOO_MARKET_DWELL`）、`--ouzhi-retry-waits`（等价 `OKOOO_OUZHI_RETRY_WAITS`）、`--odds-only`（独立冷会话只抓欧赔/凯利）
 - 正式 `predict-match` 已验证可稳定拿到真实欧赔、亚值、大小球、凯利数据
 - `premier_league / 伯恩利 vs 狼队 / 2026-05-24 / MatchID=1296105` 已验证真实盘口回流后可修正最终预测方向
 

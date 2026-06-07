@@ -53,6 +53,10 @@
 - 项目根 `MEMORY.md`
 - `.okooo-scraper/runtime/*.json`
 
+### reference-only（不写滚动记忆）
+
+友谊赛 / 世界杯等 reference_only 联赛只做参考预测，**不写滚动记忆、不进正式归档**：正式 `predict-match` 强制 `persist=False`；`predict-match-lite` 同样跳过（`--league`/`--league-name` 命中 `is_reference_only_league_request`），结果标 `persisted.skipped_reason = "reference_only_league_not_persisted"`，无需手动 `--no-write`。直接跑 `okooo_save_snapshot.py` 快照脚本本就不写 `MEMORY.md`。
+
 ## 推荐命令
 
 ### 1. 环境检查
@@ -161,7 +165,7 @@ python3 prediction_system.py refresh-repo-docs --json
 执行预测后，优先检查这些字段：
 
 - `final_probabilities`
-- `top_scores`
+- `top_scores`（文本输出中会在「主胜/平局/客胜」后罗列为 `比分参考 (Top N)`，带各比分置信度）
 - `over_under.line`
 - `over_under.line_source`
 - `over_under.market.final`
@@ -187,9 +191,12 @@ python3 prediction_system.py refresh-repo-docs --json
   - 欧赔 / 凯利：`https://m.okooo.com/match/odds.php?MatchID=<external_match_id>`
   - 亚值 / 大小球：`https://m.okooo.com/match/handicap.php?MatchID=<external_match_id>`（大小球为页内 tab）
   - `overunder.php` / `daxiao.php` 是空页面，不作为来源
-- 当前阻断识别除了 `403/405` 文字页，也覆盖 `请进行验证 / 滑动到最右边 / 拖动滑块 / 验证码` 及 `canvas / verify iframe / 大图验证` 等图形验证页特征
+- 当前阻断识别除了 `403/405` 文字页，也覆盖 `请进行验证 / 滑动到最右边 / 拖动滑块 / 验证码` 及 `verify iframe / 大图验证`（验证特征图 ≥200px）等图形验证页特征
+- 强阻断判定 `_page_blocked_now` 带「赔率数字逃生阀」：页面已渲染出 ≥6 个 `x.xx` 赔率数字时一律判为正常页、绝不判墙（真实滑块/验证墙不会渲染完整赔率表）。曾因一条过宽的 `canvas + slider/verify` 弱规则把正常 `odds.php` 误判成墙、导致欧赔/凯利长期拿不到数据，该弱规则已删除
+- 凯利解析与欧赔同构：逐公司行抽 `[初始 主/平/客][最新 主/平/客][返还率]` 取多公司共识，三路（主/平/客）应彼此不同；早期错误地只读单个 `99家平均` 聚合行导致三路被同一返还率填充（已修复）
 - 命中验证页后，当前入口路径会快速返回 `verification_required` 并停止本路径重试；同时会打开基于 `match_id + market_family` 的 TTL breaker，并在市场页访问前执行最小间隔节流，避免持续撞验证页
 - hub 链路在每次整页跳转（→`handicap.php`、→`odds.php`）后及解析完四盘后都做强阻断判定，任意盘口命中验证墙都会把 `blocked` 上抛到顶层触发熔断与换池重入，避免中途撞墙被当成「没开盘」而静默丢数据
+- 欧值 `odds.php` 撞墙时仅标记欧赔/凯利 `blocked`，保留同会话已拿到的真实亚值/大小球；按 `OUZHI_RETRY_WAITS`（默认 `3,5,10`）阶梯重试，仍失败则触发换新设备指纹 odds-only 会话单独重抓；可选参数 `--market-dwell` / `--ouzhi-retry-waits` / `--no-odds-fresh-session` / `--odds-only`
 
 如果本机默认浏览器或裸 `curl` 访问 `odds.php` 返回 `403/405`，不代表正式链不可用；优先确认是否绕过了公共访问策略。
 
@@ -223,6 +230,7 @@ OKOOO_BROWSER_E2E=1 python3 -m unittest test_okooo_browser
 
 - 优先解析多家公司的欧赔明细并生成 `multi_company_consensus`
 - `99家平均` 只作为 fallback，不再是默认优先结果
+- 凯利与欧赔同构表，逐公司行抽 `[初始 主/平/客][最新 主/平/客][返还率]` 取多公司共识；`market_snapshot.凯利` 的 `initial`/`final` 三路应彼此不同并带 `consensus.company_count > 1`，若三路坍缩成同一返还率即为解析错误
 - 预测输出里应优先检查：
   - `market_snapshot.欧赔.company_mode`
   - `market_snapshot.欧赔.companies`
