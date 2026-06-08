@@ -969,6 +969,8 @@ def run_openclaw_predict_match_lite(args):
         # for these leagues. They carry no standings context and would pollute the
         # accuracy stats, so we skip persistence regardless of --no-write.
         reference_only = is_reference_only_league_request(getattr(args, "league", "")) or is_reference_only_league_request(getattr(args, "league_name", ""))
+        resolved_league_code = getattr(args, "league", "") or result.get("league_code") or ""
+        sot_backed = str(result.get("storage_mode") or "").strip() == "league_sot"
         if args.no_write or reference_only:
             result["persisted"] = {"enabled": False, "archived": False, "memory_updated": False}
             if reference_only and not args.no_write:
@@ -976,7 +978,11 @@ def run_openclaw_predict_match_lite(args):
         else:
             manager = ResultManager(EUROPE_LEAGUES_ROOT)
             service = PredictionPersistenceService(EUROPE_LEAGUES_ROOT, cache=None, result_manager=manager)
-            result = service.persist_memory_only_prediction(result, getattr(args, "league", "") or result.get("league_code") or "")
+            if sot_backed:
+                # SoT 联赛（含世界杯）写回正式联赛主归档 + 滚动记忆 + 赛果同步登记。
+                result = service.persist_prediction("predict-match-lite", {}, result, resolved_league_code)
+            else:
+                result = service.persist_memory_only_prediction(result, resolved_league_code)
         result.setdefault("runtime_profile", get_command_runtime_profile("predict-match-lite"))
         return result
 

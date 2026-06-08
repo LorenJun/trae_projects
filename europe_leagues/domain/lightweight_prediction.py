@@ -8,12 +8,23 @@ from typing import Any, Dict, List, Optional
 
 
 COMMON_RUNTIME_LEAGUE_CODES = {
+    "世界杯": "world_cup",
     "英冠": "championship",
     "葡超": "primeira_liga",
     "瑞超": "allsvenskan",
     "沙特联": "saudi_pro_league",
     "瑞典甲": "sweden_superettan",
 }
+
+# 这些联赛有目录化 SoT 主归档（teams_*.md），预测应写回正式归档而非只进滚动记忆。
+SOT_BACKED_LEAGUE_CODES = (
+    "premier_league",
+    "la_liga",
+    "serie_a",
+    "bundesliga",
+    "ligue_1",
+    "world_cup",
+)
 
 
 def _normalize_team_text(name: str) -> str:
@@ -613,6 +624,7 @@ def build_lightweight_prediction_result(
         include_diag=True,
     )
     league_code = _league_code_from_name(league_name, league_code)
+    is_sot_backed = league_code in SOT_BACKED_LEAGUE_CODES
 
     return {
         "league_code": league_code,
@@ -623,7 +635,7 @@ def build_lightweight_prediction_result(
         "match_time": match_time,
         "match_id": str(match_id or snapshot.get("match_id") or "").strip(),
         "external_match_id": str(match_id or snapshot.get("match_id") or "").strip(),
-        "storage_mode": "runtime_only",
+        "storage_mode": "league_sot" if is_sot_backed else "runtime_only",
         "prediction": prediction,
         "predicted_winner": {"主胜": "home", "平局": "draw", "客胜": "away"}.get(prediction, "draw"),
         "confidence": confidence,
@@ -640,7 +652,11 @@ def build_lightweight_prediction_result(
             "凯利": snapshot.get("凯利") or {},
         },
         "upset_potential": risk,
-        "retrieved_memory_explanation": "轻量模式：基于澳客欧赔、亚值与大小球快照生成单场预测记录，仅写入滚动记忆，不进入正式联赛主归档。",
+        "retrieved_memory_explanation": (
+            "轻量模式：基于澳客欧赔、亚值与大小球快照生成单场预测记录，写入滚动记忆并归档到正式联赛主归档（teams_*.md）。"
+            if is_sot_backed
+            else "轻量模式：基于澳客欧赔、亚值与大小球快照生成单场预测记录，仅写入滚动记忆，不进入正式联赛主归档。"
+        ),
         "runtime_profile": {"mode": "lightweight_market_snapshot"},
     }
 

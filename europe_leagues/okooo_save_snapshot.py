@@ -19,6 +19,7 @@ import atexit
 import argparse
 import json
 import os
+import random
 import re
 import subprocess
 import time
@@ -105,6 +106,51 @@ def _parse_wait_ladder(raw: str, fallback: List[float]) -> List[float]:
 OUZHI_RETRY_WAITS = _parse_wait_ladder(
     os.environ.get("OKOOO_OUZHI_RETRY_WAITS", "3,5,10"), [3.0, 5.0, 10.0]
 )
+
+# Single-machine, fixed-IP抗封策略：所有深链之间用一道进程级最小间隔闸门约束节奏，
+# 无论上游是哪个模型/agent、并发多猛，下游访问频率恒定温柔。固定 IP 下「节奏」是
+# 被风控识别的首要信号，比指纹更关键。可用 OKOOO_MIN_REQUEST_INTERVAL 配置秒数。
+OKOOO_MIN_REQUEST_INTERVAL = float(
+    os.environ.get("OKOOO_MIN_REQUEST_INTERVAL", "2.5")
+)
+
+
+def _jittered(seconds: float, *, ratio: float = 0.35) -> float:
+    """Return seconds perturbed by ±ratio random jitter (never below 0).
+
+    Fixed wait cadences are themselves a machine fingerprint. Adding bounded
+    randomness to every backoff/dwell makes the retry rhythm unpredictable and
+    more human-like — important on a fixed IP where behaviour, not the device
+    fingerprint, is what the anti-bot wall scores.
+    """
+    base = max(0.0, float(seconds))
+    if base <= 0:
+        return 0.0
+    delta = base * max(0.0, ratio)
+    return max(0.0, base + random.uniform(-delta, delta))
+
+
+_LAST_DEEP_NAV_AT = 0.0
+
+
+def _global_pace_gate() -> float:
+    """Process-level minimum interval between deep navigations.
+
+    On a single machine with a fixed IP the dominant block trigger is request
+    *cadence*: some callers fire deep links back-to-back and push the IP past
+    okooo's frequency threshold. This gate forces a jittered minimum gap before
+    every deep navigation regardless of which model/agent drives the run, so the
+    downstream access rhythm stays uniformly gentle no matter how bursty the
+    upstream is. Returns the seconds actually slept.
+    """
+    global _LAST_DEEP_NAV_AT
+    interval = _jittered(OKOOO_MIN_REQUEST_INTERVAL)
+    now = time.time()
+    wait = max(0.0, interval - max(0.0, now - _LAST_DEEP_NAV_AT))
+    if wait > 0:
+        time.sleep(wait)
+    _LAST_DEEP_NAV_AT = time.time()
+    return wait
 
 
 def _default_data_root() -> Path:
@@ -1274,7 +1320,46 @@ class LocalChromeSession:
         self._cdp("Page.enable")
         self._cdp("Runtime.enable")
         self._cdp("Network.enable")
+        self._install_stealth_script()
         self._apply_okooo_mobile_profile(profile)
+
+    def _install_stealth_script(self) -> None:
+        # On a fixed IP the wall scores behaviour + automation fingerprints far
+        # more than the device profile. A CDP-driven page leaks the most obvious
+        # tell — navigator.webdriver === true, plus a missing window.chrome and
+        # empty plugin/language shapes. Inject a document-start script that masks
+        # these so the page reads like a normal mobile Safari session. Best effort:
+        # any failure must not abort the scrape.
+        stealth_js = r"""
+(() => {
+  try { Object.defineProperty(navigator, 'webdriver', {get: () => undefined}); } catch (e) {}
+  try {
+    if (!window.chrome) { window.chrome = { runtime: {} }; }
+  } catch (e) {}
+  try {
+    if (!navigator.languages || !navigator.languages.length) {
+      Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']});
+    }
+  } catch (e) {}
+  try {
+    const origQuery = navigator.permissions && navigator.permissions.query;
+    if (origQuery) {
+      navigator.permissions.query = (params) => (
+        params && params.name === 'notifications'
+          ? Promise.resolve({state: Notification.permission})
+          : origQuery(params)
+      );
+    }
+  } catch (e) {}
+})();
+"""
+        try:
+            self._cdp(
+                "Page.addScriptToEvaluateOnNewDocument",
+                {"source": stealth_js},
+            )
+        except Exception:
+            pass
 
     def _apply_okooo_mobile_profile(self, profile: OkoooMobileProfile | None = None) -> None:
         # Mobile emulation + no-cache headers reduce the chance of desktop or stale
@@ -1663,6 +1748,7 @@ def _warm_up_session(bu: BrowserUse) -> None:
 
 def _open_ready(bu: BrowserUse, url: str, settle_seconds: float = 2.5) -> str:
     _warm_up_session(bu)
+    _global_pace_gate()
     bu.open(url)
     time.sleep(settle_seconds)
     try:
@@ -2987,7 +3073,7 @@ def _pull_odds_leg(bu: BrowserUse, history_url: str, dwell: float) -> Dict[str, 
     if _page_blocked_now(bu):
         for wait_secs in OUZHI_RETRY_WAITS:
             ouzhi_attempts += 1
-            time.sleep(wait_secs)
+            time.sleep(_jittered(wait_secs))
             _open_ready(bu, history_url, settle_seconds=2.0)
             europe_click = _click_visible_text(bu, ["欧值", "欧指", "欧赔", "赔率"], settle_seconds=HUB_NAV_SETTLE_SECONDS)
             europe_url = _current_url(bu)
@@ -3199,7 +3285,10 @@ def _run_with_retries(
     for index, delay in enumerate(RETRY_DELAYS, start=1):
         session = f"{session_prefix}_{datetime.now().strftime('%H%M%S')}_{index}"
         if base_dir and market_family:
-            wait_for_okooo_market_slot(base_dir)
+            wait_for_okooo_market_slot(
+                base_dir,
+                min_interval_seconds=_jittered(OKOOO_MIN_REQUEST_INTERVAL),
+            )
         bu = client_factory(session)
         stop_now = False
         stop_reason = ""
@@ -3375,7 +3464,7 @@ def _extract_all_markets_with_fallback(match_id: str, history_url: str, client_f
 
 
 def main() -> None:
-    global MARKET_PARSE_DWELL_SECONDS, OUZHI_RETRY_WAITS
+    global MARKET_PARSE_DWELL_SECONDS, OUZHI_RETRY_WAITS, OKOOO_MIN_REQUEST_INTERVAL
     parser = argparse.ArgumentParser()
     parser.add_argument("--league", required=True, help="联赛名称（需与热门赛事页展示文本一致，如：法甲/英超/意甲...）")
     parser.add_argument("--team1", required=True, help="主队名称（用于赛程行匹配）")
@@ -3451,6 +3540,12 @@ def main() -> None:
         help="欧值(odds.php)撞验证墙后的阶梯重试等待秒数，逗号分隔（默认 3,5,10，也可用 OKOOO_OUZHI_RETRY_WAITS 环境变量配置）。",
     )
     parser.add_argument(
+        "--min-request-interval",
+        type=float,
+        default=None,
+        help=f"深链导航之间的进程级最小间隔秒数（带随机抖动，默认 {OKOOO_MIN_REQUEST_INTERVAL}，也可用 OKOOO_MIN_REQUEST_INTERVAL 环境变量配置）。固定 IP 单机抗封的核心闸门。",
+    )
+    parser.add_argument(
         "--no-odds-fresh-session",
         action="store_true",
         help="禁用欧赔/凯利在 odds.php 撞墙后的『换新设备指纹会话单独重抓』恢复（默认开启，且不影响已拿到的亚值/大小球）。",
@@ -3466,6 +3561,8 @@ def main() -> None:
         MARKET_PARSE_DWELL_SECONDS = float(args.market_dwell)
     if args.ouzhi_retry_waits is not None:
         OUZHI_RETRY_WAITS = _parse_wait_ladder(args.ouzhi_retry_waits, OUZHI_RETRY_WAITS)
+    if args.min_request_interval is not None:
+        OKOOO_MIN_REQUEST_INTERVAL = max(0.0, float(args.min_request_interval))
 
     event_name = f"{args.team1}vs{args.team2}"
     out_dir = Path(args.out_dir).resolve()

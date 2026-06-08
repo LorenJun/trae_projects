@@ -7,9 +7,10 @@
 > - **入口真相源**：`prediction_system.py` 只是兼容/发现入口；真正的命令面、参数、JSON 输出 **以 `app/cli.py` 为准**。文档与代码冲突时信代码。
 > - **最常用命令**：
 >   - 正式预测（SoT 联赛，可注入战术/首发 context）：`predict-match`
->   - 轻量预测（友谊赛/世界杯等 reference-only）：`predict-match-lite`
+>   - 轻量预测（基于盘口快照，可用于世界杯/友谊赛等无积分榜上下文的赛事）：`predict-match-lite`
 >   - 抓盘口快照：`okooo_save_snapshot.py`（可加 `--odds-only` 单独补抓欧赔）
 > - **盘口四盘**：欧赔 / 凯利 / 亚盘 / 大小球，走单会话 hub 真实导航一次拿回；解析规则与排障见 [`ODDS_FETCH_GUIDE.md`](ODDS_FETCH_GUIDE.md)。
+> - **固定 IP 抗封（单机无代理，默认全开）**：三道防线 = 进程级全局频控闸（`_global_pace_gate`，默认 2.5s，可调 `--min-request-interval`）+ 节奏随机抖动（`_jittered` ±35%）+ stealth 指纹屏蔽（`_install_stealth_script` 抹掉 `navigator.webdriver` 等自动化特征）。无代理时把请求节奏放慢拉抖是降低撞验证墙的根因手段，换模型/换 UA 不是。
 > - **持久化边界**：SoT-backed（五大联赛+世界杯，写回 teams md）/ runtime-only（杯赛）/ reference-only（友谊赛，**不写滚动记忆**）。详见 [`docs/PRD_足球预测系统_2026.md`](docs/PRD_足球预测系统_2026.md) 第 5 节。
 > - **找文档**：先看导航路由页 [`docs/INDEX.md`](docs/INDEX.md)，按场景跳转。
 > - **凯利解析关键不变量**：主/平/客三路应彼此不同；若三路坍缩成同一个返还率即为解析 bug。
@@ -128,11 +129,13 @@
 
 ### 3. reference-only competitions（不写滚动记忆）
 
-友谊赛 / 世界杯等 reference_only 联赛只做参考预测，没有积分榜/战意上下文，**不写滚动记忆、不进正式归档**：
+只有友谊赛（`friendly`）是 reference_only：没有积分榜/战意上下文，只做参考预测，**不写滚动记忆、不进正式归档**：
 
-- 正式 `predict-match` 对这类联赛强制 `persist=False`
+- 正式 `predict-match` 对友谊赛强制 `persist=False`
 - `predict-match-lite` 同样跳过（`--league`/`--league-name` 命中 `is_reference_only_league_request`），结果标 `persisted.skipped_reason = "reference_only_league_not_persisted"`，无需手动 `--no-write`
 - 直接跑 `okooo_save_snapshot.py` 快照脚本本就不写 `MEMORY.md`
+
+> 注意：**世界杯不是 reference-only**，它是 SoT-backed 正式联赛（见上文「SoT 写回」），`predict-match` 与 `predict-match-lite` 都会写回 [`world_cup/teams_2026.md`](world_cup/teams_2026.md) + 滚动记忆 + 赛果同步登记。
 
 ## 预测与结果闭环
 
@@ -274,6 +277,12 @@ OKOOO_BROWSER_E2E=1 python3 -m unittest test_okooo_browser
 - 强阻断判定 `_page_blocked_now` 带「赔率数字逃生阀」：页面已渲染出 ≥6 个 `x.xx` 赔率数字时一律判为正常页、绝不判墙（真实滑块/验证墙不会渲染完整赔率表），避免把解析得到的真实数据误判吞掉
 - 欧值 `odds.php` 撞墙时仅标记欧赔/凯利 `blocked`，保留同会话已拿到的真实亚值/大小球；并按 `OUZHI_RETRY_WAITS`（默认 `3,5,10`）阶梯重试，仍失败则触发换新设备指纹 odds-only 会话单独重抓（`--no-odds-fresh-session` 可关闭）
 - 快照脚本可选盘口参数：`--market-dwell`（每盘解析前停留秒数，默认 5，等价 `OKOOO_MARKET_DWELL`）、`--ouzhi-retry-waits`（等价 `OKOOO_OUZHI_RETRY_WAITS`）、`--odds-only`（独立冷会话只抓欧赔/凯利）
+- 固定 IP 单机抗封（默认全开、无需代理）由三道防线兜底，与代理路线互补：
+  - **进程级全局频控闸** `_global_pace_gate`：相邻深度导航强制最小间隔（`OKOOO_MIN_REQUEST_INTERVAL`，默认 `2.5s`，CLI `--min-request-interval` 可调），避免短时间高频请求触发风控
+  - **节奏随机抖动** `_jittered(±35%)`：把所有等待/间隔（暖站、重试、市场节流闸）打散成非固定值，规避「机械等长间隔」这一机器人特征
+  - **stealth 指纹屏蔽** `_install_stealth_script`：在 `_connect_if_needed` 内经 CDP `Page.addScriptToEvaluateOnNewDocument` 于文档启动前注入，抹掉 `navigator.webdriver`、补 `window.chrome` / `navigator.languages` / permissions，best-effort try/except 不阻断主链
+  - 设备指纹池（`okooo_mobile_access.py` 的 `_build_profiles` / `fresh_mobile_profile`）锁定每设备 viewport+DPR、仅轮换 UA 版本，跨池干净轮换，与上述行为层抗封叠加
+  - 物理上限说明：单机固定 IP 下抗封是「降低撞墙概率 + 撞墙后自动恢复」，不是 100% 不撞；真正高频/大批量仍需代理资源
 - 正式 `predict-match` 已验证可稳定拿到真实欧赔、亚值、大小球、凯利数据
 - `premier_league / 伯恩利 vs 狼队 / 2026-05-24 / MatchID=1296105` 已验证真实盘口回流后可修正最终预测方向
 

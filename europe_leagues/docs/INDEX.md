@@ -14,6 +14,7 @@
 | 学怎么跑命令 / 日常工作流 | [`../README_使用指南.md`](../README_使用指南.md) | 「默认工作流」 |
 | 理解产品边界 / SoT 治理语义 | [`PRD_足球预测系统_2026.md`](./PRD_足球预测系统_2026.md) | 顶部「速读摘要」+ 第 2、5 节 |
 | 抓澳客盘口 / 欧赔凯利解析 / 排障 | [`../ODDS_FETCH_GUIDE.md`](../ODDS_FETCH_GUIDE.md) | 「盘口抓取链路」「解析规则」 |
+| 抓盘口反复撞验证墙 / 固定 IP 单机抗封 | [`../ODDS_FETCH_GUIDE.md`](../ODDS_FETCH_GUIDE.md) | 「固定 IP 单机抗封三道防线」 |
 | 本机 odds.php 被拦截排障 | [`../../debug-local-odds-access.md`](../../debug-local-odds-access.md) | 全文 |
 | 爆冷预警怎么用 | [`upset_warning_guide.md`](./upset_warning_guide.md) | 全文 |
 | 看历史爆冷案例 | [`../爆冷案例库.md`](../爆冷案例库.md) | 按联赛/类型检索 |
@@ -44,9 +45,9 @@
 
 | 类别 | competition | 是否写滚动记忆/归档 |
 |---|---|---|
-| **SoT-backed** | premier_league / la_liga / serie_a / bundesliga / ligue_1 / world_cup | 写回 archive + `<league>/teams_2025-26.md` |
+| **SoT-backed** | premier_league / la_liga / serie_a / bundesliga / ligue_1 / world_cup | 写回 archive + 滚动记忆 + `<league>/teams_*.md`（五大联赛 `teams_2025-26.md`，世界杯 `teams_2026.md`）；`predict-match` 与 `predict-match-lite` 均进正式归档 |
 | **runtime-only** | europa_league / champions_league / conference_league / 其他杯赛 | 运行时归档 + 滚动记忆 |
-| **reference-only** | 友谊赛 / 世界杯等 | **不写滚动记忆、不进归档**（`predict-match` 与 `predict-match-lite` 均强制跳过，标记 `reference_only_league_not_persisted`） |
+| **reference-only** | 友谊赛（仅 `friendly`） | **不写滚动记忆、不进归档**（`predict-match` 与 `predict-match-lite` 均强制跳过，标记 `reference_only_league_not_persisted`） |
 
 ---
 

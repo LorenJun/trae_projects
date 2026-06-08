@@ -8,6 +8,7 @@
 > - **抓取入口**：`okooo_save_snapshot.py`；只补欧赔用 `--odds-only`；可调 `--market-dwell`/`--ouzhi-retry-waits`/`--no-odds-fresh-session`。
 > - **阻断判定**：`_page_blocked_now` 带「赔率数字逃生阀」——页面已渲染 ≥6 个 `x.xx` 赔率时一律判正常、绝不判墙（曾因过宽 canvas 弱规则误判 odds.php，已删除）。
 > - **欧赔撞墙处理**：仅标记欧赔/凯利 `blocked`、保留已拿到的亚值/大小球；按 `OUZHI_RETRY_WAITS`(默认 3,5,10) 阶梯重试，仍失败则换新设备指纹 odds-only 会话单独重抓。
+> - **固定 IP 抗封（单机无代理）**：三道代码级防线默认生效——① 进程级全局频控闸（每次深链导航前强制最小间隔，默认 2.5s，`--min-request-interval`/`OKOOO_MIN_REQUEST_INTERVAL` 可调）；② 所有等待/退避带 ±35% 随机抖动；③ 注入 stealth 脚本屏蔽 `navigator.webdriver` 等自动化指纹。节奏由代码恒定约束，与调用方是哪个模型无关。
 > - **解析关键不变量**：
 >   - 欧赔优先 `multi_company_consensus`，`99家平均` 仅作 fallback。
 >   - 凯利与欧赔同构表，逐公司行抽 `[初始 主/平/客][最新 主/平/客][返还率]` 取共识；**主/平/客三路应彼此不同，坍缩成同一返还率即为列映射 bug（已修复）**。
@@ -71,6 +72,12 @@
 - 欧值(`odds.php`)若真撞墙，先做阶梯重试（`OUZHI_RETRY_WAITS`，默认 `3s → 5s → 10s`：等待后回 hub 重新点欧值再判墙）；阶梯耗尽仍撞墙且亚值/大小球已成功时，触发独立的换新设备指纹 odds-only 会话单独重抓欧赔/凯利（`--no-odds-fresh-session` 可关闭），恢复成功打 `_recovered_via: odds_fresh_session` 标记。亚值/大小球来自第一段会话，恢复段永不影响它们
 - odds.php 撞墙时只把欧赔/凯利标记 `blocked`，**保留同会话已拿到的真实亚值/大小球**，不再整轮丢弃；仅当亚值/大小球也全部失败时才把 `blocked` 上抛顶层触发熔断+换池重入
 - 命中验证页时，当前入口路径会尽快返回 `verification_required` 并停止本路径连续重试；同时会打开基于 `match_id + market_family` 的 TTL breaker，并在市场页访问前执行最小间隔节流，避免持续撞验证页
+- **固定 IP 单机抗封三道防线（默认全开，无需代理）**：
+  - **进程级全局频控闸 `_global_pace_gate`**：挂在 `_open_ready` 每次深链导航前，强制两次深链之间的最小间隔（默认 `2.5s`，带抖动）。固定 IP 下「请求节奏」是被风控识别的首要信号——这道闸让下游访问频率恒定温柔，**无论上游是哪个模型/agent、并发多猛都一视同仁**，从根上消除「某些模型每次都撞墙」的节奏差异。可用 `--min-request-interval <秒>` 或 `OKOOO_MIN_REQUEST_INTERVAL` 配置
+  - **随机抖动 `_jittered`（±35%）**：所有等待（频控闸、OUZHI 阶梯重试、文件级 throttle）都加随机抖动。固定节奏本身就是机器特征，抖动让重试节奏不可预测、更像真人
+  - **stealth 指纹屏蔽 `_install_stealth_script`**：连接后用 CDP `Page.addScriptToEvaluateOnNewDocument` 在文档启动前注入脚本，屏蔽 `navigator.webdriver`、补 `window.chrome`/`navigator.languages`/permissions 等 CDP 自动化最明显的破绽，让页面读起来像正常移动 Safari。best-effort，注入失败绝不阻断抓取
+  - 物理上限说明：以上是「行为+指纹」层优化，若澳客已对该 IP 做硬性日配额，只能延缓不能突破（单机无代理无法绕过 IP 级封禁）
+- 设备指纹池（`okooo_mobile_access.py`）已锁定每个 iPhone 设备的 `viewport + device_scale_factor` 一致性、仅轮换 UA 版本，`fresh_mobile_profile` 跨设备池干净轮换，避免拼出「不存在的设备组合」被识别
 
 ## 当前访问策略
 
@@ -124,6 +131,7 @@ python3 europe_leagues/okooo_save_snapshot.py \
 - `--ouzhi-retry-waits <逗号秒列表>`：欧值(`odds.php`)撞墙后的阶梯重试等待（默认 `3,5,10`，等价环境变量 `OKOOO_OUZHI_RETRY_WAITS`）
 - `--no-odds-fresh-session`：关闭「odds.php 撞墙后换新设备指纹 odds-only 会话单独重抓欧赔/凯利」的恢复（默认开启）
 - `--odds-only`：独立冷会话只抓欧赔/凯利（`hub → 欧值 → odds.php → 凯利 tab`，全程不碰 `handicap.php`），用于隔离排查 odds.php 单端点问题
+- `--min-request-interval <秒>`：深链导航之间的进程级最小间隔（默认 `2.5`，带 ±35% 抖动，等价环境变量 `OKOOO_MIN_REQUEST_INTERVAL`）。固定 IP 单机抗封的核心旋钮——撞墙频繁就调大、嫌慢可调小
 
 ### 4. 用正式 CLI 跑最终预测
 

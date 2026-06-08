@@ -6,8 +6,9 @@
 > - **定位**：本文是 **CLI-first 执行手册**（产品边界看 [`docs/PRD_足球预测系统_2026.md`](docs/PRD_足球预测系统_2026.md)，总览看 [`README.md`](README.md)）。
 > - **两条铁律**：`prediction_system.py` 只是兼容/发现入口；真正的命令与 JSON 输出 **以 `app/cli.py` 为准**。
 > - **标准工作流（7 步）**：`collect-data`（取赛程+match_id）→ `predict-match`/`predict-schedule`（预测）→ 查盘口与 RAG → 按比赛类型写 SoT/runtime → `save-result`/`auto-sync-results`（赛后回填）→ `sync-pending-results-review`（批次复盘）→ 需要时 `accuracy --refresh`。
-> - **最常用预测命令**：SoT 联赛用 `predict-match`；友谊赛/世界杯等 reference-only 用 `predict-match-lite`（自动跳过滚动记忆，无需 `--no-write`）。
+> - **最常用预测命令**：SoT 联赛（含世界杯）用 `predict-match`，或用 `predict-match-lite` 基于盘口快照轻量预测（同样写回正式归档）；友谊赛用 `predict-match-lite`（reference-only，自动跳过滚动记忆，无需 `--no-write`）。
 > - **盘口补抓**：欧赔缺失时用 `okooo_save_snapshot.py --odds-only` 单独补抓，细节见 [`ODDS_FETCH_GUIDE.md`](ODDS_FETCH_GUIDE.md)。
+> - **撞验证墙怎么办（固定 IP 单机）**：抗封三道防线默认全开（全局频控闸 + 随机抖动 + stealth 指纹屏蔽），频繁撞墙时调大 `--min-request-interval`（默认 2.5s）放慢节奏，而不是换模型/换 UA。详见 [`ODDS_FETCH_GUIDE.md`](ODDS_FETCH_GUIDE.md)。
 > - **`apply-reanalysis` 是高级维护流**，不是每次赛后必跑。
 > - **找其他文档**：先看导航路由页 [`docs/INDEX.md`](docs/INDEX.md)。
 >
@@ -68,7 +69,9 @@
 
 ### reference-only（不写滚动记忆）
 
-友谊赛 / 世界杯等 reference_only 联赛只做参考预测，**不写滚动记忆、不进正式归档**：正式 `predict-match` 强制 `persist=False`；`predict-match-lite` 同样跳过（`--league`/`--league-name` 命中 `is_reference_only_league_request`），结果标 `persisted.skipped_reason = "reference_only_league_not_persisted"`，无需手动 `--no-write`。直接跑 `okooo_save_snapshot.py` 快照脚本本就不写 `MEMORY.md`。
+只有友谊赛（`friendly`）是 reference_only 联赛，只做参考预测，**不写滚动记忆、不进正式归档**：正式 `predict-match` 强制 `persist=False`；`predict-match-lite` 同样跳过（`--league`/`--league-name` 命中 `is_reference_only_league_request`），结果标 `persisted.skipped_reason = "reference_only_league_not_persisted"`，无需手动 `--no-write`。直接跑 `okooo_save_snapshot.py` 快照脚本本就不写 `MEMORY.md`。
+
+> 世界杯不是 reference-only，它是 SoT-backed 正式联赛：`predict-match` 与 `predict-match-lite` 都写回 `world_cup/teams_2026.md` + 滚动记忆 + 赛果同步登记。
 
 ## 推荐命令
 

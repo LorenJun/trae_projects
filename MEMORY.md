@@ -243,15 +243,40 @@ html.includes('<canvas') && /(verify|captcha|geetest|aliyun|nc_|slider)/i.test(h
 - **同站点同结构的解析器应复用**：凯利和欧赔在澳客是同构表，凯利解析直接套欧赔的"逐公司行 + 共识"模式即可，不必另造一套脆弱的聚合行假设。
 - **历史 main 代码是事实来源**：用户说"之前 main 分支没问题"时，`git show` 历史版本的列注释直接点破了正确结构。
 
-### 友谊赛/世界杯（reference_only 联赛）不写滚动记忆
+### 友谊赛（reference_only 联赛）不写滚动记忆；世界杯是 SoT 正式联赛要进主归档
 
-**规则**: `predict-match-lite` 对 reference_only 联赛（友谊赛等）**强制不写 MEMORY 滚动记忆**，与正式 `predict-match` 路径（对这类联赛强制 `persist=False`）行为一致。
+**规则**: 只有友谊赛（`friendly`）是 reference_only：`predict-match-lite` / `predict-match` 对其**强制不写 MEMORY、不进归档**。**世界杯不是 reference_only**——它在 `LEAGUE_SOT_CODES` 内，归档文件 `world_cup/teams_2026.md`，预测要写回正式联赛主归档 + 滚动记忆 + 赛果同步登记。
 
-**原因**: 这类比赛没有联赛积分榜/战意上下文，写入会污染准确率统计；它们只做参考预测，不应进入正式归档或滚动记忆。
+**原因**: 友谊赛没有联赛积分榜/战意上下文，写入会污染准确率统计，只做参考预测。世界杯是正式赛事，有目录化 SoT，必须沉淀到主归档以支持赛果回填与复盘。
 
-**实现** (`app/cli.py::run_openclaw_predict_match_lite`): `--league` 或 `--league-name` 任一命中 `is_reference_only_league_request` 时跳过持久化，结果标记 `persisted.skipped_reason = "reference_only_league_not_persisted"`。无需每次手动加 `--no-write`。
+**实现** (`app/cli.py::run_openclaw_predict_match_lite`):
+- 友谊赛：`--league`/`--league-name` 命中 `is_reference_only_league_request` → 跳过持久化，标 `persisted.skipped_reason = "reference_only_league_not_persisted"`。
+- SoT 联赛（含世界杯）：lite 结果的 `storage_mode == "league_sot"`（由 `domain/lightweight_prediction.py` 的 `SOT_BACKED_LEAGUE_CODES` 判定）→ 走 `persist_prediction` 完整归档，而非 `persist_memory_only_prediction`。
+- 其余 runtime-only 联赛：仍只写滚动记忆。
+
+**坑（本次修复）**: 此前 lite 路径对所有非 reference_only 联赛一律 `persist_memory_only_prediction`（只写记忆），且 lite 结果把 `storage_mode` 硬编码成 `runtime_only`、`世界杯` 没进 `COMMON_RUNTIME_LEAGUE_CODES`，导致世界杯（如墨西哥vs南非）只进了滚动记忆、漏掉了 `teams_2026.md` 主归档。已三处修复：补码表映射 + 加 `SOT_BACKED_LEAGUE_CODES` 让 `storage_mode=league_sot` + cli 按 `storage_mode` 分流归档。
 
 > 注：直接跑 `okooo_save_snapshot.py` 快照脚本本就不碰 MEMORY，只落 `.okooo-scraper/snapshots/`；会写滚动记忆的是 `predict-match-lite` 命令。
+
+### 固定 IP 单机抗封 —— 行为节奏 + 指纹层三道防线（默认全开，无需代理）
+
+**背景**: 部分模型在自动化抓盘口时反复撞验证墙。单机固定 IP、无代理资源的场景下，**根因是请求行为太像机器人**（高频、等长间隔、自动化指纹暴露），而不是"该换模型/换 UA"。因此抗封聚焦行为层 + 指纹层，与代理路线互补。
+
+**三道防线**（均在 `okooo_save_snapshot.py`，默认开启）：
+1. **进程级全局频控闸** `_global_pace_gate`：相邻深度导航（hub→handicap.php→odds.php 等）强制最小间隔 `OKOOO_MIN_REQUEST_INTERVAL`（默认 `2.5s`），用模块级 `_LAST_DEEP_NAV_AT` 记录上次导航时刻、不足则 sleep 补齐。频繁撞墙时**调大** `--min-request-interval` 放慢节奏即可，这是最直接的兜底旋钮。
+2. **节奏随机抖动** `_jittered(seconds, ratio=0.35)`：把所有等待/间隔（暖站、OUZHI 阶梯重试、市场节流闸、频控闸本身）打散成 ±35% 非固定值，消除"机械等长间隔"这一机器人特征。实测 base 5.0s → 3.286~6.71s。
+3. **stealth 指纹屏蔽** `_install_stealth_script`：在 `_connect_if_needed` 内（Network.enable 后、`_apply_okooo_mobile_profile` 前）经 CDP `Page.addScriptToEvaluateOnNewDocument` 于**文档启动前**注入 JS，抹掉 `navigator.webdriver`、补 `window.chrome` / `navigator.languages` / permissions。best-effort try/except，不阻断主链。
+
+**指纹池叠加**: `okooo_mobile_access.py` 的 `_build_profiles` / `fresh_mobile_profile` 锁定每设备 viewport+DPR、仅轮换 UA 版本，跨池干净轮换；与上述行为层抗封叠加，无需改动。
+
+**物理上限（重要边界）**: 单机固定 IP 下，抗封是"**降低撞墙概率 + 撞墙后自动恢复**"，不是 100% 不撞。真正高频/大批量抓取仍需代理资源。
+
+**实跑验证**（墨西哥vs南非 MatchID 1315851）: 四盘全部正常拿回、零撞墙，节奏未把流程拖坏（~62s）。
+
+**教训**:
+- **行为节奏是单机抗封的根因抓手**，换模型/换 UA 不是。撞墙先放慢 `--min-request-interval`，而不是反复重试。
+- **抖动比固定延迟更关键**：等长间隔本身就是机器人指纹，固定再长也会被识别。
+- **stealth 必须文档启动前注入**：用 `addScriptToEvaluateOnNewDocument`，等页面加载后再注入就晚了。
 
 ***
 
@@ -753,14 +778,14 @@ Step 10: 持续优化
 #### 未完赛
 
 - [world_cup|2026-06-12|墨西哥|南非] 2026-06-12 世界杯 墨西哥 vs 南非 | MatchID: 1315851
-  预测: 主胜 (73.5%) | 比分: 3-0 > 2-0 > 2-1 | 大小球: 大球 2.25 (51.0%)
-  ◦ 欧赔: 1.48/4.04/6.60->1.41/4.30/8.03
-  ◦ 亚盘: 一球 1.91/1.91->一球 1.72/2.20
+  预测: 主胜 (70.6%) | 比分: 3-0 > 2-0 > 2-1 | 大小球: 大球 2.25 (51.0%)
+  ◦ 欧赔: 1.48/4.04/6.60->1.42/4.29/7.84
+  ◦ 亚盘: 一球 1.91/1.91->两球 3.97/1.27
   ◦ 大小: 2.50 1.96/1.83->2.25 1.86/1.93
-  ◦ 凯利: 0.94/0.94/0.94->0.94/0.94/0.94
-  ▲ 风险: 中(28) 欧赔强化主队，但需防热度集中; 进球线下修，比赛更偏低比分
-  ◆ RAG记忆: 轻量模式：基于澳客欧赔、亚值与大小球快照生成单场预测记录，仅写入滚动记忆，不进入正式联赛主归档。
-  · MatchID: 1315851 | 记忆ID: world_cup|2026-06-12|墨西哥|南非 | 更新时间: 2026-06-07 22:45:45
+  ◦ 凯利: 0.92/0.93/0.95->0.94/0.95/0.94
+  ▲ 风险: 中(42) 升盘配高水，主队穿盘阻力偏大; 欧赔强化主队，但需防热度集中; 进球线下修，比赛更偏低比分
+  ◆ RAG记忆: 轻量模式：基于澳客欧赔、亚值与大小球快照生成单场预测记录，写入滚动记忆并归档到正式联赛主归档（teams_*.md）。
+  · MatchID: 1315851 | 记忆ID: world_cup|2026-06-12|墨西哥|南非 | 更新时间: 2026-06-08 14:29:34
 
 #### 已完赛
 
@@ -1695,6 +1720,6 @@ Step 10: 持续优化
 
 ***
 
-*预测记录更新时间: 2026-06-07 23:04:40*\
+*预测记录更新时间: 2026-06-08 14:29:34*\
 *Agent系统学习时间: 2026-04-24*\
 *知识库版本: 第七版增强*
