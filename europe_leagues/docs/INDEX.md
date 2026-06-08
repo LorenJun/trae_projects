@@ -1,136 +1,63 @@
 #!/usr/bin/env markdown
-# europe_leagues Docs Index
+# europe_leagues 文档导航路由
 
-本目录只收录当前 `europe_leagues/` 子项目里真实存在、且仍有维护价值的文档。
+> 本页是 **纯导航页**：只告诉你"哪个场景该读哪个文件、读哪一节"，不展开具体内容。
+> 弱模型/新 agent 请 **先读本页(<120 行)**，再按指向精确跳转目标文件，不要全文吞长文档。
 
-## 权威入口
+---
 
-- 兼容 / 发现入口：`../prediction_system.py`
-- 真实 CLI 实现：`../app/cli.py`
-- 预测持久化编排：`../domain/persistence.py`
-- 结果同步与轮询：`../runtime/result_sync.py`
-- 结果归档与准确率：`../result_manager.py`
+## 一、我想做什么 → 该读哪个文件
 
-## 当前正式命令面
+| 你的目标 | 去读 | 关键章节 |
+|---|---|---|
+| 了解系统总览 / 入口 / 架构边界 | [`../README.md`](../README.md) | 顶部「速读摘要」+「入口与权威链」 |
+| 学怎么跑命令 / 日常工作流 | [`../README_使用指南.md`](../README_使用指南.md) | 「默认工作流」 |
+| 理解产品边界 / SoT 治理语义 | [`PRD_足球预测系统_2026.md`](./PRD_足球预测系统_2026.md) | 顶部「速读摘要」+ 第 2、5 节 |
+| 抓澳客盘口 / 欧赔凯利解析 / 排障 | [`../ODDS_FETCH_GUIDE.md`](../ODDS_FETCH_GUIDE.md) | 「盘口抓取链路」「解析规则」 |
+| 本机 odds.php 被拦截排障 | [`../../debug-local-odds-access.md`](../../debug-local-odds-access.md) | 全文 |
+| 爆冷预警怎么用 | [`upset_warning_guide.md`](./upset_warning_guide.md) | 全文 |
+| 看历史爆冷案例 | [`../爆冷案例库.md`](../爆冷案例库.md) | 按联赛/类型检索 |
 
-当前正式 CLI 子命令包括：
+---
 
-- `list-leagues`
-- `predict-match`
-- `predict-match-lite`
-- `predict-schedule`
-- `collect-data`
-- `pending-results`
-- `save-result`
-- `auto-sync-results`
-- `result-sync-daemon`
-- `accuracy`
-- `apply-reanalysis`
-- `sync-pending-results-review`
-- `build-season-master-review`
-- `refresh-repo-docs`
-- `purge-nonreal-data`
-- `rag-rebuild`
-- `rag-diagnose`
-- `sync-memory-rag`
-- `health-check`
-- `migrate-archive`
-- `setup-openclaw`
-- `harness-list`
-- `harness-run`
+## 二、权威入口（代码真相源）
 
-## 文档目录
+文档可能滞后，**实现以代码为准**：
 
-### 核心说明
+- 兼容 / 发现入口：[`../prediction_system.py`](../prediction_system.py)
+- 真实 CLI 实现：[`../app/cli.py`](../app/cli.py)
+- 预测持久化编排：[`../domain/persistence.py`](../domain/persistence.py)
+- 结果同步与轮询：[`../runtime/result_sync.py`](../runtime/result_sync.py)
+- 结果归档与准确率：[`../result_manager.py`](../result_manager.py)
 
-- `../README.md`：应用级总览、入口说明、SoT/runtime 边界、核心命令、官方 vs replay 准确率口径
-- `../README_使用指南.md`：CLI-first 执行手册、默认工作流、高级 replay/apply 维护流
-- `PRD_足球预测系统_2026.md`：产品视角 PRD、当前架构假设与 replay/apply 治理语义
+---
 
-### 专项指南
+## 三、正式命令面（速查）
 
-- `../ODDS_FETCH_GUIDE.md`：澳客赛程、快照、大小球与预测衔接说明
-- `../../debug-local-odds-access.md`：本机访问 `odds.php` 被拦截时的请求头排障结论
-- `upset_warning_guide.md`：爆冷预警相关的当前使用说明
+完整参数见 [`../app/cli.py`](../app/cli.py)。当前正式子命令：
 
-## 澳客访问现状
+`list-leagues` · `predict-match` · `predict-match-lite` · `predict-schedule` · `collect-data` · `pending-results` · `save-result` · `auto-sync-results` · `result-sync-daemon` · `accuracy` · `apply-reanalysis` · `sync-pending-results-review` · `build-season-master-review` · `refresh-repo-docs` · `purge-nonreal-data` · `rag-rebuild` · `rag-diagnose` · `sync-memory-rag` · `health-check` · `migrate-archive` · `setup-openclaw` · `harness-list` · `harness-run`
 
-当前正式链路关于 `m.okooo.com` 的有效口径是：
+---
 
-- 默认快照 driver：`local-chrome`
-- 默认请求特征：`iPhone Safari UA + Referer: https://m.okooo.com/`
-- 默认移动 profile 池：`../okooo_mobile_access.py`，当前为 `500` 组 `iPhone Safari` profile，分布在多个 iPhone device pool 上
-- 正式主动访问的移动端 URL 统一由 `runtime.match_ids.build_okooo_match_url()` 构造，只接受纯数字 `external_match_id`
-- `internal_match_id / teams_match_id` 只允许在项目内部使用，不能再拼进澳客 `MatchID`
-- 盘口抓取统一走单会话 hub 真实导航：暖首页 → `history.php` → 点 `亚指`/`欧指` 整页跳转 → 页内点 `大小球`/`凯利` tab，一次会话拿回四盘；已移除所有深链回退路径
-- 阻断检测现在同时覆盖文字风控页和滑块/图形验证页
-- 强阻断判定 `_page_blocked_now` 带「赔率数字逃生阀」：页面已渲染出 ≥6 个 `x.xx` 赔率数字时一律判为正常页、绝不判墙（真实验证墙不会渲染完整赔率表），避免把真实数据误判吞掉；曾因过宽的 canvas 弱规则误判 `odds.php`，已删除
-- 命中验证页后，当前入口路径会快速返回 `verification_required` 并停止本路径重试；同时会打开基于 `match_id + market_family` 的 TTL breaker，并在市场页访问前执行最小间隔节流，避免持续撞验证页
-- hub 链路在每次整页跳转后及解析完四盘后都做强阻断判定，任意盘口命中验证墙都会上抛顶层 `blocked` 触发熔断与换池重入，避免中途撞墙静默丢数据
-- 欧值 `odds.php` 撞墙时仅标记欧赔/凯利 `blocked`、保留已拿到的亚值/大小球；按 `OUZHI_RETRY_WAITS`（默认 `3,5,10`）阶梯重试，仍失败则换新设备指纹 odds-only 会话单独重抓（可选参数 `--market-dwell` / `--ouzhi-retry-waits` / `--no-odds-fresh-session` / `--odds-only`）
-- 欧赔解析：优先 `multi_company_consensus`，`99家平均` 仅作为 fallback
-- 凯利解析：与欧赔同构表，逐公司行抽 `[初始 主/平/客][最新 主/平/客][返还率]` 并取多公司共识；三路（主/平/客）应彼此不同，若坍缩成同一个返还率即为列映射错误（已修复）
-- 已验证样例：`la_liga / 埃尔切 vs 赫塔费 / MatchID=1302914` 可稳定拿到真实欧赔、亚值、大小球、凯利
+## 四、持久化边界（速查，细节见 PRD 第 5 节）
 
-## 当前持久化边界
+| 类别 | competition | 是否写滚动记忆/归档 |
+|---|---|---|
+| **SoT-backed** | premier_league / la_liga / serie_a / bundesliga / ligue_1 / world_cup | 写回 archive + `<league>/teams_2025-26.md` |
+| **runtime-only** | europa_league / champions_league / conference_league / 其他杯赛 | 运行时归档 + 滚动记忆 |
+| **reference-only** | 友谊赛 / 世界杯等 | **不写滚动记忆、不进归档**（`predict-match` 与 `predict-match-lite` 均强制跳过，标记 `reference_only_league_not_persisted`） |
 
-### SoT-backed
+---
 
-以下 competition 以 markdown SoT 为主：
+## 五、技能位置
 
-- `premier_league`
-- `la_liga`
-- `serie_a`
-- `bundesliga`
-- `ligue_1`
-- `world_cup`
+仓库根 skills：[`/Users/bytedance/trae_projects/.trae/skills/`](/Users/bytedance/trae_projects/.trae/skills/)
 
-对 SoT-backed 联赛，`apply-reanalysis` 会把选中的 replay 预测同时写回 prediction archive 与对应 `<league>/teams_2025-26.md` 的预测备注片段。
+与本项目高相关：`football-match-analysis` · `okooo-match-finder` · `sync-pending-results-review` · `update-five-leagues-schedules` · `update-five-leagues-players`
 
-### runtime-only
-
-以下 competition 以运行时归档与滚动记忆为主：
-
-- `europa_league`
-- `champions_league`
-- `conference_league`
-- 其他杯赛 / 欧战扩展比赛
-
-### reference-only（不写滚动记忆）
-
-友谊赛 / 世界杯等 reference_only 联赛只做参考预测，没有联赛积分榜/战意上下文，**不写入滚动记忆、不进正式归档**：
-
-- 正式 `predict-match` 对这类联赛强制 `persist=False`
-- `predict-match-lite` 同样跳过持久化（`--league` 或 `--league-name` 命中 `is_reference_only_league_request` 即跳过），结果标记 `persisted.skipped_reason = "reference_only_league_not_persisted"`，无需手动加 `--no-write`
-- 直接跑 `okooo_save_snapshot.py` 快照脚本本就不碰 `MEMORY.md`，只落 `.okooo-scraper/snapshots/`
-
-## 结果统计口径
-
-- `accuracy` 主统计中的 `overall` / `by_league` 代表正式记录口径
-- `reanalysis_report` 代表当前模型 replay 口径
-- 两者并存是设计行为，不会自动互相覆盖
-- `apply-reanalysis` 是把选中的 replay 结果显式提升为正式记录的维护动作
-
-## 技能位置
-
-仓库根的 skills 位于：
-
-- `/Users/bytedance/trae_projects/.trae/skills/`
-
-与本子项目直接相关的高价值 skill 包括：
-
-- `football-match-analysis`
-- `okooo-match-finder`
-- `sync-pending-results-review`
-- `update-five-leagues-schedules`
-- `update-five-leagues-players`
+---
 
 ## 索引维护原则
 
-本文件只保留：
-
-- 当前真实存在的文件
-- 当前正式链路仍然使用的说明
-- 不会误导读者进入失效路径的链接
-
-如果某份外层仓库文档不是当前子项目运行所必需，就不要在这里把它当作本目录的默认依赖。
+本文件**只做路由、不展开内容**。新增/删除文档时只更新本页的「目标→文件」映射；具体技术口径一律写进目标文件自身的「速读摘要」头部，不要回流到本页，避免索引膨胀成第二份正文。

@@ -1,5 +1,21 @@
 # 足球预测系统（Europe Leagues）
 
+> ## 速读摘要（TL;DR）
+> 即使读不全本文件，看完这 30 行也能拿到 80% 信息。
+>
+> - **这是什么**：仓库里真正运行的足球预测应用，目录 `europe_leagues/`。
+> - **入口真相源**：`prediction_system.py` 只是兼容/发现入口；真正的命令面、参数、JSON 输出 **以 `app/cli.py` 为准**。文档与代码冲突时信代码。
+> - **最常用命令**：
+>   - 正式预测（SoT 联赛，可注入战术/首发 context）：`predict-match`
+>   - 轻量预测（友谊赛/世界杯等 reference-only）：`predict-match-lite`
+>   - 抓盘口快照：`okooo_save_snapshot.py`（可加 `--odds-only` 单独补抓欧赔）
+> - **盘口四盘**：欧赔 / 凯利 / 亚盘 / 大小球，走单会话 hub 真实导航一次拿回；解析规则与排障见 [`ODDS_FETCH_GUIDE.md`](ODDS_FETCH_GUIDE.md)。
+> - **持久化边界**：SoT-backed（五大联赛+世界杯，写回 teams md）/ runtime-only（杯赛）/ reference-only（友谊赛，**不写滚动记忆**）。详见 [`docs/PRD_足球预测系统_2026.md`](docs/PRD_足球预测系统_2026.md) 第 5 节。
+> - **找文档**：先看导航路由页 [`docs/INDEX.md`](docs/INDEX.md)，按场景跳转。
+> - **凯利解析关键不变量**：主/平/客三路应彼此不同；若三路坍缩成同一个返还率即为解析 bug。
+>
+> 详细内容见下文分节。
+
 本目录是当前仓库里真正运行的足球预测应用。
 
 ## 入口与权威链

@@ -1,5 +1,18 @@
 # 足球预测系统使用指南
 
+> ## 速读摘要（TL;DR）
+> 读不全也能上手——看完这段即可跑通主流程。
+>
+> - **定位**：本文是 **CLI-first 执行手册**（产品边界看 [`docs/PRD_足球预测系统_2026.md`](docs/PRD_足球预测系统_2026.md)，总览看 [`README.md`](README.md)）。
+> - **两条铁律**：`prediction_system.py` 只是兼容/发现入口；真正的命令与 JSON 输出 **以 `app/cli.py` 为准**。
+> - **标准工作流（7 步）**：`collect-data`（取赛程+match_id）→ `predict-match`/`predict-schedule`（预测）→ 查盘口与 RAG → 按比赛类型写 SoT/runtime → `save-result`/`auto-sync-results`（赛后回填）→ `sync-pending-results-review`（批次复盘）→ 需要时 `accuracy --refresh`。
+> - **最常用预测命令**：SoT 联赛用 `predict-match`；友谊赛/世界杯等 reference-only 用 `predict-match-lite`（自动跳过滚动记忆，无需 `--no-write`）。
+> - **盘口补抓**：欧赔缺失时用 `okooo_save_snapshot.py --odds-only` 单独补抓，细节见 [`ODDS_FETCH_GUIDE.md`](ODDS_FETCH_GUIDE.md)。
+> - **`apply-reanalysis` 是高级维护流**，不是每次赛后必跑。
+> - **找其他文档**：先看导航路由页 [`docs/INDEX.md`](docs/INDEX.md)。
+>
+> 详细内容见下文分节。
+
 本指南面向当前 `europe_leagues/` 正式应用目录，默认以 CLI-first 方式执行。
 
 ## 先记住两条原则
