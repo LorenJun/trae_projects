@@ -36,8 +36,7 @@ last_updated_date: "2026-05-19"
 
 - `list-leagues`
 - `predict-match`
-- `predict-match-lite`
-- `predict-schedule`
+- `predict-fourteen-issue`
 - `collect-data`
 - `pending-results`
 - `save-result`

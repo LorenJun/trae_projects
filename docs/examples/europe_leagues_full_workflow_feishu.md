@@ -207,8 +207,7 @@ sequenceDiagram
 
 - `collect-data`
 - `predict-match`
-- `predict-schedule`
-- `predict-match-lite`
+- `predict-fourteen-issue`
 - `save-result`
 - `auto-sync-results`
 - `accuracy`
@@ -253,21 +252,18 @@ flowchart LR
     A[用户发起命令] --> B[CLI 参数解析]
     B --> C{命令类型}
     C -->|单场| D[predict-match]
-    C -->|批量| E[predict-schedule]
-    C -->|轻量单场| F[predict-match-lite]
+    C -->|足彩 14 场| E[predict-fourteen-issue]
 
     D --> G[构造预测上下文]
-    E --> H[获取赛程并逐场推理]
-    F --> I[轻量推理链路]
+    E --> H[逐场复用 predict-match 链路]
 
     G --> J[增强预测编排]
     H --> J
-    I --> K[轻量持久化 / 仅记忆写入]
 
     J --> L[赔率 / 实力 / 情报 / 推理 / 后处理]
-    L --> M{是否 --no-write}
-    M -->|否| N[写回 markdown / archive / memory / registry]
-    M -->|是| O[只输出结果，不落盘]
+    L --> M{是否 SoT 联赛且未 --no-write}
+    M -->|是| N[写回 markdown / archive / memory / registry]
+    M -->|否| O[只输出结果，不落盘]
 
     N --> P[返回 JSON / 控制台结果]
     O --> P
@@ -275,16 +271,16 @@ flowchart LR
 
 ### 5.2 总体流程说明
 
-无论是单场还是批量预测，正式主链都遵循同一条原则：
+无论是单场还是足彩 14 场预测，正式主链都遵循同一条原则：
 
 1. 先构造完整上下文
 2. 再做推理与后处理
-3. 最后按是否允许写入来决定是否触发持久化副作用
+3. 最后按是否为 SoT 联赛（五大联赛 + 世界杯）且未 `--no-write` 来决定是否触发持久化副作用
 
 这让系统具备了两个关键特性：
 
-- 可以做正式落链预测
-- 也可以做纯输出 smoke / 预览 / 回归验证
+- 只有正式的五大联赛 / 世界杯赛事才会落链写回 markdown、archive、memory、RAG
+- 其他赛事（杯赛、欧战、友谊赛等）一律只输出预测结果，不产生写回副作用
 
 ---
 
@@ -437,92 +433,58 @@ CLI 层负责两件事：
 
 ---
 
-## 7. 批量预测流程：predict-schedule
+## 7. 足彩 14 场预测流程：predict-fourteen-issue
 
-### 7.1 为什么批量预测要单独定义语义
+### 7.1 语义定位
 
-批量预测和单场预测表面相似，但工程行为完全不同。
-
-如果直接把批量流程做成“循环调用单场完整持久化”，会产生明显问题：
-
-1. 每场都 archive，副作用过重
-2. 每场都更新 memory，不符合批量语义
-3. 每场都注册赛果同步，边界不清晰
-4. 每场都写 markdown，容易形成重复写入
-5. 准确率刷新会被重复触发，增加额外开销
-
-因此当前正式主链把 `predict-schedule` 明确定义为：
-
-> 批量推理 + 批量级副作用
-
-而不是：
-
-> 多次单场完整持久化
+`predict-fourteen-issue` 用于按期号一次性预测足彩 14 场对阵。它不再是一条独立的轻量/批量链路，而是直接复用完整的 `predict-match` 链路逐场预测，因此每一场都继承相同的推理质量与相同的 SoT-only 写回门控。
 
 ### 7.2 当前正式语义
 
 #### 默认模式
 
-- 逐场完成推理
-- 循环内部不做逐场持久化
-- 循环结束后统一 writeback
-- 统一刷新 accuracy
-- 返回每场结果与批量 persisted summary
+- 解析期号，拉取该期 14 场对阵
+- 逐场复用 `predict-match` 完整链路推理
+- 每一场各自按"是否 SoT 联赛"决定是否写回（只有五大联赛 / 世界杯会落盘）
+- 返回每场结果与汇总摘要
 
 #### `--no-write`
 
 - 逐场只推理
-- 不写 markdown
-- 不 archive
-- 不 memory
-- 不 registry
-- 不刷新 accuracy
+- 全程不写 markdown / archive / memory / registry
 - 只输出结果
 
-### 7.3 批量流程图
+### 7.3 14 场流程图
 
 ```mermaid
 flowchart TD
-    A[predict-schedule] --> B[解析 league/date/days]
-    B --> C[生成赛程窗口]
-    C --> D[逐日调用 generate_prediction_report]
-    D --> E[逐场 predict_match persist=False]
-    E --> F[汇总 prediction results]
-    F --> G{是否 --no-write}
-    G -->|否| H[统一 write_predictions]
-    G -->|否| I[统一 persist_prediction_batch]
-    G -->|是| J[跳过所有持久化动作]
-    H --> K[写回 teams_2025-26.md]
-    I --> L[刷新 accuracy / 返回批量摘要]
-    J --> M[仅输出 JSON]
-    K --> N[返回批量更新结果]
-    L --> N
-    M --> N
+    A[predict-fourteen-issue] --> B[解析 issue 期号]
+    B --> C[拉取该期 14 场对阵]
+    C --> D[逐场复用 predict-match 链路]
+    D --> E{该场是否 SoT 联赛且未 --no-write}
+    E -->|是| F[写回 markdown / archive / memory / registry]
+    E -->|否| G[只输出结果，不落盘]
+    F --> H[汇总 14 场结果]
+    G --> H
+    H --> I[返回 JSON / 控制台结果]
 ```
 
-### 7.4 批量预测时序图
+### 7.4 14 场预测时序图
 
 ```mermaid
 sequenceDiagram
     participant U as 用户 / 调用方
     participant CLI as CLI
     participant EP as EnhancedPredictor
-    participant PM as Per-match Inference
-    participant BP as Batch Persistence
+    participant PM as predict-match 链路
 
-    U->>CLI: predict-schedule
-    CLI->>EP: generate_prediction_report(league, date, days, persist)
+    U->>CLI: predict-fourteen-issue --issue <期号>
+    CLI->>EP: 解析期号并拉取 14 场对阵
     loop 每一场比赛
-        EP->>PM: predict_match(persist=False)
+        EP->>PM: 完整 predict-match 推理（按 SoT 决定写回）
         PM-->>EP: 返回单场预测结果
     end
-    alt 默认写入
-        EP->>BP: write_predictions + persist_prediction_batch
-        BP-->>EP: 返回批量写回与刷新摘要
-    else --no-write
-        EP-->>EP: 仅保留输出结果，不执行副作用
-    end
-    EP-->>CLI: 返回批量结果
+    EP-->>CLI: 返回 14 场汇总结果
     CLI-->>U: 输出 JSON / 控制台结果
 ```
 
@@ -530,15 +492,16 @@ sequenceDiagram
 
 ## 8. 预测结果写入位置与事实源边界
 
-### 8.1 五大联赛：长期事实源
+### 8.1 SoT 联赛：唯一允许写回的赛事
 
-以下联赛以各自目录下的 `teams_2025-26.md` 作为正式事实源：
+只有以下 6 个 SoT-backed 联赛允许写回 markdown 事实源、archive、`MEMORY.md` 与 RAG 记忆：
 
 - 英超
 - 西甲
 - 意甲
 - 德甲
 - 法甲
+- 世界杯
 
 默认写回后，预测信息会进入对应比赛行的备注区，通常包括：
 
@@ -551,19 +514,17 @@ sequenceDiagram
 - 动态调权状态
 - MatchID
 
-### 8.2 欧战 / 杯赛：运行态优先
+### 8.2 其他赛事：一律只输出，不写回
 
-如：
+欧战、杯赛、友谊赛等所有非 SoT 赛事（如欧冠、欧联、欧协联、各国杯赛、国家队友谊赛等）一律只输出预测结果，不触发任何写回副作用：
 
-- 欧冠
-- 欧联
-- 欧协联
+- 不写 markdown 事实源
+- 不 archive
+- 不更新 `MEMORY.md`
+- 不写 RAG 记忆
+- 不注册赛果同步
 
-这类比赛当前更偏向 runtime-only 语义，不强制写入五大联赛式 markdown 事实源，而是更多写入：
-
-- `MEMORY.md`
-- runtime archive
-- 运行时记录
+此类比赛的 `persisted` 字段会标记 `skipped_reason = "non_sot_league_output_only"`，明确表示其只输出、不落盘。
 
 ### 8.3 写回层的工程约束
 
@@ -711,12 +672,12 @@ CLI 输出中的 `runtime_profile` / `agent_roles` 不是装饰字段，它有�
 3. 如果只想预览，不落库，带 `--no-write`
 4. 如果要进入正式记录，不带 `--no-write`
 
-### 13.2 看某天整轮比赛
+### 13.2 预测足彩 14 场
 
 推荐步骤：
 
-1. 使用 `predict-schedule`
-2. 若要正式更新联赛预测，走默认模式
+1. 使用 `predict-fourteen-issue --issue <期号>`
+2. 每一场各自按"是否 SoT 联赛"决定是否正式写回
 3. 若只做 smoke / 预览 / 回归测试，使用 `--no-write`
 
 ### 13.3 比赛结束后更新赛果
@@ -795,6 +756,6 @@ CLI 输出中的 `runtime_profile` / `agent_roles` 不是装饰字段，它有�
 
 最关键的现状可以总结为三点：
 
-1. `predict-match` 和 `predict-schedule` 已经形成统一契约，`--no-write` 表示纯输出，默认模式表示正式落链。
-2. 五大联赛以 `teams_2025-26.md` 作为长期事实源，欧战 / 杯赛更多走 runtime / memory 语义。
+1. `predict-match` 是唯一的完整预测入口，`predict-fourteen-issue` 直接复用同一链路逐场预测，`--no-write` 表示纯输出，默认模式表示正式落链。
+2. 只有五大联赛 + 世界杯等 SoT 联赛才允许写回 `teams_2025-26.md` / archive / memory / RAG，其他赛事一律只输出、不落盘。
 3. 系统真正的价值不只是“赛前算一次”，而是“赛前预测 + 赛后回填 + 准确率重算 + 历史经验修正”的完整闭环。

@@ -64,47 +64,6 @@ def run_quietly(func):
     return result, stdout_buffer.getvalue(), stderr_buffer.getvalue()
 
 
-def cleanup_invalid_schedule_cache_files(leagues=None, dates=None):
-    schedules_root = Path(EUROPE_LEAGUES_ROOT) / ".okooo-scraper" / "schedules"
-    deleted_files = []
-    if not schedules_root.exists():
-        return {"deleted_count": 0, "deleted_files": deleted_files}
-
-    league_list = [str(item or "").strip() for item in (leagues or []) if str(item or "").strip()]
-    date_list = [str(item or "").strip() for item in (dates or []) if str(item or "").strip()]
-    candidate_files = []
-
-    if league_list and date_list:
-        for league_code in league_list:
-            for match_date in date_list:
-                candidate_files.append(schedules_root / league_code / f"{match_date}.json")
-    else:
-        candidate_files.extend(schedules_root.rglob("*.json"))
-
-    for file_path in candidate_files:
-        if not file_path.exists() or file_path.is_dir():
-            continue
-        try:
-            payload = json.loads(file_path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        date_click = payload.get("date_click")
-        if not isinstance(date_click, dict) or date_click.get("clicked") is not False:
-            continue
-        try:
-            file_path.unlink()
-        except OSError:
-            continue
-        try:
-            deleted_files.append(str(file_path.relative_to(EUROPE_LEAGUES_ROOT)))
-        except ValueError:
-            deleted_files.append(str(file_path))
-
-    return {"deleted_count": len(deleted_files), "deleted_files": deleted_files}
-
-
 FORMAL_LEAGUE_ALIASES = {}
 
 
@@ -121,11 +80,27 @@ REFERENCE_ONLY_LEAGUE_DISPLAY_NAMES = {
 }
 
 
+# 仅这些 SoT 正式联赛（五大联赛 + 世界杯）允许写回 teams md / MEMORY / RAG。
+# 其余赛事（杯赛、欧战、友谊赛等）一律只输出预测，不做任何持久化。
+SOT_BACKED_LEAGUE_CODES = (
+    "premier_league",
+    "la_liga",
+    "serie_a",
+    "bundesliga",
+    "ligue_1",
+    "world_cup",
+)
+
+
 def normalize_formal_league_code(league_code: Optional[str]) -> str:
     text = str(league_code or "").strip()
     if not text:
         return ""
     return FORMAL_LEAGUE_ALIASES.get(text.lower(), FORMAL_LEAGUE_ALIASES.get(text, text))
+
+
+def is_sot_backed_league(league_code: Optional[str]) -> bool:
+    return normalize_formal_league_code(league_code) in SOT_BACKED_LEAGUE_CODES
 
 
 def normalize_reference_only_league_code(league_code: Optional[str]) -> str:
@@ -150,8 +125,7 @@ def is_reference_only_league_request(league_code: Optional[str]) -> bool:
 FORMAL_COMMANDS = (
     "list-leagues",
     "predict-match",
-    "predict-match-lite",
-    "predict-schedule",
+    "predict-fourteen-issue",
     "collect-data",
     "pending-results",
     "save-result",
@@ -186,8 +160,7 @@ LEGACY_COMMANDS = (
 COMMAND_AGENT_ROLES = {
     "list-leagues": [],
     "predict-match": ["data_collector", "match_analyzer", "odds_analyzer"],
-    "predict-match-lite": ["data_collector", "odds_analyzer"],
-    "predict-schedule": ["data_collector", "match_analyzer", "odds_analyzer"],
+    "predict-fourteen-issue": ["data_collector", "match_analyzer", "odds_analyzer"],
     "collect-data": ["data_collector"],
     "pending-results": ["result_tracker"],
     "save-result": ["result_tracker"],
@@ -876,7 +849,10 @@ def run_openclaw_predict_match(args):
             runtime_league_code = reference_only_code
         else:
             runtime_league_code = resolved_league
-        persist = not bool(getattr(args, "no_write", False)) and not reference_only
+        # 只有 SoT 正式联赛（五大联赛 + 世界杯）才写回 teams md / MEMORY / RAG；
+        # 其余赛事（杯赛、欧战、友谊赛等）一律只输出预测。
+        sot_backed = is_sot_backed_league(runtime_league_code)
+        persist = not bool(getattr(args, "no_write", False)) and sot_backed
         result = predictor.predict_match(
             home_team=args.home_team,
             away_team=args.away_team,
@@ -893,6 +869,8 @@ def run_openclaw_predict_match(args):
         )
         if not persist:
             result["persisted"] = {"enabled": False, "archived": False, "memory_updated": False}
+            if not bool(getattr(args, "no_write", False)) and not sot_backed:
+                result["persisted"]["skipped_reason"] = "non_sot_league_output_only"
         else:
             result.setdefault("persisted", {"enabled": True, "archived": False, "memory_updated": False})
         if reference_only:
@@ -946,74 +924,6 @@ def run_openclaw_predict_match(args):
         print(f"RAG记忆: {explanation}")
 
 
-def run_openclaw_predict_match_lite(args):
-    def _execute():
-        from domain.lightweight_prediction import predict_lightweight_match
-        from domain.persistence import PredictionPersistenceService
-        from result_manager import ResultManager
-
-        result = predict_lightweight_match(
-            base_dir=EUROPE_LEAGUES_ROOT,
-            league_name=args.league_name,
-            league_code=getattr(args, "league", "") or "",
-            home_team=args.home_team,
-            away_team=args.away_team,
-            match_date=args.date,
-            match_time=getattr(args, "match_time", "") or "",
-            match_id=getattr(args, "match_id", "") or "",
-            okooo_driver=getattr(args, "okooo_driver", "local-chrome"),
-            okooo_headed=bool(getattr(args, "okooo_headed", False)),
-        )
-        # Reference-only competitions (友谊赛/etc.) are never written to the rolling
-        # memory, mirroring the formal predict-match path which forces persist=False
-        # for these leagues. They carry no standings context and would pollute the
-        # accuracy stats, so we skip persistence regardless of --no-write.
-        reference_only = is_reference_only_league_request(getattr(args, "league", "")) or is_reference_only_league_request(getattr(args, "league_name", ""))
-        resolved_league_code = getattr(args, "league", "") or result.get("league_code") or ""
-        sot_backed = str(result.get("storage_mode") or "").strip() == "league_sot"
-        if args.no_write or reference_only:
-            result["persisted"] = {"enabled": False, "archived": False, "memory_updated": False}
-            if reference_only and not args.no_write:
-                result["persisted"]["skipped_reason"] = "reference_only_league_not_persisted"
-        else:
-            manager = ResultManager(EUROPE_LEAGUES_ROOT)
-            service = PredictionPersistenceService(EUROPE_LEAGUES_ROOT, cache=None, result_manager=manager)
-            if sot_backed:
-                # SoT 联赛（含世界杯）写回正式联赛主归档 + 滚动记忆 + 赛果同步登记。
-                result = service.persist_prediction("predict-match-lite", {}, result, resolved_league_code)
-            else:
-                result = service.persist_memory_only_prediction(result, resolved_league_code)
-        result.setdefault("runtime_profile", get_command_runtime_profile("predict-match-lite"))
-        return result
-
-    if args.json:
-        result, captured_stdout, captured_stderr = run_quietly(_execute)
-        emit_response(
-            build_json_result("predict-match-lite", result, captured_stdout, captured_stderr),
-            as_json=True,
-        )
-        return
-
-    result = _execute()
-    print(f"比赛: {result['home_team']} vs {result['away_team']}")
-    print(f"联赛: {result['league_name']}  日期: {result['match_date']}")
-    print(f"预测: {result['prediction']}  信心: {result['confidence']:.2%}")
-    print(f"主胜/平局/客胜: {result['all_probabilities']}")
-    _print_top_scores(result.get("top_scores"))
-    over_under = result.get("over_under") if isinstance(result.get("over_under"), dict) else {}
-    if over_under.get("available"):
-        line = over_under.get("line")
-        line_label = f"{float(line):g}" if isinstance(line, (int, float)) else "?"
-        print(
-            f"大小球: 大球 {float(over_under.get('over') or 0.0):.2%} / "
-            f"小球 {float(over_under.get('under') or 0.0):.2%} @ {line_label} "
-            f"[{over_under.get('line_source', 'unknown')}]"
-        )
-    else:
-        reason = str(over_under.get("reason") or "missing_real_market_line").strip()
-        print(f"大小球: 待补真实盘口 ({reason})")
-
-
 def _print_top_scores(top_scores) -> None:
     if not isinstance(top_scores, list) or not top_scores:
         return
@@ -1029,19 +939,6 @@ def _print_top_scores(top_scores) -> None:
             parts.append(str(item))
     if parts:
         print(f"比分参考 (Top {len(parts)}): {' / '.join(parts)}")
-
-
-def is_fourteen_issue_request(args) -> bool:
-    league = str(getattr(args, "league", "") or "").strip().lower()
-    issue = str(getattr(args, "issue", "") or "").strip()
-    return bool(issue) or league in {
-        "ctzc_14",
-        "fourteen_matches",
-        "fourteen_issue",
-        "14场",
-        "14match",
-        "14_matches",
-    }
 
 
 def run_openclaw_predict_fourteen_issue(args):
@@ -1065,7 +962,7 @@ def run_openclaw_predict_fourteen_issue(args):
     if args.json:
         result, captured_stdout, captured_stderr = run_quietly(_execute)
         emit_response(
-            build_json_result("predict-schedule-14", result, captured_stdout, captured_stderr),
+            build_json_result("predict-fourteen-issue", result, captured_stdout, captured_stderr),
             as_json=True,
         )
         return
@@ -1076,125 +973,6 @@ def run_openclaw_predict_fourteen_issue(args):
     print(f"成功: {result['success_count']}  阻断: {result['blocked_count']}  失败: {result['error_count']}")
     if result.get("output_path"):
         print(f"输出文件: {result['output_path']}")
-
-
-def run_openclaw_predict_schedule(args):
-    if is_fourteen_issue_request(args):
-        run_openclaw_predict_fourteen_issue(args)
-        return
-
-    def _execute():
-        from domain.predictor import DomainPredictor
-
-        if not str(getattr(args, "date", "") or "").strip():
-            raise ValueError("predict-schedule 普通联赛模式必须传 --date")
-        requested_league = str(getattr(args, "league", "") or "").strip()
-        base_date = datetime.strptime(args.date, "%Y-%m-%d")
-        updates = []
-        runtime_profile = get_command_runtime_profile("predict-schedule")
-        reference_only = is_reference_only_league_request(requested_league)
-        if reference_only:
-            reference_only_code = normalize_reference_only_league_code(requested_league)
-            reference_only_name = reference_only_league_display_name(requested_league)
-            return {
-                "updates": [
-                    {
-                        "league": reference_only_code,
-                        "league_name": reference_only_name,
-                        "match_date": base_date.strftime("%Y-%m-%d"),
-                        "teams_file": None,
-                        "updated": False,
-                        "prediction_count": 0,
-                        "accuracy_refreshed": False,
-                        "persisted": {
-                            "enabled": False,
-                            "archived": False,
-                            "memory_updated": False,
-                            "result_sync_registered": False,
-                        },
-                        "schedule_source_status": "unsupported",
-                        "schedule_source_reason": "reference_only_schedule_unavailable",
-                        "runtime_profile": runtime_profile,
-                    }
-                ],
-                "schedule_cache_cleanup": {"deleted_count": 0, "deleted_files": []},
-            }
-        leagues, league_config = validate_leagues(requested_league)
-        predictor = DomainPredictor()
-        league_name_override = ""
-        persist = not bool(getattr(args, "no_write", False))
-        target_dates = [
-            (base_date + timedelta(days=day_offset)).strftime("%Y-%m-%d")
-            for day_offset in range(args.days)
-        ]
-        cache_cleanup = cleanup_invalid_schedule_cache_files(leagues=leagues, dates=target_dates)
-
-        for league_code in leagues:
-            for day_offset in range(args.days):
-                match_date = (base_date + timedelta(days=day_offset)).strftime("%Y-%m-%d")
-                report = predictor.generate_prediction_report(
-                    league_code,
-                    match_date,
-                    persist=persist,
-                    write_teams=persist,
-                    league_name_override=league_name_override,
-                )
-                if isinstance(report, dict):
-                    teams_file = report.get("teams_file")
-                    teams_updated = bool(report.get("teams_updated"))
-                    prediction_count = int(report.get("prediction_count") or 0)
-                    accuracy_refreshed = bool(report.get("accuracy_refreshed"))
-                    persisted = report.get("persisted") or {
-                        "enabled": persist,
-                        "archived": False,
-                        "memory_updated": False,
-                        "result_sync_registered": False,
-                    }
-                else:
-                    teams_file = report
-                    teams_updated = bool(teams_file)
-                    prediction_count = 0
-                    accuracy_refreshed = False
-                    persisted = {
-                        "enabled": persist,
-                        "archived": False,
-                        "memory_updated": False,
-                        "result_sync_registered": False,
-                    }
-                updates.append(
-                    {
-                        "league": league_code,
-                        "league_name": league_config[league_code]["name"],
-                        "match_date": match_date,
-                        "teams_file": teams_file,
-                        "updated": teams_updated,
-                        "prediction_count": prediction_count,
-                        "accuracy_refreshed": accuracy_refreshed,
-                        "persisted": persisted,
-                        "schedule_source_status": report.get("schedule_source_status") if isinstance(report, dict) else None,
-                        "schedule_source_reason": report.get("schedule_source_reason") if isinstance(report, dict) else None,
-                        "runtime_profile": runtime_profile,
-                    }
-                )
-        return {"updates": updates, "schedule_cache_cleanup": cache_cleanup}
-
-    if args.json:
-        result, captured_stdout, captured_stderr = run_quietly(_execute)
-        emit_response(
-            build_json_result("predict-schedule", result, captured_stdout, captured_stderr),
-            as_json=True,
-        )
-        return
-
-    result = _execute()
-    cleanup = result["schedule_cache_cleanup"]
-    updates = result["updates"]
-    print("📅 预测写回结果:")
-    if cleanup["deleted_count"]:
-        print(f"已删除 {cleanup['deleted_count']} 个无效赛程缓存")
-    for item in updates:
-        status = "已更新" if item["updated"] else "无数据"
-        print(f"- {item['league_name']} {item['match_date']}: {status}")
 
 
 def run_openclaw_collect_data(args):
@@ -1930,8 +1708,7 @@ def build_parser():
         epilog="""
 常用示例:
   %(prog)s predict-match --league la_liga --home-team 巴塞罗那 --away-team 皇家马德里 --date 2026-05-11 --json
-  %(prog)s predict-schedule --league la_liga --date 2026-05-11 --days 2 --json
-  %(prog)s predict-schedule --issue 26082 --json
+  %(prog)s predict-fourteen-issue --issue 26082 --json
   %(prog)s collect-data --league la_liga --date 2026-05-11 --json
   %(prog)s pending-results --days-back 14 --json
   %(prog)s save-result --match-id la_liga_20260511_巴塞罗那_皇家马德里 --home-score 2 --away-score 1 --json
@@ -1962,31 +1739,15 @@ def build_parser():
     parser_predict_match.add_argument("--no-write", action="store_true", help="只输出预测结果，不写入 MEMORY.md/归档")
     add_json_flag(parser_predict_match)
 
-    parser_predict_match_lite = subparsers.add_parser("predict-match-lite", help="轻量预测单场比赛并写入滚动记忆（适合非正式支持联赛）")
-    parser_predict_match_lite.add_argument("--league-name", required=True, help="联赛中文名，例如 葡超/英冠")
-    parser_predict_match_lite.add_argument("--league", default="", help="联赛代码（可选；仅用于滚动记忆标识）")
-    parser_predict_match_lite.add_argument("--home-team", required=True, help="主队名称")
-    parser_predict_match_lite.add_argument("--away-team", required=True, help="客队名称")
-    parser_predict_match_lite.add_argument("--date", required=True, help="比赛日期 YYYY-MM-DD")
-    parser_predict_match_lite.add_argument("--match-id", default="", help="澳客 MatchID（可选；不传则由快照脚本自行定位）")
-    parser_predict_match_lite.add_argument("--okooo-driver", default="local-chrome", help="抓取澳客快照的 driver（默认 local-chrome；browser-use 仅显式调试时使用）")
-    parser_predict_match_lite.add_argument("--okooo-headed", action="store_true", help="browser-use 以有头模式运行（仅显式指定 browser-use 时生效）")
-    parser_predict_match_lite.add_argument("--time", dest="match_time", default="", help="比赛时间 HH:MM（用于赛程精准定位）")
-    parser_predict_match_lite.add_argument("--no-write", action="store_true", help="只输出预测结果，不写入 MEMORY.md")
-    add_json_flag(parser_predict_match_lite)
-
-    parser_predict_schedule = subparsers.add_parser("predict-schedule", help="按日期批量生成预测并按批次写回")
-    parser_predict_schedule.add_argument("--league", help="联赛代码；留空表示全部联赛")
-    parser_predict_schedule.add_argument("--date", default="", help="开始日期 YYYY-MM-DD；14场模式可不传")
-    parser_predict_schedule.add_argument("--days", type=int, default=1, help="连续处理天数")
-    parser_predict_schedule.add_argument("--issue", default="", help="传统足彩 14 场期号；传入后走独立 14 场预测链")
-    parser_predict_schedule.add_argument("--issue-notice-url", default="", help="可选：传统足彩公告 URL；不传则自动抓最新期次公告")
-    parser_predict_schedule.add_argument("--issue-output", default="", help="可选：14 场预测 markdown 输出路径")
-    parser_predict_schedule.add_argument("--okooo-driver", default="local-chrome", help="14场模式抓取澳客快照的 driver（默认 local-chrome）")
-    parser_predict_schedule.add_argument("--okooo-headed", action="store_true", help="14场模式是否有头运行（仅 browser-use 生效）")
-    parser_predict_schedule.add_argument("--no-refresh-odds", action="store_true", help="14场模式不主动刷新澳客实时赔率")
-    parser_predict_schedule.add_argument("--no-write", action="store_true", help="只输出批量预测结果，不写入 teams/统计")
-    add_json_flag(parser_predict_schedule)
+    parser_predict_fourteen = subparsers.add_parser("predict-fourteen-issue", help="按传统足彩期号预测 14 场赛事")
+    parser_predict_fourteen.add_argument("--issue", required=True, help="传统足彩 14 场期号，例如 26082")
+    parser_predict_fourteen.add_argument("--issue-notice-url", default="", help="可选：传统足彩公告 URL；不传则自动抓最新期次公告")
+    parser_predict_fourteen.add_argument("--issue-output", default="", help="可选：14 场预测 markdown 输出路径")
+    parser_predict_fourteen.add_argument("--okooo-driver", default="local-chrome", help="抓取澳客快照的 driver（默认 local-chrome）")
+    parser_predict_fourteen.add_argument("--okooo-headed", action="store_true", help="是否有头运行（仅 browser-use 生效）")
+    parser_predict_fourteen.add_argument("--no-refresh-odds", action="store_true", help="不主动刷新澳客实时赔率")
+    parser_predict_fourteen.add_argument("--no-write", action="store_true", help="只输出预测结果，不写出 markdown")
+    add_json_flag(parser_predict_fourteen)
 
     parser_collect = subparsers.add_parser("collect-data", help="抓取或降级采集比赛数据")
     parser_collect.add_argument("--league", required=True, help="联赛代码")
@@ -2198,10 +1959,8 @@ def main():
         run_openclaw_list_leagues(args.json)
     elif args.command == "predict-match":
         run_openclaw_predict_match(args)
-    elif args.command == "predict-match-lite":
-        run_openclaw_predict_match_lite(args)
-    elif args.command == "predict-schedule":
-        run_openclaw_predict_schedule(args)
+    elif args.command == "predict-fourteen-issue":
+        run_openclaw_predict_fourteen_issue(args)
     elif args.command == "collect-data":
         run_openclaw_collect_data(args)
     elif args.command == "pending-results":

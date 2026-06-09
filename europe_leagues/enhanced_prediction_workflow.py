@@ -350,6 +350,7 @@ class DynamicWeightAdjuster:
             'league_score_accuracy': float(league_acc.get('score_accuracy', 0.0) or 0.0),
             'league_ou_accuracy': float(league_acc.get('ou_accuracy', 0.0) or 0.0),
             'model_accuracy_keys': sorted([k for k in model_accuracy.keys() if k in base_weights]),
+            'model_accuracy': {k: float(v or 0.0) for k, v in model_accuracy.items()} if isinstance(model_accuracy, dict) else {},
             'top_weight_drivers': league_acc.get('top_weight_drivers', []) or [],
             'base_weights': base_weights,
             'final_weights': final,

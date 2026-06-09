@@ -27,7 +27,7 @@ description: "用 500 轮次接口更新五大联赛 `teams_2025-26.md` 赛程�
 ## 与当前架构的关系
 
 - 对五大联赛而言，`teams_2025-26.md` 是赛程、比分与预测备注的 SoT
-- 下游消费方包括：`collect-data`、`predict-match`、`predict-schedule`、`save-result`、`accuracy`
+- 下游消费方包括：`collect-data`、`predict-match`、`predict-fourteen-issue`、`save-result`、`accuracy`
 - 赛程 SoT 更新后，正式 CLI 和结果闭环会继续以这些文件为准
 - 欧战 / 杯赛不属于本 Skill 的 SoT 写回目标
 
@@ -67,7 +67,7 @@ python3 update_five_leagues_schedule_times.py --league la_liga
 
 - `prediction_system.py collect-data`
 - `prediction_system.py predict-match`
-- `prediction_system.py predict-schedule`
+- `prediction_system.py predict-fourteen-issue`
 - `prediction_system.py save-result`
 - `prediction_system.py accuracy --refresh`
 

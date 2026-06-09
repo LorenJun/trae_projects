@@ -1,7 +1,7 @@
 # 足球预测多Agent系统扩展方案
 
 > 当前说明：本文是扩展方案稿，不是当前仓库的正式运行说明。  
-> 当前正式主链路以 `prediction_system.py` 为入口，围绕 `collect-data -> predict-match/predict-schedule -> teams_2025-26.md -> save-result/accuracy` 组织；若涉及阶段化编排，则以 `harness-run` 为准。
+> 当前正式主链路以 `prediction_system.py` 为入口，围绕 `collect-data -> predict-match -> teams_2025-26.md（仅 SoT 联赛写回）-> save-result/accuracy` 组织；若涉及阶段化编排，则以 `harness-run` 为准。
 
 ## 系统扩展概览
 

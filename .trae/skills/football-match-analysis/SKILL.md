@@ -20,16 +20,15 @@ description: "足球比赛预测主技能，按 `prediction_system.py` 发现入
 
 1. 确认 `league`、主客队、比赛日期，必要时补 `match_time`
 2. 优先通过 `prediction_system.py collect-data` 或 `okooo_fetch_daily_schedule.py` 获取 `match_id`
-3. 调用 `prediction_system.py predict-match` 或 `predict-schedule`
+3. 调用 `prediction_system.py predict-match`（足彩 14 场用 `predict-fourteen-issue`）
 4. 命令会经 `app/cli.py` 进入 `DomainPredictor` / `EnhancedPredictor`
 5. 预测链会联动：
    - 实时快照刷新
    - 预测前快照注水与 `match_id` 修正
    - 缺失大小球补抓
-   - 日赛程缓存校验与坏缓存清理
    - EWMA 近况补齐
    - RAG 相似比赛 / 盘口样本 / 爆冷案例检索
-   - `domain/persistence.py` 负责 side effects
+   - `domain/persistence.py` 负责 side effects（**仅 SoT 联赛才写回**）
    - `runtime/result_sync.py` / `result_manager.py` 负责赛后闭环
 
 其中澳客相关链路当前已经支持：
@@ -54,8 +53,7 @@ description: "足球比赛预测主技能，按 `prediction_system.py` 发现入
 
 - `collect-data`
 - `predict-match`
-- `predict-match-lite`
-- `predict-schedule`
+- `predict-fourteen-issue`
 - `pending-results`
 - `save-result`
 - `auto-sync-results`
@@ -64,11 +62,13 @@ description: "足球比赛预测主技能，按 `prediction_system.py` 发现入
 - `sync-pending-results-review`
 - `harness-run`
 
-## SoT / runtime 边界
+## SoT 写回边界（二元）
 
-### SoT-backed
+写回边界已收敛为二元：**只有 SoT-backed 正式联赛才写回，其余一律只输出预测结果。**
 
-以下 competition 以 markdown SoT 为主：
+### SoT-backed（唯一允许写回）
+
+以下且仅以下 competition 允许写回 teams md / `MEMORY.md` 滚动记忆 / RAG / 赛果同步登记：
 
 - `premier_league`
 - `la_liga`
@@ -77,14 +77,11 @@ description: "足球比赛预测主技能，按 `prediction_system.py` 发现入
 - `ligue_1`
 - `world_cup`
 
-### runtime-only
+判定逻辑见 `app/cli.py` 的 `SOT_BACKED_LEAGUE_CODES` 与 `is_sot_backed_league()`。
 
-以下 competition 以 `MEMORY.md` 与 runtime archive 为主：
+### 其余一切赛事（只输出，不写回）
 
-- `europa_league`
-- `champions_league`
-- `conference_league`
-- 其他杯赛 / 欧战扩展比赛
+欧战（`europa_league` / `champions_league` / `conference_league`）、其他杯赛、友谊赛（`friendly`）以及任何非上述六个联赛的 competition：`predict-match` 强制 `persist=False`，**不写 teams md、不写 `MEMORY.md`、不进 RAG、不进归档**，结果标 `persisted.skipped_reason = "non_sot_league_output_only"`。
 
 ## 关键规则
 
@@ -93,7 +90,7 @@ description: "足球比赛预测主技能，按 `prediction_system.py` 发现入
 - 若球队在赛程里显示简称，需结合 `okooo_team_aliases.json`
 - 若赛程页当前停在错误月份，应优先依赖脚本自动翻月，而不是手工假设日期标签可直接点击
 - 若 `collect-data` 已有真实快照，`predict-match` 应优先复用并注入，而不是重新走弱兜底
-- 新预测会联动 SoT 或 runtime-only 写回、archive、MEMORY、RAG 与 result sync registry
+- 新预测只有 SoT 联赛（五大联赛 + 世界杯）才写回 teams md / MEMORY / RAG / result sync registry；其余赛事一律只输出预测，不写回
 - 赛后回填应优先走 `save-result` / `auto-sync-results` / `result-sync-daemon` / `sync-pending-results-review`
 - 默认使用 CLI-first，不要把底层 Python import 当成标准用户流程
 
@@ -112,14 +109,12 @@ python3 prediction_system.py predict-match \
   --json
 ```
 
-### 批量预测
+### 足彩 14 场预测
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py predict-schedule \
-  --league premier_league \
-  --date 2026-04-28 \
-  --days 1 \
+python3 prediction_system.py predict-fourteen-issue \
+  --issue 26082 \
   --json
 ```
 

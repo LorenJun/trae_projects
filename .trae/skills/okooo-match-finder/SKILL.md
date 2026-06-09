@@ -67,7 +67,7 @@ description: "澳客 MatchID 定位与预测入口衔接技能，按 `prediction
 
 - `collect-data`
 - `predict-match`
-- `predict-schedule`
+- `predict-fourteen-issue`
 - `harness-run`
 - `auto-sync-results`
 - `bulk_fetch_and_update.py`

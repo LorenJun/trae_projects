@@ -106,7 +106,7 @@ python3 audit_players_completeness.py
 ## 与正式主链的衔接
 
 - 这些文件是预测系统输入，不是正式对外输出
-- 正式预测入口仍应走 `prediction_system.py predict-match` / `predict-schedule` / `harness-run`
+- 正式预测入口仍应走 `prediction_system.py predict-match` / `predict-fourteen-issue` / `harness-run`
 - 如果球员数据更新后要验证效果，应通过正式 CLI 观察输出变化，而不是直接改报告模板
 
 ## 赛季更新注意事项

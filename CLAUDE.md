@@ -44,8 +44,7 @@ python3 prediction_system.py list-leagues --json
 cd europe_leagues
 python3 prediction_system.py collect-data --league premier_league --date 2026-05-11 --json
 python3 prediction_system.py predict-match --league premier_league --home-team 曼联 --away-team 切尔西 --date 2026-05-11 --json
-python3 prediction_system.py predict-schedule --league premier_league --date 2026-05-11 --days 1 --json
-python3 prediction_system.py predict-schedule --league premier_league --date 2026-05-11 --days 1 --no-write --json
+python3 prediction_system.py predict-fourteen-issue --issue 26082 --json
 python3 prediction_system.py save-result --match-id premier_league_20260511_曼联_切尔西 --home-score 2 --away-score 1 --json
 python3 prediction_system.py auto-sync-results --json
 python3 prediction_system.py result-sync-daemon --json
@@ -127,17 +126,15 @@ This service is the owner for prediction persistence side effects, including:
 
 `result_manager.py` remains the lower-level archive/result/accuracy foundation, but prediction-side orchestration should not be reimplemented ad hoc in CLI handlers or in `EnhancedPredictor`.
 
-### 4. Batch schedule prediction has different persistence semantics than single-match prediction
+### 4. Writeback is gated strictly to SoT-backed leagues
 
 This is easy to break.
 
-For `predict-schedule` / `generate_prediction_report`:
+`predict-match` only persists (teams markdown writeback + `MEMORY.md` rolling memory + RAG + result-sync registry) when the resolved league is one of the six SoT-backed leagues (`SOT_BACKED_LEAGUE_CODES` in `app/cli.py`: the five major leagues + `world_cup`). For every other competition (European cups, other cups, friendlies, any non-SoT league), `predict-match` forces `persist=False` and the result is output-only, marked `persisted.skipped_reason = "non_sot_league_output_only"`. `--no-write` still suppresses persistence for SoT leagues too.
 
-- each match is predicted with per-match persistence disabled
-- writeback/persistence/accuracy refresh happen at the batch level
-- `--no-write` must suppress both teams writeback and batch persistence side effects
+`predict-fourteen-issue` reuses the full `predict-match` chain per match, so it inherits the same SoT-only writeback gating.
 
-If you change schedule generation, verify against `test_prediction_persistence.py` and `test_cli_persistence.py`.
+If you change writeback gating, verify against `test_prediction_persistence.py` and `test_cli_persistence.py`.
 
 ### 5. Storage is split between SoT markdown and runtime JSON
 
@@ -161,21 +158,21 @@ Under `europe_leagues/.okooo-scraper/`:
 
 Do not hardcode these paths. Use `runtime/paths.py` and `get_default_paths()`.
 
-### 6. Competition behavior depends on whether the competition is league-backed SoT or runtime-only
+### 6. Writeback behavior depends solely on whether the competition is SoT-backed
 
-Current code distinguishes between:
+Current code gates all prediction writeback on a single binary:
 
-- league-backed SoT competitions: the five major leagues and now `world_cup`
-- runtime-only competitions: European cups and other cup-style competitions that persist to `MEMORY.md` plus runtime archive/index files
+- SoT-backed competitions (the five major leagues + `world_cup`): predictions write back to teams markdown + `MEMORY.md` + RAG + result-sync registry
+- every other competition (European cups, other cups, friendlies, any non-SoT league): output-only, no writeback at all
 
 This affects:
 
-- where predictions are written
+- whether predictions are written anywhere
 - how `teams_match_id` is formed
 - how result sync resolves canonical match IDs
 - whether teams markdown is the primary record
 
-When changing persistence or result sync, confirm whether the competition is expected to be SoT-backed or runtime-only.
+When changing persistence or result sync, confirm whether the competition is SoT-backed (`is_sot_backed_league()` in `app/cli.py`).
 
 ### 7. Result sync is its own subsystem
 

@@ -197,7 +197,7 @@ prediction_system.py
 
 正确关系是：
 
-- 普通正式预测：`predict-match` / `predict-schedule`
+- 普通正式预测：`predict-match`（足彩 14 场用 `predict-fourteen-issue`）
 - 需要阶段化与可审计结果时：`harness-run --pipeline match_prediction`
 - 需要阶段化赛果回填时：`harness-run --pipeline result_recording`
 
@@ -281,7 +281,7 @@ python3 prediction_system.py harness-run \
 
 ### 第二层：Pipeline 能力增强
 
-1. 把 `predict-schedule` 收敛成独立 pipeline
+1. 把 `predict-fourteen-issue` 收敛成独立 pipeline
 2. 增加 `resolve_match_id` 阶段
 3. 增加 `team_context` / `odds_snapshot` / `result_review` 阶段
 4. 增加 `policy` 层，约束哪些 pipeline 可以写文件

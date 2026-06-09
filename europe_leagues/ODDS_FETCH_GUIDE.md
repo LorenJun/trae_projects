@@ -291,7 +291,7 @@ OKOOO_BROWSER_E2E=1 python3 -m unittest test_okooo_browser
 
 - `prediction_system.py collect-data`
 - `prediction_system.py predict-match`
-- `prediction_system.py predict-schedule`
+- `prediction_system.py predict-fourteen-issue`
 - `prediction_system.py harness-run`
 - 必要时配合 `okooo_save_snapshot.py`
 

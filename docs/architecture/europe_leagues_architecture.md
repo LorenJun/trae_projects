@@ -200,7 +200,7 @@ flowchart TB
 | Football Harness | `harness/football.py` | 注册 `match_prediction`、`result_recording` 两类 pipeline，桥接 collect / predict / save-result / accuracy 到正式业务能力 |
 
 当前正式 CLI 命令已经不只包含业务命令，还包含运维/环境命令：
-- 业务命令：`predict-match`、`predict-schedule`、`collect-data`、`save-result`、`auto-sync-results`、`accuracy`
+- 业务命令：`predict-match`、`predict-fourteen-issue`、`collect-data`、`save-result`、`auto-sync-results`、`accuracy`
 - RAG 命令：`rag-rebuild`、`rag-diagnose`、`sync-memory-rag`
 - 编排命令：`harness-list`、`harness-run`
 - 环境命令：`health-check`、`setup-openclaw`
@@ -293,8 +293,8 @@ RAG 当前真实依赖的数据源包括：
 - `.okooo-scraper/snapshots/**/*.json`
 
 当前正式行为：
-- `predict-match` / `predict-schedule` 可自动读取或按需重建 RAG 索引
-- 新预测会把 `RAG记忆:` 原生写入 `MEMORY.md`
+- `predict-match` / `predict-fourteen-issue` 可自动读取或按需重建 RAG 索引
+- 新预测会把 `RAG记忆:` 原生写入 `MEMORY.md`（仅 SoT 联赛）
 - 赛果回填后，滚动记忆样本与 RAG 索引会联动刷新
 
 ### 3.6 支撑脚本与测试边界
@@ -352,7 +352,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-  A[predict-match / predict-schedule] --> R[.okooo-scraper/runtime/result_sync_registry.json]
+  A[predict-match / predict-fourteen-issue] --> R[.okooo-scraper/runtime/result_sync_registry.json]
   R --> T[result-sync-daemon / auto-sync-results]
   T --> B[result_manager.py]
   B --> C[league teams_2025-26.md]

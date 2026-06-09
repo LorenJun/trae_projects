@@ -12,8 +12,8 @@ last_updated_date: "2026-05-15"
 > 当前正式流程  
 > 1. `prediction_system.py` 是发现入口，真实命令实现位于 `europe_leagues/app/cli.py`  
 > 2. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
-> 3. `prediction_system.py predict-match / predict-schedule` 执行增强预测  
-> 4. 五大联赛写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写回 `MEMORY.md` 与 runtime-only 归档  
+> 3. `prediction_system.py predict-match` 执行增强预测（足彩 14 场用 `predict-fourteen-issue`）  
+> 4. 只有 SoT 联赛（五大联赛 + 世界杯）才写回 `europe_leagues/<league>/teams_*.md` + `MEMORY.md` + RAG；其余一切赛事（欧战/杯赛/友谊赛等）只输出预测结果，不写回  
 > 5. 赛后优先用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `sync-pending-results-review` 回填  
 > 6. 结果闭环会统一刷新 accuracy / MEMORY / RAG / review-learning；`prediction_system.py accuracy --refresh --json` 仍可作为显式重建入口  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
@@ -491,9 +491,9 @@ Step 2: 抓赛程并获取 MatchID / kickoff_time
 Step 3: 通过 `collect-data` 复用赛程与已有快照
 Step 4: 刷新实时快照（欧赔/亚值/大小球/凯利）
 Step 4.5: 自动补 EWMA form、缺失大小球，按需注入 `team_context`
-Step 5: 通过 `prediction_system.py predict-match` / `predict-schedule` 进入正式预测编排流程
+Step 5: 通过 `prediction_system.py predict-match` 进入正式预测编排流程（足彩 14 场用 `predict-fourteen-issue`）
 Step 6: 输出最终结论
-Step 7: 按比赛类型写回 teams_2025-26.md 或 MEMORY.md / runtime archive
+Step 7: 仅 SoT 联赛（五大联赛 + 世界杯）写回 teams_*.md + MEMORY + RAG；其余赛事只输出不写回
 Step 8: 赛后回填真实比分，并由结果闭环自动刷新胜负/比分/大小球准确率、记忆样本、RAG 与 review-learning
 ```
 
@@ -520,11 +520,11 @@ cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py predict-match --league premier_league --home-team 伯恩利 --away-team 狼队 --date 2026-05-24 --time 23:00 --json
 ```
 
-### 批量预测
+### 足彩 14 场预测
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py predict-schedule --league premier_league --date 2026-05-24 --days 1 --json
+python3 prediction_system.py predict-fourteen-issue --issue 26082 --json
 ```
 
 ### Harness 入口

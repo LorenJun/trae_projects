@@ -8,7 +8,7 @@ import os
 import json
 import math
 from datetime import datetime
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 import logging
 
 logging.basicConfig(level=logging.INFO, filename='ml_prediction.log')
@@ -574,6 +574,9 @@ class MultiModelFusion:
         'ensemble': 0.05
     }
 
+    # 市场（赔率隐含概率）二次融合默认权重 α（你给的实战默认：常规 0.35）
+    DEFAULT_MARKET_ALPHA = 0.35
+
     def __init__(self, model_weights: Optional[Dict[str, float]] = None):
         self.models = {
             'poisson': PoissonModel(),
@@ -621,9 +624,18 @@ class MultiModelFusion:
         home_attack: float,
         home_defense: float,
         away_attack: float,
-        away_defense: float
+        away_defense: float,
+        market_probs: Optional[Dict[str, float]] = None,
+        market_alpha: Optional[float] = None,
+        expert_signals: Optional[Dict[str, Any]] = None,
+        model_accuracy: Optional[Dict[str, float]] = None
     ) -> Dict:
-        """多模型融合预测"""
+        """多模型融合预测
+
+        两阶段融合：
+        1) 10 个模型的加权融合 -> P_model（硬数据 + 已有 expert/ensemble）
+        2) 与赔率隐含的市场概率做凸组合：final = (1-α)·P_model + α·P_market
+        """
 
         all_predictions = {}
 
@@ -684,27 +696,99 @@ class MultiModelFusion:
         )
         all_predictions['bayesian'] = bayesian_result
 
-        # 9. 专家系统（简化版）
+        # 9. 专家系统（接入真实情报信号）
         expert_result = self._expert_system(
             home_strength, away_strength,
             home_form, away_form,
-            home_injuries, away_injuries
+            home_injuries, away_injuries,
+            expert_signals=expert_signals,
         )
         all_predictions['expert'] = expert_result
 
-        # 10. 集成学习（加权平均）
-        ensemble_result = self._ensemble_predict(all_predictions)
+        # 10. 集成学习（按历史准确率带权 stacking）
+        ensemble_result = self._ensemble_predict(all_predictions, model_accuracy=model_accuracy)
         all_predictions['ensemble'] = ensemble_result
 
-        # 加权融合
-        final_prediction = self._weighted_fusion(all_predictions)
+        # 第一阶段：10 模型加权融合 -> P_model
+        model_prediction = self._weighted_fusion(all_predictions)
+
+        # 第二阶段：与市场（赔率隐含）概率做凸组合 final = (1-α)·P_model + α·P_market
+        final_prediction, market_fusion_diag = self._fuse_with_market(
+            model_prediction, market_probs, market_alpha
+        )
 
         return {
             'final': final_prediction,
+            'model_only': model_prediction,
             'all_models': all_predictions,
+            'market_fusion': market_fusion_diag,
             'home_lambda': home_lambda,
             'away_lambda': away_lambda
         }
+
+    def _fuse_with_market(
+        self,
+        model_prediction: Dict[str, float],
+        market_probs: Optional[Dict[str, float]],
+        market_alpha: Optional[float],
+    ) -> Tuple[Dict[str, float], Dict[str, Any]]:
+        """市场二次融合：final = (1-α)·P_model + α·P_market。
+
+        无可用市场概率（无真实赔率）时 α 自动置 0，等价于只用模型概率。
+        """
+        diag: Dict[str, Any] = {'applied': False, 'alpha': 0.0, 'reason': 'no_market_probs'}
+        if not isinstance(market_probs, dict):
+            return model_prediction, diag
+
+        try:
+            mh = float(market_probs.get('home_win'))
+            md = float(market_probs.get('draw'))
+            ma = float(market_probs.get('away_win'))
+        except (TypeError, ValueError):
+            return model_prediction, diag
+
+        total = mh + md + ma
+        if total <= 0 or min(mh, md, ma) < 0:
+            diag['reason'] = 'invalid_market_probs'
+            return model_prediction, diag
+        mh, md, ma = mh / total, md / total, ma / total
+
+        alpha = self.DEFAULT_MARKET_ALPHA if market_alpha is None else float(market_alpha)
+        alpha = max(0.0, min(1.0, alpha))
+
+        # 归一化模型概率，保证两侧均为合法分布、融合结果和为 1
+        mp_total = (
+            float(model_prediction.get('home_win', 0.0))
+            + float(model_prediction.get('draw', 0.0))
+            + float(model_prediction.get('away_win', 0.0))
+        )
+        if mp_total > 0:
+            norm_model = {
+                'home_win': float(model_prediction['home_win']) / mp_total,
+                'draw': float(model_prediction['draw']) / mp_total,
+                'away_win': float(model_prediction['away_win']) / mp_total,
+            }
+        else:
+            norm_model = {'home_win': 1 / 3, 'draw': 1 / 3, 'away_win': 1 / 3}
+
+        if alpha <= 0.0:
+            diag.update({'reason': 'alpha_zero', 'alpha': 0.0,
+                         'market_probs': {'home_win': round(mh, 6), 'draw': round(md, 6), 'away_win': round(ma, 6)}})
+            return model_prediction, diag
+
+        fused = {
+            'home_win': (1 - alpha) * norm_model['home_win'] + alpha * mh,
+            'draw': (1 - alpha) * norm_model['draw'] + alpha * md,
+            'away_win': (1 - alpha) * norm_model['away_win'] + alpha * ma,
+        }
+        diag = {
+            'applied': True,
+            'alpha': round(alpha, 4),
+            'reason': 'market_fused',
+            'model_probs': {k: round(float(v), 6) for k, v in norm_model.items()},
+            'market_probs': {'home_win': round(mh, 6), 'draw': round(md, 6), 'away_win': round(ma, 6)},
+        }
+        return fused, diag
 
     def _expert_system(
         self,
@@ -713,56 +797,140 @@ class MultiModelFusion:
         home_form: int,
         away_form: int,
         home_injuries: int,
-        away_injuries: int
+        away_injuries: int,
+        expert_signals: Optional[Dict[str, Any]] = None
     ) -> Dict[str, float]:
-        """专家系统（简化版）"""
-        score = 0
+        """专家系统：接入真实情报信号（伤停/停赛、核心可用、战意、爆冷、盘口异常）。
 
-        # 实力评估
-        if home_strength > away_strength + 15:
-            score += 0.3
-        elif home_strength > away_strength + 5:
-            score += 0.15
+        产出连续评分而非固定概率桶，再用 sigmoid + 平局先验映射为概率，
+        让 expert 模型携带真实信息量而非硬编码规则。
+        """
+        signals = expert_signals if isinstance(expert_signals, dict) else {}
 
-        # 状态评估
-        if home_form > away_form + 3:
-            score += 0.2
-        elif home_form > away_form:
-            score += 0.1
+        def _num(key: str, default: float = 0.0) -> float:
+            try:
+                value = signals.get(key)
+                return default if value is None else float(value)
+            except (TypeError, ValueError):
+                return default
 
-        # 伤病评估
-        if home_injuries > away_injuries + 2:
-            score -= 0.2
+        # 主队视角的净优势评分（>0 利主，<0 利客）
+        score = 0.0
+        factors: List[str] = []
 
-        # 转换为概率
-        if score > 0.2:
-            return {'home_win': 0.65, 'draw': 0.25, 'away_win': 0.10, 'model': 'Expert'}
-        elif score > 0:
-            return {'home_win': 0.55, 'draw': 0.30, 'away_win': 0.15, 'model': 'Expert'}
-        elif score > -0.2:
-            return {'home_win': 0.35, 'draw': 0.35, 'away_win': 0.30, 'model': 'Expert'}
-        else:
-            return {'home_win': 0.25, 'draw': 0.30, 'away_win': 0.45, 'model': 'Expert'}
+        # 1) 实力差
+        strength_gap = home_strength - away_strength
+        score += max(-0.30, min(0.30, strength_gap / 50.0))
+        if abs(strength_gap) >= 10:
+            factors.append(f"实力差{strength_gap:+.0f}")
 
-    def _ensemble_predict(self, all_predictions: Dict[str, Dict[str, float]]) -> Dict[str, float]:
-        """集成学习预测"""
-        ensemble_home = 0
-        ensemble_draw = 0
-        ensemble_away = 0
+        # 2) 近况状态差
+        form_gap = home_form - away_form
+        score += max(-0.15, min(0.15, form_gap * 0.04))
+        if abs(form_gap) >= 2:
+            factors.append(f"状态差{form_gap:+d}")
 
-        for model_name, prediction in all_predictions.items():
-            if model_name not in ['ensemble', 'expert']:
-                ensemble_home += prediction['home_win']
-                ensemble_draw += prediction['draw']
-                ensemble_away += prediction['away_win']
+        # 3) 伤停 / 停赛（人数差，主队多伤停利客）
+        home_out = home_injuries + int(_num('home_suspensions'))
+        away_out = away_injuries + int(_num('away_suspensions'))
+        out_gap = away_out - home_out
+        score += max(-0.18, min(0.18, out_gap * 0.05))
+        if out_gap != 0:
+            factors.append(f"伤停净差{out_gap:+d}")
 
-        n_models = len(all_predictions) - 2  # 排除ensemble和expert
+        # 4) 核心球员可用性（缺失利对方）
+        if 'home_key_available' in signals and not bool(signals.get('home_key_available')):
+            score -= 0.10
+            factors.append("主队核心缺阵")
+        if 'away_key_available' in signals and not bool(signals.get('away_key_available')):
+            score += 0.10
+            factors.append("客队核心缺阵")
+
+        # 5) 战意 / 动机差
+        motivation_gap = _num('home_motivation') - _num('away_motivation')
+        score += max(-0.12, min(0.12, motivation_gap / 100.0))
+        if abs(motivation_gap) >= 10:
+            factors.append(f"战意差{motivation_gap:+.0f}")
+
+        # 6) 情报净倾向（match_intelligence 已折算的主队净利好评分，-1~1）
+        intel_bias = max(-1.0, min(1.0, _num('intel_home_bias')))
+        if intel_bias:
+            score += intel_bias * 0.10
+            factors.append(f"情报倾向{intel_bias:+.2f}")
+
+        # 7) 盘口指向的热门方向（市场强烈看好某方时给予小幅确认）
+        favorite = str(signals.get('market_favorite') or '').strip().lower()
+        fav_strength = max(0.0, min(1.0, _num('market_favorite_strength')))
+        if favorite == 'home':
+            score += 0.10 * fav_strength
+        elif favorite == 'away':
+            score -= 0.10 * fav_strength
+
+        # 8) 爆冷风险（高爆冷指数压缩主队方向优势）
+        upset_index = max(0.0, min(1.0, _num('upset_index')))
+        if upset_index:
+            score *= (1.0 - 0.35 * upset_index)
+            if upset_index >= 0.4:
+                factors.append(f"爆冷指数{upset_index:.2f}")
+
+        # 评分 -> 概率：主客胜由 sigmoid 决定，平局概率随对阵均势上升
+        spread = 1.0 / (1.0 + math.exp(-3.2 * score))  # 0~1，0.5 为均势
+        draw_base = 0.30 - 0.18 * abs(2 * spread - 1.0)  # 越均势平局越高
+        draw = max(0.16, min(0.34, draw_base))
+        remaining = 1.0 - draw
+        home_win = remaining * spread
+        away_win = remaining * (1.0 - spread)
 
         return {
-            'home_win': ensemble_home / n_models,
-            'draw': ensemble_draw / n_models,
-            'away_win': ensemble_away / n_models,
-            'model': 'Ensemble'
+            'home_win': round(home_win, 6),
+            'draw': round(draw, 6),
+            'away_win': round(away_win, 6),
+            'model': 'Expert',
+            'expert_score': round(score, 4),
+            'expert_factors': factors,
+        }
+
+    def _ensemble_predict(
+        self,
+        all_predictions: Dict[str, Dict[str, float]],
+        model_accuracy: Optional[Dict[str, float]] = None
+    ) -> Dict[str, float]:
+        """集成学习：按各基模型历史准确率带权 stacking。
+
+        排除自身/expert/market 避免重复计数；无历史准确率时退化为等权平均。
+        """
+        accuracy = model_accuracy if isinstance(model_accuracy, dict) else {}
+        excluded = {'ensemble', 'expert', 'market'}
+
+        ensemble_home = 0.0
+        ensemble_draw = 0.0
+        ensemble_away = 0.0
+        weight_sum = 0.0
+        used_accuracy = False
+
+        for model_name, prediction in all_predictions.items():
+            if model_name in excluded:
+                continue
+            acc = accuracy.get(model_name)
+            if isinstance(acc, (int, float)) and acc > 0:
+                weight = 0.5 + float(acc) * 1.5  # 与 DynamicWeightAdjuster 一致的口径
+                used_accuracy = True
+            else:
+                weight = 1.0
+            ensemble_home += float(prediction['home_win']) * weight
+            ensemble_draw += float(prediction['draw']) * weight
+            ensemble_away += float(prediction['away_win']) * weight
+            weight_sum += weight
+
+        if weight_sum <= 0:
+            return {'home_win': 1 / 3, 'draw': 1 / 3, 'away_win': 1 / 3, 'model': 'Ensemble'}
+
+        return {
+            'home_win': ensemble_home / weight_sum,
+            'draw': ensemble_draw / weight_sum,
+            'away_win': ensemble_away / weight_sum,
+            'model': 'Ensemble',
+            'stacking_weighted': used_accuracy,
         }
 
     def _weighted_fusion(self, all_predictions: Dict[str, Dict[str, float]]) -> Dict[str, float]:

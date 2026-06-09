@@ -88,136 +88,6 @@ class CliPersistenceTest(unittest.TestCase):
         self.assertTrue(str(choices["enhanced"].description or "").startswith("[legacy]") or str(choices["enhanced"].format_usage()).startswith("usage:"))
         self.assertEqual(choices["enhanced"].prog.split()[-1], "enhanced")
 
-    def test_predict_schedule_returns_runtime_profile_per_update(self):
-        captured = {}
-        calls = []
-
-        class DummyPredictor:
-            def generate_prediction_report(self, league_code, match_date, persist=True, write_teams=True, league_name_override=""):
-                calls.append((league_code, match_date, persist, write_teams, league_name_override))
-                return {
-                    "teams_file": f"/tmp/{league_code}_{match_date}.md",
-                    "teams_updated": True,
-                    "prediction_count": 3,
-                    "accuracy_refreshed": persist,
-                    "schedule_source_status": "valid",
-                    "schedule_source_reason": "ok",
-                    "persisted": {
-                        "enabled": persist,
-                        "archived": persist,
-                        "memory_updated": persist,
-                        "result_sync_registered": persist,
-                        "archive_count": 3 if persist else 0,
-                        "memory_update_count": 3 if persist else 0,
-                        "result_sync_registration_count": 3 if persist else 0,
-                    },
-                }
-
-        args = Namespace(
-            league="premier_league",
-            date="2026-05-11",
-            days=2,
-            no_write=False,
-            json=True,
-        )
-
-        with patch("domain.predictor.DomainPredictor", return_value=DummyPredictor()), patch(
-            "domain.predictor.LEAGUE_CONFIG", {"premier_league": {"name": "英超"}}
-        ), patch("app.cli.cleanup_invalid_schedule_cache_files", return_value={"deleted_count": 2, "deleted_files": ["a.json", "b.json"]}) as mock_cleanup, patch(
-            "app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)
-        ):
-            cli.run_openclaw_predict_schedule(args)
-
-        data = captured["payload"]["data"]
-        updates = data["updates"]
-        self.assertEqual(data["schedule_cache_cleanup"], {"deleted_count": 2, "deleted_files": ["a.json", "b.json"]})
-        mock_cleanup.assert_called_once_with(leagues=["premier_league"], dates=["2026-05-11", "2026-05-12"])
-        self.assertEqual(len(updates), 2)
-        self.assertEqual(calls[0], ("premier_league", "2026-05-11", True, True, ""))
-        self.assertEqual(calls[1], ("premier_league", "2026-05-12", True, True, ""))
-        self.assertTrue(all(item["updated"] for item in updates))
-        self.assertTrue(all(item["prediction_count"] == 3 for item in updates))
-        self.assertTrue(all(item["persisted"]["enabled"] for item in updates))
-        self.assertTrue(all(item["persisted"]["archived"] for item in updates))
-        self.assertTrue(all(item["persisted"]["memory_updated"] for item in updates))
-        self.assertTrue(all(item["persisted"]["result_sync_registered"] for item in updates))
-        self.assertTrue(all(item["persisted"]["archive_count"] == 3 for item in updates))
-        self.assertTrue(all(item["persisted"]["memory_update_count"] == 3 for item in updates))
-        self.assertTrue(all(item["persisted"]["result_sync_registration_count"] == 3 for item in updates))
-        self.assertTrue(all(item["runtime_profile"]["agent_roles"] == ["data_collector", "match_analyzer", "odds_analyzer"] for item in updates))
-
-    def test_predict_schedule_no_write_disables_batch_persistence(self):
-        captured = {}
-        calls = []
-
-        class DummyPredictor:
-            def generate_prediction_report(self, league_code, match_date, persist=True, write_teams=True, league_name_override=""):
-                calls.append((league_code, match_date, persist, write_teams, league_name_override))
-                return {
-                    "teams_file": None,
-                    "teams_updated": False,
-                    "prediction_count": 2,
-                    "accuracy_refreshed": False,
-                    "schedule_source_status": "missing",
-                    "schedule_source_reason": "schedule_cache_missing",
-                    "persisted": {
-                        "enabled": persist,
-                        "archived": False,
-                        "memory_updated": False,
-                        "result_sync_registered": False,
-                        "memory_update_count": 0,
-                        "result_sync_registration_count": 0,
-                    },
-                }
-
-        args = Namespace(
-            league="premier_league",
-            date="2026-05-11",
-            days=1,
-            no_write=True,
-            json=True,
-        )
-
-        with patch("domain.predictor.DomainPredictor", return_value=DummyPredictor()), patch(
-            "domain.predictor.LEAGUE_CONFIG", {"premier_league": {"name": "英超"}}
-        ), patch("app.cli.cleanup_invalid_schedule_cache_files", return_value={"deleted_count": 0, "deleted_files": []}), patch(
-            "app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)
-        ):
-            cli.run_openclaw_predict_schedule(args)
-
-        self.assertEqual(calls, [("premier_league", "2026-05-11", False, False, "")])
-        data = captured["payload"]["data"]
-        self.assertEqual(data["schedule_cache_cleanup"], {"deleted_count": 0, "deleted_files": []})
-        update = data["updates"][0]
-        self.assertFalse(update["updated"])
-        self.assertFalse(update["accuracy_refreshed"])
-        self.assertEqual(update["persisted"], {"enabled": False, "archived": False, "memory_updated": False, "result_sync_registered": False, "memory_update_count": 0, "result_sync_registration_count": 0})
-
-    def test_predict_schedule_reference_only_reports_unsupported_schedule_source(self):
-        captured = {}
-
-        args = Namespace(
-            league="友谊赛",
-            date="2026-06-06",
-            days=1,
-            no_write=False,
-            json=True,
-        )
-
-        with patch("domain.predictor.DomainPredictor") as mock_predictor, patch(
-            "domain.predictor.LEAGUE_CONFIG", {"world_cup": {"name": "世界杯"}}
-        ), patch("app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)):
-            cli.run_openclaw_predict_schedule(args)
-
-        mock_predictor.assert_not_called()
-        update = captured["payload"]["data"]["updates"][0]
-        self.assertEqual(update["league"], "friendly")
-        self.assertEqual(update["league_name"], "友谊赛")
-        self.assertFalse(update["persisted"]["enabled"])
-        self.assertEqual(update["schedule_source_status"], "unsupported")
-        self.assertEqual(update["schedule_source_reason"], "reference_only_schedule_unavailable")
-        self.assertEqual(captured["payload"]["data"]["schedule_cache_cleanup"], {"deleted_count": 0, "deleted_files": []})
-
     def test_collect_data_serializes_matches_and_runtime_profile(self):
         captured = {}
 
@@ -584,7 +454,12 @@ class CliPersistenceTest(unittest.TestCase):
         self.assertEqual(captured["payload"]["data"]["league_request"], "友谊赛")
         self.assertEqual(
             captured["payload"]["data"]["persisted"],
-            {"enabled": False, "archived": False, "memory_updated": False},
+            {
+                "enabled": False,
+                "archived": False,
+                "memory_updated": False,
+                "skipped_reason": "non_sot_league_output_only",
+            },
         )
         self.assertEqual(
             captured["payload"]["data"]["reference_only_live_market_notice"]["reason"],
@@ -634,105 +509,103 @@ class CliPersistenceTest(unittest.TestCase):
             {"enabled": True, "archived": False, "memory_updated": False},
         )
 
-    def test_predict_match_lite_uses_memory_only_persistence_service(self):
+    def test_predict_match_non_sot_league_outputs_without_persisting(self):
         captured = {}
-        persistence_calls = []
+        calls = []
 
-        raw_result = {
-            "league_code": "championship",
-            "league_name": "英冠",
-            "home_team": "米尔沃尔",
-            "away_team": "赫尔城",
-            "match_date": "2026-05-12",
-            "prediction": "主胜",
-            "confidence": 0.55,
-            "all_probabilities": {"主胜": 0.55, "平局": 0.25, "客胜": 0.20},
-            "over_under": {"available": False, "reason": "missing_real_market_line"},
-        }
-
-        class DummyPersistenceService:
-            def __init__(self, base_dir, cache, result_manager):
-                self.base_dir = base_dir
-                self.cache = cache
-                self.result_manager = result_manager
-
-            def persist_memory_only_prediction(self, result, league_code):
-                persistence_calls.append((result["home_team"], result["away_team"], league_code))
-                persisted = dict(result)
-                persisted["persisted"] = {
-                    "enabled": True,
-                    "archived": False,
-                    "memory_updated": True,
+        class DummyPredictor:
+            def predict_match(self, **kwargs):
+                calls.append(kwargs)
+                return {
+                    "home_team": kwargs["home_team"],
+                    "away_team": kwargs["away_team"],
+                    "league_name": "英冠",
+                    "match_date": kwargs["match_date"],
+                    "prediction": "主胜",
+                    "confidence": 0.55,
+                    "final_probabilities": {"home_win": 0.55, "draw": 0.25, "away_win": 0.20},
+                    "over_under": {"available": False, "reason": "missing_real_market_line"},
                 }
-                return persisted
 
         args = Namespace(
-            league_name="英冠",
-            league="championship",
             home_team="米尔沃尔",
             away_team="赫尔城",
+            league="championship",
             date="2026-05-12",
             match_id="1309999",
+            no_refresh_odds=False,
             okooo_driver="local-chrome",
             okooo_headed=False,
             match_time="03:00",
+            league_hint=None,
+            context_file="",
             no_write=False,
             json=True,
         )
 
-        with patch("domain.lightweight_prediction.predict_lightweight_match", return_value=raw_result), patch(
-            "domain.persistence.PredictionPersistenceService", DummyPersistenceService
-        ), patch("result_manager.ResultManager", return_value=object()), patch(
-            "app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)
-        ):
-            cli.run_openclaw_predict_match_lite(args)
+        with patch("domain.predictor.DomainPredictor", return_value=DummyPredictor()), patch(
+            "app.cli.load_analysis_context_file", return_value={}
+        ), patch("app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)):
+            cli.run_openclaw_predict_match(args)
 
-        self.assertEqual(persistence_calls, [("米尔沃尔", "赫尔城", "championship")])
-        self.assertTrue(captured["payload"]["data"]["persisted"]["memory_updated"])
-        self.assertFalse(captured["payload"]["data"]["persisted"]["archived"])
+        self.assertFalse(calls[0]["persist"])
+        self.assertEqual(
+            captured["payload"]["data"]["persisted"],
+            {
+                "enabled": False,
+                "archived": False,
+                "memory_updated": False,
+                "skipped_reason": "non_sot_league_output_only",
+            },
+        )
 
-    def test_predict_match_lite_no_write_skips_memory_only_persistence(self):
+    def test_predict_match_sot_league_persists_by_default(self):
         captured = {}
+        calls = []
 
-        raw_result = {
-            "league_code": "championship",
-            "league_name": "英冠",
-            "home_team": "米尔沃尔",
-            "away_team": "赫尔城",
-            "match_date": "2026-05-12",
-            "prediction": "主胜",
-            "confidence": 0.55,
-            "all_probabilities": {"主胜": 0.55, "平局": 0.25, "客胜": 0.20},
-            "over_under": {"available": False, "reason": "missing_real_market_line"},
-        }
+        class DummyPredictor:
+            def predict_match(self, **kwargs):
+                calls.append(kwargs)
+                return {
+                    "home_team": kwargs["home_team"],
+                    "away_team": kwargs["away_team"],
+                    "league_name": "英超",
+                    "match_date": kwargs["match_date"],
+                    "prediction": "主胜",
+                    "confidence": 0.61,
+                    "final_probabilities": {"home_win": 0.52, "draw": 0.27, "away_win": 0.21},
+                    "over_under": {"available": False, "reason": "missing_real_market_line"},
+                    "persisted": {
+                        "enabled": True,
+                        "archived": True,
+                        "memory_updated": True,
+                    },
+                }
 
         args = Namespace(
-            league_name="英冠",
-            league="championship",
-            home_team="米尔沃尔",
-            away_team="赫尔城",
-            date="2026-05-12",
-            match_id="1309999",
+            home_team="曼联",
+            away_team="布伦特福德",
+            league="premier_league",
+            date="2026-04-28",
+            match_id="",
+            no_refresh_odds=False,
             okooo_driver="local-chrome",
             okooo_headed=False,
-            match_time="03:00",
-            no_write=True,
+            match_time="",
+            league_hint=None,
+            context_file="",
+            no_write=False,
             json=True,
         )
 
-        with patch("domain.lightweight_prediction.predict_lightweight_match", return_value=raw_result), patch(
-            "domain.persistence.PredictionPersistenceService"
-        ) as mock_service_cls, patch("result_manager.ResultManager") as mock_manager_cls, patch(
-            "app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)
-        ):
-            cli.run_openclaw_predict_match_lite(args)
+        with patch("domain.predictor.DomainPredictor", return_value=DummyPredictor()), patch(
+            "app.cli.load_analysis_context_file", return_value={}
+        ), patch("app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)):
+            cli.run_openclaw_predict_match(args)
 
-        mock_service_cls.assert_not_called()
-        mock_manager_cls.assert_not_called()
-        self.assertEqual(
-            captured["payload"]["data"]["persisted"],
-            {"enabled": False, "archived": False, "memory_updated": False},
-        )
+        self.assertTrue(calls[0]["persist"])
+        self.assertTrue(captured["payload"]["data"]["persisted"]["archived"])
+        self.assertNotIn("skipped_reason", captured["payload"]["data"]["persisted"])
 
 
 if __name__ == "__main__":

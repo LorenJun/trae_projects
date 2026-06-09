@@ -1111,6 +1111,110 @@ class InferencePipelineService:
         except Exception as exc:
             return {'league_code': league_code, 'error': str(exc)}
 
+    def _market_implied_1x2(self, european_odds: Optional[Dict[str, Any]]) -> Optional[Dict[str, float]]:
+        """从欧赔 final 反推归一化市场隐含 1X2 概率；无有效赔率返回 None。"""
+        if not isinstance(european_odds, dict):
+            return None
+        final = european_odds.get('final')
+        if not isinstance(final, dict):
+            return None
+        oh = self._to_float(final.get('home'))
+        od = self._to_float(final.get('draw'))
+        oa = self._to_float(final.get('away'))
+        if not oh or not od or not oa or min(oh, od, oa) <= 1.01:
+            return None
+        ph, pd, pa = 1.0 / oh, 1.0 / od, 1.0 / oa
+        total = ph + pd + pa
+        return {'home_win': ph / total, 'draw': pd / total, 'away_win': pa / total}
+
+    def _resolve_market_alpha(
+        self,
+        market_probs: Optional[Dict[str, float]],
+        applied_weights: Dict[str, Any],
+        expert_signals: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """按实战口径动态选 α：常规 0.35 / 热门强队 0.25 / 小联赛-数据少 0.5 / 伤停换帅 0.65。
+
+        无市场概率时 α=0（等价只用模型）。
+        """
+        if not isinstance(market_probs, dict):
+            return {'alpha': 0.0, 'reason': 'no_market_probs', 'regime': 'model_only'}
+
+        alpha = getattr(self.model_fusion, 'DEFAULT_MARKET_ALPHA', 0.35)
+        regime = 'normal'
+        reason = '常规场景，模型为主市场为辅'
+
+        # 小联赛 / 数据少：市场更可信
+        has_enough = bool(applied_weights.get('has_enough_samples', False))
+        if not has_enough:
+            alpha = 0.5
+            regime = 'data_poor'
+            reason = '联赛样本不足/小联赛，提高市场权重'
+
+        # 突发消息（核心伤停 / 多伤停 / 换帅）：市场资金已反映消息
+        out_gap = abs(int(expert_signals.get('home_suspensions', 0)) + int(expert_signals.get('away_suspensions', 0)))
+        heavy_absence = (
+            expert_signals.get('home_key_available') is False
+            or expert_signals.get('away_key_available') is False
+            or bool(expert_signals.get('coach_change'))
+            or out_gap >= 2
+        )
+        if heavy_absence:
+            alpha = 0.65
+            regime = 'news_shock'
+            reason = '核心伤停/停赛或换帅等突发消息，市场资金已反映'
+
+        # 热门强队（市场强烈看好一方）：更信模型防诱盘
+        fav_prob = max(market_probs.get('home_win', 0.0), market_probs.get('away_win', 0.0))
+        if fav_prob >= 0.60 and regime in ('normal', 'data_poor'):
+            alpha = min(alpha, 0.25)
+            regime = 'hot_favorite'
+            reason = '市场强烈看好一方，降低市场权重防诱盘'
+
+        return {'alpha': round(float(alpha), 4), 'reason': reason, 'regime': regime,
+                'market_favorite_prob': round(float(fav_prob), 4)}
+
+    def _build_expert_signals(
+        self,
+        home_strength: Dict[str, Any],
+        away_strength: Dict[str, Any],
+        home_motivation: float,
+        away_motivation: float,
+        match_intelligence: Optional[Dict[str, Any]],
+        market_probs: Optional[Dict[str, float]],
+    ) -> Dict[str, Any]:
+        """组装 expert 模型的真实情报输入。"""
+        signals: Dict[str, Any] = {
+            'home_suspensions': int(home_strength.get('suspended_count', 0) or 0),
+            'away_suspensions': int(away_strength.get('suspended_count', 0) or 0),
+            'home_key_available': bool(home_strength.get('key_players_available', True)),
+            'away_key_available': bool(away_strength.get('key_players_available', True)),
+            'home_motivation': float(home_motivation),
+            'away_motivation': float(away_motivation),
+        }
+        # 情报净倾向：用 quant_adjustment 的 λ 缩放差折算主队净利好（-1~1）
+        if isinstance(match_intelligence, dict):
+            quant = match_intelligence.get('quant_adjustment') or {}
+            try:
+                home_scale = float(quant.get('home_lambda_scale') or 1.0)
+                away_scale = float(quant.get('away_lambda_scale') or 1.0)
+                signals['intel_home_bias'] = max(-1.0, min(1.0, (home_scale - away_scale)))
+            except (TypeError, ValueError):
+                signals['intel_home_bias'] = 0.0
+            if match_intelligence.get('coach_change') or match_intelligence.get('head_coach_change'):
+                signals['coach_change'] = True
+        # 市场热门方向
+        if isinstance(market_probs, dict):
+            ph = market_probs.get('home_win', 0.0)
+            pa = market_probs.get('away_win', 0.0)
+            if ph >= pa:
+                signals['market_favorite'] = 'home'
+                signals['market_favorite_strength'] = max(0.0, min(1.0, (ph - 0.4) / 0.4))
+            else:
+                signals['market_favorite'] = 'away'
+                signals['market_favorite_strength'] = max(0.0, min(1.0, (pa - 0.4) / 0.4))
+        return signals
+
     def detect_market_odds_anomaly(
         self,
         league_code: str,
@@ -2022,6 +2126,20 @@ class InferencePipelineService:
         h2h_away_wins = int(analysis_context.get('h2h_away_wins', 0))
         h2h_draws = int(analysis_context.get('h2h_draws', 0))
         realtime['context_applied'].update({'h2h_home_wins': h2h_home_wins, 'h2h_away_wins': h2h_away_wins, 'h2h_draws': h2h_draws})
+
+        # 市场（赔率隐含）概率 + 动态 α + 专家情报信号 + 各模型历史准确率
+        market_probs = self._market_implied_1x2(european_odds)
+        expert_signals = self._build_expert_signals(
+            home_strength=home_strength,
+            away_strength=away_strength,
+            home_motivation=home_motivation,
+            away_motivation=away_motivation,
+            match_intelligence=match_intelligence,
+            market_probs=market_probs,
+        )
+        alpha_diag = self._resolve_market_alpha(market_probs, applied_weights, expert_signals)
+        model_accuracy = applied_weights.get('model_accuracy') if isinstance(applied_weights, dict) else None
+
         fusion_result = self.model_fusion.predict(
             home_team=home_team,
             away_team=away_team,
@@ -2042,7 +2160,14 @@ class InferencePipelineService:
             home_defense=home_strength['defense'],
             away_attack=away_strength['attack'],
             away_defense=away_strength['defense'],
+            market_probs=market_probs,
+            market_alpha=alpha_diag.get('alpha'),
+            expert_signals=expert_signals,
+            model_accuracy=model_accuracy,
         )
+        realtime['context_applied']['market_fusion'] = fusion_result.get('market_fusion')
+        realtime['context_applied']['market_alpha'] = alpha_diag
+        realtime['context_applied']['expert_signals'] = expert_signals
         final_prob = fusion_result['final']
         ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
 

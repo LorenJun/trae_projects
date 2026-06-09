@@ -5,7 +5,7 @@
 当前推荐路径：
 - 赛程与 MatchID：`okooo_fetch_daily_schedule.py` / `prediction_system.py collect-data`
 - 实时快照：`okooo_save_snapshot.py --driver local-chrome`
-- 正式预测：`prediction_system.py predict-match` / `predict-schedule`
+- 正式预测：`prediction_system.py predict-match` / `predict-fourteen-issue`
 """
 
 import argparse

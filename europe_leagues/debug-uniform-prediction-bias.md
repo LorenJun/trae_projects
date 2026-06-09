@@ -11,7 +11,7 @@
 4. Batch prediction or cache reuse leaks prior-match context into later matches.
 
 ## Evidence Plan
-- Inspect runtime flow from `predict-schedule` / `predict-match` through inference, RAG, and postprocess.
+- Inspect runtime flow from `predict-match` (and `predict-fourteen-issue`) through inference, RAG, and postprocess.
 - Instrument pre/post inference values, market inputs, and retrieved memory impact.
 - Reproduce on a small set of matches with different OU / handicap profiles.
 

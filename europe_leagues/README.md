@@ -6,12 +6,11 @@
 > - **这是什么**：仓库里真正运行的足球预测应用，目录 `europe_leagues/`。
 > - **入口真相源**：`prediction_system.py` 只是兼容/发现入口；真正的命令面、参数、JSON 输出 **以 `app/cli.py` 为准**。文档与代码冲突时信代码。
 > - **最常用命令**：
->   - 正式预测（SoT 联赛，可注入战术/首发 context）：`predict-match`
->   - 轻量预测（基于盘口快照，可用于世界杯/友谊赛等无积分榜上下文的赛事）：`predict-match-lite`
+>   - 正式预测（唯一预测入口，可注入战术/首发 context）：`predict-match`
 >   - 抓盘口快照：`okooo_save_snapshot.py`（可加 `--odds-only` 单独补抓欧赔）
 > - **盘口四盘**：欧赔 / 凯利 / 亚盘 / 大小球，走单会话 hub 真实导航一次拿回；解析规则与排障见 [`ODDS_FETCH_GUIDE.md`](ODDS_FETCH_GUIDE.md)。
 > - **固定 IP 抗封（单机无代理，默认全开）**：三道防线 = 进程级全局频控闸（`_global_pace_gate`，默认 2.5s，可调 `--min-request-interval`）+ 节奏随机抖动（`_jittered` ±35%）+ stealth 指纹屏蔽（`_install_stealth_script` 抹掉 `navigator.webdriver` 等自动化特征）。无代理时把请求节奏放慢拉抖是降低撞验证墙的根因手段，换模型/换 UA 不是。
-> - **持久化边界**：SoT-backed（五大联赛+世界杯，写回 teams md）/ runtime-only（杯赛）/ reference-only（友谊赛，**不写滚动记忆**）。详见 [`docs/PRD_足球预测系统_2026.md`](docs/PRD_足球预测系统_2026.md) 第 5 节。
+> - **持久化边界（已收敛为二元）**：只有 SoT-backed 正式联赛（五大联赛 + 世界杯）才写回 teams md / `MEMORY.md` 滚动记忆 / RAG；其余一切赛事（杯赛、欧战、友谊赛等）**只输出预测结果，不做任何写回**（`persisted.skipped_reason = "non_sot_league_output_only"`）。详见 [`docs/PRD_足球预测系统_2026.md`](docs/PRD_足球预测系统_2026.md) 第 5 节。
 > - **找文档**：先看导航路由页 [`docs/INDEX.md`](docs/INDEX.md)，按场景跳转。
 > - **凯利解析关键不变量**：主/平/客三路应彼此不同；若三路坍缩成同一个返还率即为解析 bug。
 >
@@ -33,7 +32,7 @@
 当前正式 CLI 子命令包括：
 
 - 基础：`list-leagues`、`health-check`、`setup-openclaw`
-- 采集与预测：`collect-data`、`predict-match`、`predict-match-lite`、`predict-schedule`
+- 采集与预测：`collect-data`、`predict-match`、`predict-fourteen-issue`
 - 结果同步：`pending-results`、`save-result`、`auto-sync-results`、`result-sync-daemon`
 - 复盘与治理：`accuracy`、`apply-reanalysis`、`sync-pending-results-review`、`build-season-master-review`
 - 文档与清理：`refresh-repo-docs`、`purge-nonreal-data`
@@ -60,7 +59,7 @@
 3. `okooo_save_snapshot.py` 可按 `日期 + 主客队 + 时间` 精确锁定比赛行并抓取 `欧赔 / 亚值 / 大小球 / 凯利`
 4. `domain/live.py` 与 `domain/odds.py` 会在预测前注入快照，必要时补抓真实盘口线
 5. 预测输出中的 `over_under.line_source=snapshot_final` 代表真实盘口已成功接入正式链
-6. `predict-match` / `predict-match-lite` 的文本输出在「主胜/平局/客胜」之后会罗列 `比分参考 (Top N)`（带各比分置信度，数据来自结果里的 `top_scores`）
+6. `predict-match` 的文本输出在「主胜/平局/客胜」之后会罗列 `比分参考 (Top N)`（带各比分置信度，数据来自结果里的 `top_scores`）
 
 当前身份字段约定也已收敛：
 
@@ -93,13 +92,13 @@
 - `runtime/result_sync.py`
 - `result_manager.py`
 
-## SoT 与 runtime 边界
+## SoT 写回边界（二元）
 
-当前系统有两类持久化路径：
+当前持久化边界已收敛为二元：**只有 SoT-backed 正式联赛才写回，其余一律只输出预测结果。**
 
-### 1. league-backed / SoT-backed competitions
+### 1. SoT-backed competitions（唯一允许写回）
 
-以下比赛类型以 markdown SoT 为主：
+以下且仅以下比赛类型允许写回 teams md / `MEMORY.md` 滚动记忆 / RAG / 赛果同步登记：
 
 - `premier_league`
 - `la_liga`
@@ -113,29 +112,16 @@
 - 五大联赛：`<league>/teams_2025-26.md`
 - 世界杯：`world_cup/teams_2026.md`
 
-### 2. runtime-only competitions
+判定逻辑见 `app/cli.py` 的 `SOT_BACKED_LEAGUE_CODES` 与 `is_sot_backed_league()`。
 
-以下比赛类型以运行时归档与滚动记忆为主：
+### 2. 其余一切赛事（只输出，不写回）
 
-- `europa_league`
-- `champions_league`
-- `conference_league`
-- 其他杯赛 / 欧战类扩展 competition
+杯赛、欧战（`europa_league` / `champions_league` / `conference_league`）、友谊赛（`friendly`）以及任何非上述六个联赛的 competition：`predict-match` 强制 `persist=False`，**不写 teams md、不写 `MEMORY.md`、不进 RAG、不进归档**。
 
-对应主持久化路径：
-
-- 项目根 `MEMORY.md`
-- `.okooo-scraper/runtime/*.json`
-
-### 3. reference-only competitions（不写滚动记忆）
-
-只有友谊赛（`friendly`）是 reference_only：没有积分榜/战意上下文，只做参考预测，**不写滚动记忆、不进正式归档**：
-
-- 正式 `predict-match` 对友谊赛强制 `persist=False`
-- `predict-match-lite` 同样跳过（`--league`/`--league-name` 命中 `is_reference_only_league_request`），结果标 `persisted.skipped_reason = "reference_only_league_not_persisted"`，无需手动 `--no-write`
+- 结果标 `persisted.skipped_reason = "non_sot_league_output_only"`，无需手动 `--no-write`
 - 直接跑 `okooo_save_snapshot.py` 快照脚本本就不写 `MEMORY.md`
 
-> 注意：**世界杯不是 reference-only**，它是 SoT-backed 正式联赛（见上文「SoT 写回」），`predict-match` 与 `predict-match-lite` 都会写回 [`world_cup/teams_2026.md`](world_cup/teams_2026.md) + 滚动记忆 + 赛果同步登记。
+> 注意：**世界杯属于 SoT-backed 正式联赛**，`predict-match` 会写回 [`world_cup/teams_2026.md`](world_cup/teams_2026.md) + 滚动记忆 + 赛果同步登记。
 
 ## 预测与结果闭环
 
@@ -186,7 +172,7 @@ python3 prediction_system.py list-leagues --json
 ```bash
 python3 prediction_system.py collect-data --league premier_league --date 2026-05-11 --json
 python3 prediction_system.py predict-match --league premier_league --home-team 曼联 --away-team 切尔西 --date 2026-05-11 --json
-python3 prediction_system.py predict-schedule --league premier_league --date 2026-05-11 --days 1 --json
+python3 prediction_system.py predict-fourteen-issue --issue 26082 --json
 python3 prediction_system.py harness-run --pipeline match_prediction --league premier_league --home-team 曼联 --away-team 切尔西 --date 2026-05-11 --json
 ```
 

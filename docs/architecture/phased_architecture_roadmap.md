@@ -98,7 +98,7 @@
 ### 原则 1：先保主链稳定，再动结构
 优先保护以下正式主链：
 
-`collect-data -> predict-match / predict-schedule -> writeback -> save-result / auto-sync -> accuracy --refresh`
+`collect-data -> predict-match -> writeback（仅 SoT 联赛）-> save-result / auto-sync -> accuracy --refresh`
 
 任何重构都不应先打断这条链。
 
@@ -132,7 +132,7 @@ Markdown 可以继续保留，但应逐步降级为导出视图，而不是唯�
 app/
   cli.py                # 仅保留 parser 装配 + 顶层 dispatch
   commands/
-    predict.py          # predict-match / predict-schedule / predict-match-lite
+    predict.py          # predict-match / predict-fourteen-issue
     result.py           # save-result / auto-sync-results / accuracy / pending-results
     rag.py              # rag-rebuild / rag-diagnose / sync-memory-rag
     harness.py          # harness-list / harness-run

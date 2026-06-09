@@ -5,8 +5,8 @@
 >
 > - **定位**：本文是 **CLI-first 执行手册**（产品边界看 [`docs/PRD_足球预测系统_2026.md`](docs/PRD_足球预测系统_2026.md)，总览看 [`README.md`](README.md)）。
 > - **两条铁律**：`prediction_system.py` 只是兼容/发现入口；真正的命令与 JSON 输出 **以 `app/cli.py` 为准**。
-> - **标准工作流（7 步）**：`collect-data`（取赛程+match_id）→ `predict-match`/`predict-schedule`（预测）→ 查盘口与 RAG → 按比赛类型写 SoT/runtime → `save-result`/`auto-sync-results`（赛后回填）→ `sync-pending-results-review`（批次复盘）→ 需要时 `accuracy --refresh`。
-> - **最常用预测命令**：SoT 联赛（含世界杯）用 `predict-match`，或用 `predict-match-lite` 基于盘口快照轻量预测（同样写回正式归档）；友谊赛用 `predict-match-lite`（reference-only，自动跳过滚动记忆，无需 `--no-write`）。
+> - **标准工作流（7 步）**：`collect-data`（取赛程+match_id）→ `predict-match`（预测）→ 查盘口与 RAG → 仅 SoT 联赛写回，其余只输出 → `save-result`/`auto-sync-results`（赛后回填）→ `sync-pending-results-review`（批次复盘）→ 需要时 `accuracy --refresh`。
+> - **唯一预测命令**：所有单场预测一律用 `predict-match`。只有 SoT-backed 正式联赛（五大联赛 + 世界杯）会写回 teams md / `MEMORY.md` / RAG；其余一切赛事（杯赛、欧战、友谊赛等）只输出预测结果，自动跳过写回（无需 `--no-write`）。足彩 14 场用 `predict-fourteen-issue`。
 > - **盘口补抓**：欧赔缺失时用 `okooo_save_snapshot.py --odds-only` 单独补抓，细节见 [`ODDS_FETCH_GUIDE.md`](ODDS_FETCH_GUIDE.md)。
 > - **撞验证墙怎么办（固定 IP 单机）**：抗封三道防线默认全开（全局频控闸 + 随机抖动 + stealth 指纹屏蔽），频繁撞墙时调大 `--min-request-interval`（默认 2.5s）放慢节奏，而不是换模型/换 UA。详见 [`ODDS_FETCH_GUIDE.md`](ODDS_FETCH_GUIDE.md)。
 > - **`apply-reanalysis` 是高级维护流**，不是每次赛后必跑。
@@ -26,20 +26,22 @@
 ## 当前标准工作流
 
 1. 用 `collect-data` 获取赛程、`match_id` 与上下文
-2. 用 `predict-match` / `predict-schedule` 执行预测
+2. 用 `predict-match` 执行预测（足彩 14 场用 `predict-fourteen-issue`）
 3. 检查真实盘口与 RAG 相关输出
-4. 根据比赛类型写入 SoT 或 runtime-only 归档
+4. 根据比赛类型决定是否写回（仅 SoT 联赛写回，其余只输出）
 5. 赛后使用 `save-result` / `auto-sync-results` / `result-sync-daemon` 回填
 6. 需要批次复盘时使用 `sync-pending-results-review`
 7. 需要显式重建时再执行 `accuracy --refresh`
 
 默认日常流程到这里为止。`apply-reanalysis` 属于高级维护流，用来把当前模型 replay 的选定结果显式提升为正式记录，不是每次赛后都要自动执行的标准步骤。
 
-## 比赛类型与写回边界
+## 比赛类型与写回边界（二元）
 
-### league-backed / SoT-backed
+写回边界已收敛为二元：**只有 SoT-backed 正式联赛写回，其余一律只输出预测结果。**
 
-以下 competition 以 SoT markdown 为主：
+### SoT-backed（唯一允许写回）
+
+以下且仅以下 competition 允许写回 teams md / `MEMORY.md` 滚动记忆 / RAG / 赛果同步登记：
 
 - `premier_league`
 - `la_liga`
@@ -53,25 +55,13 @@
 - 五大联赛：`<league>/teams_2025-26.md`
 - 世界杯：`world_cup/teams_2026.md`
 
-### runtime-only
+判定逻辑见 `app/cli.py` 的 `SOT_BACKED_LEAGUE_CODES` 与 `is_sot_backed_league()`。
 
-以下 competition 以运行时归档与滚动记忆为主：
+### 其余一切赛事（只输出，不写回）
 
-- `europa_league`
-- `champions_league`
-- `conference_league`
-- 其他杯赛 / 欧战扩展比赛
+杯赛、欧战（`europa_league` / `champions_league` / `conference_league`）、友谊赛（`friendly`）以及任何非上述六个联赛的 competition：`predict-match` 强制 `persist=False`，**不写 teams md、不写 `MEMORY.md`、不进 RAG、不进归档**。结果标 `persisted.skipped_reason = "non_sot_league_output_only"`，无需手动 `--no-write`。直接跑 `okooo_save_snapshot.py` 快照脚本本就不写 `MEMORY.md`。
 
-写回位置：
-
-- 项目根 `MEMORY.md`
-- `.okooo-scraper/runtime/*.json`
-
-### reference-only（不写滚动记忆）
-
-只有友谊赛（`friendly`）是 reference_only 联赛，只做参考预测，**不写滚动记忆、不进正式归档**：正式 `predict-match` 强制 `persist=False`；`predict-match-lite` 同样跳过（`--league`/`--league-name` 命中 `is_reference_only_league_request`），结果标 `persisted.skipped_reason = "reference_only_league_not_persisted"`，无需手动 `--no-write`。直接跑 `okooo_save_snapshot.py` 快照脚本本就不写 `MEMORY.md`。
-
-> 世界杯不是 reference-only，它是 SoT-backed 正式联赛：`predict-match` 与 `predict-match-lite` 都写回 `world_cup/teams_2026.md` + 滚动记忆 + 赛果同步登记。
+> 世界杯属于 SoT-backed 正式联赛：`predict-match` 会写回 `world_cup/teams_2026.md` + 滚动记忆 + 赛果同步登记。
 
 ## 推荐命令
 
@@ -106,18 +96,14 @@ cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py predict-match --league premier_league --home-team 伯恩利 --away-team 狼队 --date 2026-05-24 --time 23:00 --json
 ```
 
-### 4. 批量预测
+### 4. 足彩 14 场预测
 
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
-python3 prediction_system.py predict-schedule --league premier_league --date 2026-05-24 --days 1 --json
+python3 prediction_system.py predict-fourteen-issue --issue 26082 --json
 ```
 
-如只想查看批量结果而不触发写回副作用：
-
-```bash
-python3 prediction_system.py predict-schedule --league premier_league --date 2026-05-24 --days 1 --no-write --json
-```
+`predict-fourteen-issue` 复用完整 `predict-match` 链路逐场预测，写回边界同样遵循「仅 SoT 联赛写回」规则；如只想查看结果不触发任何写回，可加 `--no-write`。
 
 ### 5. Harness 审计链路
 

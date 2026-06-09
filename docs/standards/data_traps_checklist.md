@@ -9,8 +9,8 @@ last_updated: "2026-05-08"
 > 当前正式流程  
 > 1. `prediction_system.py` 是发现入口，真实命令实现位于 `europe_leagues/app/cli.py`  
 > 2. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
-> 3. `prediction_system.py predict-match / predict-schedule` 执行增强预测，并自动接入 RAG 记忆层  
-> 4. 五大联赛 SoT 写回 `europe_leagues/<league>/teams_2025-26.md`；欧战/杯赛写入 `MEMORY.md` 与 runtime-only 归档  
+> 3. `prediction_system.py predict-match` 执行增强预测，并自动接入 RAG 记忆层（足彩 14 场用 `predict-fourteen-issue`）  
+> 4. 只有 SoT 联赛（五大联赛 + 世界杯）才写回 `europe_leagues/<league>/teams_*.md` + `MEMORY.md` + RAG；其余一切赛事只输出预测结果，不写回  
 > 5. 赛后优先用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `sync-pending-results-review` 回填  
 > 6. `prediction_system.py accuracy --refresh --json` 是显式重建入口，不是唯一常规路径  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  

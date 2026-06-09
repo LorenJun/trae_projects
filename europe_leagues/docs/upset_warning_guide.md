@@ -16,7 +16,7 @@
 爆冷预警不是独立脚本产品，而是正式预测链中的一个分析结果。典型链路为：
 
 1. `collect-data` 获取赛程、`match_id` 与上下文
-2. `predict-match` / `predict-schedule` 进入正式预测主链
+2. `predict-match`（足彩 14 场用 `predict-fourteen-issue`）进入正式预测主链
 3. `enhanced_prediction_workflow.py`、`domain/inference.py`、`domain/postprocess.py` 等模块协同生成预测结果
 4. 输出中携带爆冷相关分析、风险提示与建议
 
@@ -140,7 +140,7 @@ PY
 
 - `prediction_system.py collect-data`
 - `prediction_system.py predict-match`
-- `prediction_system.py predict-schedule`
+- `prediction_system.py predict-fourteen-issue`
 - `prediction_system.py harness-run`
 
 如文档与代码冲突，以 `app/cli.py`、`enhanced_prediction_workflow.py`、`domain/persistence.py`、`runtime/result_sync.py` 的当前实现为准。

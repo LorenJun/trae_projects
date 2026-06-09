@@ -243,20 +243,18 @@ html.includes('<canvas') && /(verify|captcha|geetest|aliyun|nc_|slider)/i.test(h
 - **同站点同结构的解析器应复用**：凯利和欧赔在澳客是同构表，凯利解析直接套欧赔的"逐公司行 + 共识"模式即可，不必另造一套脆弱的聚合行假设。
 - **历史 main 代码是事实来源**：用户说"之前 main 分支没问题"时，`git show` 历史版本的列注释直接点破了正确结构。
 
-### 友谊赛（reference_only 联赛）不写滚动记忆；世界杯是 SoT 正式联赛要进主归档
+### 只有 SoT 联赛（五大联赛 + 世界杯）写回；其他赛事一律只输出
 
-**规则**: 只有友谊赛（`friendly`）是 reference_only：`predict-match-lite` / `predict-match` 对其**强制不写 MEMORY、不进归档**。**世界杯不是 reference_only**——它在 `LEAGUE_SOT_CODES` 内，归档文件 `world_cup/teams_2026.md`，预测要写回正式联赛主归档 + 滚动记忆 + 赛果同步登记。
+**规则**: 写回门控已收敛为二元——只有 6 个 SoT-backed 联赛（`premier_league` / `la_liga` / `serie_a` / `bundesliga` / `ligue_1` / `world_cup`）才允许写回 markdown 主归档 + 滚动记忆（MEMORY.md）+ RAG 记忆 + 赛果同步登记。其余所有赛事（杯赛、欧战、友谊赛等）一律只输出预测结果，不产生任何写回副作用，`persisted.skipped_reason = "non_sot_league_output_only"`。**世界杯是 SoT 正式联赛**——归档文件 `world_cup/teams_2026.md`，预测要写回主归档 + 滚动记忆 + 赛果同步登记。
 
-**原因**: 友谊赛没有联赛积分榜/战意上下文，写入会污染准确率统计，只做参考预测。世界杯是正式赛事，有目录化 SoT，必须沉淀到主归档以支持赛果回填与复盘。
+**原因**: 非 SoT 赛事没有目录化 SoT 事实源与积分榜/战意上下文，写入会污染准确率统计与长期事实记录；只做纯输出参考预测。世界杯有目录化 SoT，必须沉淀到主归档以支持赛果回填与复盘。
 
-**实现** (`app/cli.py::run_openclaw_predict_match_lite`):
-- 友谊赛：`--league`/`--league-name` 命中 `is_reference_only_league_request` → 跳过持久化，标 `persisted.skipped_reason = "reference_only_league_not_persisted"`。
-- SoT 联赛（含世界杯）：lite 结果的 `storage_mode == "league_sot"`（由 `domain/lightweight_prediction.py` 的 `SOT_BACKED_LEAGUE_CODES` 判定）→ 走 `persist_prediction` 完整归档，而非 `persist_memory_only_prediction`。
-- 其余 runtime-only 联赛：仍只写滚动记忆。
+**实现** (`app/cli.py::run_openclaw_predict_match`):
+- `sot_backed = is_sot_backed_league(runtime_league_code)`（基于 `SOT_BACKED_LEAGUE_CODES`）。
+- `persist = not --no-write and sot_backed`；非 SoT 联赛在未带 `--no-write` 时标 `persisted.skipped_reason = "non_sot_league_output_only"`。
+- `predict-fourteen-issue` 逐场复用 `predict-match` 链路，继承相同 SoT-only 写回门控。
 
-**坑（本次修复）**: 此前 lite 路径对所有非 reference_only 联赛一律 `persist_memory_only_prediction`（只写记忆），且 lite 结果把 `storage_mode` 硬编码成 `runtime_only`、`世界杯` 没进 `COMMON_RUNTIME_LEAGUE_CODES`，导致世界杯（如墨西哥vs南非）只进了滚动记忆、漏掉了 `teams_2026.md` 主归档。已三处修复：补码表映射 + 加 `SOT_BACKED_LEAGUE_CODES` 让 `storage_mode=league_sot` + cli 按 `storage_mode` 分流归档。
-
-> 注：直接跑 `okooo_save_snapshot.py` 快照脚本本就不碰 MEMORY，只落 `.okooo-scraper/snapshots/`；会写滚动记忆的是 `predict-match-lite` 命令。
+> 注：`predict-schedule` 与 `predict-match-lite` 链路已删除，单场/足彩 14 场统一走完整 `predict-match` 链路。直接跑 `okooo_save_snapshot.py` 快照脚本本就不碰 MEMORY，只落 `.okooo-scraper/snapshots/`。
 
 ### 固定 IP 单机抗封 —— 行为节奏 + 指纹层三道防线（默认全开，无需代理）
 
@@ -619,7 +617,7 @@ Step 10: 持续优化
 2. 所有分析都要区分：模型结论、盘口结论、综合结论；不要把单一维度包装成最终确定性答案。
 3. 除只读查询外，优先使用 prediction_system.py 的非交互命令，并附带 --json。
 4. 正式输出只允许写入对应联赛的 teams_2025-26.md，不要把新结果写入 predictions/、analysis/predictions/*.md 或其它旧目录。
-5. 赛前预测必须按“确认比赛 -> collect-data -> 分析 -> predict-match/predict-schedule -> 写回 teams_2025-26.md / MEMORY.md”执行。
+5. 赛前预测必须按“确认比赛 -> collect-data -> 分析 -> predict-match -> 仅 SoT 联赛写回 teams_2025-26.md / MEMORY.md（其他赛事只输出）”执行。
 6. 赛后任务必须按“确认比赛 -> 核验比分 -> save-result -> 必要时 accuracy --refresh”执行。
 7. 缺少 browser-use、Playwright 或实时源异常时，可以降级，但必须明确标记为 mock/降级数据。
 8. 对跨联赛、杯赛、样本不足、快照缺失等场景，必须显式提示边界与风险。
@@ -646,7 +644,7 @@ Step 10: 持续优化
 - 环境检查：health-check
 - 数据采集：collect-data
 - 单场预测：predict-match
-- 批量预测：predict-schedule
+- 足彩 14 场预测：predict-fourteen-issue
 - 赛果回填：save-result
 - 准确率统计：accuracy --refresh
 

@@ -89,6 +89,67 @@ class PredictionPostprocessService:
         return snapshot
 
     @staticmethod
+    def build_model_fusion_analysis(
+        fusion_result: Dict[str, Any],
+        realtime: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """暴露两阶段融合的可解释性：模型概率、市场概率、α 与各模型对比。"""
+        market_fusion = fusion_result.get('market_fusion') if isinstance(fusion_result, dict) else None
+        market_fusion = market_fusion if isinstance(market_fusion, dict) else {}
+        model_only = fusion_result.get('model_only') if isinstance(fusion_result, dict) else None
+        model_only = model_only if isinstance(model_only, dict) else {}
+        final = fusion_result.get('final') if isinstance(fusion_result, dict) else None
+        final = final if isinstance(final, dict) else {}
+        all_models = fusion_result.get('all_models') if isinstance(fusion_result, dict) else {}
+        all_models = all_models if isinstance(all_models, dict) else {}
+
+        context = realtime.get('context_applied', {}) if isinstance(realtime, dict) else {}
+        alpha_diag = context.get('market_alpha') if isinstance(context.get('market_alpha'), dict) else {}
+        expert_signals = context.get('expert_signals') if isinstance(context.get('expert_signals'), dict) else {}
+
+        def _round(p: Dict[str, Any]) -> Dict[str, float]:
+            return {
+                'home_win': round(float(p.get('home_win') or 0.0), 4),
+                'draw': round(float(p.get('draw') or 0.0), 4),
+                'away_win': round(float(p.get('away_win') or 0.0), 4),
+            }
+
+        market_probs = market_fusion.get('market_probs') if isinstance(market_fusion.get('market_probs'), dict) else None
+
+        per_model = {}
+        for name, pred in all_models.items():
+            if isinstance(pred, dict):
+                per_model[name] = _round(pred)
+
+        expert_pred = all_models.get('expert') if isinstance(all_models.get('expert'), dict) else {}
+        ensemble_pred = all_models.get('ensemble') if isinstance(all_models.get('ensemble'), dict) else {}
+
+        return {
+            'two_stage': True,
+            'stage1_model_only': _round(model_only),
+            'stage2_market_fusion': {
+                'applied': bool(market_fusion.get('applied')),
+                'alpha': market_fusion.get('alpha'),
+                'reason': alpha_diag.get('reason') or market_fusion.get('reason'),
+                'regime': alpha_diag.get('regime'),
+                'market_probs': _round(market_probs) if market_probs else None,
+                'market_favorite_prob': alpha_diag.get('market_favorite_prob'),
+            },
+            'final': _round(final),
+            'expert': {
+                'probs': _round(expert_pred) if expert_pred else None,
+                'expert_score': expert_pred.get('expert_score'),
+                'factors': expert_pred.get('expert_factors'),
+                'signals': expert_signals or None,
+            },
+            'ensemble': {
+                'probs': _round(ensemble_pred) if ensemble_pred else None,
+                'stacking_weighted': ensemble_pred.get('stacking_weighted'),
+            },
+            'per_model_probabilities': per_model,
+        }
+
+    @staticmethod
     def normalize_probs(p: Dict[str, float]) -> Dict[str, float]:
         h = float(p.get('home_win') or 0.0)
         d = float(p.get('draw') or 0.0)
@@ -2256,6 +2317,7 @@ class PredictionPostprocessService:
             'model_predictions': fusion_result['all_models'],
             'final_probabilities': final_probabilities,
             'applied_model_weights': applied_model_weights,
+            'model_fusion_analysis': self.build_model_fusion_analysis(fusion_result, realtime),
             'realtime': realtime,
             'analysis_context': analysis_context,
             'retrieved_memory': retrieved_memory or {},

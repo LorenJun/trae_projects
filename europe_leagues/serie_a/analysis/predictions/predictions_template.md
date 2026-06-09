@@ -30,6 +30,6 @@
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py collect-data --league serie_a --date 2026-05-04 --json
-python3 prediction_system.py predict-schedule --league serie_a --date 2026-05-04 --days 1 --json
+python3 prediction_system.py predict-match --league serie_a --home <主队> --away <客队> --date 2026-05-04 --json
 python3 prediction_system.py accuracy --refresh --json
 ```
