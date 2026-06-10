@@ -88,3 +88,24 @@ def parse_predicted_ou(note: str) -> Optional[Dict[str, object]]:
     except Exception:
         return None
     return {'side': side, 'line': line}
+
+
+def parse_predicted_stake(note: str) -> Optional[str]:
+    """解析备注中 `仓位:5%` 形式的凯利仓位建议片段，返回原始百分比文本。"""
+    if not isinstance(note, str):
+        return None
+    m = re.search(r'仓位[:\s]*([0-9]+(?:\.[0-9]+)?%)', note)
+    if not m:
+        return None
+    return m.group(1)
+
+
+def parse_predicted_narrative(note: str) -> Optional[str]:
+    """解析备注中 `解读:xxx` 形式的盘口数据变化解读片段（取到行尾或下一个已知字段前）。"""
+    if not isinstance(note, str):
+        return None
+    m = re.search(r'解读[:：]\s*(.+?)\s*$', note)
+    if not m:
+        return None
+    text = m.group(1).strip()
+    return text or None

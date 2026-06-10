@@ -880,11 +880,34 @@ class EnhancedPredictor:
             current_odds=current_odds,
         )
 
+        # 硬性闸门：必须拿到真实盘口数据（澳客实时快照）才允许预测。
+        # over_under.available 仅在通过真实盘口校验（line_source ∈ snapshot_final/initial）后才置 True，
+        # 否则返回 {'available': False, 'reason': 'missing_real_market_line'}（见 inference.build_real_market_over_under）。
+        # 因此 available 即真实盘口的权威信号；拿不到则标记 prediction_blocked，
+        # 既不输出有效预测、也禁止写入任何持久化（MEMORY/归档/赛程/赛果同步登记）。
+        ou_guard = result.get('over_under') if isinstance(result.get('over_under'), dict) else {}
+        has_real_market = bool(ou_guard.get('available'))
+        if not has_real_market:
+            result['prediction_blocked'] = True
+            result['blocked_reason'] = str(ou_guard.get('reason') or 'missing_real_market_line')
+            persist = False
+            logger.warning(
+                "预测被拦截（无真实盘口数据）: %s vs %s [%s]",
+                home_team, away_team, result['blocked_reason'],
+            )
+
         if persist:
             self.persistence_service.persist_prediction('predict_match', cache_params, result, league_code)
             teams_path = self.writeback.teams_file_path(league_code)
             if result.get('storage_mode') == 'league_sot' and os.path.exists(teams_path):
                 self.writeback.write_prediction(league_code, result)
+            try:
+                from scripts.build_accuracy_dashboard import build_dashboard
+                build_dashboard(base_dir=getattr(self, 'base_dir', None))
+                result.setdefault('persisted', {})['dashboard_refreshed'] = True
+            except Exception as exc:
+                logger.warning("刷新准确率仪表盘失败: %s", exc)
+                result.setdefault('persisted', {})['dashboard_error'] = str(exc)
         else:
             result['persisted'] = {'enabled': False, 'archived': False, 'memory_updated': False}
         logger.info(f"预测完成: {home_team} vs {away_team} -> {main_prediction} ({confidence:.1%})")

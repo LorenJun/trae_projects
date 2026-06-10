@@ -919,9 +919,43 @@ def run_openclaw_predict_match(args):
     else:
         reason = str(over_under.get("reason") or "missing_real_market_line").strip()
         print(f"大小球: 待补真实盘口 ({reason})")
+    _print_betting_advice(result)
+    narrative = str(result.get("market_change_narrative") or "").strip()
+    if narrative:
+        print(f"数据变化解读: {narrative}")
     explanation = str(result.get("retrieved_memory_explanation") or "").strip()
     if explanation:
         print(f"RAG记忆: {explanation}")
+
+
+_KELLY_METHOD_LABEL = {"half_cap5": "半凯利", "quarter_cap3": "1/4凯利"}
+
+
+def _print_betting_advice(result) -> None:
+    """基于凯利仓位与临场跟单建议，打印可执行的投注建议。"""
+    staking = result.get("staking") if isinstance(result.get("staking"), dict) else {}
+    kelly = staking.get("kelly") if isinstance(staking.get("kelly"), dict) else {}
+    if not kelly.get("available"):
+        reason = str(kelly.get("reason") or kelly.get("error") or "缺有效盘口赔率").strip()
+        print(f"投注建议: 暂无（{reason}）")
+        return
+
+    recommended = kelly.get("recommended") if isinstance(kelly.get("recommended"), dict) else {}
+    outcome = str(recommended.get("outcome") or "").strip()
+    fraction = recommended.get("fraction")
+    if outcome and isinstance(fraction, (int, float)) and fraction > 0:
+        odds = kelly.get("odds") if isinstance(kelly.get("odds"), dict) else {}
+        odds_key = {"主胜": "home", "平局": "draw", "客胜": "away"}.get(outcome)
+        odds_val = odds.get(odds_key) if odds_key else None
+        odds_text = f" @{float(odds_val):.2f}" if isinstance(odds_val, (int, float)) else ""
+        method = _KELLY_METHOD_LABEL.get(str(recommended.get("method") or ""), "凯利")
+        print(f"投注建议: 推荐【{outcome}】{odds_text} · {method}仓位 {float(fraction):.1%}（按本金占比）")
+    else:
+        print("投注建议: 观望（无正期望投注机会，建议不下注）")
+
+    advice = str(result.get("live_betting_advice") or "").strip()
+    if advice:
+        print(f"临场跟单: {advice}")
 
 
 def _print_top_scores(top_scores) -> None:

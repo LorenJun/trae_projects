@@ -255,7 +255,11 @@ def build_prediction_note(prediction: Dict[str, Any]) -> str:
     dyn = ''
     if isinstance(applied_weights, dict) and 'has_enough_samples' in applied_weights:
         dyn = '动态调权:已生效' if applied_weights.get('has_enough_samples') else '动态调权:样本不足'
-    return f"预测:{prediction_text} 信心:{confidence:.2f} {score_ou_note} {upset_note}{(' ' + dyn) if dyn else ''}{(' ' + match_id_note) if match_id_note else ''}".strip()
+    narrative = str(prediction.get('market_change_narrative') or '').strip()
+    # 备注内联，去掉分句分隔符里的换行风险并限长，避免撑爆单行备注
+    narrative = re.sub(r'\s+', '', narrative)
+    narrative_note = f'解读:{narrative[:120]}' if narrative else ''
+    return f"预测:{prediction_text} 信心:{confidence:.2f} {score_ou_note} {upset_note}{(' ' + dyn) if dyn else ''}{(' ' + match_id_note) if match_id_note else ''}{(' ' + narrative_note) if narrative_note else ''}".strip()
 
 
 def update_teams_md_prediction_notes(

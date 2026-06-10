@@ -1136,12 +1136,17 @@ class InferencePipelineService:
         applied_weights: Dict[str, Any],
         expert_signals: Dict[str, Any],
         strength_quality: str = 'real',
+        odds_anomaly: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """按实战口径动态选 α：常规 0.35 / 热门强队 0.25 / 小联赛-数据少 0.5 / 伤停换帅 0.65。
 
         无市场概率时 α=0（等价只用模型）。
         当球队强度无真实数据支撑（national_fallback / flat_default）时，模型硬数据可信度低，
         进一步提高市场权重，避免无数据场景预测趋同。
+
+        热门强队的"防诱盘"降权只在盘口本身可疑时才触发：复用 detect_market_odds_anomaly 的
+        可信度（level/trusted），区分"诱盘 vs 真实调整"——多公司一致、亚欧同向的强主/强客
+        是真实信号，应继续信任市场而非压低市场权重；只有盘口异常（少公司/亚欧背离）才防诱盘。
         """
         if not isinstance(market_probs, dict):
             return {'alpha': 0.0, 'reason': 'no_market_probs', 'regime': 'model_only',
@@ -1180,15 +1185,27 @@ class InferencePipelineService:
             regime = 'news_shock'
             reason = '核心伤停/停赛或换帅等突发消息，市场资金已反映'
 
-        # 热门强队（市场强烈看好一方）：更信模型防诱盘
+        # 热门强队（市场强烈看好一方）：只有盘口本身可疑时才降权防诱盘。
+        # fav_prob 用 max(home_win, away_win) 不分主客，强主/强客走同一规则。
+        # 复用 detect_market_odds_anomaly 的可信度：多公司一致、亚欧同向（level=none/low）
+        # 是真实强主/强客调整，应继续信市场；只有盘口异常（level=medium/high，少公司/亚欧
+        # 背离）才认定诱盘并压低市场权重。注意 detect 里 trusted 仅在 level=='none' 时为 True，
+        # 故判别只按 level（low 也属可信，不降权）。
         fav_prob = max(market_probs.get('home_win', 0.0), market_probs.get('away_win', 0.0))
+        anomaly_level = (odds_anomaly or {}).get('level', 'none')
+        odds_suspicious = anomaly_level in ('medium', 'high')
         if fav_prob >= 0.60 and regime in ('normal', 'data_poor'):
-            alpha = min(alpha, 0.25)
-            regime = 'hot_favorite'
-            reason = '市场强烈看好一方，降低市场权重防诱盘'
+            if odds_suspicious:
+                alpha = min(alpha, 0.25)
+                regime = 'hot_favorite'
+                reason = '市场强烈看好一方且盘口可疑，降低市场权重防诱盘'
+            else:
+                regime = 'hot_favorite_trusted'
+                reason = '市场强烈看好一方但盘口可信（多公司一致），维持市场权重信任真实调整'
 
         return {'alpha': round(float(alpha), 4), 'reason': reason, 'regime': regime,
                 'market_favorite_prob': round(float(fav_prob), 4),
+                'odds_anomaly_level': anomaly_level,
                 'strength_quality': strength_quality}
 
     def _build_expert_signals(
@@ -2196,7 +2213,10 @@ class InferencePipelineService:
             match_intelligence=match_intelligence,
             market_probs=market_probs,
         )
-        alpha_diag = self._resolve_market_alpha(market_probs, applied_weights, expert_signals, strength_quality)
+        odds_anomaly_diag = (realtime.get('context_applied', {})
+                             .get('lambda_calibration', {})
+                             .get('odds_anomaly'))
+        alpha_diag = self._resolve_market_alpha(market_probs, applied_weights, expert_signals, strength_quality, odds_anomaly_diag)
         model_accuracy = applied_weights.get('model_accuracy') if isinstance(applied_weights, dict) else None
 
         historical_ratings = self._resolve_historical_ratings(

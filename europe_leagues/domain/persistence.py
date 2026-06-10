@@ -1300,6 +1300,15 @@ class PredictionPersistenceService:
         result['predicted_winner'] = payload.predicted_winner
 
     def _persist_prediction_side_effects(self, result: Dict[str, Any], league_code: str, *, register_result_sync: bool, sync_derivatives: bool) -> Dict[str, Any]:
+        # 防御性闸门：被拦截（无真实盘口）的预测一律不落地，避免污染统计与赛程。
+        if result.get('prediction_blocked'):
+            result['persisted'] = {
+                'enabled': False,
+                'archived': False,
+                'memory_updated': False,
+                'skipped_reason': str(result.get('blocked_reason') or 'prediction_blocked'),
+            }
+            return result
         payload = self._build_persistence_payload(result, league_code)
         self._apply_persistence_payload(result, payload)
         persisted = self._persisted_status(True)

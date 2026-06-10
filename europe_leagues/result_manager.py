@@ -522,6 +522,13 @@ class ResultManager:
         except Exception as exc:
             logger.warning("刷新 review-learning 摘要失败: %s", exc)
             refresh['review_learning_error'] = str(exc)
+        try:
+            from scripts.build_accuracy_dashboard import build_dashboard
+            build_dashboard(base_dir=self.base_dir)
+            refresh['dashboard_refreshed'] = True
+        except Exception as exc:
+            logger.warning("刷新准确率仪表盘失败: %s", exc)
+            refresh['dashboard_error'] = str(exc)
         return refresh
 
     def _finalize_saved_result(

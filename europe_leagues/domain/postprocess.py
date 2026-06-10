@@ -2252,6 +2252,103 @@ class PredictionPostprocessService:
         }
         return adjusted, diag
 
+    @staticmethod
+    def build_market_change_narrative(
+        current_odds: Optional[Dict[str, Any]],
+        realtime: Optional[Dict[str, Any]],
+        top_scores: Optional[List[Tuple[str, float]]] = None,
+    ) -> str:
+        """把盘口数据变化（初盘→终盘、市场可信度、市场权重）解读成一句简短中文。
+
+        素材取自实时盘口快照与 run() 已生成的诊断（market_alpha / odds_anomaly），
+        以及最可能比分概率（top_scores），不做任何新建模，只做面向用户的口语化归纳。
+        """
+        odds = current_odds if isinstance(current_odds, dict) else {}
+        ctx = realtime.get('context_applied', {}) if isinstance(realtime, dict) else {}
+
+        def _f(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        parts: List[str] = []
+
+        # 欧赔初盘→终盘方向：主胜赔率走低=主队被看高，走高=主队被看低
+        euro = odds.get('欧赔') if isinstance(odds.get('欧赔'), dict) else {}
+        ei = euro.get('initial') if isinstance(euro.get('initial'), dict) else {}
+        ef = euro.get('final') if isinstance(euro.get('final'), dict) else {}
+        hi, hf = _f(ei.get('home')), _f(ef.get('home'))
+        ai, af = _f(ei.get('away')), _f(ef.get('away'))
+        if hi and hf and ai and af:
+            dh, da = hf - hi, af - ai
+            thr = 0.03
+            if dh <= -thr and da >= thr:
+                parts.append('欧赔向主队收紧（主降客升），市场临场更看好主队')
+            elif dh >= thr and da <= -thr:
+                parts.append('欧赔向客队收紧（客降主升），市场临场更看好客队')
+            elif abs(dh) < thr and abs(da) < thr:
+                parts.append('欧赔初终盘基本不动，市场维持原判')
+            elif dh <= -thr:
+                parts.append('主胜赔率走低，资金略偏主队')
+            elif da <= -thr:
+                parts.append('客胜赔率走低，资金略偏客队')
+
+        # 亚盘让球深浅变化
+        asian = odds.get('亚盘') if isinstance(odds.get('亚盘'), dict) else (odds.get('亚值') if isinstance(odds.get('亚值'), dict) else {})
+        ti = asian.get('initial') if isinstance(asian.get('initial'), dict) else {}
+        tf = asian.get('final') if isinstance(asian.get('final'), dict) else {}
+        hcp_i = ti.get('handicap_text') or ti.get('盘口')
+        hcp_f = tf.get('handicap_text') or tf.get('盘口')
+        if hcp_i and hcp_f and str(hcp_i).strip() != str(hcp_f).strip():
+            parts.append(f'亚盘由 {str(hcp_i).strip()} 变为 {str(hcp_f).strip()}')
+
+        # 大小球盘口升降
+        totals = odds.get('大小球') if isinstance(odds.get('大小球'), dict) else {}
+        li = _f((totals.get('initial') or {}).get('line'))
+        lf = _f((totals.get('final') or {}).get('line'))
+        if li is not None and lf is not None and abs(lf - li) >= 0.05:
+            parts.append(f'总进球盘口由 {li:g} {"升" if lf > li else "降"}到 {lf:g}')
+
+        # 市场可信度（诱盘 vs 真实调整）
+        anomaly = ((ctx.get('lambda_calibration') or {}).get('odds_anomaly') or {}) if isinstance(ctx.get('lambda_calibration'), dict) else {}
+        level = anomaly.get('level')
+        if level in ('medium', 'high'):
+            reason = (anomaly.get('reasons') or [None])[0]
+            tail = f'（{reason}）' if reason else ''
+            parts.append(f'盘口异常信号偏强{tail}，对市场降权防诱盘')
+        elif level == 'low':
+            parts.append('盘口存在轻微背离，整体仍可信')
+        elif level == 'none' and anomaly.get('available'):
+            parts.append('多公司报价一致，盘口可信度高')
+
+        # 市场权重（α）档位说明
+        alpha = ctx.get('market_alpha') if isinstance(ctx.get('market_alpha'), dict) else {}
+        regime = alpha.get('regime')
+        regime_text = {
+            'hot_favorite': '市场强烈看好一方但盘口可疑，已降低市场权重',
+            'hot_favorite_trusted': '市场强烈看好一方且盘口可信，维持对市场的信任',
+            'news_shock': '有伤停/换帅等突发消息，提高了市场权重',
+            'no_strength_data': '缺真实球员数据，更依赖市场盘口',
+            'data_poor': '联赛样本偏少，更依赖市场盘口',
+        }.get(regime)
+        if regime_text:
+            parts.append(regime_text)
+
+        # 最可能比分概率（取前两个）
+        if top_scores:
+            score_bits = []
+            for score, prob in top_scores[:2]:
+                p = _f(prob)
+                if str(score).strip() and p is not None:
+                    score_bits.append(f'{str(score).strip()}({p:.0%})')
+            if score_bits:
+                parts.append('最可能比分 ' + '、'.join(score_bits))
+
+        if not parts:
+            return '盘口数据稳定，无明显临场变化。'
+        return '；'.join(parts) + '。'
+
     def build_prediction_result(
         self,
         *,
@@ -2326,6 +2423,7 @@ class PredictionPostprocessService:
             'analysis_context': analysis_context,
             'retrieved_memory': retrieved_memory or {},
             'retrieved_memory_explanation': memory_explanation,
+            'market_change_narrative': self.build_market_change_narrative(current_odds, realtime, top_scores),
             'live_betting_advice': live_betting_advice,
             'market_snapshot': self.build_market_snapshot(current_odds),
             'runtime_profile': runtime_profile,
