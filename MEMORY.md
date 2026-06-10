@@ -243,6 +243,61 @@ html.includes('<canvas') && /(verify|captcha|geetest|aliyun|nc_|slider)/i.test(h
 - **同站点同结构的解析器应复用**：凯利和欧赔在澳客是同构表，凯利解析直接套欧赔的"逐公司行 + 共识"模式即可，不必另造一套脆弱的聚合行假设。
 - **历史 main 代码是事实来源**：用户说"之前 main 分支没问题"时，`git show` 历史版本的列注释直接点破了正确结构。
 
+### 无数据场景预测趋同 + 进球系统性偏高（2026-06-09 修复）
+
+**现象**: 一批友谊赛/国家队预测质量差且高度雷同 —— total_lambda 普遍 3.5~4.2、大球概率 60~83% 虚高、最可能比分清一色 2-1、置信度普遍 0.35~0.49。
+
+**根因链**（框架体检定位，4 个症状同源）:
+1. **量纲误用**: `domain/inference.py` 用 `league_avg_goals`（全场总进球均值）直接当**单队**进球基准 → 两队 λ 各≈整场总进球、合计翻倍 → 进球与大球虚高。
+2. **无数据统一默认值**: 友谊赛/国家队在 `<league>/players/` 无球员 JSON → `team_strength.py` 对**所有**未知球队退回同一组 `strength=50, attack=defense=1.0` → `strength_diff=0`、两队对称 → 预测趋同、置信度天然低（top1≈0.4）。
+3. **固定主场系数 1.12**: 中立场友谊赛也照加 → 主队 λ 恒定虚高 → 比分恒为 X-1（众数 2-1）。
+4. **市场兜底失效**: data_poor 提高的 α 在无真实赔率时退回 0，强度缺失没被有效兜底。
+
+**修复**:
+1. **P0-A 量纲**: `per_team_baseline = league_avg_goals / 2.0`，base λ 改用单队基准（`inference.py` run 内 base_home/away_lambda）。
+2. **P1-A 国家队强度兜底**: 新增 `data/national_team_strength.json`（FIFA 分档近似，70+ 国家队差异化 strength/attack/defense），`team_strength.py::analyze_team_strength` 无球员数据时先查兜底表（`strength_source=national_fallback`），查不到才退 `flat_default`。
+3. **P0-B 无强度数据强制市场主导**: `_resolve_market_alpha` 新增 `strength_quality` 入参（real/fallback/flat），fallback 时 α≥0.5、flat 时 α≥0.6，regime=`no_strength_data`。
+4. **P1-B 主场系数场景化**: `_resolve_home_advantage(league_code)` —— 友谊赛 1.03 / 世界杯 1.02 / 洲际杯赛 1.06 / 联赛 1.12。
+5. **P2-B 比分网格**: Dixon-Coles / Poisson 网格 0-5→0-6（max_goals=6），rho_map 增 friendly -0.04 / world_cup -0.07（减少弱主客对攻场的平局虚高）。
+6. **可解释性**: `postprocess.py::build_model_fusion_analysis` 输出 `data_quality.{strength_quality,home_advantage_factor}`。
+
+**修复效果**（实跑验证）: 中国vs泰国 total_lambda 3.51→2.38、over 67.5%→45.4%、比分 2-1→1-0；伊拉克vs委内瑞拉 total_lambda 3.63→2.86、over 83.1%→68.5%，regime 升级 `no_strength_data`(α=0.5)。SoT 联赛（有真实球员数据）`strength_source` 仍为 real，行为不变、且校准锚点更准。新增 `test_national_fallback_strength.py`(5) + 已有 `test_market_fusion.py`(10) + `test_cli_persistence.py`(16) 全绿。
+
+**教训**:
+- **多个症状常同源**：进球偏高/比分恒2-1/置信度低/预测趋同看似 4 个 bug，根因都是"无数据 → 统一默认强度 + 量纲误用"。先找共因再动手，避免逐个打补丁。
+- **缺数据兜底要差异化**：对未知实体退回单一默认值会让所有预测坍缩到同一点；按先验（FIFA 排名）给差异化兜底 + 在无硬数据时让市场赔率主导，才是正确降级。
+- **量纲一致性**：`league_avg_goals` 是全场口径，用作单队基准前必须 /2。
+
+### ELO/Glicko 历史评分持久化（P2-A，2026-06-10）
+
+**目的**: 此前 ELO/Glicko 评分只在单次预测内由 `strength*10+1500` 临时派生、用完即弃（evaluate 路径的 `update_ratings` 是死代码）。新增持久化层，让真实赛果逐步沉淀为历史评分，替代纯实力派生值。
+
+**实现**:
+- **存储/服务层**: 新增 `storage/ratings.py` —— `RatingStore`（读写 `runtime/elo_ratings.json`，复用 `AccuracyStatsStore` 同款 Store 模式）+ `RatingService`：
+  - `get_ratings(league, team)`：返回 `{elo, glicko, games}`，**无记录返回 None**；
+  - `update_from_result(...)`：赛果后按 胜1/平0.5/负0 更新 elo(K=32)/glicko(K=24)，主场优势 +100，缺记录时用 seed 播种、落盘。
+- **读取侧（预测）**: `inference.py::_resolve_historical_ratings` 仅当两队**都**有历史评分才下发 `{home, away}`；`ml_prediction_models.py::predict` 新增 `historical_ratings` 入参，有则用历史 elo/glicko，无则回退 `strength*10+1500`。
+- **写入侧（赛果）**: `result_manager.py::_refresh_result_derivatives` 新增 `_update_elo_ratings(result_data)`，与 `update_accuracy_stats()` 并列，解析 `actual_score` + home/away_team + league，seed 用 `TeamStrengthService.analyze_team_strength` 派生（与读取侧回退口径一致）。
+- **接线**: `EnhancedPredictor` 创建单例 `RatingService` 注入 `InferencePipelineService(rating_service=...)`；`ResultManager` 各自持有。
+
+**SoT 零回归保证**: 评分库为空时 `get_ratings`→None → 预测回退 strength 派生（=历史行为）；只有真实赛果累积后评分才偏离。新增 `test_rating_service.py`(5) 全绿，连同既有 31 个测试共 36 个全过。
+
+**教训**: 历史信息持久化要设计成"空库等价于旧行为"，让新机制零风险灰度——有数据才生效，无数据完全回退，避免一上线就改变所有预测口径。
+
+### ELO 评分接入 RAG 检索（2026-06-10）
+
+**目的**: 把 P2-A 持久化的 ELO 评分作为新的检索维度，让 RAG 召回"对局形态（强打弱/势均力敌）"相似的历史比赛，而不只是文本/市场/时间相似。
+
+**实现**（全部在 `runtime/rag_store.py`）:
+- **构建侧** `_annotate_elo_ratings(documents, base_dir)`：给每条案例文档标注 `home_elo`/`away_elo`/`elo_diff`（主客历史 ELO 之差），在 `build_hybrid_rag_index` 内 `_annotate_review_dimensions` 之前调用。
+- **检索侧** `_annotate_query_elo(query, base_dir)`：为当前查询比赛补 `elo_diff`；`_rating_similarity_bonus(doc, query)`：按两者 elo_diff 接近度加分（gap<200 线性，封顶 1.5），并入 `retrieve_hybrid_context` 的 `total_score`。`_format_doc_result` 暴露 `home_elo/away_elo/elo_diff`。
+
+**零回归保证**: 任一方无 elo_diff（评分库空或新队）时 `_rating_similarity_bonus` 返回 0，检索行为与之前完全一致。`retrieve_structured_cases` 复用 `retrieve_hybrid_context`，自动覆盖。
+
+**与评分库的关系**: 此前评分库与 RAG 完全解耦（仅共享赛果回填入口）；本次让 RAG **读取** `elo_ratings.json` 作为检索特征，方向是 RatingService → RAG（单向），不影响写入侧。新增 `test_rag_store.py::RagRatingSimilarityTest`(5)，全套 50 测试全绿。
+
+
+
 ### 只有 SoT 联赛（五大联赛 + 世界杯）写回；其他赛事一律只输出
 
 **规则**: 写回门控已收敛为二元——只有 6 个 SoT-backed 联赛（`premier_league` / `la_liga` / `serie_a` / `bundesliga` / `ligue_1` / `world_cup`）才允许写回 markdown 主归档 + 滚动记忆（MEMORY.md）+ RAG 记忆 + 赛果同步登记。其余所有赛事（杯赛、欧战、友谊赛等）一律只输出预测结果，不产生任何写回副作用，`persisted.skipped_reason = "non_sot_league_output_only"`。**世界杯是 SoT 正式联赛**——归档文件 `world_cup/teams_2026.md`，预测要写回主归档 + 滚动记忆 + 赛果同步登记。
@@ -522,6 +577,99 @@ html.includes('<canvas') && /(verify|captcha|geetest|aliyun|nc_|slider)/i.test(h
 | 降盘（让球减少） | 庄家弱化看好 | ⭐⭐   |
 | 水位主队下降   | 主队热度上升 | ⭐⭐⭐  |
 | 水位客队下降   | 客队热度上升 | ⭐⭐⭐  |
+
+**诱盘 vs 真实方向调整 判定口诀（固定参考维度）**:
+
+当模型预测与机构盘口方向/强度不一致时，按以下顺序判断盘口是「诱盘」还是「真实根据市场调整方向」。系统在 `detect_market_odds_anomaly` 中用加权打分实现，分越高越像诱盘/盘口不可信，并据此压低市场对 λ 的修正权重。
+
+口诀：
+
+```
+方向冲突信模型；方向一致看程度。
+赔率热、水位高、让球浅、临场退——四件套，是真方向＋诱盘手法并存：
+跟方向，别追让球盘，别重仓。
+```
+
+第一步——看方向是否冲突：
+
+| 现象 | 信号(加分) | 判定 |
+| --- | --- | --- |
+| 欧赔强侧 与 亚盘让球方 **相反** | favorite_direction_mismatch (+0.55) | 几乎必是诱盘 → 信模型 |
+| 欧赔强侧 与 基础模型 方向相反 | base_model_direction_mismatch (+0.28) | 盘口与模型对着干 → 谨慎跟随 |
+| 方向一致 | — | 进入第二步看程度 |
+
+第二步——强侧「赔率 vs 水位」是否同向（最核心区分点）:
+
+| 强侧赔率 | 强侧水位 | 判定 |
+| --- | --- | --- |
+| 降（变热） | 降 / 盘口加深 | **真实方向调整** → 跟盘 |
+| 降（变热） | **升 ≥ 0.04**（背离） | **诱盘嫌疑**（water_drift）→ 降低跟随、加平局/冷门容错 |
+
+第三步——让球深度配不配得上欧赔热度:
+
+| 现象 | 信号(加分) | 判定 |
+| --- | --- | --- |
+| 欧赔大热(≥62%)却只让半球/平手 | favorite_depth_mismatch (+0.42) | 庄家不敢让赢 → 防冷门 |
+| 临场退盘但欧赔仍硬挺强侧 | retreat_vs_strong_odds (+0.12) | 边打边撤 → 防冷门 |
+| 强侧低赔但终水偏高(≥2.15) | water_high_vs_low_odds (+0.18) | 赔率/水位背离 → 诱盘嫌疑 |
+
+第四步——看模型与盘口差距的来源:
+
+| 差距来源 | 判定 |
+| --- | --- |
+| 盘口「过度自信」(base_model_gap_large +0.22) | 盘口可能造假象 → 减信盘口 |
+| 模型数据缺失（如友谊赛无球员数据，strength_quality=fallback/flat）| 反而**多信盘口**（系统用 α≥0.5 强制市场主导） |
+
+异常总分 → 市场修正权重（calibration_weight）映射:
+
+| score | 档位 | 市场权重 | 含义 |
+| --- | --- | --- | --- |
+| ≥ 0.72 | high | 0.0 | 完全不信盘口，回到模型基础 λ（认定诱盘） |
+| 0.42 ~ 0.72 | medium | 0.35 | 盘口只采信 35% |
+| 0.18 ~ 0.42 | low | 0.7 | 盘口采信 70%（方向真但有诱盘手法） |
+| < 0.18 | none | 1.0 | 完全跟随盘口（认定真实方向调整） |
+
+典型案例（葡萄牙 vs 尼日利亚 友谊赛 2026-06-11）：欧赔主胜 71.9% 极热，但亚盘 -1.75→-1.5 退盘、主队终水 1.88 偏高、71.9%大热只让 1.5 球。score=0.34(low)、signals=[retreat_vs_strong_odds, base_model_gap_large]、calibration_weight=0.7。结论=「方向真（葡萄牙赢）＋诱盘手法（压赔吸大热让球盘）」，系统采信盘口方向 70% 仍出主胜，但临场对主胜 -0.10/平局 +0.10，凯利=0 不建议下注。
+
+***
+
+### 框架体检与算法修复优化记录
+
+> 针对 `europe_leagues` 预测系统做的全仓体检与修复沉淀，便于以后回溯「为什么这么写」。
+
+**第一梯队（算法 Bug 修复）**:
+
+- Dixon-Coles τ 修正的 `rho` 符号方向纠正。
+- 多模型融合内 Poisson λ 量纲修正：`league_avg_goals` 是「全场总进球均值」，单队基准需 `/2`，否则进球被整体高估。
+- ELO 死代码清理、LR 伤停符号修正。
+- Glicko 评分真实化、融合权重 `α≤0` 时归一化。
+
+**第二梯队（持久化与导入健壮性）**:
+
+- #6 评分/统计/归档落盘改「原子写 + 损坏告警」（`storage/_jsonio.py` 的 `safe_read_json` + `atomic_write_json`）。
+- #7 ELO 评分按 `match_id` 幂等去重，重复赛果不会二次更新评分。
+- #8 `RatingService` 多实例缓存一致性：用 `os.path.getmtime` 做缓存失效。预测侧与回填侧共享同一 `elo_ratings.json` 时，任一实例落盘后其它实例下次读取自动重载，避免读到陈旧评分。
+- #9 `runtime/__init__` 改 PEP 562 模块级 `__getattr__` 惰性导入，消除 `runtime → rag_store → storage → runtime` 循环导入脆弱。
+
+**第三梯队（配置集中 / 异常 / 盘口 / 护栏）**:
+
+- 配置集中（SoT）：新增 `domain/constants.py` 收口散落各处的魔法数字 —— `RHO_MAP`/`resolve_rho`、主场系数 `HOME_ADVANTAGE_MAP`/`resolve_home_advantage`、strength→ELO 派生公式 `strength_to_seed_rating`（`strength*10 + 1500`）。`inference.py`/`result_manager.py`/`ml_prediction_models.py` 统一接入，零行为回归。
+- 异常处理：5 处裸 `except:` 全部改 `except Exception:`，避免吞掉 `KeyboardInterrupt`/`SystemExit`。
+- 亚盘四分线（quarter line）半推语义：`predict_over_under` 对 2.25/2.75 等四分线按「拆分注」处理 —— `2.25 = ½×2.0 + ½×2.5`、`2.75 = ½×2.5 + ½×3.0`，取相邻两线结果平均。
+- 巨石回归护栏：`test_predict_match_e2e.py` 为 `predict_match` 主链补端到端特征测试（只断言结构/量纲不变量，不锁精确数值），为后续拆分提供安全网。
+- 巨石定向抽取：将 `result_manager.py` 中 5 个无状态备注/比分解析函数（胜负、信心、比分、大小球）抽到 `domain/note_parsing.py`，`ResultManager` 同名方法改为委托，保留全部 32 处调用点（含 `reanalyze_matches.py` 外部调用），零行为回归。
+
+**测试套件保鲜（清账）**:
+
+- 修复历史遗留的 16 failures + 3 errors（曾长期为预先存在失败，掩盖真实回归）：
+  - `test_prediction_persistence`：production 现在向 memory payload 注入 `league_code/league/league_name`，断言同步更新。
+  - `test_okooo_save_snapshot`：`_find_match_id` 现优先走 `_find_rows_in_date_section` 命中即短路，不再保证调用 `_find_rows_fuzzy`；断言改为校验「赛程页优先 + 不回落在线搜索」。缓存回退用例补 `_mobile_league_url=None` 还原 online-only 场景。
+  - `test_result_manager`：7 个用例是「时间相对」夹具（比赛日 2026-05-10/11，按 `days_back` 窗口过滤），随真实时钟前移而失效。改为在 setUp 冻结 `result_manager.datetime.now()` 至固定点，使套件不再随时间腐化。
+- 结论：全量 `python3 -m unittest discover` 现 **421 tests OK（skipped=1）**，首次全绿。
+
+**仓库清理**:
+
+- `git rm --cached` 移除误入库的一次性产物（`villa_*.html`、`reanalysis_results*.json`、生成类报告），并扩展 `.gitignore` 防止再次入库（文件保留在磁盘）。
 
 ***
 

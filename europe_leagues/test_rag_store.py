@@ -6,6 +6,7 @@ from runtime.rag_store import (
     _build_query,
     _derive_review_tags,
     _load_rag_artifacts,
+    _rating_similarity_bonus,
     _select_top_group,
     _temporal_bonus,
     retrieve_hybrid_context,
@@ -366,6 +367,82 @@ class RagReviewTagTest(unittest.TestCase):
             self.assertIn("英超-大小球盘口线缺失", doc["league_review_tags"])
             self.assertIn("错因标签:", doc["text"])
             self.assertIn("联赛复盘:", doc["text"])
+
+
+class RagRatingSimilarityTest(unittest.TestCase):
+    def test_bonus_zero_when_elo_missing(self):
+        # 任一方无 elo_diff 时不加分，保证评分库为空时 RAG 检索零回归。
+        self.assertEqual(_rating_similarity_bonus({}, {"elo_diff": 120.0}), 0.0)
+        self.assertEqual(_rating_similarity_bonus({"elo_diff": 120.0}, {}), 0.0)
+
+    def test_bonus_higher_for_closer_strength_gap(self):
+        query = {"elo_diff": 120.0}
+        near = _rating_similarity_bonus({"elo_diff": 110.0}, query)
+        far = _rating_similarity_bonus({"elo_diff": 60.0}, query)
+        self.assertGreater(near, far)
+        self.assertGreater(far, 0.0)
+
+    def test_bonus_zero_beyond_threshold(self):
+        # 实力差相差 ≥200 视为不相似。
+        self.assertEqual(_rating_similarity_bonus({"elo_diff": -100.0}, {"elo_diff": 120.0}), 0.0)
+
+    def test_identical_gap_hits_cap(self):
+        self.assertAlmostEqual(_rating_similarity_bonus({"elo_diff": 80.0}, {"elo_diff": 80.0}), 1.5)
+
+    def test_rating_bonus_breaks_tie_in_retrieval(self):
+        # 两条历史案例文本/市场/时间完全一致，仅实力差不同：与当前更接近的应排在前。
+        common = {
+            "league_code": "friendly",
+            "league_name": "友谊赛",
+            "competition_stage_name": "",
+            "competition_bucket": "friendly",
+            "match_date": "2026-05-10",
+            "home_team": "历史主队",
+            "away_team": "历史客队",
+            "prediction": "主胜",
+            "confidence": 0.6,
+            "actual_score": "1-0",
+            "actual_result": "主胜",
+            "storage_mode": "archive",
+            "risk_points": [],
+            "predicted_ou_direction": "",
+            "ou_line": 2.5,
+            "predicted_scores": ["1-0"],
+            "case_type": "prediction_case",
+            "text": "友谊赛 历史主队 历史客队",
+            "terms": ["友谊赛", "历史主队", "历史客队"],
+            "term_counts": {"友谊赛": 1, "历史主队": 1, "历史客队": 1},
+            "doc_length": 3,
+            "completed": True,
+        }
+        doc_similar = {**common, "match_id": "elo-similar", "elo_diff": 100.0}
+        doc_distant = {**common, "match_id": "elo-distant", "elo_diff": 10.0}
+        documents = [doc_distant, doc_similar]
+        index_payload = {
+            "document_count": 2,
+            "avgdl": 3.0,
+            "document_frequencies": {"友谊赛": 2, "历史主队": 2, "历史客队": 2},
+        }
+
+        def fake_annotate_query_elo(query, base_dir):
+            query["elo_diff"] = 110.0
+
+        with patch("runtime.rag_store._load_rag_artifacts", return_value=({"cases": documents}, index_payload)), \
+             patch("runtime.rag_store._annotate_query_elo", side_effect=fake_annotate_query_elo):
+            result = retrieve_hybrid_context(
+                None,
+                league_code="friendly",
+                home_team="当前主队",
+                away_team="当前客队",
+                market_snapshot={},
+                match_date="2026-05-15",
+                top_k=3,
+                min_score=0.0,
+            )
+
+        ids = [case["match_id"] for case in result["similar_cases"]]
+        self.assertEqual(ids[0], "elo-similar")
+        self.assertEqual(result["similar_cases"][0]["elo_diff"], 100.0)
 
 
 if __name__ == "__main__":

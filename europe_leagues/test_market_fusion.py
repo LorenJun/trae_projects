@@ -40,8 +40,13 @@ class MarketFusionTests(unittest.TestCase):
     def test_alpha_zero_skips_market(self):
         market = {'home_win': 0.47, 'draw': 0.29, 'away_win': 0.24}
         res = self.fusion.predict(market_probs=market, market_alpha=0.0, **_base_kwargs())
-        self.assertEqual(res['final'], res['model_only'])
         self.assertFalse(res['market_fusion']['applied'])
+        self.assertEqual(res['market_fusion']['alpha'], 0.0)
+        # α=0 时市场不参与：final 为归一化后的模型分布（与 model_only 同向、和为1）
+        self.assertAlmostEqual(sum(res['final'].values()), 1.0, places=6)
+        mo_total = sum(res['model_only'].values())
+        for key in ('home_win', 'draw', 'away_win'):
+            self.assertAlmostEqual(res['final'][key], res['model_only'][key] / mo_total, places=6)
 
     def test_final_probabilities_sum_to_one(self):
         market = {'home_win': 0.5, 'draw': 0.3, 'away_win': 0.2}

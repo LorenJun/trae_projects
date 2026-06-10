@@ -171,7 +171,7 @@ class SportteryScraper(BaseScraper):
                         try:
                             home_score, away_score = map(int, score.split('-'))
                             match.score = (home_score, away_score)
-                        except:
+                        except Exception:
                             pass
                     
                     matches.append(match)
@@ -249,7 +249,7 @@ class OkoooScraper(BaseScraper):
                         try:
                             home_score, away_score = map(int, score.split('-'))
                             match.score = (home_score, away_score)
-                        except:
+                        except Exception:
                             pass
                     
                     matches.append(match)

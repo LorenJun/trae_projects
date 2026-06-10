@@ -16,6 +16,42 @@ class TeamStrengthService:
     def __init__(self, base_dir: Optional[str] = None):
         self.base_dir = base_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.cache = PredictionCache()
+        self._national_strength: Optional[Dict[str, Any]] = None
+
+    def _load_national_strength(self) -> Dict[str, Any]:
+        """加载国家队强度兜底表（FIFA 分档近似），只读一次并缓存。"""
+        if self._national_strength is not None:
+            return self._national_strength
+        table: Dict[str, Any] = {}
+        path = os.path.join(self.base_dir, 'data', 'national_team_strength.json')
+        try:
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as handle:
+                    raw = json.load(handle)
+                table = {k: v for k, v in raw.items() if not k.startswith('_')}
+        except Exception as exc:
+            logger.warning('加载国家队强度兜底表失败: %s', exc)
+        self._national_strength = table
+        return table
+
+    def _national_fallback_strength(self, team_name: str) -> Optional[Dict[str, Any]]:
+        """无球员数据时，尝试用国家队强度兜底表给出差异化强度。"""
+        entry = self._load_national_strength().get(team_name)
+        if not isinstance(entry, dict):
+            return None
+        return {
+            'team': team_name,
+            'strength': float(entry.get('strength', 50.0)),
+            'attack': float(entry.get('attack', 1.0)),
+            'defense': float(entry.get('defense', 1.0)),
+            'injured_count': 0,
+            'suspended_count': 0,
+            'key_players_available': True,
+            'available_value': 0,
+            'total_value': 0,
+            'strength_source': 'national_fallback',
+            'strength_tier': entry.get('tier'),
+        }
 
     def get_player_data_path(self, league_code: str, team_name: str) -> str:
         return os.path.join(self.base_dir, league_code, 'players', f'{team_name}.json')
@@ -43,17 +79,20 @@ class TeamStrengthService:
             return cached
         team_data = self.load_player_data(league_code, team_name)
         if not team_data:
-            result = {
-                'team': team_name,
-                'strength': 50.0,
-                'attack': 1.0,
-                'defense': 1.0,
-                'injured_count': 0,
-                'suspended_count': 0,
-                'key_players_available': True,
-                'available_value': 0,
-                'total_value': 0,
-            }
+            result = self._national_fallback_strength(team_name)
+            if result is None:
+                result = {
+                    'team': team_name,
+                    'strength': 50.0,
+                    'attack': 1.0,
+                    'defense': 1.0,
+                    'injured_count': 0,
+                    'suspended_count': 0,
+                    'key_players_available': True,
+                    'available_value': 0,
+                    'total_value': 0,
+                    'strength_source': 'flat_default',
+                }
         else:
             players = team_data.get('players', [])
             injured_players = [player for player in players if player.get('transfer_status') == 'injured']

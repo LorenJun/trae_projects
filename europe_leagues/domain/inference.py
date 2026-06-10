@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from domain.constants import resolve_home_advantage, resolve_rho
 from domain.odds import resolve_over_under_line
 from models import DixonColesModel
 
@@ -24,6 +25,7 @@ class InferencePipelineService:
         weight_adjuster: Any,
         league_ou_learning: Any,
         postprocess_service: Any,
+        rating_service: Any = None,
     ):
         self.league_config = league_config
         self.team_manager = team_manager
@@ -35,6 +37,7 @@ class InferencePipelineService:
         self.weight_adjuster = weight_adjuster
         self.league_ou_learning = league_ou_learning
         self.postprocess_service = postprocess_service
+        self.rating_service = rating_service
 
     @staticmethod
     def _to_float(value: Any) -> Optional[float]:
@@ -1132,13 +1135,17 @@ class InferencePipelineService:
         market_probs: Optional[Dict[str, float]],
         applied_weights: Dict[str, Any],
         expert_signals: Dict[str, Any],
+        strength_quality: str = 'real',
     ) -> Dict[str, Any]:
         """按实战口径动态选 α：常规 0.35 / 热门强队 0.25 / 小联赛-数据少 0.5 / 伤停换帅 0.65。
 
         无市场概率时 α=0（等价只用模型）。
+        当球队强度无真实数据支撑（national_fallback / flat_default）时，模型硬数据可信度低，
+        进一步提高市场权重，避免无数据场景预测趋同。
         """
         if not isinstance(market_probs, dict):
-            return {'alpha': 0.0, 'reason': 'no_market_probs', 'regime': 'model_only'}
+            return {'alpha': 0.0, 'reason': 'no_market_probs', 'regime': 'model_only',
+                    'strength_quality': strength_quality}
 
         alpha = getattr(self.model_fusion, 'DEFAULT_MARKET_ALPHA', 0.35)
         regime = 'normal'
@@ -1151,6 +1158,15 @@ class InferencePipelineService:
             regime = 'data_poor'
             reason = '联赛样本不足/小联赛，提高市场权重'
 
+        # 球队强度无真实球员数据支撑：模型硬数据不可信，市场主导
+        if strength_quality in ('fallback', 'flat'):
+            floor = 0.6 if strength_quality == 'flat' else 0.5
+            if alpha < floor:
+                alpha = floor
+            if regime in ('normal', 'data_poor'):
+                regime = 'no_strength_data'
+                reason = '球队无真实球员数据（国家队兜底/默认值），提高市场权重防趋同'
+
         # 突发消息（核心伤停 / 多伤停 / 换帅）：市场资金已反映消息
         out_gap = abs(int(expert_signals.get('home_suspensions', 0)) + int(expert_signals.get('away_suspensions', 0)))
         heavy_absence = (
@@ -1160,7 +1176,7 @@ class InferencePipelineService:
             or out_gap >= 2
         )
         if heavy_absence:
-            alpha = 0.65
+            alpha = max(alpha, 0.65)
             regime = 'news_shock'
             reason = '核心伤停/停赛或换帅等突发消息，市场资金已反映'
 
@@ -1172,7 +1188,8 @@ class InferencePipelineService:
             reason = '市场强烈看好一方，降低市场权重防诱盘'
 
         return {'alpha': round(float(alpha), 4), 'reason': reason, 'regime': regime,
-                'market_favorite_prob': round(float(fav_prob), 4)}
+                'market_favorite_prob': round(float(fav_prob), 4),
+                'strength_quality': strength_quality}
 
     def _build_expert_signals(
         self,
@@ -1327,8 +1344,7 @@ class InferencePipelineService:
                 signals.append('retreat_vs_strong_odds')
 
         if base_home_lambda and base_away_lambda:
-            rho_map = {'premier_league': -0.08, 'la_liga': -0.10, 'serie_a': -0.12, 'bundesliga': -0.06, 'ligue_1': -0.10}
-            dc = DixonColesModel(rho=rho_map.get(league_code, -0.10))
+            dc = DixonColesModel(rho=resolve_rho(league_code))
             base_probs = dc.predict_with_dixon_coles(max(0.15, float(base_home_lambda)), max(0.15, float(base_away_lambda)))
             base_home = float(base_probs.get('home_win') or 0.0)
             base_away = float(base_probs.get('away_win') or 0.0)
@@ -1364,6 +1380,36 @@ class InferencePipelineService:
         diag['signals'] = signals
         diag['calibration_weight'] = weight
         return diag
+
+    def _resolve_home_advantage(self, league_code: str) -> float:
+        """主场优势系数：联赛主客场制用 1.12；中立/弱主场赛事（友谊赛、世界杯、洲际杯赛）降低。
+
+        友谊赛/国家队比赛常在中立或弱主场环境进行，固定 1.12 会让主队 λ 恒定虚高、
+        比分恒为 X-1，因此这类赛事用接近中立的系数。
+        """
+        return resolve_home_advantage(league_code)
+
+    def _resolve_historical_ratings(
+        self,
+        league_code: str,
+        home_team: str,
+        away_team: str,
+    ) -> Optional[Dict[str, Dict[str, float]]]:
+        """组装持久化的历史 ELO/Glicko 评分供模型融合使用。
+
+        - 无 rating_service 或某队无历史记录时返回 None，让模型融合回退到 strength 派生值（SoT 零回归）；
+        - 仅当两队都有历史评分时才下发，避免一队历史/一队派生的混合口径。
+        """
+        if self.rating_service is None:
+            return None
+        try:
+            home_hist = self.rating_service.get_ratings(league_code, home_team)
+            away_hist = self.rating_service.get_ratings(league_code, away_team)
+        except Exception:
+            return None
+        if not home_hist or not away_hist:
+            return None
+        return {'home': home_hist, 'away': away_hist}
 
     def calibrate_lambdas_from_market(
         self,
@@ -1404,8 +1450,7 @@ class InferencePipelineService:
         total = ph + pd + pa
         ph, pd, pa = ph / total, pd / total, pa / total
 
-        rho_map = {'premier_league': -0.08, 'la_liga': -0.10, 'serie_a': -0.12, 'bundesliga': -0.06, 'ligue_1': -0.10}
-        dc = DixonColesModel(rho=rho_map.get(league_code, -0.10))
+        dc = DixonColesModel(rho=resolve_rho(league_code))
         league_avg = float(self.league_config.get(league_code, {}).get('avg_goals') or 2.6)
         base_total = max(0.8, float(base_home_lambda) + float(base_away_lambda))
         best = None
@@ -2063,6 +2108,15 @@ class InferencePipelineService:
             realtime['context_applied']['match_intelligence_bind_error'] = str(exc)
 
         strength_diff = home_strength['strength'] - away_strength['strength']
+        # 强度数据质量：双方都有真实球员数据=real；任一退回兜底/默认=fallback/flat。
+        sources = {home_strength.get('strength_source', 'real'), away_strength.get('strength_source', 'real')}
+        if 'flat_default' in sources:
+            strength_quality = 'flat'
+        elif 'national_fallback' in sources:
+            strength_quality = 'fallback'
+        else:
+            strength_quality = 'real'
+        realtime['context_applied']['strength_quality'] = strength_quality
         asian_handicap = current_odds.get('亚值') if isinstance(current_odds, dict) else None
         european_odds = current_odds.get('欧赔') if isinstance(current_odds, dict) else None
         league_avg_goals = self.league_config[league_code]['avg_goals']
@@ -2072,8 +2126,13 @@ class InferencePipelineService:
         away_motivation = float(analysis_context.get('away_motivation', 75))
         realtime['context_applied'].update({'home_form': home_form, 'away_form': away_form, 'home_motivation': home_motivation, 'away_motivation': away_motivation})
 
-        base_home_lambda = home_strength['attack'] * away_strength['defense'] * league_avg_goals * 1.12
-        base_away_lambda = away_strength['attack'] * home_strength['defense'] * league_avg_goals
+        # league_avg_goals 是“全场总进球”均值，需除以 2 才是单队进球基准，
+        # 否则两队 λ 各自≈整场总进球、合计翻倍，导致预期进球与大球概率系统性偏高。
+        per_team_baseline = league_avg_goals / 2.0
+        home_advantage = self._resolve_home_advantage(league_code)
+        base_home_lambda = home_strength['attack'] * away_strength['defense'] * per_team_baseline * home_advantage
+        base_away_lambda = away_strength['attack'] * home_strength['defense'] * per_team_baseline
+        realtime['context_applied']['home_advantage_factor'] = round(float(home_advantage), 4)
         home_lambda = base_home_lambda
         away_lambda = base_away_lambda
         try:
@@ -2137,8 +2196,12 @@ class InferencePipelineService:
             match_intelligence=match_intelligence,
             market_probs=market_probs,
         )
-        alpha_diag = self._resolve_market_alpha(market_probs, applied_weights, expert_signals)
+        alpha_diag = self._resolve_market_alpha(market_probs, applied_weights, expert_signals, strength_quality)
         model_accuracy = applied_weights.get('model_accuracy') if isinstance(applied_weights, dict) else None
+
+        historical_ratings = self._resolve_historical_ratings(
+            league_code, home_team, away_team
+        )
 
         fusion_result = self.model_fusion.predict(
             home_team=home_team,
@@ -2164,6 +2227,9 @@ class InferencePipelineService:
             market_alpha=alpha_diag.get('alpha'),
             expert_signals=expert_signals,
             model_accuracy=model_accuracy,
+            historical_ratings=historical_ratings,
+            per_team_baseline=per_team_baseline,
+            home_advantage=home_advantage,
         )
         realtime['context_applied']['market_fusion'] = fusion_result.get('market_fusion')
         realtime['context_applied']['market_alpha'] = alpha_diag
@@ -2448,8 +2514,7 @@ class InferencePipelineService:
             upset_potential=upset_potential,
         )
 
-        rho_map = {'premier_league': -0.08, 'la_liga': -0.10, 'serie_a': -0.12, 'bundesliga': -0.06, 'ligue_1': -0.10}
-        dc_model = DixonColesModel(rho=rho_map.get(league_code, -0.10))
+        dc_model = DixonColesModel(rho=resolve_rho(league_code))
         score_result = dc_model.predict_with_dixon_coles(home_lambda, away_lambda)
         top_scores, score_guard_diag = self._rerank_scores_for_under_three(
             score_result.get('score_probs'),

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, Optional
 
 from runtime.paths import get_default_paths
+from ._jsonio import atomic_write_json, safe_read_json
 
 
 class PredictionArchiveStore:
@@ -14,13 +14,8 @@ class PredictionArchiveStore:
         self.path = self.paths.runtime_file('prediction_archive.json')
 
     def load(self) -> Dict[str, Dict[str, Any]]:
-        if not self.path.exists():
-            return {}
-        try:
-            payload = json.loads(self.path.read_text(encoding='utf-8'))
-        except Exception:
-            return {}
+        payload = safe_read_json(self.path, {})
         return payload if isinstance(payload, dict) else {}
 
     def save(self, archive: Dict[str, Dict[str, Any]]) -> None:
-        self.path.write_text(json.dumps(archive, ensure_ascii=False, indent=2), encoding='utf-8')
+        atomic_write_json(self.path, archive)

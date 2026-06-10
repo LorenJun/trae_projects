@@ -41,6 +41,7 @@ from domain.odds import (
 )
 from models import MultiModelFusion, PoissonModel
 from result_manager import ResultManager
+from storage.ratings import RatingService
 from agent_runtime_registry import get_runtime_profile
 from runtime.cache import PredictionCache
 
@@ -380,6 +381,7 @@ class EnhancedPredictor:
         self.weight_adjuster = DynamicWeightAdjuster()
         self.cache = PredictionCache()
         self.result_manager = ResultManager(base_dir=self.base_dir)
+        self.rating_service = RatingService(self.base_dir)
         self.postprocess_service = PredictionPostprocessService(LEAGUE_CONFIG, self.base_dir)
         self.rag_service = LightweightRAGService(self.base_dir)
         self.review_learning_service = PredictionReviewLearningService(self.base_dir)
@@ -399,6 +401,7 @@ class EnhancedPredictor:
             weight_adjuster=self.weight_adjuster,
             league_ou_learning=self.league_ou_learning,
             postprocess_service=self.postprocess_service,
+            rating_service=self.rating_service,
         )
         self.runtime_profile = get_runtime_profile(
             ["data_collector", "match_analyzer", "odds_analyzer"]

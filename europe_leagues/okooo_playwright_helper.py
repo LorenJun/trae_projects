@@ -320,7 +320,7 @@ class OkoooPlaywrightHelper:
                                 "draw": float(draw_initial),
                                 "away": float(away_initial)
                             }
-                    except:
+                    except Exception:
                         pass
                     
                     # 即时赔
@@ -335,7 +335,7 @@ class OkoooPlaywrightHelper:
                                 "draw": float(draw_current),
                                 "away": float(away_current)
                             }
-                    except:
+                    except Exception:
                         pass
                     
                     if odds_data["initial"] or odds_data["current"]:

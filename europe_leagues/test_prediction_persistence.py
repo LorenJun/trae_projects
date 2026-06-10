@@ -171,7 +171,7 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
             )
 
         mock_memory.assert_called_once_with(
-            {"match_id": "a", "match_date": "2026-05-18", "home_team": "阿森纳", "away_team": "切尔西", "prediction": "主胜", "external_match_id": "", "internal_match_id": "premier_league_20260518_阿森纳_切尔西", "teams_match_id": "premier_league_20260518_阿森纳_切尔西", "storage_mode": "league_sot", "predicted_winner": "home", "persisted": {"enabled": True, "archived": True, "memory_updated": True, "result_sync_registered": True}},
+            {"match_id": "a", "match_date": "2026-05-18", "home_team": "阿森纳", "away_team": "切尔西", "prediction": "主胜", "external_match_id": "", "internal_match_id": "premier_league_20260518_阿森纳_切尔西", "teams_match_id": "premier_league_20260518_阿森纳_切尔西", "storage_mode": "league_sot", "league_code": "premier_league", "league": "premier_league", "league_name": "英超", "predicted_winner": "home", "persisted": {"enabled": True, "archived": True, "memory_updated": True, "result_sync_registered": True}},
             sync_derivatives=False,
         )
         mock_rag.assert_not_called()

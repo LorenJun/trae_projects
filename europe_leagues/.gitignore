@@ -1,1 +1,15 @@
 .prediction_cache/
+
+# 抓取/调试原始页面 dump（一次性产物，不应入库）
+villa_*.html
+*_raw.html
+
+# 重分析批跑结果（运行期生成产物）
+reanalysis_results*.json
+
+# 各类运行期生成的报告/快照产物
+detailed_player_report.json
+player_status_report.json
+player_data.json
+weekly_player_report_*.json
+latest_prediction.json

@@ -11,6 +11,7 @@ import logging
 import os
 import tempfile
 import unittest
+from datetime import datetime as _real_datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -36,8 +37,24 @@ def quiet_test_output():
         logging.disable(previous_disable)
 
 
+# 固定夹具中的“今天”，避免随真实时钟前移导致按 days_back 窗口过滤的用例逐渐失效。
+# 夹具比赛日期为 2026-05-10/11，这里冻结在其后数日，确保始终落在 30 天窗口内。
+_FROZEN_NOW = _real_datetime(2026, 5, 15, 12, 0, 0)
+
+
+class _FrozenDatetime(_real_datetime):
+    @classmethod
+    def now(cls, tz=None):
+        if tz is None:
+            return _FROZEN_NOW
+        return _FROZEN_NOW.astimezone(tz)
+
+
 class ResultManagerTest(unittest.TestCase):
     def setUp(self):
+        self._frozen_time = patch("result_manager.datetime", _FrozenDatetime)
+        self._frozen_time.start()
+        self.addCleanup(self._frozen_time.stop)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.base_dir = Path(self.temp_dir.name)
         league_dir = self.base_dir / "la_liga"

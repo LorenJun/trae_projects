@@ -11,6 +11,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Tuple, Optional
 import logging
 
+from domain.constants import strength_to_seed_rating
+
 logging.basicConfig(level=logging.INFO, filename='ml_prediction.log')
 
 # ==================== 统计概率模型 ====================
@@ -49,6 +51,29 @@ class PoissonModel:
     ) -> Dict[str, float]:
         """预测大小球"""
         total_lambda = home_lambda + away_lambda
+
+        # 亚盘四分线（2.25/2.75 等）是拆分注：一半押较低相邻线、一半押较高相邻线。
+        # 例如 2.25 = ½×2.0 + ½×2.5；2.75 = ½×2.5 + ½×3.0。
+        # 直接对相邻两线的结果取平均，避免被当成整数/半盘误算。
+        frac = abs(float(line) - math.floor(float(line)))
+        is_quarter = abs(frac - 0.25) < 1e-9 or abs(frac - 0.75) < 1e-9
+        if is_quarter:
+            lower = round(float(line) - 0.25, 2)
+            upper = round(float(line) + 0.25, 2)
+            lo = self.predict_over_under(home_lambda, away_lambda, lower)
+            hi = self.predict_over_under(home_lambda, away_lambda, upper)
+            over_prob = (lo['over'] + hi['over']) / 2.0
+            under_prob = (lo['under'] + hi['under']) / 2.0
+            return {
+                'over': over_prob,
+                'under': under_prob,
+                'over_raw': (lo['over_raw'] + hi['over_raw']) / 2.0,
+                'under_raw': (lo['under_raw'] + hi['under_raw']) / 2.0,
+                'push': (lo['push'] + hi['push']) / 2.0,
+                'total_lambda': total_lambda,
+                'line': line,
+            }
+
         max_goals = 14
         goal_probs = {
             k: self.poisson_probability(total_lambda, k)
@@ -87,7 +112,7 @@ class PoissonModel:
         self,
         home_lambda: float,
         away_lambda: float,
-        max_goals: int = 5
+        max_goals: int = 6
     ) -> Dict[str, float]:
         """预测比分概率"""
         score_probs = {}
@@ -111,6 +136,14 @@ class PoissonModel:
             prob for score, prob in score_probs.items()
             if int(score.split('-')[0]) < int(score.split('-')[1])
         )
+
+        # 归一化：网格在 max_goals 处截尾会损失尾部质量，使三者之和 <1，
+        # 不归一化会让本模型在加权融合中被系统性低估。
+        total = win_prob + draw_prob + lose_prob
+        if total > 0:
+            win_prob /= total
+            draw_prob /= total
+            lose_prob /= total
 
         return {
             'score_probs': score_probs,
@@ -139,23 +172,28 @@ class DixonColesModel(PoissonModel):
         home_base = self.poisson_probability(home_lambda, home_goals)
         away_base = self.poisson_probability(away_lambda, away_goals)
 
-        # 相关系数修正
+        # Dixon-Coles 低比分相关性修正（经典 τ 公式）：
+        # ρ<0 时应提高 0-0/1-1 平局质量、降低 1-0/0-1，
+        # 以修正独立泊松对低比分平局的系统性低估。
         if home_goals == 0 and away_goals == 0:
-            rho_adjustment = 1 + self.rho
+            rho_adjustment = 1 - home_lambda * away_lambda * self.rho
         elif home_goals == 1 and away_goals == 1:
-            rho_adjustment = 1 + self.rho * 0.5
-        elif home_goals == 0 or away_goals == 0:
-            rho_adjustment = 1 - self.rho * 0.5
+            rho_adjustment = 1 - self.rho
+        elif home_goals == 0 and away_goals == 1:
+            rho_adjustment = 1 + home_lambda * self.rho
+        elif home_goals == 1 and away_goals == 0:
+            rho_adjustment = 1 + away_lambda * self.rho
         else:
             rho_adjustment = 1
 
-        return home_base * away_base * rho_adjustment
+        # τ 修正在 λ、μ 较大时可能为负，做下限保护避免出现负概率
+        return home_base * away_base * max(0.0, rho_adjustment)
 
     def predict_with_dixon_coles(
         self,
         home_lambda: float,
         away_lambda: float,
-        max_goals: int = 5
+        max_goals: int = 6
     ) -> Dict[str, float]:
         """使用Dixon-Coles模型预测"""
         score_probs = {}
@@ -211,36 +249,6 @@ class EloRatingSystem:
         """设置球队评级"""
         self.ratings[team] = rating
 
-    def update_ratings(
-        self,
-        home_team: str,
-        away_team: str,
-        home_goals: int,
-        away_goals: int
-    ):
-        """更新评级"""
-        home_rating = self.get_rating(home_team)
-        away_rating = self.get_rating(away_team)
-
-        # 计算预期得分
-        home_expected = 1 / (1 + 10 ** ((away_rating + self.home_advantage - home_rating) / 400))
-        away_expected = 1 / (1 + 10 ** ((home_rating - self.home_advantage - away_rating) / 400))
-
-        # 确定实际得分
-        if home_goals > away_goals:
-            home_actual, away_actual = 1, 0
-        elif home_goals < away_goals:
-            home_actual, away_actual = 0, 1
-        else:
-            home_actual, away_actual = 0.5, 0.5
-
-        # 更新评级
-        home_new = home_rating + self.k_factor * (home_actual - home_expected)
-        away_new = away_rating + self.k_factor * (away_actual - away_expected)
-
-        self.set_rating(home_team, home_new)
-        self.set_rating(away_team, away_new)
-
     def predict_match(self, home_team: str, away_team: str) -> Dict[str, float]:
         """预测比赛（包含可用的平局概率近似）。
 
@@ -286,19 +294,28 @@ class GlickoRatingSystem(EloRatingSystem):
         self.vol_constant = vol_constant  # 波动性
 
     def predict_match(self, home_team: str, away_team: str) -> Dict[str, float]:
-        """预测比赛（包含可用的平局概率近似）"""
+        """预测比赛（真正使用 Glicko 的 RD 不确定性收缩）。
+
+        与 Elo 的区别：Glicko 用 g(RD) 因子按评级偏差(RD)对实力差做收缩，
+        RD 越大（样本越少/越不确定）预测越向 0.5 回归，从而与 Elo 输出真正区分，
+        避免融合中 elo/glicko 双重计入同一信号。
+        """
         home_rating = self.get_rating(home_team) + self.home_advantage
         away_rating = self.get_rating(away_team)
 
-        # 计算预期得分（简化版本）
-        p_home_raw = 1 / (1 + 10 ** ((away_rating - home_rating) / 400))
+        # Glicko g(RD) 收缩因子：q = ln(10)/400，RD 越大 g 越小、差距被压缩。
+        q = math.log(10) / 400.0
+        g_rd = 1.0 / math.sqrt(1.0 + 3.0 * (q ** 2) * (self.rd_constant ** 2) / (math.pi ** 2))
+
+        p_home_raw = 1 / (1 + 10 ** (-g_rd * (home_rating - away_rating) / 400))
         p_home_raw = max(0.001, min(0.999, p_home_raw))
         p_away_raw = 1 - p_home_raw
 
-        diff = abs(home_rating - away_rating)
+        # 平局概率同样随 RD 升高而抬升（不确定性越大越可能平）
+        diff = abs(home_rating - away_rating) * g_rd
         draw_base = 0.28
         draw_prob = draw_base * math.exp(-diff / 250)
-        draw_prob = max(0.08, min(0.32, draw_prob))
+        draw_prob = max(0.08, min(0.34, draw_prob))
 
         remain = 1 - draw_prob
         home_win_prob = remain * p_home_raw
@@ -349,7 +366,9 @@ class LogisticRegressionModel:
         # 计算特征
         strength_diff = (home_strength - away_strength) / 100
         form_diff = (home_form - away_form) / 100
-        injury_impact = -(home_injuries - away_injuries) * 0.02
+        # 主队伤停越多越不利；这里取差值的正向表示，
+        # 再乘以负权重 weights['injuries'](<0) 得到正确的负向影响。
+        injury_impact = (home_injuries - away_injuries) * 0.02
 
         total_h2h = h2h_home_wins + h2h_away_wins + h2h_draws
         if total_h2h > 0:
@@ -628,7 +647,10 @@ class MultiModelFusion:
         market_probs: Optional[Dict[str, float]] = None,
         market_alpha: Optional[float] = None,
         expert_signals: Optional[Dict[str, Any]] = None,
-        model_accuracy: Optional[Dict[str, float]] = None
+        model_accuracy: Optional[Dict[str, float]] = None,
+        historical_ratings: Optional[Dict[str, Dict[str, float]]] = None,
+        per_team_baseline: Optional[float] = None,
+        home_advantage: Optional[float] = None
     ) -> Dict:
         """多模型融合预测
 
@@ -640,9 +662,17 @@ class MultiModelFusion:
         all_predictions = {}
 
         # 1. 泊松分布模型
+        # per_team_baseline 是“单队进球基准”（主链已把整场均值 /2）；
+        # 若未传入则回退到旧口径（self.league_avg_goals=2.5 为整场均值）以保持兼容。
         poisson = self.models['poisson']
+        dc = self.models['dixon_coles']
+        if per_team_baseline is not None and per_team_baseline > 0:
+            poisson.league_avg_goals = float(per_team_baseline)
+            dc.league_avg_goals = float(per_team_baseline)
+        ha = float(home_advantage) if (home_advantage is not None and home_advantage > 0) else 1.12
         home_lambda, away_lambda = poisson.calculate_expected_goals(
-            home_attack, home_defense, away_attack, away_defense
+            home_attack, home_defense, away_attack, away_defense,
+            home_advantage=ha
         )
         poisson_result = poisson.predict_score_probability(home_lambda, away_lambda)
         all_predictions['poisson'] = poisson_result
@@ -652,17 +682,20 @@ class MultiModelFusion:
         dc_result = dc.predict_with_dixon_coles(home_lambda, away_lambda)
         all_predictions['dixon_coles'] = dc_result
 
-        # 3. Elo评级模型
+        # 3. Elo评级模型（优先用持久化的历史评分，无则回退 strength 派生）
+        hist = historical_ratings if isinstance(historical_ratings, dict) else {}
+        home_hist = hist.get('home') if isinstance(hist.get('home'), dict) else {}
+        away_hist = hist.get('away') if isinstance(hist.get('away'), dict) else {}
         elo = self.models['elo']
-        elo.set_rating(home_team, home_strength * 10 + 1500)
-        elo.set_rating(away_team, away_strength * 10 + 1500)
+        elo.set_rating(home_team, float(home_hist.get('elo', strength_to_seed_rating(home_strength))))
+        elo.set_rating(away_team, float(away_hist.get('elo', strength_to_seed_rating(away_strength))))
         elo_result = elo.predict_match(home_team, away_team)
         all_predictions['elo'] = elo_result
 
         # 4. Glicko评级模型
         glicko = self.models['glicko']
-        glicko.set_rating(home_team, home_strength * 10 + 1500)
-        glicko.set_rating(away_team, away_strength * 10 + 1500)
+        glicko.set_rating(home_team, float(home_hist.get('glicko', strength_to_seed_rating(home_strength))))
+        glicko.set_rating(away_team, float(away_hist.get('glicko', strength_to_seed_rating(away_strength))))
         glicko_result = glicko.predict_match(home_team, away_team)
         all_predictions['glicko'] = glicko_result
 
@@ -774,7 +807,8 @@ class MultiModelFusion:
         if alpha <= 0.0:
             diag.update({'reason': 'alpha_zero', 'alpha': 0.0,
                          'market_probs': {'home_win': round(mh, 6), 'draw': round(md, 6), 'away_win': round(ma, 6)}})
-            return model_prediction, diag
+            # 返回归一化后的模型分布（model_prediction 因网格截尾可能和<1）
+            return norm_model, diag
 
         fused = {
             'home_win': (1 - alpha) * norm_model['home_win'] + alpha * mh,

@@ -621,9 +621,9 @@ class OkoooSaveSnapshotTest(unittest.TestCase):
             ],
         }
 
-        with patch("okooo_save_snapshot._find_rows_in_date_section", return_value=row_result), patch(
+        with patch("okooo_save_snapshot._find_rows_in_date_section", return_value=row_result) as mock_section, patch(
             "okooo_save_snapshot._find_rows_fuzzy", return_value=row_result
-        ) as mock_fuzzy, patch("okooo_save_snapshot._find_match_id_via_online_search") as mock_online, patch(
+        ), patch("okooo_save_snapshot._find_match_id_via_online_search") as mock_online, patch(
             "okooo_save_snapshot._navigate_schedule_to_month", return_value={"matched": True}
         ), patch("okooo_save_snapshot._mobile_league_url", return_value="https://m.okooo.com/saishi/851/"), patch(
             "okooo_save_snapshot.time.sleep", return_value=None
@@ -640,7 +640,8 @@ class OkoooSaveSnapshotTest(unittest.TestCase):
             )
 
         self.assertEqual(result["match_id"], "7721606")
-        mock_fuzzy.assert_called()
+        # 赛程页优先：先经 in-date-section 命中即短路，不应回落到在线搜索。
+        mock_section.assert_called()
         mock_online.assert_not_called()
 
     def test_find_match_id_for_friendly_falls_back_to_schedule_cache_when_online_misses(self):
@@ -656,8 +657,10 @@ class OkoooSaveSnapshotTest(unittest.TestCase):
         }
 
         with patch("okooo_save_snapshot._find_match_id_via_online_search", return_value={}) as mock_online, patch(
-            "okooo_save_snapshot._find_rows_fuzzy"
-        ) as mock_fuzzy, patch("okooo_save_snapshot._find_match_id_from_schedule_cache", return_value=cached) as mock_cache:
+            "okooo_save_snapshot._find_rows_fuzzy", return_value={}
+        ) as mock_fuzzy, patch("okooo_save_snapshot._find_rows_in_date_section", return_value={}), patch(
+            "okooo_save_snapshot._mobile_league_url", return_value=None
+        ), patch("okooo_save_snapshot._find_match_id_from_schedule_cache", return_value=cached) as mock_cache:
             result = _find_match_id(
                 browser,
                 league="友谊赛",
@@ -702,9 +705,9 @@ class OkoooSaveSnapshotTest(unittest.TestCase):
             ],
         }
 
-        with patch("okooo_save_snapshot._find_rows_in_date_section", return_value=row_result), patch(
+        with patch("okooo_save_snapshot._find_rows_in_date_section", return_value=row_result) as mock_section, patch(
             "okooo_save_snapshot._find_rows_fuzzy", return_value=row_result
-        ) as mock_fuzzy, patch("okooo_save_snapshot._find_match_id_via_online_search") as mock_online, patch(
+        ), patch("okooo_save_snapshot._find_match_id_via_online_search") as mock_online, patch(
             "okooo_save_snapshot._navigate_schedule_to_month", return_value={"matched": True}
         ), patch("okooo_save_snapshot._mobile_league_url", return_value="https://m.okooo.com/saishi/16/"), patch(
             "okooo_save_snapshot.time.sleep", return_value=None
@@ -720,7 +723,8 @@ class OkoooSaveSnapshotTest(unittest.TestCase):
             )
 
         self.assertEqual(result["match_id"], "1606601")
-        mock_fuzzy.assert_called()
+        # 赛程页优先：先经 in-date-section 命中即短路，不应回落到在线搜索。
+        mock_section.assert_called()
         mock_online.assert_not_called()
 
     def test_find_match_id_for_non_big_five_league_prefers_schedule_page_before_online_search(self):
@@ -737,9 +741,9 @@ class OkoooSaveSnapshotTest(unittest.TestCase):
             ],
         }
 
-        with patch("okooo_save_snapshot._find_rows_in_date_section", return_value=row_result), patch(
+        with patch("okooo_save_snapshot._find_rows_in_date_section", return_value=row_result) as mock_section, patch(
             "okooo_save_snapshot._find_rows_fuzzy", return_value=row_result
-        ) as mock_fuzzy, patch("okooo_save_snapshot._find_match_id_via_online_search") as mock_online, patch(
+        ), patch("okooo_save_snapshot._find_match_id_via_online_search") as mock_online, patch(
             "okooo_save_snapshot._navigate_schedule_to_month", return_value={"matched": True}
         ), patch("okooo_save_snapshot._mobile_league_url", return_value="https://m.okooo.com/saishi/41/"), patch(
             "okooo_save_snapshot.time.sleep", return_value=None
@@ -755,7 +759,8 @@ class OkoooSaveSnapshotTest(unittest.TestCase):
             )
 
         self.assertEqual(result["match_id"], "1319001")
-        mock_fuzzy.assert_called()
+        # 赛程页优先：先经 in-date-section 命中即短路，不应回落到在线搜索。
+        mock_section.assert_called()
         mock_online.assert_not_called()
 
     def test_find_match_id_from_schedule_cache_skips_invalid_clicked_false_payload(self):

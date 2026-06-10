@@ -135,6 +135,10 @@ class PredictionPostprocessService:
                 'market_probs': _round(market_probs) if market_probs else None,
                 'market_favorite_prob': alpha_diag.get('market_favorite_prob'),
             },
+            'data_quality': {
+                'strength_quality': context.get('strength_quality'),
+                'home_advantage_factor': context.get('home_advantage_factor'),
+            },
             'final': _round(final),
             'expert': {
                 'probs': _round(expert_pred) if expert_pred else None,

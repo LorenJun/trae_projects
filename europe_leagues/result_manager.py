@@ -23,6 +23,16 @@ from runtime.match_ids import first_valid_external_match_id, normalize_external_
 from runtime.paths import get_default_paths
 from runtime.rag_store import sync_rag_index
 from storage import AccuracyStatsStore, PredictionArchiveStore, TeamsMarkdownStore
+from storage.ratings import RatingService
+from domain.constants import strength_to_seed_rating
+from domain.note_parsing import (
+    parse_predicted_ou,
+    parse_predicted_scores,
+    parse_predicted_winner,
+    parse_prediction_confidence,
+    parse_score_to_winner,
+)
+from domain.team_strength import TeamStrengthService
 from domain.writeback import build_prediction_note, normalize_existing_prediction_note, update_teams_md_prediction_notes
 
 # 配置日志
@@ -163,6 +173,8 @@ class ResultManager:
         self.accuracy_store = AccuracyStatsStore(self.base_dir)
         self.prediction_archive_store = PredictionArchiveStore(self.base_dir)
         self.teams_store = TeamsMarkdownStore(self.base_dir)
+        self.rating_service = RatingService(self.base_dir)
+        self._team_strength_service: Optional[TeamStrengthService] = None
         self.accuracy_file = str(self.accuracy_store.path)
         self.prediction_archive_file = str(self.prediction_archive_store.path)
         self.upset_library_file = os.path.join(self.base_dir, '爆冷案例库.json')
@@ -429,7 +441,51 @@ class ResultManager:
         )
         memory_path.write_text(content, encoding='utf-8')
 
-    def _refresh_result_derivatives(self) -> Dict[str, Any]:
+    def _team_seed_rating(self, league_code: str, team: str) -> float:
+        """用球队当前实力派生 ELO/Glicko 初始播种值（strength*10+1500），与读取侧回退口径一致。"""
+        if self._team_strength_service is None:
+            self._team_strength_service = TeamStrengthService(self.base_dir)
+        try:
+            strength = float(self._team_strength_service.analyze_team_strength(league_code, team).get('strength', 50.0))
+        except Exception:
+            strength = 50.0
+        return strength_to_seed_rating(strength)
+
+    def _update_elo_ratings(self, result_data: Dict[str, Any]) -> Dict[str, Any]:
+        """赛果结束后用真实比分更新主客队历史 ELO/Glicko 评分。
+
+        缺主客队名/比分时跳过（返回 skipped）；首次出现的球队用实力派生值播种。
+        """
+        home_team = (result_data.get('home_team') or '').strip()
+        away_team = (result_data.get('away_team') or '').strip()
+        league = (result_data.get('league') or '').strip()
+        score = (result_data.get('actual_score') or '').strip()
+        if not (home_team and away_team and league and score):
+            return {'updated': False, 'reason': 'missing_fields'}
+        match = re.match(r'^\s*(\d+)\s*[-:]\s*(\d+)\s*$', score)
+        if not match:
+            return {'updated': False, 'reason': f'unparsable_score:{score}'}
+        home_goals, away_goals = int(match.group(1)), int(match.group(2))
+        home_seed = self._team_seed_rating(league, home_team)
+        away_seed = self._team_seed_rating(league, away_team)
+        # 幂等去重键：优先用 match_id，否则退回 联赛+日期+主客队
+        match_id = str(result_data.get('match_id') or '').strip()
+        dedup_key = match_id or f"{league}:{result_data.get('match_date', '')}:{home_team}:{away_team}"
+        outcome = self.rating_service.update_from_result(
+            league_code=league,
+            home_team=home_team,
+            away_team=away_team,
+            home_goals=home_goals,
+            away_goals=away_goals,
+            home_seed=home_seed,
+            away_seed=away_seed,
+            match_date=result_data.get('match_date'),
+            match_id=dedup_key,
+        )
+        outcome['updated'] = not outcome.get('skipped', False)
+        return outcome
+
+    def _refresh_result_derivatives(self, result_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         refresh = {
             'accuracy_refreshed': False,
             'memory_samples_synced': False,
@@ -442,6 +498,11 @@ class ResultManager:
         except Exception as exc:
             logger.warning("更新准确率失败: %s", exc)
             refresh['accuracy_error'] = str(exc)
+        try:
+            refresh['elo_ratings'] = self._update_elo_ratings(result_data or {})
+        except Exception as exc:
+            logger.warning("更新 ELO/Glicko 历史评分失败: %s", exc)
+            refresh['elo_ratings_error'] = str(exc)
         try:
             sync_prediction_memory_samples(self.base_dir, limit=100)
             refresh['memory_samples_synced'] = True
@@ -487,7 +548,7 @@ class ResultManager:
         self._update_memory_result_entry(final_result)
         if sync_archive:
             final_result['archive_sync'] = self._sync_prediction_archive_result(final_result)
-        final_result['refresh'] = self._refresh_result_derivatives()
+        final_result['refresh'] = self._refresh_result_derivatives(final_result)
         return final_result
 
     def save_runtime_only_result(self, prediction_ref: Dict[str, Any], home_score: int, away_score: int) -> Dict[str, Any]:
@@ -549,77 +610,19 @@ class ResultManager:
         )
 
     def _parse_score_to_winner(self, score_text: str) -> Optional[str]:
-        if not isinstance(score_text, str) or '-' not in score_text:
-            return None
-        parts = score_text.split('-')
-        if len(parts) != 2:
-            return None
-        try:
-            hs = int(parts[0].strip())
-            as_ = int(parts[1].strip())
-        except Exception:
-            return None
-        if hs > as_:
-            return 'home'
-        if hs < as_:
-            return 'away'
-        return 'draw'
+        return parse_score_to_winner(score_text)
 
     def _parse_predicted_winner(self, note: str) -> Optional[str]:
-        if not isinstance(note, str):
-            return None
-        # Support both:
-        # - enhanced writeback: `预测:主胜 ...`
-        # - legacy fragments: `预测主胜✅` / `已结束/预测平局✅`
-        match = re.search(r'(?:预测\s*[:：]?\s*)(主胜|平局|客胜)', note)
-        if not match:
-            return None
-        return {'主胜': 'home', '平局': 'draw', '客胜': 'away'}.get(match.group(1))
+        return parse_predicted_winner(note)
 
     def _parse_prediction_confidence(self, note: str) -> Optional[float]:
-        if not isinstance(note, str):
-            return None
-        match = re.search(r'信心[:：]?\s*([0-9]+(?:\.[0-9]+)?)', note)
-        if not match:
-            return None
-        try:
-            value = float(match.group(1))
-        except Exception:
-            return None
-        if value > 1:
-            value = value / 100.0
-        if 0 < value <= 1:
-            return value
-        return None
+        return parse_prediction_confidence(note)
 
     def _parse_predicted_scores(self, note: str) -> List[str]:
-        """Parse `比分:1-1/1-0` style fragments from the schedule note."""
-        if not isinstance(note, str):
-            return []
-        m = re.search(r'比分[:\s]*([0-9\-\/]+)', note)
-        if not m:
-            return []
-        raw = (m.group(1) or '').strip()
-        scores = []
-        for part in raw.split('/'):
-            s = part.strip()
-            if re.match(r'^\d+\s*-\s*\d+$', s):
-                scores.append(re.sub(r'\s+', '', s))
-        return scores
+        return parse_predicted_scores(note)
 
     def _parse_predicted_ou(self, note: str) -> Optional[Dict[str, object]]:
-        """Parse `大小:小2.5(0.58)` fragments from the schedule note."""
-        if not isinstance(note, str):
-            return None
-        m = re.search(r'大小[:\s]*([大小])\s*([0-9]+(?:\.[0-9]+)?)', note)
-        if not m:
-            return None
-        side = m.group(1)
-        try:
-            line = float(m.group(2))
-        except Exception:
-            return None
-        return {'side': side, 'line': line}
+        return parse_predicted_ou(note)
 
     @staticmethod
     def _winner_key_from_text(value: str) -> Optional[str]:

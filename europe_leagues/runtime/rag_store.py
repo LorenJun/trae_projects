@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from runtime.memory_samples import load_prediction_memory_samples
 from runtime.paths import get_default_paths
 from storage import PredictionArchiveStore
+from storage.ratings import RatingService
 
 RAG_MODE = "hybrid-structured-bm25-v2"
 CASE_TYPES = ("prediction_case", "market_case", "upset_case")
@@ -195,6 +196,38 @@ def _derive_review_tags(case: Dict[str, Any]) -> List[str]:
     if ou_line is None:
         tags.append('大小球盘口线缺失')
     return tags
+
+
+def _annotate_elo_ratings(documents: List[Dict[str, Any]], base_dir: Optional[str]) -> None:
+    """给每个案例文档标注主客队历史 ELO 与实力差（elo_diff）。
+
+    评分库为空或某队无历史评分时不标注（字段留 None），检索侧的实力相似度加分会自然跳过，
+    保证 RAG 检索零回归——只有真实赛果累积出评分后，这条维度才开始生效。
+    """
+    try:
+        rating_service = RatingService(base_dir)
+    except Exception:
+        return
+    for doc in documents:
+        if not isinstance(doc, dict):
+            continue
+        league_code = str(doc.get("league_code") or "").strip()
+        home_team = str(doc.get("home_team") or "").strip()
+        away_team = str(doc.get("away_team") or "").strip()
+        if not (league_code and home_team and away_team):
+            continue
+        try:
+            home_rating = rating_service.get_ratings(league_code, home_team)
+            away_rating = rating_service.get_ratings(league_code, away_team)
+        except Exception:
+            continue
+        if not home_rating or not away_rating:
+            continue
+        home_elo = float(home_rating.get("elo", 1500.0))
+        away_elo = float(away_rating.get("elo", 1500.0))
+        doc["home_elo"] = round(home_elo, 2)
+        doc["away_elo"] = round(away_elo, 2)
+        doc["elo_diff"] = round(home_elo - away_elo, 2)
 
 
 def _annotate_review_dimensions(documents: List[Dict[str, Any]], recent_days: int = 30) -> None:
@@ -648,6 +681,7 @@ def build_hybrid_rag_index(base_dir: Optional[str] = None, limit: int = 200) -> 
         doc = _market_case_from_snapshot(record, index=index)
         if doc:
             documents.append(doc)
+    _annotate_elo_ratings(documents, base_dir)
     _annotate_review_dimensions(documents, recent_days=30)
     index_stats = _build_index_statistics(documents)
     cases_payload = {
@@ -888,6 +922,45 @@ def _structured_bonus(doc: Dict[str, Any], query: Dict[str, Any]) -> float:
     return score
 
 
+def _rating_similarity_bonus(doc: Dict[str, Any], query: Dict[str, Any]) -> float:
+    """按历史 ELO 实力差（elo_diff）的接近程度加分。
+
+    当前比赛与历史案例的"主客实力差"越接近，对局形态（强打弱/势均力敌）越相似，
+    召回越有参考价值。任一方无 elo_diff（评分库为空或新队）时返回 0，保证零回归。
+    """
+    query_diff = query.get("elo_diff")
+    doc_diff = doc.get("elo_diff")
+    if not isinstance(query_diff, (int, float)) or not isinstance(doc_diff, (int, float)):
+        return 0.0
+    gap = abs(float(query_diff) - float(doc_diff))
+    # 实力差相差 200 分（≈两档）以上视为不相似；越接近加分越高，封顶 1.5。
+    if gap >= 200.0:
+        return 0.0
+    return round(1.5 * (1.0 - gap / 200.0), 4)
+
+
+def _annotate_query_elo(query: Dict[str, Any], base_dir: Optional[str]) -> None:
+    """为当前查询比赛补 elo_diff（主客历史 ELO 之差）；任一方无历史评分则不标注。"""
+    league_code = str(query.get("league_code") or "").strip()
+    home_team = str(query.get("home_team") or "").strip()
+    away_team = str(query.get("away_team") or "").strip()
+    if not (league_code and home_team and away_team):
+        return
+    try:
+        rating_service = RatingService(base_dir)
+        home_rating = rating_service.get_ratings(league_code, home_team)
+        away_rating = rating_service.get_ratings(league_code, away_team)
+    except Exception:
+        return
+    if not home_rating or not away_rating:
+        return
+    home_elo = float(home_rating.get("elo", 1500.0))
+    away_elo = float(away_rating.get("elo", 1500.0))
+    query["home_elo"] = round(home_elo, 2)
+    query["away_elo"] = round(away_elo, 2)
+    query["elo_diff"] = round(home_elo - away_elo, 2)
+
+
 def _build_query(
     *,
     league_code: str,
@@ -980,6 +1053,9 @@ def _format_doc_result(
         "bm25_score": round(float(bm25), 4),
         "market_bonus": round(float(market_bonus), 4),
         "structured_bonus": round(float(structured_bonus), 4),
+        "home_elo": doc.get("home_elo"),
+        "away_elo": doc.get("away_elo"),
+        "elo_diff": doc.get("elo_diff"),
         "season_bonus": round(float(temporal_signals.get("season_bonus") or 0.0), 4),
         "time_decay_bonus": round(float(temporal_signals.get("time_decay_bonus") or 0.0), 4),
         "temporal_bonus": round(float(temporal_signals.get("temporal_bonus") or 0.0), 4),
@@ -1069,6 +1145,7 @@ def retrieve_hybrid_context(
         query["competition_bucket"] = inferred_context["competition_bucket"]
     if not query.get("competition_stage_name") and inferred_context.get("competition_stage_name"):
         query["competition_stage_name"] = inferred_context["competition_stage_name"]
+    _annotate_query_elo(query, base_dir)
     query_terms = _tokenize_text(query.get("text") or "")
 
     ranked_docs: List[Tuple[float, float, float, float, Dict[str, Any], Dict[str, Any]]] = []
@@ -1080,6 +1157,7 @@ def retrieve_hybrid_context(
         bm25 = _bm25_score(doc, query_terms, index_payload)
         structured_bonus = _structured_bonus(doc, query)
         market_bonus = _market_similarity_bonus(doc, query)
+        rating_bonus = _rating_similarity_bonus(doc, query)
         temporal_signals = _temporal_bonus(doc, query)
         case_type = str(doc.get("case_type") or "")
         type_bias = {
@@ -1088,7 +1166,7 @@ def retrieve_hybrid_context(
             "upset_case": 0.3,
         }.get(case_type, 0.0)
         temporal_bonus = float(temporal_signals.get("temporal_bonus") or 0.0)
-        total_score = bm25 + structured_bonus + market_bonus + type_bias + temporal_bonus
+        total_score = bm25 + structured_bonus + market_bonus + rating_bonus + type_bias + temporal_bonus
         ranked_docs.append((total_score, bm25, market_bonus, structured_bonus, doc, temporal_signals))
 
     ranked_docs.sort(

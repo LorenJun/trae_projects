@@ -50,6 +50,14 @@
 5. `domain/persistence.py` 负责预测落盘 side effects
 6. `runtime/result_sync.py` 与 `result_manager.py` 负责赛果同步、结果闭环与衍生数据更新
 
+### 共享基础模块（单一事实源 / 无状态工具）
+
+为避免魔法数字与纯逻辑散落在巨石文件里，下列模块集中收口可复用基础能力：
+
+- `domain/constants.py`：算法参数的单一事实源（SoT），收口 Dixon-Coles `RHO_MAP` / `resolve_rho`、主场系数 `HOME_ADVANTAGE_MAP` / `resolve_home_advantage`、strength→ELO 播种公式 `strength_to_seed_rating`。`inference.py` / `result_manager.py` / `ml_prediction_models.py` 统一从这里取值，避免各处复制常量产生漂移。
+- `domain/note_parsing.py`：teams md 备注列与比分文本的无状态解析函数（胜负 / 信心 / 比分 / 大小球）。`ResultManager` 的同名 `_parse_*` 方法委托到此处，便于复用与单测。
+- `storage/_jsonio.py`：JSON 落盘的原子写（`atomic_write_json`）与带损坏告警的安全读取（`safe_read_json`）。评分（`storage/ratings.py`）、准确率（`storage/accuracy.py`）、归档（`storage/archive.py`）统一走原子写，避免半写文件损坏数据。
+
 ## 当前实时盘口回流链
 
 当前正式预测链已经把“赛程抓取、MatchID 定位、快照落盘、预测前注水、缺失盘口补抓”串成闭环：
@@ -244,6 +252,15 @@ europe_leagues/
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
 python3 -m unittest test_okooo_save_snapshot test_okooo_mobile_access test_okooo_fetch_daily_schedule test_okooo_browser
+```
+
+算法 / 持久化 / 评分相关核心测试（本轮体检后全套绿）：
+
+```bash
+cd /Users/bytedance/trae_projects/europe_leagues
+python3 -m unittest test_algorithm_fixes test_market_fusion test_rating_service test_json_io test_predict_match_e2e test_result_manager
+# 或一键全量
+python3 -m unittest discover -s . -p "test_*.py"
 ```
 
 如需显式运行 Playwright 烟雾测试：

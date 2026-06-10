@@ -562,7 +562,7 @@ def 判断爆冷类型(
                 return 爆冷类型.大球爆冷.value
             elif 实际进球 <= 1:
                 return 爆冷类型.小球爆冷.value
-        except:
+        except Exception:
             pass
 
     return 爆冷类型.弱队胜强队.value
