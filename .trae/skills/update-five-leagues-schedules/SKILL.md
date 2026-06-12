@@ -21,7 +21,7 @@ description: "用 500 轮次接口更新五大联赛 `teams_2025-26.md` 赛程�
 
 - 预测推理
 - archive 迁移
-- runtime-only 比赛写回
+- 非 SoT 赛事的 `archive_only` 归档写回
 - `MEMORY.md` 维护
 
 ## 与当前架构的关系

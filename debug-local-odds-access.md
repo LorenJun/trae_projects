@@ -51,7 +51,7 @@
   - `Referer: https://m.okooo.com/`
   - no-cache 头
   - cache-bust 参数
-  - 当前 `100` 组随机移动 profile 池
+  - 当前 `500` 组 `iPhone Safari` 移动 profile 池（跨多个 iPhone device pool）
 - `okooo_save_snapshot.py` 的首次打开路径已调整为：
   - 先开 `about:blank`
   - 再通过 `Page.navigate(..., referrer=...)` 进入目标页

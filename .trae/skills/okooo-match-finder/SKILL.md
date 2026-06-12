@@ -48,7 +48,7 @@ description: "澳客 MatchID 定位与预测入口衔接技能，按 `prediction
 - 欧赔真实入口：`https://m.okooo.com/match/odds.php?MatchID=<MatchID>`
 - 当前正式快照 driver：`local-chrome`
 - 当前正式访问口径：`iPhone Safari UA + Referer: https://m.okooo.com/`
-- 当前公共设备池：`100` 组随机 `iPhone Safari` profile
+- 当前公共设备池：`500` 组 `iPhone Safari` profile，分布在多个 iPhone device pool 上
 - 欧赔解析优先级：多公司明细 -> `multi_company_consensus` -> `99家平均` fallback
 - `okooo_fetch_daily_schedule.py` 现已支持自动翻月到目标年月、按日期分组抽取整天比赛、过滤 `盈亏/亚指/欧指/分析` 等噪声文案，并把结果落盘到 `.okooo-scraper/schedules/<league>/YYYY-MM-DD.json`
 - `okooo_save_snapshot.py` 现已支持自动翻月、日期分区扫描、按 `日期 + 主客队 + 时间` 精确锁定比赛行，避免误点同日其它场次

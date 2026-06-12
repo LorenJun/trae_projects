@@ -44,7 +44,7 @@ description: "足球比赛预测主技能，按 `prediction_system.py` 发现入
 - 默认快照 driver：`local-chrome`
 - 默认请求特征：`iPhone Safari UA + Referer: https://m.okooo.com/`
 - 公共移动 profile 池：`europe_leagues/okooo_mobile_access.py`
-- 当前设备池规模：`100` 组随机 `iPhone Safari` profile
+- 当前设备池规模：`500` 组 `iPhone Safari` profile，分布在多个 iPhone device pool 上
 - 欧赔解析优先 `multi_company_consensus`；`99家平均` 仅作为 fallback
 
 ## 当前正式命令面
@@ -64,9 +64,9 @@ description: "足球比赛预测主技能，按 `prediction_system.py` 发现入
 
 ## SoT 写回边界（二元）
 
-写回边界已收敛为二元：**只有 SoT-backed 正式联赛才写回，其余一律只输出预测结果。**
+写回边界已收敛为二元：**只有 SoT-backed 正式联赛走完整写回；其余赛事走 `archive_only`（仅归档 + 赛果同步 + 准确率，不写 MEMORY/RAG/teams md）。**
 
-### SoT-backed（唯一允许写回）
+### SoT-backed（完整写回）
 
 以下且仅以下 competition 允许写回 teams md / `MEMORY.md` 滚动记忆 / RAG / 赛果同步登记：
 
@@ -79,9 +79,9 @@ description: "足球比赛预测主技能，按 `prediction_system.py` 发现入
 
 判定逻辑见 `app/cli.py` 的 `SOT_BACKED_LEAGUE_CODES` 与 `is_sot_backed_league()`。
 
-### 其余一切赛事（只输出，不写回）
+### 其余一切赛事（archive_only，仅归档不写 MEMORY/RAG/teams md）
 
-欧战（`europa_league` / `champions_league` / `conference_league`）、其他杯赛、友谊赛（`friendly`）以及任何非上述六个联赛的 competition：`predict-match` 强制 `persist=False`，**不写 teams md、不写 `MEMORY.md`、不进 RAG、不进归档**，结果标 `persisted.skipped_reason = "non_sot_league_output_only"`。
+欧战（`europa_league` / `champions_league` / `conference_league`）、其他杯赛、友谊赛（`friendly`）以及任何非上述六个联赛的 competition：`predict-match` 走 `archive_only` 路径（`persist=True, archive_only=True`），**只归档预测 + 登记赛果同步 + 刷新准确率，不写 teams md、不写 `MEMORY.md`、不进 RAG**，结果标 `persisted.archive_only=True`、`memory_updated=False`、`archived=True`。
 
 ## 关键规则
 
@@ -90,7 +90,7 @@ description: "足球比赛预测主技能，按 `prediction_system.py` 发现入
 - 若球队在赛程里显示简称，需结合 `okooo_team_aliases.json`
 - 若赛程页当前停在错误月份，应优先依赖脚本自动翻月，而不是手工假设日期标签可直接点击
 - 若 `collect-data` 已有真实快照，`predict-match` 应优先复用并注入，而不是重新走弱兜底
-- 新预测只有 SoT 联赛（五大联赛 + 世界杯）才写回 teams md / MEMORY / RAG / result sync registry；其余赛事一律只输出预测，不写回
+- 新预测只有 SoT 联赛（五大联赛 + 世界杯）才完整写回 teams md / MEMORY / RAG / result sync registry；其余赛事走 `archive_only`，仅归档 + 赛果同步，不写 MEMORY/RAG/teams md
 - 赛后回填应优先走 `save-result` / `auto-sync-results` / `result-sync-daemon` / `sync-pending-results-review`
 - 默认使用 CLI-first，不要把底层 Python import 当成标准用户流程
 

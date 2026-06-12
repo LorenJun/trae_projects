@@ -444,7 +444,8 @@ class CliPersistenceTest(unittest.TestCase):
             cli.run_openclaw_predict_match(args)
 
         self.assertEqual(calls[0]["league_code"], "friendly")
-        self.assertFalse(calls[0]["persist"])
+        self.assertTrue(calls[0]["persist"])
+        self.assertTrue(calls[0]["archive_only"])
         self.assertEqual(calls[0]["analysis_context"]["competition_type"], "friendly")
         self.assertEqual(calls[0]["analysis_context"]["okooo_league_name_override"], "友谊赛")
         self.assertTrue(captured["payload"]["data"]["reference_only"])
@@ -452,15 +453,8 @@ class CliPersistenceTest(unittest.TestCase):
         self.assertEqual(captured["payload"]["data"]["league_name"], "友谊赛")
         self.assertEqual(captured["payload"]["data"]["runtime_league_code"], "friendly")
         self.assertEqual(captured["payload"]["data"]["league_request"], "友谊赛")
-        self.assertEqual(
-            captured["payload"]["data"]["persisted"],
-            {
-                "enabled": False,
-                "archived": False,
-                "memory_updated": False,
-                "skipped_reason": "non_sot_league_output_only",
-            },
-        )
+        self.assertTrue(captured["payload"]["data"]["persisted"]["enabled"])
+        self.assertTrue(captured["payload"]["data"]["persisted"]["archive_only"])
         self.assertEqual(
             captured["payload"]["data"]["reference_only_live_market_notice"]["reason"],
             "friendly_match_requires_explicit_match_id_for_live_market",
@@ -509,7 +503,7 @@ class CliPersistenceTest(unittest.TestCase):
             {"enabled": True, "archived": False, "memory_updated": False},
         )
 
-    def test_predict_match_non_sot_league_outputs_without_persisting(self):
+    def test_predict_match_non_sot_league_syncs_via_archive_only(self):
         captured = {}
         calls = []
 
@@ -548,16 +542,10 @@ class CliPersistenceTest(unittest.TestCase):
         ), patch("app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)):
             cli.run_openclaw_predict_match(args)
 
-        self.assertFalse(calls[0]["persist"])
-        self.assertEqual(
-            captured["payload"]["data"]["persisted"],
-            {
-                "enabled": False,
-                "archived": False,
-                "memory_updated": False,
-                "skipped_reason": "non_sot_league_output_only",
-            },
-        )
+        self.assertTrue(calls[0]["persist"])
+        self.assertTrue(calls[0]["archive_only"])
+        self.assertTrue(captured["payload"]["data"]["persisted"]["enabled"])
+        self.assertTrue(captured["payload"]["data"]["persisted"]["archive_only"])
 
     def test_predict_match_sot_league_persists_by_default(self):
         captured = {}

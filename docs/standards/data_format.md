@@ -10,7 +10,7 @@ last_updated: "2026-05-08"
 > 1. `prediction_system.py` 是发现入口，真实命令实现位于 `europe_leagues/app/cli.py`  
 > 2. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
 > 3. `prediction_system.py predict-match` 执行增强预测，并自动接入 RAG 记忆层（足彩 14 场用 `predict-fourteen-issue`）  
-> 4. 只有 SoT 联赛（五大联赛 + 世界杯）才写回 `europe_leagues/<league>/teams_*.md` + `MEMORY.md` + RAG；其余一切赛事只输出预测结果，不写回  
+> 4. 只有 SoT 联赛（五大联赛 + 世界杯）才走完整写回 `europe_leagues/<league>/teams_*.md` + `MEMORY.md` + RAG + 归档；其余一切赛事走 `archive_only`，仅归档 + 赛果同步，不写 MEMORY/RAG/teams md  
 > 5. 赛后优先用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `sync-pending-results-review` 回填  
 > 6. `prediction_system.py accuracy --refresh --json` 是显式重建入口，不是唯一常规路径  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
@@ -27,10 +27,10 @@ last_updated: "2026-05-08"
 
 ## 当前事实与写回边界
 
-正式主流程采用双路径：
+正式主流程写回边界为二元：
 
-- 五大联赛 SoT：`europe_leagues/<league>/teams_2025-26.md`
-- 欧战/杯赛：`/Users/bytedance/trae_projects/MEMORY.md`
+- SoT 联赛（五大联赛 + 世界杯）完整写回：`europe_leagues/<league>/teams_2025-26.md`（世界杯 `teams_2026.md`）+ `MEMORY.md` + RAG + 归档
+- 非 SoT 赛事走 `archive_only`：仅归档 `prediction_archive.json` + 登记赛果同步，不写 `MEMORY.md`/RAG/teams md
 - 运行时归档：`prediction_archive.json`、`prediction_memory_odds_samples.json`、`result_sync_registry.json`
 - RAG 索引：`rag_cases.json`、`rag_index.json`、`rag_registry.json`
 - 欧战正式 competition config：`europa_league`、`champions_league`、`conference_league`
@@ -615,6 +615,6 @@ docs/
 ### 主流程写回验证
 
 - 五大联赛正式写回发生在 `teams_2025-26.md`
-- 欧战/杯赛正式写回发生在 `MEMORY.md` 与 `.okooo-scraper/runtime/`
+- 非 SoT 赛事走 `archive_only`，写回 `prediction_archive.json` 与 `.okooo-scraper/runtime/`，不写 `MEMORY.md`
 - 不把主流程结果写入旧 `predictions/`、`reports/` 目录
 - 批量回填与准确率刷新会更新 `teams_2025-26.md`、`MEMORY.md` 与 `.okooo-scraper/runtime/`

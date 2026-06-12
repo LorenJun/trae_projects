@@ -852,27 +852,31 @@ def run_openclaw_predict_match(args):
         # 只有 SoT 正式联赛（五大联赛 + 世界杯）才写回 teams md / MEMORY / RAG；
         # 其余赛事（杯赛、欧战、友谊赛等）一律只输出预测。
         sot_backed = is_sot_backed_league(runtime_league_code)
-        persist = not bool(getattr(args, "no_write", False)) and sot_backed
+        write_enabled = not bool(getattr(args, "no_write", False))
+        # SoT 联赛走完整写回；非 SoT 联赛仅归档同步网页，不写 MEMORY/RAG/teams md。
+        persist = write_enabled
+        archive_only = write_enabled and not sot_backed
         result = predictor.predict_match(
             home_team=args.home_team,
             away_team=args.away_team,
             league_code=runtime_league_code,
             match_date=args.date,
             match_id=getattr(args, "match_id", "") or "",
-            force_refresh_odds=not getattr(args, "no_refresh_odds", False),
+            force_refresh_odds=True,
             okooo_driver=getattr(args, "okooo_driver", "local-chrome"),
             okooo_headed=bool(getattr(args, "okooo_headed", False)),
             match_time=getattr(args, "match_time", "") or "",
             league_hint=getattr(args, "league_hint", None),
             analysis_context=ctx,
             persist=persist,
+            archive_only=archive_only,
         )
         if not persist:
             result["persisted"] = {"enabled": False, "archived": False, "memory_updated": False}
-            if not bool(getattr(args, "no_write", False)) and not sot_backed:
-                result["persisted"]["skipped_reason"] = "non_sot_league_output_only"
         else:
             result.setdefault("persisted", {"enabled": True, "archived": False, "memory_updated": False})
+            if archive_only:
+                result["persisted"].setdefault("archive_only", True)
         if reference_only:
             result["reference_only"] = True
             result["league_code"] = reference_only_code
@@ -920,6 +924,13 @@ def run_openclaw_predict_match(args):
         reason = str(over_under.get("reason") or "missing_real_market_line").strip()
         print(f"大小球: 待补真实盘口 ({reason})")
     _print_betting_advice(result)
+    dealer_labels = result.get("dealer_warning_labels")
+    if isinstance(dealer_labels, list) and dealer_labels:
+        pattern = result.get("dealer_operation_pattern") if isinstance(result.get("dealer_operation_pattern"), dict) else {}
+        verdict_cn = {'deceptive': '诱导', 'genuine': '真实', 'neutral': '中性'}.get(pattern.get('verdict'), '')
+        pattern_cn = str(pattern.get('pattern_cn') or '')
+        head = f"[{pattern_cn}·{verdict_cn}] " if (pattern_cn or verdict_cn) else ""
+        print(f"庄家操盘警示: {head}" + " ".join(str(x) for x in dealer_labels))
     narrative = str(result.get("market_change_narrative") or "").strip()
     if narrative:
         print(f"数据变化解读: {narrative}")
@@ -1768,7 +1779,6 @@ def build_parser():
     parser_predict_match.add_argument("--okooo-driver", default="local-chrome", help="刷新澳客快照的 driver（默认 local-chrome；browser-use 仅显式调试时使用）")
     parser_predict_match.add_argument("--okooo-headed", action="store_true", help="browser-use 以有头模式运行（仅显式指定 browser-use 时生效）")
     parser_predict_match.add_argument("--time", dest="match_time", default="", help="比赛时间 HH:MM（用于赛程精准定位）")
-    parser_predict_match.add_argument("--no-refresh-odds", action="store_true", help="不刷新澳客实时赔率（仅使用本地/空赔率）")
     parser_predict_match.add_argument("--context-file", default="", help="补充信息 JSON 文件（战术/战意/首发/临场等）")
     parser_predict_match.add_argument("--no-write", action="store_true", help="只输出预测结果，不写入 MEMORY.md/归档")
     add_json_flag(parser_predict_match)

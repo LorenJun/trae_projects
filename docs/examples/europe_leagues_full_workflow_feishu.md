@@ -279,8 +279,8 @@ flowchart LR
 
 这让系统具备了两个关键特性：
 
-- 只有正式的五大联赛 / 世界杯赛事才会落链写回 markdown、archive、memory、RAG
-- 其他赛事（杯赛、欧战、友谊赛等）一律只输出预测结果，不产生写回副作用
+- 只有正式的五大联赛 / 世界杯赛事才会落链完整写回 markdown、archive、memory、RAG
+- 其他赛事（杯赛、欧战、友谊赛等）走 `archive_only`：仅归档 + 赛果同步 + 刷新准确率，不写 MEMORY/RAG/teams md
 
 ---
 
@@ -514,17 +514,17 @@ sequenceDiagram
 - 动态调权状态
 - MatchID
 
-### 8.2 其他赛事：一律只输出，不写回
+### 8.2 其他赛事：archive_only（仅归档，不写 MEMORY/RAG/teams md）
 
-欧战、杯赛、友谊赛等所有非 SoT 赛事（如欧冠、欧联、欧协联、各国杯赛、国家队友谊赛等）一律只输出预测结果，不触发任何写回副作用：
+欧战、杯赛、友谊赛等所有非 SoT 赛事（如欧冠、欧联、欧协联、各国杯赛、国家队友谊赛等）走 `archive_only` 路径（`persist=True, archive_only=True`），只做归档与赛果同步：
 
-- 不写 markdown 事实源
-- 不 archive
+- 不写 markdown 事实源（teams md）
+- **会 archive** 预测结果到 `prediction_archive.json`
 - 不更新 `MEMORY.md`
 - 不写 RAG 记忆
-- 不注册赛果同步
+- **会注册赛果同步**并刷新准确率/仪表盘
 
-此类比赛的 `persisted` 字段会标记 `skipped_reason = "non_sot_league_output_only"`，明确表示其只输出、不落盘。
+此类比赛的 `persisted` 字段会标记 `archive_only=True`、`memory_updated=False`、`archived=True`，明确表示其仅归档同步、不写 MEMORY/RAG/teams md。
 
 ### 8.3 写回层的工程约束
 

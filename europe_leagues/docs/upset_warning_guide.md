@@ -94,7 +94,7 @@ python3 prediction_system.py harness-run \
 其落盘与后续闭环仍遵循正式主链：
 
 - 五大联赛 / 世界杯：写 SoT-backed markdown
-- 欧战 / 杯赛：写 `MEMORY.md` 与 runtime-only 归档
+- 欧战 / 杯赛：走 `archive_only`，仅归档 + 赛果同步，不写 `MEMORY.md`/RAG/teams md
 - 赛后结果通过 `save-result` / `auto-sync-results` / `result-sync-daemon` / `sync-pending-results-review` 进入结果闭环
 
 ## 什么时候才用底层 Python 调试

@@ -297,6 +297,33 @@ class ResultManager:
                     return file_path, payload
         return '', None
 
+    def _find_snapshot_file_by_teams(
+        self, league_code: str, home_team: str, away_team: str, match_date: str = ''
+    ) -> tuple[str, Optional[Dict[str, Any]]]:
+        home = str(home_team or '').strip()
+        away = str(away_team or '').strip()
+        if not home or not away:
+            return '', None
+        wanted_date = str(match_date or '').strip()
+        for snap_dir in self._snapshot_dirs_for_competition(league_code):
+            if not os.path.isdir(snap_dir):
+                continue
+            for name in sorted(os.listdir(snap_dir)):
+                if not name.endswith('.json'):
+                    continue
+                file_path = os.path.join(snap_dir, name)
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        payload = json.load(f)
+                except Exception:
+                    continue
+                if (str(payload.get('home_team') or '').strip() == home
+                        and str(payload.get('away_team') or '').strip() == away):
+                    if wanted_date and str(payload.get('match_date') or '').strip() != wanted_date:
+                        continue
+                    return file_path, payload
+        return '', None
+
     @staticmethod
     def _snapshot_totals_line_source(snapshot: Optional[Dict[str, Any]]) -> str:
         if not isinstance(snapshot, dict):
@@ -1173,6 +1200,33 @@ class ResultManager:
         _path, payload = self._find_snapshot_file_by_match_id(league_code, match_id)
         return payload
 
+    def _resolve_snapshot_for_result(self, result_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        league_code = result_data.get('league')
+        if not league_code:
+            return None
+        candidate_ids = []
+        for key in ('external_match_id', 'match_id', 'internal_match_id', 'teams_match_id'):
+            value = str(result_data.get(key) or '').strip()
+            if value and value not in candidate_ids:
+                candidate_ids.append(value)
+        external = first_valid_external_match_id(
+            result_data.get('external_match_id'),
+            result_data.get('match_id'),
+        )
+        if external and external not in candidate_ids:
+            candidate_ids.insert(0, external)
+        for mid in candidate_ids:
+            _path, payload = self._find_snapshot_file_by_match_id(league_code, mid)
+            if payload:
+                return payload
+        _path, payload = self._find_snapshot_file_by_teams(
+            league_code,
+            result_data.get('home_team'),
+            result_data.get('away_team'),
+            result_data.get('match_date') or '',
+        )
+        return payload
+
     def _get_snapshot_europe_odds(self, snapshot: Optional[Dict[str, Any]]) -> Optional[Dict[str, float]]:
         if not isinstance(snapshot, dict):
             return None
@@ -1707,11 +1761,19 @@ class ResultManager:
 
     def _hydrate_prediction_fields(self, result_data: Dict[str, Any]) -> Dict[str, Any]:
         hydrated = dict(result_data)
+        archive = self._load_prediction_archive()
+        archived = archive.get(str(hydrated.get('match_id') or '')) or {}
+        if not hydrated.get('external_match_id'):
+            external = first_valid_external_match_id(
+                archived.get('external_match_id'),
+                archived.get('match_id'),
+                (archived.get('full_prediction') or {}).get('external_match_id'),
+            )
+            if external:
+                hydrated['external_match_id'] = external
         if hydrated.get('predicted_winner') in PREDICTED_WINNER_TEXT:
             return hydrated
 
-        archive = self._load_prediction_archive()
-        archived = archive.get(str(hydrated.get('match_id') or '')) or {}
         archived_predicted_winner = archived.get('predicted_winner')
         if archived_predicted_winner in PREDICTED_WINNER_TEXT:
             hydrated['predicted_winner'] = archived_predicted_winner
@@ -1772,7 +1834,7 @@ class ResultManager:
         standings = self._load_league_standings(result_data['league'])
         home_meta = standings.get(result_data['home_team'], {})
         away_meta = standings.get(result_data['away_team'], {})
-        snapshot = self._load_snapshot_by_match_id(result_data['league'], result_data['match_id'])
+        snapshot = self._resolve_snapshot_for_result(result_data)
         prediction_probability = self._estimate_prediction_probability(note, predicted_winner, snapshot)
 
         if not self._should_record_upset_case(
@@ -3652,6 +3714,14 @@ class ResultManager:
 
         self.accuracy_store.save(stats)
 
+        try:
+            from scripts.build_accuracy_dashboard import build_dashboard
+            build_dashboard(base_dir=self.base_dir)
+            stats['dashboard_refreshed'] = True
+        except Exception as exc:
+            logger.warning("刷新准确率仪表盘失败: %s", exc)
+            stats['dashboard_error'] = str(exc)
+
         logger.info("准确率统计已更新")
         return stats
 
@@ -3677,7 +3747,7 @@ class ResultManager:
         prediction_result = enhanced_pred.get('prediction', '')
         predicted_winner = {'主胜': 'home', '客胜': 'away', '平局': 'draw'}.get(prediction_result)
         top_scores = enhanced_pred.get('top_scores', [])
-        predicted_scores = [score for score, _prob in top_scores[:2]] if top_scores else []
+        predicted_scores = [score for score, _prob in top_scores[:3]] if top_scores else []
         predicted_score = '/'.join(predicted_scores) if predicted_scores else ''
         predicted_ou = None
         over_under = enhanced_pred.get('over_under', {})

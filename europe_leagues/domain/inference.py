@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from domain.constants import resolve_home_advantage, resolve_rho
@@ -99,6 +100,58 @@ class InferencePipelineService:
         if adjusted_confidence in (0.0, 0.99):
             diag['reason'] += '_clamped'
         return adjusted_confidence, diag
+
+    @staticmethod
+    def _mix_cross_direction_scores(
+        reranked_scores: Optional[List[Tuple[str, float]]],
+        score_probs: Optional[Dict[str, Any]],
+        limit: int = 3,
+    ) -> List[Tuple[str, float]]:
+        """以预测方向最可能比分为锚，再按全局比分分布补足，给出跨方向 top-N。
+
+        rerank_top_scores 输出严格限定在预测方向内（可能 3 个同向比分）。
+        这里保留其首选作为方向锚点（赢面最大的比分），其余名额用全局
+        Dixon-Coles 分布按概率补足，从而覆盖最可能出现的几个比分方向。
+        """
+        target = max(1, int(limit or 3))
+        anchored = [
+            (str(score).strip(), float(prob or 0.0))
+            for score, prob in (reranked_scores or [])
+            if str(score).strip()
+        ]
+        global_map = {
+            str(score).strip(): float(prob or 0.0)
+            for score, prob in (score_probs or {}).items()
+            if str(score).strip()
+        }
+        global_ranked = sorted(global_map.items(), key=lambda item: item[1], reverse=True)
+        final: List[Tuple[str, float]] = []
+        seen = set()
+        if anchored:
+            anchor_score = anchored[0][0]
+            anchor_prob = global_map.get(anchor_score, anchored[0][1])
+            final.append((anchor_score, anchor_prob))
+            seen.add(anchor_score)
+        for score, prob in global_ranked:
+            if len(final) >= target:
+                break
+            if score in seen:
+                continue
+            final.append((score, prob))
+            seen.add(score)
+        for score, prob in anchored:
+            if len(final) >= target:
+                break
+            if score in seen:
+                continue
+            final.append((score, prob))
+            seen.add(score)
+        if not final:
+            return list(anchored[:target])
+        total = sum(prob for _score, prob in final)
+        if total > 0:
+            final = [(score, prob / total) for score, prob in final]
+        return sorted(final, key=lambda item: item[1], reverse=True)[:target]
 
     @staticmethod
     def _rerank_scores_for_under_three(
@@ -938,6 +991,21 @@ class InferencePipelineService:
             '受让两球': 2.0,
             '受让两球/两球半': 2.25,
             '受让两球半': 2.5,
+            '受平手': 0.0,
+            '受平手/半球': 0.25,
+            '受平/半': 0.25,
+            '受半球': 0.5,
+            '受半': 0.5,
+            '受半球/一球': 0.75,
+            '受半/一': 0.75,
+            '受一球': 1.0,
+            '受一球/球半': 1.25,
+            '受一/球半': 1.25,
+            '受球半': 1.5,
+            '受球半/两球': 1.75,
+            '受两球': 2.0,
+            '受两球/两球半': 2.25,
+            '受两球半': 2.5,
         }
         return mapping.get(raw.replace(' ', ''))
 
@@ -1398,13 +1466,530 @@ class InferencePipelineService:
         diag['calibration_weight'] = weight
         return diag
 
-    def _resolve_home_advantage(self, league_code: str) -> float:
+    def detect_market_movement_sentiment(
+        self,
+        european_odds: Optional[Dict[str, Any]],
+        asian_handicap: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """识别盘口动态运动中的「虚热诱下」情绪信号（initial→final）。
+
+        两类诱下特征：
+        1) 欧赔虚热：热门侧赔率被压低 + 冷门侧赔率被明显抬高 → 公众资金被往热门方向赶。
+        2) 盘水背离：亚盘不升盘（甚至退盘）却让热门侧水位大幅走低 → 庄家不愿为"赢球"
+           背书、只用低水/低赔制造表面铁热；或升盘同时配高水（抬人气诱下）。
+
+        返回 luring_side（被诱、即应警惕方向）+ strength（0~1）+ reasons/signals。
+        仅做检测，不改概率（由 apply_market_sentiment_adjustment 消费）。
+        """
+        diag: Dict[str, Any] = {
+            'available': False,
+            'detected': False,
+            'luring_side': None,
+            'strength': 0.0,
+            'reasons': [],
+            'signals': [],
+        }
+        if not isinstance(european_odds, dict):
+            diag['reason'] = 'missing_european_odds'
+            return diag
+        ini = european_odds.get('initial') if isinstance(european_odds.get('initial'), dict) else {}
+        fin = european_odds.get('final') if isinstance(european_odds.get('final'), dict) else {}
+        oh_i, od_i, oa_i = self._to_float(ini.get('home')), self._to_float(ini.get('draw')), self._to_float(ini.get('away'))
+        oh_f, od_f, oa_f = self._to_float(fin.get('home')), self._to_float(fin.get('draw')), self._to_float(fin.get('away'))
+        if not all(isinstance(v, float) and v > 1.01 for v in (oh_i, od_i, oa_i, oh_f, od_f, oa_f)):
+            diag['reason'] = 'missing_euro_initial_or_final'
+            return diag
+        diag['available'] = True
+
+        # 终盘市场强侧
+        ph_f, pa_f = 1.0 / oh_f, 1.0 / oa_f
+        fav_side = 'home' if ph_f >= pa_f else 'away'
+        dog_side = 'away' if fav_side == 'home' else 'home'
+        diag['market_favorite'] = fav_side
+
+        # 赔率变动率（正=赔率走高/被看衰，负=赔率走低/被加注）
+        fav_odds_move = ((oh_f - oh_i) / oh_i) if fav_side == 'home' else ((oa_f - oa_i) / oa_i)
+        dog_odds_move = ((oa_f - oa_i) / oa_i) if fav_side == 'home' else ((oh_f - oh_i) / oh_i)
+        diag['fav_odds_move'] = round(fav_odds_move, 4)
+        diag['dog_odds_move'] = round(dog_odds_move, 4)
+
+        score = 0.0
+        reasons: List[str] = []
+        signals: List[str] = []
+
+        # 信号1：欧赔虚热 —— 热门赔率被压低且冷门赔率被明显抬高
+        if fav_odds_move <= -0.04 and dog_odds_move >= 0.10:
+            mag = min(0.45, abs(fav_odds_move) * 1.5 + dog_odds_move * 0.9)
+            score += mag
+            reasons.append(f'欧赔虚热：热门侧赔率降{abs(fav_odds_move)*100:.1f}%、冷门侧涨{dog_odds_move*100:.1f}%')
+            signals.append('euro_favorite_pump')
+
+        # 信号2：盘水背离（亚盘 initial→final）
+        if isinstance(asian_handicap, dict):
+            a_ini = asian_handicap.get('initial') if isinstance(asian_handicap.get('initial'), dict) else {}
+            a_fin = asian_handicap.get('final') if isinstance(asian_handicap.get('final'), dict) else {}
+            hcp_i = self._parse_handicap_value(
+                a_ini.get('handicap') if 'handicap' in a_ini else a_ini.get('handicap_value') if 'handicap_value' in a_ini else a_ini.get('handicap_text')
+            )
+            hcp_f = self._parse_handicap_value(
+                a_fin.get('handicap') if 'handicap' in a_fin else a_fin.get('handicap_value') if 'handicap_value' in a_fin else a_fin.get('handicap_text')
+            )
+            # 热门侧水位（让球方）
+            fav_water_i = self._to_float(a_ini.get('home_water')) if fav_side == 'home' else self._to_float(a_ini.get('away_water'))
+            fav_water_f = self._to_float(a_fin.get('home_water')) if fav_side == 'home' else self._to_float(a_fin.get('away_water'))
+            diag['handicap_initial'] = hcp_i
+            diag['handicap_final'] = hcp_f
+            if isinstance(fav_water_i, float) and isinstance(fav_water_f, float):
+                water_move = fav_water_f - fav_water_i
+                diag['fav_water_move'] = round(water_move, 4)
+                hcp_deepened = (
+                    hcp_i is not None and hcp_f is not None and abs(hcp_f) - abs(hcp_i) > 0.06
+                )
+                hcp_flat_or_retreat = (
+                    hcp_i is not None and hcp_f is not None and abs(hcp_f) - abs(hcp_i) <= 0.06
+                )
+                # 2a：盘不升而热门水大降 —— 庄家不愿为赢球背书的典型诱下
+                if hcp_flat_or_retreat and water_move <= -0.20:
+                    mag = min(0.40, abs(water_move) * 0.9)
+                    score += mag
+                    reasons.append(f'盘水背离：盘口未升而热门侧主水大降{abs(water_move):.2f}（不愿为赢球背书）')
+                    signals.append('handicap_flat_water_drop')
+                # 2b：升盘同时配高水 —— 抬人气诱下
+                elif hcp_deepened and water_move >= 0.12:
+                    mag = min(0.32, water_move * 1.2)
+                    score += mag
+                    reasons.append(f'升盘配高水：让球加深但热门侧升水{water_move:.2f}（抬人气诱下）')
+                    signals.append('handicap_up_water_up')
+
+        if not signals:
+            diag['reason'] = 'no_luring_signal'
+            return diag
+
+        strength = max(0.0, min(1.0, score))
+        diag['detected'] = strength >= 0.18
+        diag['strength'] = round(strength, 4)
+        diag['luring_side'] = fav_side  # 被诱方向=被抬热的热门，应警惕其不胜
+        diag['protect_side'] = dog_side
+        diag['reasons'] = reasons
+        diag['signals'] = signals
+        return diag
+
+    def apply_market_sentiment_adjustment(
+        self,
+        *,
+        final_prob: Dict[str, float],
+        sentiment: Optional[Dict[str, Any]],
+    ) -> Tuple[Dict[str, float], Dict[str, Any]]:
+        """消费 detect_market_movement_sentiment：检测到虚热诱下时，
+        从被诱（热门）方向回撤概率，补给平局 + 被看衰方向，并给出预警。
+
+        回撤幅度 = strength * 0.10，封顶 0.07，且保留热门方向不低于 0.02。
+        """
+        diag: Dict[str, Any] = {'applied': False, 'source': 'market_movement_sentiment'}
+        if not isinstance(final_prob, dict) or not isinstance(sentiment, dict):
+            diag['reason'] = 'missing_inputs'
+            return final_prob, diag
+        if not sentiment.get('detected'):
+            diag['reason'] = str(sentiment.get('reason') or 'not_detected')
+            return final_prob, diag
+        luring = sentiment.get('luring_side')
+        if luring not in ('home', 'away'):
+            diag['reason'] = 'invalid_luring_side'
+            return final_prob, diag
+
+        p_h = float(final_prob.get('home_win') or 0.0)
+        p_d = float(final_prob.get('draw') or 0.0)
+        p_a = float(final_prob.get('away_win') or 0.0)
+        total = p_h + p_d + p_a
+        if total <= 0:
+            diag['reason'] = 'invalid_probability_mass'
+            return final_prob, diag
+        p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
+
+        strength = float(sentiment.get('strength') or 0.0)
+        take = min(0.07, strength * 0.10)
+        luring_p = p_h if luring == 'home' else p_a
+        actual = min(take, max(0.0, luring_p - 0.02))
+        if actual < 0.004:
+            diag['reason'] = 'delta_below_threshold'
+            return final_prob, diag
+
+        # 回撤分配：60% 给平局、40% 给被看衰侧
+        give_draw = actual * 0.6
+        give_dog = actual * 0.4
+        if luring == 'home':
+            p_h -= actual
+            p_d += give_draw
+            p_a += give_dog
+        else:
+            p_a -= actual
+            p_d += give_draw
+            p_h += give_dog
+
+        s = p_h + p_d + p_a
+        final_prob = {'home_win': p_h / s, 'draw': p_d / s, 'away_win': p_a / s}
+        diag.update({
+            'applied': True,
+            'luring_side': luring,
+            'protect_side': sentiment.get('protect_side'),
+            'strength': round(strength, 4),
+            'delta_taken': round(actual, 4),
+            'reasons': sentiment.get('reasons'),
+            'signals': sentiment.get('signals'),
+            'warning': '盘口动态显示热门侧被虚抬（诱下嫌疑），已下调其胜率并补充平局/冷门方向',
+        })
+        return final_prob, diag
+
+    def classify_market_operation_pattern(
+        self,
+        *,
+        european_odds: Optional[Dict[str, Any]],
+        asian_handicap: Optional[Dict[str, Any]] = None,
+        ou_signal: Optional[Dict[str, Any]] = None,
+        kelly: Optional[Dict[str, Any]] = None,
+        market_sentiment: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """统一识别庄家「盘口×大小球×欧赔×凯利」交叉操盘手法，判别真实/诱导并打警示标签。
+
+        三大交叉场景：
+          1) 盘动+球动   2) 盘不动+球动   3) 盘不动+球不动（结合欧赔、凯利静态读盘）
+
+        判别三原则：
+          a. 明暗一致性——盘口可见方向与水位暗钱方向相反=诱导；
+          b. 背书意愿——升盘=愿为赢球背书(真)，配高水/退水=不愿背书(诱)；
+          c. 欧赔↔盘口/凯利同步——欧赔虚热却不被盘口或凯利跟随=人气虚抬。
+
+        仅做判别+给出 verdict/warning_labels/recommended_extra_retreat，
+        由 apply_market_operation_adjustment 消费做智能概率调整。
+        """
+        diag: Dict[str, Any] = {
+            'available': False,
+            'pattern': None,
+            'verdict': 'neutral',
+            'strength': 0.0,
+            'warning_labels': [],
+            'deception_signals': [],
+            'corroboration_signals': [],
+            'luring_side': None,
+            'favored_side': None,
+            'recommended_extra_retreat': 0.0,
+        }
+
+        sentiment = market_sentiment if isinstance(market_sentiment, dict) else {}
+        ou = ou_signal if isinstance(ou_signal, dict) else {}
+        senti_signals = sentiment.get('signals') if isinstance(sentiment.get('signals'), list) else []
+        ou_signals = ou.get('signals') if isinstance(ou.get('signals'), list) else []
+
+        fav_side = sentiment.get('market_favorite')
+        if fav_side not in ('home', 'away'):
+            # 欧赔缺失时由亚盘让球方推断强侧
+            hcp_f = None
+            if isinstance(asian_handicap, dict):
+                a_fin = asian_handicap.get('final') if isinstance(asian_handicap.get('final'), dict) else {}
+                hcp_f = self._parse_handicap_value(
+                    a_fin.get('handicap') if 'handicap' in a_fin else a_fin.get('handicap_value') if 'handicap_value' in a_fin else a_fin.get('handicap_text')
+                )
+            if isinstance(hcp_f, float):
+                fav_side = 'home' if hcp_f < 0 else 'away' if hcp_f > 0 else None
+        dog_side = 'away' if fav_side == 'home' else 'home' if fav_side == 'away' else None
+        diag['favored_side'] = fav_side
+
+        # 盘动判定：亚盘让球深度变化是否 > 0.06
+        handicap_moved = None
+        hcp_i = sentiment.get('handicap_initial')
+        hcp_f = sentiment.get('handicap_final')
+        if not isinstance(hcp_i, (int, float)) or not isinstance(hcp_f, (int, float)):
+            if isinstance(asian_handicap, dict):
+                a_ini = asian_handicap.get('initial') if isinstance(asian_handicap.get('initial'), dict) else {}
+                a_fin = asian_handicap.get('final') if isinstance(asian_handicap.get('final'), dict) else {}
+                hcp_i = self._parse_handicap_value(
+                    a_ini.get('handicap') if 'handicap' in a_ini else a_ini.get('handicap_value') if 'handicap_value' in a_ini else a_ini.get('handicap_text')
+                )
+                hcp_f = self._parse_handicap_value(
+                    a_fin.get('handicap') if 'handicap' in a_fin else a_fin.get('handicap_value') if 'handicap_value' in a_fin else a_fin.get('handicap_text')
+                )
+        if isinstance(hcp_i, (int, float)) and isinstance(hcp_f, (int, float)):
+            handicap_moved = abs(abs(float(hcp_f)) - abs(float(hcp_i))) > 0.06
+
+        # 球动判定：大小球升降盘，或单侧水位移动
+        ou_moved = None
+        if ou.get('available'):
+            ou_moved = bool(
+                ('ou_line_up' in ou_signals)
+                or ('ou_line_down' in ou_signals)
+                or ('over_water_drop' in ou_signals)
+                or ('under_water_drop' in ou_signals)
+            )
+
+        if handicap_moved is None and ou_moved is None and not senti_signals:
+            diag['reason'] = 'insufficient_market_dynamics'
+            return diag
+        diag['available'] = True
+
+        # 场景标签
+        hm = bool(handicap_moved)
+        om = bool(ou_moved)
+        if handicap_moved is None and ou_moved is None:
+            pattern = 'static_static'
+        elif hm and om:
+            pattern = 'handicap_move_ou_move'
+        elif (not hm) and om:
+            pattern = 'handicap_static_ou_move'
+        elif hm and (not om):
+            pattern = 'handicap_move_ou_static'
+        else:
+            pattern = 'static_static'
+        diag['pattern'] = pattern
+
+        # 方向轴与进球轴分离：方向诱导只由「欧赔深压/亚盘硬背离」驱动，
+        # 大小球暗钱仅作进球轴标签（pace_shift 已在 postprocess 生效），不翻转方向判定。
+        deception = 0.0
+        corroboration = 0.0
+        dsig: List[str] = []
+        csig: List[str] = []
+        labels: List[str] = []
+
+        fav_move = sentiment.get('fav_odds_move')
+        dog_move = sentiment.get('dog_odds_move')
+        # 欧赔深压：热门侧赔率被压低 ≥7%（普通强队走热通常 <7%，避免误报）
+        deep_euro_pump = (
+            'euro_favorite_pump' in senti_signals
+            and isinstance(fav_move, (int, float))
+            and float(fav_move) <= -0.07
+        )
+        light_euro_pump = ('euro_favorite_pump' in senti_signals) and not deep_euro_pump
+        handicap_deepened = (
+            hm and isinstance(hcp_i, (int, float)) and isinstance(hcp_f, (int, float))
+            and abs(float(hcp_f)) - abs(float(hcp_i)) > 0.06
+        )
+
+        # ——欧赔轴——
+        if deep_euro_pump:
+            mag = min(0.45, abs(float(fav_move)) * 1.5 + abs(float(dog_move or 0.0)) * 0.9)
+            deception += mag
+            dsig.append('euro_deep_favorite_pump')
+            labels.append('⚠️欧赔深压·热门被人气虚抬')
+        elif light_euro_pump:
+            # 轻度走热=正常强队被看好，不计方向诱导，仅提示
+            labels.append('◽欧赔小幅走热·属强队正常被看好')
+        elif isinstance(fav_move, (int, float)) and isinstance(dog_move, (int, float)) and fav_move <= -0.02 and dog_move <= 0.02:
+            corroboration += min(0.18, abs(float(fav_move)) * 1.2)
+            csig.append('euro_fav_compressed_consensus')
+
+        # ——亚盘轴——
+        if 'handicap_flat_water_drop' in senti_signals:
+            deception += min(0.40, abs(float(sentiment.get('fav_water_move') or 0.0)) * 0.9)
+            dsig.append('handicap_flat_water_drop')
+            labels.append('⚠️盘不升·热门水大降（不愿为赢球背书）')
+        if handicap_deepened:
+            fav_water_move = sentiment.get('fav_water_move')
+            # 升盘=愿为赢球背书。仅当「欧赔深压」同现，升盘配高水才成立诱下；
+            # 否则升盘默认背书豁免（升盘配底水更强），避免把正常升盘误判为诱导。
+            if 'handicap_up_water_up' in senti_signals and deep_euro_pump:
+                deception += min(0.20, abs(float(fav_water_move or 0.0)) * 0.8)
+                dsig.append('handicap_up_water_up_with_deep_pump')
+                labels.append('⚠️升盘配高水叠加欧赔深压·抬人气诱下')
+            elif not deep_euro_pump:
+                # 欧赔深压时不给背书印证，避免与诱导判定自相矛盾
+                corroboration += 0.16
+                csig.append('handicap_up_endorsed')
+                labels.append('✅升盘背书·庄家愿为赢球加深让步')
+
+        # ——大小球轴（进球轴，独立于方向判定）——
+        goal_labels: List[str] = []
+        div = ou.get('ou_line_water_divergence') if isinstance(ou.get('ou_line_water_divergence'), dict) else None
+        if div:
+            side = div.get('side')
+            if side == 'over':
+                goal_labels.append('⚠️降盘底水给大·暗钱买大球')
+            else:
+                goal_labels.append('⚠️升盘压小水·暗钱买小球')
+        nudge = ou.get('ou_flat_water_nudge') if isinstance(ou.get('ou_flat_water_nudge'), dict) else None
+        if nudge:
+            side = nudge.get('side')
+            goal_labels.append(f'✅盘锁·{"大" if side == "over" else "小"}球底水真买（弱）')
+        labels.extend(goal_labels)
+
+        # ——凯利轴（仅放大方向诱导，不单独触发）——
+        kd = None
+        if isinstance(kelly, dict):
+            kfin = kelly.get('final') if isinstance(kelly.get('final'), dict) else kelly
+            kd = self._to_float(kfin.get('draw') if isinstance(kfin, dict) else None)
+        if isinstance(kd, float):
+            if kd <= 0.95 and dsig:
+                deception += 0.06
+                dsig.append('kelly_draw_low_amplifier')
+                labels.append('⚠️凯利平局偏低·放大诱下嫌疑')
+            elif 0.97 <= kd <= 1.03 and not dsig:
+                corroboration += 0.10
+                csig.append('kelly_consensus_stable')
+
+        deception = max(0.0, min(1.0, deception))
+        corroboration = max(0.0, min(1.0, corroboration))
+        net = deception - corroboration
+        if net >= 0.18:
+            verdict = 'deceptive'
+            strength = deception
+        elif net <= -0.12 and not dsig:
+            verdict = 'genuine'
+            strength = corroboration
+        else:
+            verdict = 'neutral'
+            strength = max(deception, corroboration)
+
+        # 警示标签兜底（全场景打标）
+        pattern_cn = {
+            'handicap_move_ou_move': '盘动+球动',
+            'handicap_static_ou_move': '盘不动+球动',
+            'handicap_move_ou_static': '盘动+球不动',
+            'static_static': '盘不动+球不动',
+        }.get(pattern, pattern)
+        if verdict == 'genuine' and not any(lbl.startswith('✅') for lbl in labels):
+            labels.append(f'✅{pattern_cn}·盘水欧凯同向（真实）')
+        elif verdict == 'neutral':
+            labels.append(f'◽{pattern_cn}·信号不足/中性')
+
+        # 标准力度：诱导额外回撤最多 +0.05
+        extra_retreat = 0.0
+        if verdict == 'deceptive' and dog_side is not None:
+            extra_retreat = round(min(0.05, strength * 0.07), 4)
+
+        diag.update({
+            'pattern_cn': pattern_cn,
+            'handicap_moved': handicap_moved,
+            'ou_moved': ou_moved,
+            'verdict': verdict,
+            'strength': round(strength, 4),
+            'deception_score': round(deception, 4),
+            'corroboration_score': round(corroboration, 4),
+            'deception_signals': dsig,
+            'corroboration_signals': csig,
+            'warning_labels': labels,
+            'luring_side': fav_side if verdict == 'deceptive' else None,
+            'recommended_extra_retreat': extra_retreat,
+        })
+        return diag
+
+    def _load_operation_weights(self) -> Dict[str, Any]:
+        """惰性加载已学习的操盘信号可靠度系数（runtime/operation_weights.json）。
+
+        文件不存在或样本不足时返回 {}，调权自动退化为「仅提示不改概率」。
+        系数由 tools/learn_operation_weights.py 离线从归档学习并写入，绑定留出表现。
+        """
+        cached = getattr(self, '_operation_weights_cache', None)
+        if cached is not None:
+            return cached
+        weights: Dict[str, Any] = {}
+        try:
+            import json
+            from runtime.paths import get_default_paths
+            path = get_default_paths().runtime_file('operation_weights.json')
+            if path.exists():
+                payload = json.loads(path.read_text(encoding='utf-8'))
+                if isinstance(payload, dict):
+                    w = payload.get('weights')
+                    weights = w if isinstance(w, dict) else {}
+        except Exception:
+            weights = {}
+        self._operation_weights_cache = weights
+        return weights
+
+    def apply_market_operation_adjustment(
+        self,
+        *,
+        final_prob: Dict[str, float],
+        pattern_diag: Optional[Dict[str, Any]],
+        delta_vector: Optional[Dict[str, Any]] = None,
+        weights: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Dict[str, float], Dict[str, Any]]:
+        """两层动态调权：调整量 = 逐场Δ向量 · 各信号历史可靠度系数。
+
+        - 第一层 delta_vector：该场实时盘口位移（每场不同，贴合当场数据）；
+        - 第二层 weights：每个信号的可靠度(reliability)与方向(sign)，从历史赛果学出，
+          绑定留出表现；样本/显著性不足则 reliability=0，对应信号自动失效。
+        合成 score（标准化后加权和）：>0=印证强侧(真实看好)，<0=诱导嫌疑。
+        所有系数为 0（如当前样本不足）时 score=0，恒返回 applied=False、概率不变，
+        等价「仅透传警示标签」。无写死方向阈值，随样本增长自动生效/退化。
+        警示标签始终透传，不受 applied 影响。
+        """
+        from domain.operation_weight_learner import score_delta
+
+        diag: Dict[str, Any] = {'applied': False, 'source': 'market_operation_pattern'}
+        if not isinstance(final_prob, dict) or not isinstance(pattern_diag, dict):
+            diag['reason'] = 'missing_inputs'
+            return final_prob, diag
+        diag['verdict'] = pattern_diag.get('verdict')
+        diag['pattern'] = pattern_diag.get('pattern')
+        diag['warning_labels'] = pattern_diag.get('warning_labels')
+
+        if weights is None:
+            weights = self._load_operation_weights()
+        fav_side = pattern_diag.get('favored_side')
+        if not isinstance(delta_vector, dict) or fav_side not in ('home', 'away'):
+            diag['reason'] = 'missing_delta_or_favorite'
+            return final_prob, diag
+
+        score, active = score_delta(delta_vector, weights)
+        diag['score'] = round(score, 4)
+        diag['active_signals'] = active
+        if not active or abs(score) < 1e-9:
+            # 无可靠信号(系数全0/样本不足) → 不改概率，仅提示。这是防过拟合的预期行为。
+            diag['reason'] = 'no_reliable_signal_label_only'
+            return final_prob, diag
+
+        p_h = float(final_prob.get('home_win') or 0.0)
+        p_d = float(final_prob.get('draw') or 0.0)
+        p_a = float(final_prob.get('away_win') or 0.0)
+        total = p_h + p_d + p_a
+        if total <= 0:
+            diag['reason'] = 'invalid_probability_mass'
+            return final_prob, diag
+        p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
+
+        # 连续力度：score 经 tanh 压到 (-1,1)，再封顶 ±0.05。逐场连续，无写死阈值。
+        delta = round(math.tanh(score) * 0.05, 4)
+        fav_p = p_h if fav_side == 'home' else p_a
+
+        if delta < 0:  # 诱导嫌疑：从强侧回撤，60%给平局、40%给冷门
+            take = min(abs(delta), max(0.0, fav_p - 0.02))
+            if take < 0.004:
+                diag['reason'] = 'delta_below_threshold'
+                return final_prob, diag
+            give_draw, give_dog = take * 0.6, take * 0.4
+            if fav_side == 'home':
+                p_h -= take; p_d += give_draw; p_a += give_dog
+            else:
+                p_a -= take; p_d += give_draw; p_h += give_dog
+            diag['delta_taken'] = round(take, 4)
+        else:  # 印证强侧：从平局让给强侧
+            give = min(delta, max(0.0, p_d - 0.02))
+            if give < 0.004:
+                diag['reason'] = 'delta_below_threshold'
+                return final_prob, diag
+            p_d -= give
+            if fav_side == 'home':
+                p_h += give
+            else:
+                p_a += give
+            diag['delta_given'] = round(give, 4)
+
+        s = p_h + p_d + p_a
+        final_prob = {'home_win': p_h / s, 'draw': p_d / s, 'away_win': p_a / s}
+        diag.update({
+            'applied': True,
+            'favored_side': fav_side,
+            'direction': 'deceptive' if delta < 0 else 'endorse',
+        })
+        return final_prob, diag
+
+    def _resolve_home_advantage(self, league_code: str, home_team: str = "") -> float:
         """主场优势系数：联赛主客场制用 1.12；中立/弱主场赛事（友谊赛、世界杯、洲际杯赛）降低。
 
         友谊赛/国家队比赛常在中立或弱主场环境进行，固定 1.12 会让主队 λ 恒定虚高、
-        比分恒为 X-1，因此这类赛事用接近中立的系数。
+        比分恒为 X-1，因此这类赛事用接近中立的系数。世界杯为合办赛事，仅东道主
+        （美/加/墨）作主队时享有弱主场优势，其余对阵按中立场地处理。
         """
-        return resolve_home_advantage(league_code)
+        return resolve_home_advantage(league_code, home_team)
 
     def _resolve_historical_ratings(
         self,
@@ -1823,14 +2408,56 @@ class InferencePipelineService:
             diag['historical_market_alignment'] = market_alignment_diag
         return {'home_win': p_h, 'draw': p_d, 'away_win': p_a}, diag
 
+    @staticmethod
+    def _implied_total_from_ou_line(line: float, over_prob: float, under_prob: float) -> Optional[float]:
+        # 反解出与"真实大小球盘口线 + 去水大小球概率"一致的总进球 λ：
+        # 在泊松总进球分布下二分搜索 λ，使 P(总进球 > line) 的去水占比逼近 over 概率。
+        # 用于球队无攻防数据（占位强度）时，用市场盘口锚定总进球量级，避免坍缩成 0-0。
+        if line is None or line <= 0:
+            return None
+        op = float(over_prob or 0.0)
+        up = float(under_prob or 0.0)
+        if op <= 0 or up <= 0:
+            return None
+        over_share = op / (op + up)
+        threshold = math.floor(line) if abs(line - round(line)) > 1e-9 else int(round(line))
+
+        def over_share_for(total_lambda: float) -> float:
+            # P(总进球 > line)，整数盘口的平局球数计入推球、从分母中剔除。
+            p_over = 0.0
+            p_under = 0.0
+            pmf = math.exp(-total_lambda)
+            for k in range(0, 16):
+                if k > 0:
+                    pmf *= total_lambda / k
+                if abs(line - round(line)) <= 1e-9 and k == threshold:
+                    continue
+                if k > line:
+                    p_over += pmf
+                else:
+                    p_under += pmf
+            denom = p_over + p_under
+            return p_over / denom if denom > 0 else 0.0
+
+        lo, hi = 0.3, 6.0
+        for _ in range(40):
+            mid = (lo + hi) / 2.0
+            if over_share_for(mid) < over_share:
+                lo = mid
+            else:
+                hi = mid
+        return (lo + hi) / 2.0
+
     def apply_market_ou_calibration(
         self,
         *,
         home_lambda: float,
         away_lambda: float,
         current_odds: Optional[Dict[str, Any]],
+        strength_quality: str = 'real',
+        asian_handicap: Optional[Dict[str, Any]] = None,
     ) -> Tuple[float, float, Dict[str, Any]]:
-        diag: Dict[str, Any] = {'applied': False, 'market_pressure_source': 'market_signal'}
+        diag: Dict[str, Any] = {'applied': False, 'market_pressure_source': 'market_signal', 'strength_quality': strength_quality}
         if not self.postprocess_service:
             diag['reason'] = 'missing_postprocess_service'
             return home_lambda, away_lambda, diag
@@ -1839,14 +2466,80 @@ class InferencePipelineService:
         if not isinstance(market_signal, dict) or not market_signal.get('available'):
             diag['reason'] = 'market_signal_unavailable'
             return home_lambda, away_lambda, diag
+        current_total = max(0.6, float(home_lambda) + float(away_lambda))
+        share = float(home_lambda) / current_total if current_total > 0 else 0.5
+
+        # 退化（占位/兜底强度）场景下，模型 λ 的主客拆分同样不可信，
+        # 用真实亚盘让球数反推主客净胜球，得到有真实盘口背书的 share。
+        ah_share = None
+        ah_diag: Dict[str, Any] = {'applied': False}
+        if strength_quality in ('flat', 'fallback') and isinstance(asian_handicap, dict):
+            ah_fin = asian_handicap.get('final') if isinstance(asian_handicap.get('final'), dict) else {}
+            hcp = None
+            for key in ('handicap', 'handicap_value', '盘口值', 'handicap_text', '盘口'):
+                hcp = self._parse_handicap_value(ah_fin.get(key))
+                if hcp is not None:
+                    break
+            if hcp is not None:
+                # _parse_handicap_value：让球为负、受让为正（主队视角）。
+                # 主队预期净胜球 supremacy = -hcp（让球越深，主队越强）。
+                ah_diag = {'applied': True, 'handicap_home_view': round(float(hcp), 4), 'supremacy': round(float(-hcp), 4)}
+        diag['asian_share_signal'] = ah_diag
+
+        # 球队攻防数据缺失（占位/兜底强度，如世界杯无 teams 数据）时，模型 λ 不可信，
+        # 用真实大小球盘口线的绝对量级锚定总进球，避免低 λ 把概率全堆到 0-0。
+        degraded = strength_quality in ('flat', 'fallback')
+        final_prices = market_signal.get('final_prices') if isinstance(market_signal.get('final_prices'), dict) else {}
+        final_line = self._to_float(market_signal.get('final_line'))
+        implied_total = None
+        if degraded and final_line and final_prices.get('available'):
+            implied_total = self._implied_total_from_ou_line(
+                final_line,
+                self._to_float(final_prices.get('over_prob')) or 0.0,
+                self._to_float(final_prices.get('under_prob')) or 0.0,
+            )
+        if implied_total is not None:
+            anchor_weight = 0.85 if strength_quality == 'flat' else 0.6
+            target_total = current_total * (1.0 - anchor_weight) + implied_total * anchor_weight
+            target_total = max(0.8, min(4.5, target_total))
+            effective_share = share
+            if ah_diag.get('applied'):
+                # 在锚定后的总进球下，用让球数推主客 share：home_λ-away_λ≈supremacy。
+                # share=(total+supremacy)/(2*total)，并与模型 share 取 0.7 权重融合后夹紧。
+                supremacy = float(ah_diag['supremacy'])
+                ah_share = (target_total + supremacy) / (2.0 * target_total)
+                ah_share = max(0.18, min(0.82, ah_share))
+                effective_share = max(0.18, min(0.82, share * 0.3 + ah_share * 0.7))
+                ah_diag['share_from_handicap'] = round(float(ah_share), 4)
+                ah_diag['model_share'] = round(float(share), 4)
+                ah_diag['effective_share'] = round(float(effective_share), 4)
+            new_home = max(0.15, target_total * effective_share)
+            new_away = max(0.15, target_total * (1.0 - effective_share))
+            diag.update(
+                {
+                    'applied': True,
+                    'market_pressure_source': 'absolute_ou_line',
+                    'implied_total_from_line': round(float(implied_total), 6),
+                    'anchor_weight': anchor_weight,
+                    'final_line': round(float(final_line), 4),
+                    'target_total': round(float(target_total), 6),
+                    'base_total': round(float(current_total), 6),
+                    'share_used': round(float(effective_share), 6),
+                    'adjusted_lambda': {
+                        'home': round(float(new_home), 6),
+                        'away': round(float(new_away), 6),
+                        'total': round(float(new_home + new_away), 6),
+                    },
+                }
+            )
+            return new_home, new_away, diag
+
         pace_shift = float(market_signal.get('pace_shift') or 0.0)
         if abs(pace_shift) < 1e-9:
             diag['reason'] = 'market_signal_flat'
             diag['market_pace_shift'] = 0.0
             return home_lambda, away_lambda, diag
-        current_total = max(0.6, float(home_lambda) + float(away_lambda))
         target_total = max(0.8, min(4.2, current_total + pace_shift * 3.0))
-        share = float(home_lambda) / current_total if current_total > 0 else 0.5
         new_home = max(0.15, target_total * share)
         new_away = max(0.15, target_total * (1.0 - share))
         diag.update(
@@ -2146,7 +2839,7 @@ class InferencePipelineService:
         # league_avg_goals 是“全场总进球”均值，需除以 2 才是单队进球基准，
         # 否则两队 λ 各自≈整场总进球、合计翻倍，导致预期进球与大球概率系统性偏高。
         per_team_baseline = league_avg_goals / 2.0
-        home_advantage = self._resolve_home_advantage(league_code)
+        home_advantage = self._resolve_home_advantage(league_code, home_team)
         base_home_lambda = home_strength['attack'] * away_strength['defense'] * per_team_baseline * home_advantage
         base_away_lambda = away_strength['attack'] * home_strength['defense'] * per_team_baseline
         realtime['context_applied']['home_advantage_factor'] = round(float(home_advantage), 4)
@@ -2168,6 +2861,8 @@ class InferencePipelineService:
                 home_lambda=home_lambda,
                 away_lambda=away_lambda,
                 current_odds=current_odds,
+                strength_quality=strength_quality,
+                asian_handicap=asian_handicap,
             )
             realtime['context_applied']['market_ou_lambda_calibration'] = market_ou_lambda_diag
         except Exception as exc:
@@ -2423,6 +3118,46 @@ class InferencePipelineService:
             review_outcome_diag=review_outcome_diag,
         )
         realtime['context_applied']['draw_confirmation_guard'] = draw_guard_diag
+        sentiment_adj_diag: Dict[str, Any] = {'applied': False}
+        try:
+            market_sentiment = self.detect_market_movement_sentiment(
+                european_odds=european_odds,
+                asian_handicap=asian_handicap,
+            )
+            realtime['context_applied']['market_movement_sentiment'] = market_sentiment
+            final_prob, sentiment_adj_diag = self.apply_market_sentiment_adjustment(
+                final_prob=final_prob,
+                sentiment=market_sentiment,
+            )
+            realtime['context_applied']['market_sentiment_adjustment'] = sentiment_adj_diag
+        except Exception as exc:
+            realtime['context_applied']['market_sentiment_adjustment'] = {'applied': False, 'error': str(exc)}
+        try:
+            ou_market_signal = self.postprocess_service.extract_over_under_market_signal(current_odds)
+            operation_pattern = self.classify_market_operation_pattern(
+                european_odds=european_odds,
+                asian_handicap=asian_handicap,
+                ou_signal=ou_market_signal,
+                kelly=current_odds.get('凯利') if isinstance(current_odds, dict) else None,
+                market_sentiment=realtime['context_applied'].get('market_movement_sentiment'),
+            )
+            realtime['context_applied']['market_operation_pattern'] = operation_pattern
+            from domain.operation_weight_learner import extract_delta_vector
+            operation_delta_vector = extract_delta_vector(
+                european_odds,
+                asian_handicap,
+                current_odds.get('凯利') if isinstance(current_odds, dict) else None,
+                self._parse_handicap_value,
+            )
+            realtime['context_applied']['market_operation_delta_vector'] = operation_delta_vector
+            final_prob, operation_adj_diag = self.apply_market_operation_adjustment(
+                final_prob=final_prob,
+                pattern_diag=operation_pattern,
+                delta_vector=operation_delta_vector,
+            )
+            realtime['context_applied']['market_operation_adjustment'] = operation_adj_diag
+        except Exception as exc:
+            realtime['context_applied']['market_operation_adjustment'] = {'applied': False, 'error': str(exc)}
         ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
         main_prediction = ranked_probabilities[0][0]
         confidence = ranked_probabilities[0][1]
@@ -2536,10 +3271,19 @@ class InferencePipelineService:
 
         dc_model = DixonColesModel(rho=resolve_rho(league_code))
         score_result = dc_model.predict_with_dixon_coles(home_lambda, away_lambda)
+        score_probs = score_result.get('score_probs')
+        if isinstance(sentiment_adj_diag, dict) and sentiment_adj_diag.get('applied'):
+            score_probs = self.postprocess_service.rescale_score_probs_to_outcome(
+                score_probs, final_prob
+            )
+            realtime['context_applied']['market_sentiment_score_rescale'] = {
+                'applied': True,
+                'reason': 'align_scores_to_sentiment_adjusted_1x2',
+            }
         top_scores, score_guard_diag = self._rerank_scores_for_under_three(
-            score_result.get('score_probs'),
+            score_probs,
             over_under,
-            limit=8,
+            limit=12,
         )
         realtime['context_applied']['score_rerank_guard'] = score_guard_diag
         top_scores, review_score_diag = self.postprocess_service.rerank_top_scores(
@@ -2560,6 +3304,15 @@ class InferencePipelineService:
             limit=3,
         )
         realtime['context_applied']['review_score_rerank'] = review_score_diag
+        top_scores = self._mix_cross_direction_scores(
+            top_scores,
+            score_probs,
+            limit=3,
+        )
+        realtime['context_applied']['score_cross_direction_mix'] = {
+            'applied': True,
+            'reason': 'anchor_predicted_direction_then_global_distribution',
+        }
         total_goals = self.postprocess_service.compute_total_goals_distribution(score_result.get('score_probs', {}), max_bucket=7)
         total_goals, review_total_goals_diag = self.postprocess_service.apply_three_layer_total_goals_adjustment(
             total_goals,

@@ -147,7 +147,7 @@ purpose: "定义项目统一采用的专业纬度足彩数据精算师身份、�
 
 * 正式流程必须服从 `prediction_system.py`（发现入口）、`app/cli.py`（真实命令实现）、`domain/predictor.py` / `enhanced_prediction_workflow.py`、结果同步命令与 `harness` 层
 
-* 正式写回遵守五大联赛/世界杯 SoT 与欧战/杯赛 runtime-only 的双路径边界
+* 正式写回遵守二元边界：五大联赛/世界杯 SoT 完整写回，非 SoT 赛事走 `archive_only`（仅归档 + 赛果同步，不写 MEMORY/RAG/teams md）
 
 * 策略优化必须建立在真实回填、准确率统计和结构化复盘之上，不允许凭主观印象随意改权重
 

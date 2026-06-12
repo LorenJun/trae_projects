@@ -198,13 +198,14 @@ last_updated: 2026-06-06
 - 先从混合池收敛为纯 `iPhone Safari`
 - 再扩到 `20` 组
 - 再扩到 `50` 组
-- 当前扩到 `100` 组
+- 再扩到 `100` 组
+- 当前扩到 `500` 组（`5` 个 iPhone device pool × `100` 个版本组合）
 
 当前设备池特征：
 - 全部为 `iPhone Safari` 风格 UA
-- 全部统一 `viewport={"width": 1080, "height": 720}`
-- `device_scale_factor=3`
-- 每次访问随机选择一个 profile
+- 分布在 `5` 个真实 iPhone device pool（iPhone SE / 12 / 13 mini / 14 Plus / 15 Pro）
+- 每个 device pool 使用各自真实的 `viewport` 与 `device_scale_factor`（如 iPhone SE 为 `375x667` / DPR `2`，iPhone 15 Pro 为 `393x852` / DPR `3`），不再统一成单一 viewport
+- 每次访问通过 `random_mobile_profile()` 随机选择一个 profile
 
 当前影响范围：
 - 所有通过公共层 `random_mobile_profile()` 访问 `m.okooo.com` 的正式脚本
@@ -239,7 +240,7 @@ last_updated: 2026-06-06
 同步内容包括：
 - `local-chrome` 默认链路
 - `iPhone Safari + Referer` 放行条件
-- `100` 设备池
+- `500` 设备池
 - 欧赔 `multi_company_consensus`
 - 正式 `predict-match` 已验证可拿到真实数据
 - `build-season-master-review` 示例命令与当前 CLI 参数对齐
@@ -269,7 +270,7 @@ last_updated: 2026-06-06
 - `app/cli.py` 是真实命令实现入口
 - `local-chrome` 是当前默认快照 driver
 - `iPhone Safari UA + Referer` 是当前默认访问特征
-- `100` 组随机移动 profile 是当前公共访问池
+- `500` 组随机移动 profile 是当前公共访问池
 - 欧赔优先输出 `multi_company_consensus`
 - 正式 `predict-match` 已验证可稳定拿到真实欧赔、亚值、大小球、凯利
 

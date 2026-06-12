@@ -126,13 +126,13 @@ This service is the owner for prediction persistence side effects, including:
 
 `result_manager.py` remains the lower-level archive/result/accuracy foundation, but prediction-side orchestration should not be reimplemented ad hoc in CLI handlers or in `EnhancedPredictor`.
 
-### 4. Writeback is gated strictly to SoT-backed leagues
+### 4. Writeback depth is gated by SoT-backed leagues (binary)
 
 This is easy to break.
 
-`predict-match` only persists (teams markdown writeback + `MEMORY.md` rolling memory + RAG + result-sync registry) when the resolved league is one of the six SoT-backed leagues (`SOT_BACKED_LEAGUE_CODES` in `app/cli.py`: the five major leagues + `world_cup`). For every other competition (European cups, other cups, friendlies, any non-SoT league), `predict-match` forces `persist=False` and the result is output-only, marked `persisted.skipped_reason = "non_sot_league_output_only"`. `--no-write` still suppresses persistence for SoT leagues too.
+`predict-match` does a **full writeback** (teams markdown + `MEMORY.md` rolling memory + RAG + archive + result-sync registry) only when the resolved league is one of the six SoT-backed leagues (`SOT_BACKED_LEAGUE_CODES` in `app/cli.py`: the five major leagues + `world_cup`). For every other competition (European cups, other cups, friendlies, any non-SoT league), `predict-match` runs the `archive_only` path (`persist=True, archive_only=True`): it **archives the prediction + registers result-sync + refreshes accuracy, but does NOT write `MEMORY.md`/RAG/teams md**. The result is marked `persisted.archive_only=True`, `persisted.memory_updated=False`, `persisted.archived=True` (see `persist_archive_only_prediction()` in `domain/persistence.py`). `--no-write` suppresses persistence entirely (`persist=False`) for any league.
 
-`predict-fourteen-issue` reuses the full `predict-match` chain per match, so it inherits the same SoT-only writeback gating.
+`predict-fourteen-issue` reuses the full `predict-match` chain per match, so it inherits the same binary (full vs `archive_only`) writeback gating.
 
 If you change writeback gating, verify against `test_prediction_persistence.py` and `test_cli_persistence.py`.
 

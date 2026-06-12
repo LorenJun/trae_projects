@@ -57,11 +57,11 @@ last_updated: 2026-05-08
 - 仓库里出现某个联赛目录，不等于它已经进入正式主链
 - 例如 `afc_champions_league/` 当前更像数据目录或快照落盘目录，不属于现行 `LEAGUE_CONFIG`
 
-### 1.3 事实写回与 runtime 边界
+### 1.3 事实写回与归档边界
 
-项目当前的“事实写回”采用双路径：
-- **五大联赛 SoT**：`europe_leagues/<league>/teams_2025-26.md`
-- **跨联赛滚动记忆**：项目根 `MEMORY.md`
+项目当前的“事实写回”为二元边界：
+- **SoT 联赛完整写回**（五大联赛 + 世界杯）：`europe_leagues/<league>/teams_2025-26.md`（世界杯 `teams_2026.md`）+ 项目根 `MEMORY.md` 滚动记忆 + RAG + 归档
+- **非 SoT 赛事 `archive_only`**：仅归档预测 + 登记赛果同步，不写 `MEMORY.md`/RAG/teams md
 - **运行时归档与索引**：`europe_leagues/.okooo-scraper/runtime/*.json`
 
 其中 `.okooo-scraper/runtime/` 已经是当前实现里的统一 runtime 数据目录，实际可见文件包括：

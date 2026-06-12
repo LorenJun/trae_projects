@@ -226,7 +226,7 @@ OKOOO_BROWSER_E2E=1 python3 -m unittest test_okooo_browser
 这些命令会驱动：
 
 - SoT-backed 比赛更新 `teams_2025-26.md` / `teams_2026.md`
-- runtime-only 比赛更新 `MEMORY.md` 与 `.okooo-scraper/runtime/*.json`
+- 非 SoT 比赛走 `archive_only`：仅归档预测 + 登记赛果同步（`.okooo-scraper/runtime/*.json`），不写 `MEMORY.md`/RAG/teams md
 - 准确率、RAG、记忆样本和相关衍生结果同步刷新
 
 ## 调试说明

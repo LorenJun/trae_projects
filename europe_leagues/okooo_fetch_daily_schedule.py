@@ -53,8 +53,11 @@ def _parse_row_text(text: str) -> Dict[str, Any]:
     
     # Check if status is "完"
     has_finish_marker = "完" in s
+    # 比分解析前先剥离日期 token，避免把 "2026-06-13" 里的 "26-06" 误当成比分。
+    s_for_score = re.sub(r"\b\d{4}-\d{1,2}-\d{1,2}\b", " ", s)
+    s_for_score = re.sub(r"(?<!\d)\d{1,2}-\d{1,2}(?=\s*第\d+轮)", " ", s_for_score)
     # 只有明确带"完"的行才尝试解析比分，避免把 20:00 / 21:30 / 22:15 误当成赛果。
-    score_match = re.search(r"(\d{1,2})\s*[-:]\s*(\d{1,2})", s) if has_finish_marker else None
+    score_match = re.search(r"(\d{1,2})\s*[-:]\s*(\d{1,2})", s_for_score) if has_finish_marker else None
     if score_match:
         home_score = int(score_match.group(1))
         away_score = int(score_match.group(2))
@@ -63,11 +66,11 @@ def _parse_row_text(text: str) -> Dict[str, Any]:
         result["score"] = f"{home_score}-{away_score}"
         result["status"] = "已结束"
         # Remove score and finish marker for cleaner team/kickoff extraction
-        s_clean = re.sub(r"\b\d{1,2}\s*[-:]\s*\d{1,2}\b", "", s)
+        s_clean = re.sub(r"\b\d{1,2}\s*[-:]\s*\d{1,2}\b", "", s_for_score)
         s_clean = re.sub(r"\b完\b", "", s_clean)
     else:
         result["status"] = "已结束" if has_finish_marker else "待进行"
-        s_clean = re.sub(r"\b完\b", "", s) if has_finish_marker else s
+        s_clean = re.sub(r"\b完\b", "", s_for_score) if has_finish_marker else s_for_score
     
     # Try to find kickoff time
     kickoff_match = re.search(r"(\d{1,2}:\d{2})", s_clean)

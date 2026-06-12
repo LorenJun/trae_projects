@@ -37,18 +37,18 @@
 
 完整参数见 [`../app/cli.py`](../app/cli.py)。当前正式子命令：
 
-`list-leagues` · `predict-match` · `predict-fourteen-issue` · `collect-data` · `pending-results` · `save-result` · `auto-sync-results` · `result-sync-daemon` · `accuracy` · `apply-reanalysis` · `sync-pending-results-review` · `build-season-master-review` · `refresh-repo-docs` · `purge-nonreal-data` · `rag-rebuild` · `rag-diagnose` · `sync-memory-rag` · `health-check` · `migrate-archive` · `setup-openclaw` · `harness-list` · `harness-run`
+`list-leagues` · `predict-match` · `predict-fourteen-issue` · `collect-data` · `pending-results` · `save-result` · `auto-sync-results` · `result-sync-daemon` · `accuracy` · `apply-reanalysis` · `rag-replay-eval` · `sync-pending-results-review` · `build-season-master-review` · `refresh-repo-docs` · `purge-nonreal-data` · `rag-rebuild` · `rag-diagnose` · `sync-memory-rag` · `health-check` · `migrate-archive` · `setup-openclaw` · `harness-list` · `harness-run`
 
 ---
 
 ## 四、写回边界（速查，细节见 PRD 第 5 节）
 
-写回边界已收敛为二元：**只有 SoT-backed 正式联赛写回，其余一律只输出预测结果。**
+写回边界已收敛为二元：**只有 SoT-backed 正式联赛走完整写回；其余赛事走 `archive_only`（仅归档 + 赛果同步 + 准确率，不写 MEMORY/RAG/teams md）。**
 
-| 类别 | competition | 是否写回 teams md / 滚动记忆 / RAG |
+| 类别 | competition | 写回行为 |
 |---|---|---|
-| **SoT-backed（唯一写回）** | premier_league / la_liga / serie_a / bundesliga / ligue_1 / world_cup | `predict-match` 写回 archive + 滚动记忆 + RAG + `<league>/teams_*.md`（五大联赛 `teams_2025-26.md`，世界杯 `teams_2026.md`） |
-| **其余一切赛事** | europa_league / champions_league / conference_league / 其他杯赛 / 友谊赛（`friendly`）/ 任何非上述六联赛 | **只输出预测结果，不写回**（`predict-match` 强制 `persist=False`，标记 `non_sot_league_output_only`，无需 `--no-write`） |
+| **SoT-backed（完整写回）** | premier_league / la_liga / serie_a / bundesliga / ligue_1 / world_cup | `predict-match` 写回 archive + 滚动记忆 + RAG + `<league>/teams_*.md`（五大联赛 `teams_2025-26.md`，世界杯 `teams_2026.md`）+ 赛果同步登记 |
+| **其余一切赛事** | europa_league / champions_league / conference_league / 其他杯赛 / 友谊赛（`friendly`）/ 任何非上述六联赛 | 走 `archive_only`（`persist=True, archive_only=True`）：**仅归档预测 + 登记赛果同步 + 刷新准确率，不写 MEMORY/RAG/teams md**，结果标 `persisted.archive_only=True`、`memory_updated=False` |
 
 ---
 

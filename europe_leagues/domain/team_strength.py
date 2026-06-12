@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import glob
 import json
 import logging
 import os
@@ -72,6 +73,88 @@ class TeamStrengthService:
                 logger.warning('加载球员数据失败 %s: %s', team_name, exc)
         return None
 
+    @staticmethod
+    def _team_signal_score(team_data: Dict[str, Any]) -> Optional[float]:
+        # 当 market_value 缺失时，从已采集的真实信号派生一个队级实力代理分。
+        # 英超：FPL 价格 + xG；其余四大联赛：understat 队级 xG/xA + 进球助攻。
+        # 任一信号缺失则跳过该项，全部为 0 返回 None（交给上层兜底）。
+        players = team_data.get('players', []) if isinstance(team_data, dict) else []
+        if not players:
+            return None
+        fpl_price = 0.0
+        xg = 0.0
+        xa = 0.0
+        goals = 0.0
+        assists = 0.0
+        for player in players:
+            if not isinstance(player, dict):
+                continue
+            fpl_price += float(player.get('fpl_price_m') or 0.0)
+            shooting = player.get('shooting_stats') if isinstance(player.get('shooting_stats'), dict) else {}
+            passing = player.get('passing_stats') if isinstance(player.get('passing_stats'), dict) else {}
+            technical = player.get('technical_stats') if isinstance(player.get('technical_stats'), dict) else {}
+            stats = player.get('stats') if isinstance(player.get('stats'), dict) else {}
+            xg += float(shooting.get('xg') or technical.get('expected_goals') or 0.0)
+            xa += float(passing.get('xa') or technical.get('expected_assists') or 0.0)
+            goals += float(stats.get('goals') or 0.0)
+            assists += float(stats.get('assists') or 0.0)
+        # 优先用 understat/技术统计的攻击产出（xG 为主），它比 FPL 全队价格之和
+        # 更能反映真实强弱（价格之和受阵容人数/人气干扰）；都缺失时退到 FPL 价格。
+        output = xg + 0.5 * xa + 0.5 * goals + 0.25 * assists
+        if output > 0:
+            return output
+        return fpl_price if fpl_price > 0 else None
+
+    def _league_signal_ranks(self, league_code: str) -> Dict[str, float]:
+        # 对一个联赛内所有有信号的队做分位归一（0~1），用于把真实信号映射成强度。
+        cache_params = {'league': league_code}
+        cached = self.cache.get('league_signal_ranks', cache_params)
+        if cached is not None:
+            return cached
+        scores: Dict[str, float] = {}
+        pattern = os.path.join(self.base_dir, league_code, 'players', '*.json')
+        for file_path in glob.glob(pattern):
+            team_name = os.path.splitext(os.path.basename(file_path))[0]
+            try:
+                with open(file_path, 'r', encoding='utf-8') as handle:
+                    data = json.load(handle)
+            except Exception:
+                continue
+            score = self._team_signal_score(data)
+            if score is not None:
+                scores[team_name] = score
+        ranks: Dict[str, float] = {}
+        if len(scores) >= 2:
+            ordered = sorted(scores.items(), key=lambda kv: kv[1])
+            denom = len(ordered) - 1
+            for idx, (team_name, _) in enumerate(ordered):
+                ranks[team_name] = idx / denom
+        self.cache.set('league_signal_ranks', cache_params, ranks)
+        return ranks
+
+    def _strength_from_signal(self, league_code: str, team_name: str, team_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        # 用联赛内分位把真实信号映射成 strength/attack/defense。
+        ranks = self._league_signal_ranks(league_code)
+        pct = ranks.get(team_name)
+        if pct is None:
+            return None
+        strength = 30.0 + pct * 60.0
+        attack = 0.6 + pct * 0.8
+        defense = 0.6 + pct * 0.8
+        return {
+            'team': team_name,
+            'strength': round(strength, 2),
+            'attack': round(attack, 4),
+            'defense': round(defense, 4),
+            'injured_count': len([p for p in team_data.get('players', []) if p.get('transfer_status') == 'injured']),
+            'suspended_count': len([p for p in team_data.get('players', []) if p.get('transfer_status') == 'suspended']),
+            'key_players_available': True,
+            'available_value': 0,
+            'total_value': 0,
+            'strength_source': 'rating_signal',
+            'strength_percentile': round(pct, 4),
+        }
+
     def analyze_team_strength(self, league_code: str, team_name: str) -> Dict[str, Any]:
         cache_params = {'league': league_code, 'team': team_name}
         cached = self.cache.get('analyze_team_strength', cache_params)
@@ -136,5 +219,19 @@ class TeamStrengthService:
                 'available_value': available_value,
                 'total_value': total_value,
             }
+            # 球员档案存在但无任何市值数据（全项目当前 market_value 恒为 0）。
+            # 优先用已采集的真实信号（英超 FPL 价格+xG；其余四大联赛 understat xG/xA+进球助攻）
+            # 按联赛内分位派生强度；信号也缺失时退到国家队兜底表，再退到 flat_default
+            # （由下游 λ 校准用市场盘口锚定，避免坍缩成 0-0）。
+            if total_value <= 0:
+                signal = self._strength_from_signal(league_code, team_name, team_data)
+                if signal is not None:
+                    result = signal
+                else:
+                    national = self._national_fallback_strength(team_name)
+                    if national is not None:
+                        result = national
+                    else:
+                        result['strength_source'] = 'flat_default'
         self.cache.set('analyze_team_strength', cache_params, result)
         return result

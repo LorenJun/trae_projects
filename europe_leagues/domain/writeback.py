@@ -56,38 +56,11 @@ def _sanitize_note_fragment(value: Any) -> str:
     return text.strip(' ;；,/')
 
 
-def _score_matches_prediction(score: str, prediction_text: str) -> bool:
-    normalized = str(score or '').strip()
-    if not normalized or '-' not in normalized:
-        return False
-    try:
-        home_goals, away_goals = [int(part.strip()) for part in normalized.split('-', 1)]
-    except Exception:
-        return False
-
-    prediction_label = str(prediction_text or '').strip()
-    allowed = set()
-    if '主胜' in prediction_label:
-        allowed.add('home')
-    if '平局' in prediction_label:
-        allowed.add('draw')
-    if '客胜' in prediction_label:
-        allowed.add('away')
-    if not allowed:
-        return True
-
-    if home_goals > away_goals:
-        return 'home' in allowed
-    if home_goals < away_goals:
-        return 'away' in allowed
-    return 'draw' in allowed
-
-
 def _filter_score_candidates(raw_scores: Any, prediction_text: str, limit: int | None = None) -> List[str]:
     score_parts: List[str] = []
     for raw_part in str(raw_scores or '').split('/'):
         score = raw_part.strip()
-        if not score or not _score_matches_prediction(score, prediction_text):
+        if not score or not re.match(r'^\d+-\d+$', score):
             continue
         if score in score_parts:
             continue
@@ -173,7 +146,7 @@ def format_score_ou_note(prediction: Dict[str, Any]) -> str:
         score_parts = _filter_score_candidates(
             '/'.join(str(item[0]).strip() for item in top_scores if isinstance(item, (list, tuple)) and item),
             prediction_text,
-            limit=2,
+            limit=3,
         )
     score_note = f"比分:{'/'.join(score_parts)}" if score_parts else ''
 

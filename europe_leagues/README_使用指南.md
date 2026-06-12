@@ -57,9 +57,9 @@
 
 判定逻辑见 `app/cli.py` 的 `SOT_BACKED_LEAGUE_CODES` 与 `is_sot_backed_league()`。
 
-### 其余一切赛事（只输出，不写回）
+### 其余一切赛事（仅归档同步，不写 MEMORY/RAG/teams md）
 
-杯赛、欧战（`europa_league` / `champions_league` / `conference_league`）、友谊赛（`friendly`）以及任何非上述六个联赛的 competition：`predict-match` 强制 `persist=False`，**不写 teams md、不写 `MEMORY.md`、不进 RAG、不进归档**。结果标 `persisted.skipped_reason = "non_sot_league_output_only"`，无需手动 `--no-write`。直接跑 `okooo_save_snapshot.py` 快照脚本本就不写 `MEMORY.md`。
+杯赛、欧战（`europa_league` / `champions_league` / `conference_league`）、友谊赛（`friendly`）以及任何非上述六个联赛的 competition：`predict-match` 走 `archive_only` 路径（`persist=True, archive_only=True`），**只归档预测 + 登记赛果同步 + 刷新准确率/仪表盘，不写 teams md、不写 `MEMORY.md`、不进 RAG**。结果标 `persisted.archive_only=True`、`memory_updated=False`、`archived=True`，无需手动 `--no-write`。直接跑 `okooo_save_snapshot.py` 快照脚本本就不写 `MEMORY.md`。
 
 > 世界杯属于 SoT-backed 正式联赛：`predict-match` 会写回 `world_cup/teams_2026.md` + 滚动记忆 + 赛果同步登记。
 
@@ -255,7 +255,7 @@ OKOOO_BROWSER_E2E=1 python3 -m unittest test_okooo_browser
 
 预测 side effects 由 `domain/persistence.py` 统一编排，通常会联动：
 
-- SoT 写回或 runtime-only 归档
+- SoT 完整写回，或非 SoT 的 `archive_only` 归档
 - `MEMORY.md` 更新
 - prediction archive 更新
 - result sync registry 登记
@@ -306,7 +306,7 @@ OKOOO_BROWSER_E2E=1 python3 -m unittest test_okooo_browser
 
 ### 3. 把欧战当成五大联赛 SoT 写回
 
-错误。欧战 / 杯赛默认是 runtime-only 路径，不直接写五大联赛 `teams_2025-26.md`。
+错误。欧战 / 杯赛默认走 `archive_only` 路径（仅归档 + 赛果同步 + 准确率），不写五大联赛 `teams_2025-26.md`、不写 `MEMORY.md`、不进 RAG。
 
 ### 4. 直接改旧模板目录当正式输出
 

@@ -34,14 +34,14 @@ name: football-prediction-live-update
 1. 每场比赛只有一个最终有效预测视图
 2. 临场更新应覆盖旧预测，而不是制造重复记录
 3. 必须写清“调整说明”，解释为何临场结论变化
-4. 若进入正式落盘，仍应遵守 SoT-backed / runtime-only 边界
+4. 若进入正式落盘，仍应遵守 SoT 完整写回 / 非 SoT `archive_only` 的二元边界
 
 ## 当前访问与盘口口径
 
 - 临场赔率刷新仍走正式快照链，不要临时拼裸请求
 - 默认快照 driver：`local-chrome`
 - 默认请求特征：`iPhone Safari UA + Referer: https://m.okooo.com/`
-- 当前公共设备池：`100` 组随机 `iPhone Safari` profile
+- 当前公共设备池：`500` 组 `iPhone Safari` profile，分布在多个 iPhone device pool 上
 - 欧赔优先解析 `multi_company_consensus`
 - 大小球真实盘口优先来自 `handicap.php -> 大小球 tab`
 - 当前正式链已支持：自动翻月定位目标日期、按当天比赛分组精确锁定主客队、快照身份校验、预测前快照注水与缺失盘口补抓
@@ -123,14 +123,14 @@ python3 prediction_system.py harness-run \
 - `ligue_1`
 - `world_cup`
 
-### runtime-only
+### 其余一切赛事（archive_only）
 
-以下 competition 更新后仍写 `MEMORY.md` 与 runtime archive：
+以下及任何非上述六联赛的 competition 更新后走 `archive_only`：仅归档 + 赛果同步，不写 `MEMORY.md`/RAG/teams md：
 
 - `europa_league`
 - `champions_league`
 - `conference_league`
-- 其他杯赛 / 欧战扩展比赛
+- 其他杯赛 / 欧战扩展比赛 / 友谊赛
 
 ## 调整说明建议
 

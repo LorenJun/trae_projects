@@ -49,7 +49,7 @@ purpose: "负责从正式实时源采集足球比赛所需的结构化数据，�
 2. 优先获取 match_id；已知 match_id 时直接抓快照，不要重复模糊匹配。
 3. 自动化入口优先使用 `prediction_system.py collect-data`；显式抓取时再使用 `okooo_fetch_daily_schedule.py`、`okooo_save_snapshot.py`。
 4. 澳客访问统一走当前正式策略：`local-chrome + iPhone Safari UA + Referer: https://m.okooo.com/`。
-5. 公共移动设备池统一由 `okooo_mobile_access.py` 提供，当前为 `100` 组随机 profile。
+5. 公共移动设备池统一由 `okooo_mobile_access.py` 提供，当前为 `500` 组 `iPhone Safari` profile，分布在多个 iPhone device pool 上。
 6. 欧赔输出优先检查 `multi_company_consensus` 与 `companies`，`99家平均` 只视为 fallback。
 7. 采集目标不仅是快照，还包括赛程里的 `kickoff_time`、`history_url`、已结束状态与比分。
 8. 大小球真实数据优先从 handicap.php 页面内的“大小球”tab 获取，不默认使用固定 2.5。

@@ -115,7 +115,7 @@ def _build_baseline(manager: ResultManager, row: Dict[str, Any]) -> Dict[str, An
         "actual_winner": _winner_key_to_cn(actual_winner_key),
         "actual_winner_key": actual_winner_key or "",
         "win_hit": bool(predicted_winner_key and actual_winner_key and predicted_winner_key == actual_winner_key),
-        "score_hit": bool(actual_score and predicted_scores and actual_score in predicted_scores[:2]),
+        "score_hit": bool(actual_score and predicted_scores and actual_score in predicted_scores[:3]),
     }
 
 
@@ -145,7 +145,7 @@ def _build_replay_result(result: Dict[str, Any], baseline: Dict[str, Any]) -> Di
     predicted_winner = str(result.get("prediction") or "").strip()
     predicted_winner_key = _winner_cn_to_key(predicted_winner)
     top_scores = result.get("top_scores") if isinstance(result.get("top_scores"), list) else []
-    predicted_scores = [str(score) for score, _prob in top_scores[:2] if str(score).strip()]
+    predicted_scores = [str(score) for score, _prob in top_scores[:3] if str(score).strip()]
     realtime = result.get("realtime") if isinstance(result.get("realtime"), dict) else {}
     context_applied = realtime.get("context_applied") if isinstance(realtime.get("context_applied"), dict) else {}
     return {

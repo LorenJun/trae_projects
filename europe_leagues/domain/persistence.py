@@ -1235,7 +1235,7 @@ class PredictionPersistenceService:
         predicted_winner = str(result.get('predicted_winner') or {'主胜': 'home', '客胜': 'away', '平局': 'draw'}.get(prediction, '')).strip()
         top_scores = result.get('top_scores') if isinstance(result.get('top_scores'), list) else []
         predicted_scores = []
-        for item in top_scores[:2]:
+        for item in top_scores[:3]:
             if isinstance(item, (list, tuple)) and item:
                 predicted_scores.append(str(item[0]))
         over_under = result.get('over_under') if isinstance(result.get('over_under'), dict) else {}
@@ -1343,6 +1343,38 @@ class PredictionPersistenceService:
         if self.cache is not None:
             self.cache.set(cache_name, cache_params, result)
         return self._persist_prediction_side_effects(result, league_code, register_result_sync=True, sync_derivatives=True)
+
+    def persist_archive_only_prediction(self, cache_name: str, cache_params: Dict[str, Any], result: Dict[str, Any], league_code: str) -> Dict[str, Any]:
+        """非 SoT 联赛：仅归档 + 登记赛果同步，刷新统计/仪表盘，不写 MEMORY/RAG/teams md。"""
+        if self.cache is not None:
+            self.cache.set(cache_name, cache_params, result)
+        if result.get('prediction_blocked'):
+            result['persisted'] = {
+                'enabled': False,
+                'archived': False,
+                'memory_updated': False,
+                'skipped_reason': str(result.get('blocked_reason') or 'prediction_blocked'),
+            }
+            return result
+        payload = self._build_persistence_payload(result, league_code)
+        self._apply_persistence_payload(result, payload)
+        persisted = self._persisted_status(True)
+        persisted['memory_updated'] = False
+        persisted['archive_only'] = True
+        try:
+            self.result_manager.save_prediction_from_enhanced(result, league_code)
+            persisted['archived'] = True
+        except Exception as exc:
+            logger.warning('归档预测失败: %s', exc)
+            persisted['error'] = str(exc)
+        try:
+            register_prediction_result_sync(self.base_dir, result)
+            persisted['result_sync_registered'] = True
+        except Exception as exc:
+            logger.warning('登记自动赛果同步失败: %s', exc)
+            persisted['error'] = str(exc)
+        result['persisted'] = persisted
+        return result
 
     def persist_memory_only_prediction(self, result: Dict[str, Any], league_code: str) -> Dict[str, Any]:
         payload = self._build_persistence_payload(result, league_code)

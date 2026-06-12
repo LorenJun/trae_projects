@@ -1972,6 +1972,68 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertIn("ou_high_line_balanced_over_nudge", signal["signals"])
         self.assertGreaterEqual(signal["pace_shift"], 0.008)
 
+    def test_extract_over_under_market_signal_detects_line_down_over_backed_divergence(self):
+        signal = self.service.extract_over_under_market_signal(
+            {
+                "大小球": {
+                    "initial": {"line": 2.5, "over": 2.0, "under": 1.8175},
+                    "final": {"line": 2.0, "over": 1.81, "under": 2.0525},
+                }
+            }
+        )
+        self.assertTrue(signal["available"])
+        self.assertEqual(signal["goal_pressure"], "over")
+        self.assertIn("ou_line_down", signal["signals"])
+        self.assertIn("over_water_drop", signal["signals"])
+        self.assertIn("ou_line_down_over_backed_divergence", signal["signals"])
+        self.assertEqual(signal["ou_line_water_divergence"]["side"], "over")
+        self.assertEqual(signal["ou_line_water_divergence"]["water_tier"], "low")
+        self.assertGreater(signal["ou_line_water_divergence"]["boost"], 0.0)
+
+    def test_flat_line_over_water_drop_adds_weak_over_nudge(self):
+        signal = self.service.extract_over_under_market_signal(
+            {"大小球": {"initial": {"line": 2.25, "over": 1.95, "under": 1.85},
+                        "final": {"line": 2.25, "over": 1.88, "under": 1.92}}}
+        )
+        self.assertTrue(signal["available"])
+        self.assertNotIn("ou_line_down", signal["signals"])
+        self.assertNotIn("ou_line_up", signal["signals"])
+        self.assertIn("ou_flat_line_over_backed_weak", signal["signals"])
+        self.assertEqual(signal["ou_flat_water_nudge"]["side"], "over")
+        self.assertGreater(signal["ou_flat_water_nudge"]["boost"], 0.0)
+        self.assertGreater(signal["pace_shift"], 0.0)
+
+    def test_flat_line_weak_nudge_not_triggered_when_line_moves(self):
+        signal = self.service.extract_over_under_market_signal(
+            {"大小球": {"initial": {"line": 2.5, "over": 2.0, "under": 1.8175},
+                        "final": {"line": 2.0, "over": 1.81, "under": 2.0525}}}
+        )
+        self.assertIsNone(signal["ou_flat_water_nudge"])
+        self.assertNotIn("ou_flat_line_over_backed_weak", signal["signals"])
+
+    def test_classify_water_tier_matches_hong_kong_bands(self):
+        self.assertEqual(self.service.classify_water_tier(1.85)["tier"], "low")
+        self.assertEqual(self.service.classify_water_tier(1.86)["tier"], "mid")
+        self.assertEqual(self.service.classify_water_tier(1.95)["tier"], "mid")
+        self.assertEqual(self.service.classify_water_tier(1.96)["tier"], "high")
+        self.assertFalse(self.service.classify_water_tier(1.0)["available"])
+
+    def test_high_water_suppresses_line_down_over_divergence_boost(self):
+        low = self.service.extract_over_under_market_signal(
+            {"大小球": {"initial": {"line": 2.5, "over": 2.0, "under": 1.8175},
+                        "final": {"line": 2.0, "over": 1.81, "under": 2.0525}}}
+        )
+        high = self.service.extract_over_under_market_signal(
+            {"大小球": {"initial": {"line": 2.5, "over": 2.1, "under": 1.8175},
+                        "final": {"line": 2.0, "over": 1.96, "under": 2.30}}}
+        )
+        self.assertEqual(low["ou_line_water_divergence"]["water_tier"], "low")
+        self.assertEqual(high["ou_line_water_divergence"]["water_tier"], "high")
+        self.assertGreater(
+            low["ou_line_water_divergence"]["boost"],
+            high["ou_line_water_divergence"]["boost"],
+        )
+
     def test_market_ou_calibration_uses_water_movement_for_total_lambda(self):
         inference = InferencePipelineService(
             league_config={},
@@ -2635,6 +2697,239 @@ class InferenceConfidenceCalibrationTest(unittest.TestCase):
         self.assertGreater(adjusted["home_win"], 0.42)
         self.assertIn("historical_market_alignment", diag)
 
+    def test_market_operation_pattern_flags_handicap_flat_water_drop_as_deceptive(self):
+        service = object.__new__(InferencePipelineService)
+        sentiment = service.detect_market_movement_sentiment(
+            european_odds={
+                "initial": {"home": 1.61, "draw": 3.60, "away": 5.50},
+                "final": {"home": 1.55, "draw": 3.70, "away": 6.50},
+            },
+            asian_handicap={
+                "initial": {"handicap": -0.5, "home_water": 1.00, "away_water": 0.85},
+                "final": {"handicap": -0.5, "home_water": 0.72, "away_water": 1.10},
+            },
+        )
+        pattern = service.classify_market_operation_pattern(
+            european_odds={
+                "initial": {"home": 1.61, "draw": 3.60, "away": 5.50},
+                "final": {"home": 1.55, "draw": 3.70, "away": 6.50},
+            },
+            asian_handicap={
+                "initial": {"handicap": -0.5, "home_water": 1.00, "away_water": 0.85},
+                "final": {"handicap": -0.5, "home_water": 0.72, "away_water": 1.10},
+            },
+            ou_signal={"available": False},
+            kelly={"final": {"draw": 0.90}},
+            market_sentiment=sentiment,
+        )
+        self.assertEqual(pattern["verdict"], "deceptive")
+        self.assertEqual(pattern["luring_side"], "home")
+        self.assertTrue(any("诱" in lbl or "虚" in lbl or "背书" in lbl for lbl in pattern["warning_labels"]))
+        self.assertGreater(pattern["recommended_extra_retreat"], 0.0)
+
+        adjusted, diag = service.apply_market_operation_adjustment(
+            final_prob={"home_win": 0.55, "draw": 0.27, "away_win": 0.18},
+            pattern_diag=pattern,
+            delta_vector={"fav": "home", "euro_fav_imp_move": 0.02},
+            weights={},
+        )
+        # 两层动态调权：系数全0(样本不足)→不改概率，仅透传标签
+        self.assertFalse(diag["applied"])
+        self.assertEqual(diag["reason"], "no_reliable_signal_label_only")
+        self.assertEqual(adjusted["home_win"], 0.55)
+        self.assertEqual(adjusted["draw"], 0.27)
+
+    def test_market_operation_pattern_marks_genuine_when_axes_corroborate(self):
+        service = object.__new__(InferencePipelineService)
+        sentiment = service.detect_market_movement_sentiment(
+            european_odds={
+                "initial": {"home": 1.80, "draw": 3.50, "away": 4.50},
+                "final": {"home": 1.70, "draw": 3.55, "away": 4.55},
+            },
+            asian_handicap={
+                "initial": {"handicap": -0.5, "home_water": 0.95, "away_water": 0.90},
+                "final": {"handicap": -0.75, "home_water": 0.85, "away_water": 1.00},
+            },
+        )
+        pattern = service.classify_market_operation_pattern(
+            european_odds={
+                "initial": {"home": 1.80, "draw": 3.50, "away": 4.50},
+                "final": {"home": 1.70, "draw": 3.55, "away": 4.55},
+            },
+            asian_handicap={
+                "initial": {"handicap": -0.5, "home_water": 0.95, "away_water": 0.90},
+                "final": {"handicap": -0.75, "home_water": 0.85, "away_water": 1.00},
+            },
+            ou_signal={"available": True, "signals": [], "ou_line_water_divergence": None, "ou_flat_water_nudge": None},
+            kelly={"final": {"draw": 1.00}},
+            market_sentiment=sentiment,
+        )
+        self.assertEqual(pattern["verdict"], "genuine")
+        self.assertTrue(any(lbl.startswith("✅") for lbl in pattern["warning_labels"]))
+
+        adjusted, diag = service.apply_market_operation_adjustment(
+            final_prob={"home_win": 0.50, "draw": 0.28, "away_win": 0.22},
+            pattern_diag=pattern,
+            delta_vector={"fav": "home", "euro_fav_imp_move": 0.03},
+            weights={},
+        )
+        # 两层动态调权：系数全0(样本不足)→不改概率，仅透传标签
+        self.assertFalse(diag["applied"])
+        self.assertEqual(diag["reason"], "no_reliable_signal_label_only")
+        self.assertEqual(adjusted["home_win"], 0.50)
+        self.assertEqual(adjusted["draw"], 0.28)
+
+    def test_market_operation_pattern_light_euro_pump_not_flagged_deceptive(self):
+        """真实回归：墨西哥2-0南非——热门仅轻度走热(-4.3%)+盘不动，正常强队被看好，不应误判诱导。"""
+        service = object.__new__(InferencePipelineService)
+        european_odds = {
+            "initial": {"home": 1.48, "draw": 4.0379, "away": 6.5953},
+            "final": {"home": 1.4159, "draw": 4.291, "away": 8.3429},
+        }
+        asian_handicap = {
+            "initial": {"handicap": -1, "home_water": 1.91, "away_water": 1.91},
+            "final": {"handicap": -1, "home_water": 1.80, "away_water": 2.13},
+        }
+        sentiment = service.detect_market_movement_sentiment(
+            european_odds=european_odds,
+            asian_handicap=asian_handicap,
+        )
+        pattern = service.classify_market_operation_pattern(
+            european_odds=european_odds,
+            asian_handicap=asian_handicap,
+            ou_signal={"available": True, "signals": [], "ou_line_water_divergence": None, "ou_flat_water_nudge": None},
+            kelly={"final": {"draw": 0.9451}},
+            market_sentiment=sentiment,
+        )
+        self.assertNotEqual(pattern["verdict"], "deceptive")
+        self.assertIsNone(pattern["luring_side"])
+        self.assertTrue(any("正常被看好" in lbl for lbl in pattern["warning_labels"]))
+
+    def test_market_operation_pattern_deep_euro_pump_flags_deceptive(self):
+        """真实回归：加拿大1-1波黑——欧赔深压(-9.8%)+升盘，热门没赢，应判诱导。"""
+        service = object.__new__(InferencePipelineService)
+        european_odds = {
+            "initial": {"home": 2.0294, "draw": 3.4003, "away": 3.6626},
+            "final": {"home": 1.831, "draw": 3.438, "away": 4.5237},
+        }
+        asian_handicap = {
+            "initial": {"handicap": -0.25, "home_water": 1.93, "away_water": 1.89},
+            "final": {"handicap": -0.5, "home_water": 1.91, "away_water": 2.03},
+        }
+        sentiment = service.detect_market_movement_sentiment(
+            european_odds=european_odds,
+            asian_handicap=asian_handicap,
+        )
+        pattern = service.classify_market_operation_pattern(
+            european_odds=european_odds,
+            asian_handicap=asian_handicap,
+            ou_signal={"available": True, "signals": [], "ou_line_water_divergence": None, "ou_flat_water_nudge": None},
+            kelly={"final": {"draw": 0.9439}},
+            market_sentiment=sentiment,
+        )
+        self.assertEqual(pattern["verdict"], "deceptive")
+        self.assertEqual(pattern["luring_side"], "home")
+        self.assertTrue(any("深压" in lbl for lbl in pattern["warning_labels"]))
+        self.assertFalse(any("升盘背书" in lbl for lbl in pattern["warning_labels"]))
+
+    def test_market_operation_pattern_neutral_labels_when_signals_insufficient(self):
+        service = object.__new__(InferencePipelineService)
+        pattern = service.classify_market_operation_pattern(
+            european_odds={
+                "initial": {"home": 2.00, "draw": 3.30, "away": 3.60},
+                "final": {"home": 2.00, "draw": 3.30, "away": 3.60},
+            },
+            asian_handicap={
+                "initial": {"handicap": -0.25, "home_water": 0.92, "away_water": 0.92},
+                "final": {"handicap": -0.25, "home_water": 0.92, "away_water": 0.92},
+            },
+            ou_signal={"available": True, "signals": [], "ou_line_water_divergence": None, "ou_flat_water_nudge": None},
+            kelly={"final": {"draw": 1.10}},
+            market_sentiment={"available": True, "signals": [], "market_favorite": "home"},
+        )
+        self.assertEqual(pattern["verdict"], "neutral")
+        self.assertTrue(any(lbl.startswith("◽") for lbl in pattern["warning_labels"]))
+        _, diag = service.apply_market_operation_adjustment(
+            final_prob={"home_win": 0.45, "draw": 0.30, "away_win": 0.25},
+            pattern_diag=pattern,
+            delta_vector={"fav": "home", "euro_fav_imp_move": 0.0},
+            weights={},
+        )
+        self.assertFalse(diag["applied"])
+        self.assertEqual(diag["reason"], "no_reliable_signal_label_only")
+
+    def test_operation_weight_learner_below_sample_threshold_yields_zero_reliability(self):
+        """样本不足 → reliability=0（仅提示不调权，防过拟合的自动退化）。"""
+        from domain.operation_weight_learner import OperationWeightLearner
+        learner = OperationWeightLearner(min_samples=80, min_auc_gap=0.07)
+        samples = [
+            {"euro_fav_imp_move": 0.05 if i % 2 else -0.05, "_fav_won": i % 2}
+            for i in range(40)
+        ]
+        weights = learner.learn(samples)
+        self.assertIn("euro_fav_imp_move", weights)
+        self.assertEqual(weights["euro_fav_imp_move"]["reliability"], 0.0)
+
+    def test_operation_weight_learner_learns_sign_and_reliability_for_strong_signal(self):
+        """构造强信号(特征值与强侧赢完全同向)+足量样本 → 学出正sign与正reliability。"""
+        from domain.operation_weight_learner import OperationWeightLearner
+        learner = OperationWeightLearner(min_samples=80, min_auc_gap=0.07)
+        samples = []
+        for i in range(120):
+            won = 1 if i % 2 == 0 else 0
+            samples.append({"hcp_deepen": 1.0 + i * 0.01 if won else -1.0 - i * 0.01, "_fav_won": won})
+        weights = learner.learn(samples)
+        self.assertIn("hcp_deepen", weights)
+        self.assertEqual(weights["hcp_deepen"]["sign"], 1)
+        self.assertGreater(weights["hcp_deepen"]["reliability"], 0.0)
+        self.assertGreaterEqual(weights["hcp_deepen"]["auc"], 0.9)
+
+    def test_score_delta_zero_when_weights_empty(self):
+        """系数全0 → score=0、无激活信号（调权退化为仅提示）。"""
+        from domain.operation_weight_learner import score_delta
+        score, active = score_delta({"fav": "home", "hcp_deepen": 0.3}, {})
+        self.assertEqual(score, 0.0)
+        self.assertEqual(active, [])
+
+    def test_two_layer_adjustment_applies_when_reliable_weight_present(self):
+        """有可靠系数 + 逐场Δ → 按方向连续调权（印证强侧时强侧概率上升）。"""
+        service = object.__new__(InferencePipelineService)
+        pattern = {"verdict": "neutral", "pattern": "static_static", "favored_side": "home", "warning_labels": []}
+        weights = {
+            "hcp_deepen": {"reliability": 1.0, "sign": 1, "auc": 0.95, "n": 120, "mean": 0.0, "std": 0.2},
+        }
+        delta_vector = {"fav": "home", "hcp_deepen": 0.4}
+        adjusted, diag = service.apply_market_operation_adjustment(
+            final_prob={"home_win": 0.50, "draw": 0.28, "away_win": 0.22},
+            pattern_diag=pattern,
+            delta_vector=delta_vector,
+            weights=weights,
+        )
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["direction"], "endorse")
+        self.assertGreater(adjusted["home_win"], 0.50)
+        self.assertLess(adjusted["draw"], 0.28)
+        self.assertAlmostEqual(sum(adjusted.values()), 1.0, places=6)
+
+    def test_two_layer_adjustment_deceptive_direction_retreats_favorite(self):
+        """跨轴背离(欧赔热但盘不升)可靠系数为利空强侧 → 回撤强侧概率。"""
+        service = object.__new__(InferencePipelineService)
+        pattern = {"verdict": "neutral", "pattern": "static_static", "favored_side": "home", "warning_labels": []}
+        weights = {
+            "div_euro_hot_hcp_flat": {"reliability": 1.0, "sign": -1, "auc": 0.10, "n": 120, "mean": 0.0, "std": 0.02},
+        }
+        delta_vector = {"fav": "home", "div_euro_hot_hcp_flat": 0.06}
+        adjusted, diag = service.apply_market_operation_adjustment(
+            final_prob={"home_win": 0.55, "draw": 0.27, "away_win": 0.18},
+            pattern_diag=pattern,
+            delta_vector=delta_vector,
+            weights=weights,
+        )
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["direction"], "deceptive")
+        self.assertLess(adjusted["home_win"], 0.55)
+        self.assertAlmostEqual(sum(adjusted.values()), 1.0, places=6)
+
     def test_build_prediction_note_includes_match_id(self):
         note = build_prediction_note(
             {
@@ -2648,7 +2943,7 @@ class InferenceConfidenceCalibrationTest(unittest.TestCase):
         )
         self.assertIn("MatchID:1302909", note)
 
-    def test_build_prediction_note_filters_scores_against_single_direction(self):
+    def test_build_prediction_note_keeps_cross_direction_scores(self):
         note = build_prediction_note(
             {
                 "prediction": "主胜",
@@ -2658,9 +2953,7 @@ class InferenceConfidenceCalibrationTest(unittest.TestCase):
                 "upset_potential": {"level": "中", "index": 63},
             }
         )
-        self.assertIn("比分:1-0", note)
-        self.assertNotIn("比分:1-1/1-0", note)
-        self.assertNotIn("0-0", note)
+        self.assertIn("比分:1-1/1-0/0-0", note)
 
     def test_build_prediction_note_sanitizes_case_hint_and_closes_parenthesis(self):
         note = build_prediction_note(
@@ -2685,8 +2978,7 @@ class InferenceConfidenceCalibrationTest(unittest.TestCase):
         normalized = normalize_existing_prediction_note(
             "已完赛；预测:主胜 信心:0.42 比分:1-0/0-1 大小:小2.5(0.72) 爆冷:中(46) 案例:切尔西vs曼联(中度爆冷,强队胜强队 动态调权:样本不足"
         )
-        self.assertIn("比分:1-0", normalized)
-        self.assertNotIn("0-1", normalized)
+        self.assertIn("比分:1-0/0-1", normalized)
         self.assertIn("案例:切尔西vs曼联(中度爆冷,强队胜强队)", normalized)
         self.assertIn("动态调权:样本不足", normalized)
 

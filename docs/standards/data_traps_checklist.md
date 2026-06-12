@@ -10,7 +10,7 @@ last_updated: "2026-05-08"
 > 1. `prediction_system.py` 是发现入口，真实命令实现位于 `europe_leagues/app/cli.py`  
 > 2. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
 > 3. `prediction_system.py predict-match` 执行增强预测，并自动接入 RAG 记忆层（足彩 14 场用 `predict-fourteen-issue`）  
-> 4. 只有 SoT 联赛（五大联赛 + 世界杯）才写回 `europe_leagues/<league>/teams_*.md` + `MEMORY.md` + RAG；其余一切赛事只输出预测结果，不写回  
+> 4. 只有 SoT 联赛（五大联赛 + 世界杯）才走完整写回 `europe_leagues/<league>/teams_*.md` + `MEMORY.md` + RAG + 归档；其余一切赛事走 `archive_only`，仅归档 + 赛果同步，不写 MEMORY/RAG/teams md  
 > 5. 赛后优先用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `sync-pending-results-review` 回填  
 > 6. `prediction_system.py accuracy --refresh --json` 是显式重建入口，不是唯一常规路径  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
@@ -36,12 +36,12 @@ last_updated: "2026-05-08"
   - 在复盘和统计里禁止把历史 `default_2.5` 与真实盘口样本混算
   - 对缺盘口样本，检查是否明确落为 `over_under.available=false` 且 `reason=missing_real_line`
 
-## 2. 双路径写回导致分母错觉
+## 2. 多写回出口导致分母错觉
 
 - 严重程度：`极高`
 - 典型症状：`teams_2025-26.md` 里的准确率和 `MEMORY.md` 顶部统计、`accuracy_stats.json` 看起来不一致
 - 高风险位置：`result_manager.py`、`domain/persistence.py`、`accuracy_stats.json`
-- 风险说明：五大联赛写 `teams_2025-26.md`，欧战/杯赛写 `MEMORY.md + prediction_archive.json`；如果统计只扫一个出口，就会误判模型好坏
+- 风险说明：SoT 联赛写 `teams_2025-26.md` + `MEMORY.md` + `prediction_archive.json`，非 SoT 赛事走 `archive_only` 只写 `prediction_archive.json`；如果统计只扫一个出口，就会误判模型好坏
 - 检查动作：
   - 统一使用 `accuracy --refresh --json`
   - 检查 `over_under_report.scope = unified_prediction_sources`
@@ -51,7 +51,7 @@ last_updated: "2026-05-08"
 
 - 严重程度：`极高`
 - 典型症状：已完赛样本存在，但 `line_source = unknown`
-- 高风险位置：`prediction_archive.json` 的历史 runtime-only 条目
+- 高风险位置：`prediction_archive.json` 的历史 `archive_only`（非 SoT）条目
 - 风险说明：这类样本已经进入命中率分母，但无法判断它到底属于真实盘口还是 fallback，导致统计解释力下降
 - 检查动作：
   - 统计 `by_line_source.unknown`
@@ -64,7 +64,7 @@ last_updated: "2026-05-08"
 - 严重程度：`极高`
 - 典型症状：赛果抓到了，但没有更新到正确预测；或同一场比赛出现重复记录
 - 高风险位置：`runtime/result_sync.py`、`result_manager.py`、`prediction_archive.json`、`result_sync_registry.json`
-- 风险说明：联赛 SoT 常用 `league_date_home_away`，runtime-only 更依赖真实 `external_match_id`；一旦透传不完整，就会导致写回错位或重复建档
+- 风险说明：联赛 SoT 常用 `league_date_home_away`，非 SoT 的 `archive_only` 条目更依赖真实 `external_match_id`；一旦透传不完整，就会导致写回错位或重复建档
 - 检查动作：
   - 检查 `match_id / external_match_id / internal_match_id / teams_match_id`
   - 赛后确认 registry 和 archive 是否指向同一场比赛

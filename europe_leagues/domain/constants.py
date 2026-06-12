@@ -23,7 +23,7 @@ RHO_MAP: Dict[str, float] = {
     'bundesliga': -0.06,
     'ligue_1': -0.10,
     'friendly': -0.04,
-    'world_cup': -0.07,
+    'world_cup': -0.03,
 }
 
 
@@ -45,9 +45,22 @@ HOME_ADVANTAGE_MAP: Dict[str, float] = {
     'conference_league': 1.06,
 }
 
+# 2026 世界杯由美国/加拿大/墨西哥三国合办：仅当东道主作为主队时享有真实主场优势，
+# 其余对阵均在中立场地进行，主场系数取 1.0（中立）。
+WORLD_CUP_HOSTS = {'美国', '加拿大', '墨西哥'}
+WORLD_CUP_HOST_HOME_ADVANTAGE = 1.08
+WORLD_CUP_NEUTRAL_ADVANTAGE = 1.0
 
-def resolve_home_advantage(league_code: str) -> float:
-    """返回联赛的主场优势系数；未知联赛回退 1.12。"""
+
+def resolve_home_advantage(league_code: str, home_team: str = "") -> float:
+    """返回联赛的主场优势系数；未知联赛回退 1.12。
+
+    世界杯为合办赛事：东道主（美/加/墨）作主队按弱主场处理，其余视为中立场地。
+    """
+    if league_code == 'world_cup':
+        if str(home_team or "").strip() in WORLD_CUP_HOSTS:
+            return WORLD_CUP_HOST_HOME_ADVANTAGE
+        return WORLD_CUP_NEUTRAL_ADVANTAGE
     return HOME_ADVANTAGE_MAP.get(league_code, DEFAULT_HOME_ADVANTAGE)
 
 

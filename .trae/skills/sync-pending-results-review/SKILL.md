@@ -86,7 +86,7 @@ python3 prediction_system.py save-result --match-id '<主队> vs <客队>' --hom
 ## 结果闭环后应看到什么
 
 - SoT-backed 比赛更新 `teams_2025-26.md` / `teams_2026.md`
-- runtime-only 比赛更新 `MEMORY.md` 与 `.okooo-scraper/runtime/*.json`
+- 非 SoT 比赛（`archive_only`）更新 `prediction_archive.json` 与 `.okooo-scraper/runtime/*.json`，不写 `MEMORY.md`
 - `prediction_archive.json` 实际赛果字段补齐
 - 准确率与 review-learning 相关输出刷新
 - 必要时滚动记忆从“未完赛”迁移到“已完赛”

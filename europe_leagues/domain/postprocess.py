@@ -78,6 +78,61 @@ class PredictionPostprocessService:
         return [(score, float(prob or 0.0) / total) for score, prob in scores]
 
     @staticmethod
+    def rescale_score_probs_to_outcome(
+        score_probs: Optional[Dict[str, float]],
+        final_probabilities: Optional[Dict[str, float]],
+    ) -> Dict[str, float]:
+        """按修正后的胜平负边际重标定比分分布。
+
+        比分由 λ 派生，与胜平负概率独立；当市场情绪等修正改变了 1x2 方向后，
+        若不同步比分，会出现"方向=平局、比分=1-0"的口径冲突。此方法保留各方向内部
+        的比分相对排序（λ 信息），仅把主/平/客三个方向的总质量重标定到目标边际。
+        """
+        if not isinstance(score_probs, dict) or not score_probs:
+            return score_probs or {}
+        if not isinstance(final_probabilities, dict) or not final_probabilities:
+            return dict(score_probs)
+        tgt_h = float(final_probabilities.get('home_win') or 0.0)
+        tgt_d = float(final_probabilities.get('draw') or 0.0)
+        tgt_a = float(final_probabilities.get('away_win') or 0.0)
+        tgt_total = tgt_h + tgt_d + tgt_a
+        if tgt_total <= 0:
+            return dict(score_probs)
+        tgt_h, tgt_d, tgt_a = tgt_h / tgt_total, tgt_d / tgt_total, tgt_a / tgt_total
+
+        def outcome_of(score: str) -> Optional[str]:
+            try:
+                h, a = (int(x) for x in str(score).split('-'))
+            except Exception:
+                return None
+            if h > a:
+                return 'home_win'
+            if h < a:
+                return 'away_win'
+            return 'draw'
+
+        cur = {'home_win': 0.0, 'draw': 0.0, 'away_win': 0.0}
+        for score, prob in score_probs.items():
+            oc = outcome_of(score)
+            if oc:
+                cur[oc] += max(0.0, float(prob or 0.0))
+        scale = {
+            'home_win': (tgt_h / cur['home_win']) if cur['home_win'] > 1e-12 else 0.0,
+            'draw': (tgt_d / cur['draw']) if cur['draw'] > 1e-12 else 0.0,
+            'away_win': (tgt_a / cur['away_win']) if cur['away_win'] > 1e-12 else 0.0,
+        }
+        rescaled: Dict[str, float] = {}
+        for score, prob in score_probs.items():
+            oc = outcome_of(score)
+            rescaled[score] = max(0.0, float(prob or 0.0)) * scale.get(oc, 1.0) if oc else max(0.0, float(prob or 0.0))
+        norm = sum(rescaled.values())
+        if norm > 0:
+            for score in rescaled:
+                rescaled[score] /= norm
+        return rescaled
+
+
+    @staticmethod
     def build_market_snapshot(current_odds: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         if not isinstance(current_odds, dict):
             return {}
@@ -511,6 +566,21 @@ class PredictionPostprocessService:
             'under_prob': round(implied_under / total, 6) if total > 0 else None,
         }
 
+    def classify_water_tier(self, decimal_odds: Optional[float]) -> Dict[str, Any]:
+        """按香港水位口径分档：港水 = 小数赔率 − 1。
+        0.85 以下=低水(底水)、0.86–0.95=中水、0.96 以上=高水。
+        """
+        if not isinstance(decimal_odds, (int, float)) or decimal_odds <= 1.0:
+            return {'available': False, 'tier': None, 'hk_water': None}
+        hk = round(float(decimal_odds) - 1.0, 4)
+        if hk <= 0.85:
+            tier = 'low'
+        elif hk <= 0.95:
+            tier = 'mid'
+        else:
+            tier = 'high'
+        return {'available': True, 'tier': tier, 'hk_water': hk}
+
     def extract_over_under_market_signal(self, current_odds: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         totals = current_odds.get('大小球') if isinstance(current_odds, dict) and isinstance(current_odds.get('大小球'), dict) else {}
         initial = totals.get('initial') if isinstance(totals.get('initial'), dict) else {}
@@ -545,6 +615,58 @@ class PredictionPostprocessService:
             goal_pressure = 'under'
         direction = 1.0 if goal_pressure == 'over' else -1.0 if goal_pressure == 'under' else 0.0
         pace_shift = direction * (abs(line_delta) * 0.08 + abs(bias_delta) * 0.25 + abs(bias_final) * 0.06)
+        # 盘水背离：降盘却把大球水位压低（暗钱买大），或升盘却把小球水位压低。
+        # 明面盘口与暗钱方向相反 → 视为诱导信号，给被加注一侧额外加成。
+        # 加成强度按香港水位档位缩放：底水(低水)最强、中水折半、高水基本忽略。
+        tier_weight = {'low': 1.0, 'mid': 0.5, 'high': 0.15}
+        over_water_tier = self.classify_water_tier(final_prices.get('over_decimal'))
+        under_water_tier = self.classify_water_tier(final_prices.get('under_decimal'))
+        ou_line_water_divergence = None
+        if 'ou_line_down' in signals and 'over_water_drop' in signals and goal_pressure == 'over':
+            weight = tier_weight.get(over_water_tier.get('tier'), 0.5)
+            boost = min(0.09, abs(line_delta) * 0.10 + abs(bias_delta) * 0.20) * weight
+            pace_shift += boost
+            signals.append('ou_line_down_over_backed_divergence')
+            ou_line_water_divergence = {
+                'side': 'over', 'boost': round(boost, 6),
+                'water_tier': over_water_tier.get('tier'), 'hk_water': over_water_tier.get('hk_water'),
+            }
+        elif 'ou_line_up' in signals and 'under_water_drop' in signals and goal_pressure == 'under':
+            weight = tier_weight.get(under_water_tier.get('tier'), 0.5)
+            boost = min(0.09, abs(line_delta) * 0.10 + abs(bias_delta) * 0.20) * weight
+            pace_shift -= boost
+            signals.append('ou_line_up_under_backed_divergence')
+            ou_line_water_divergence = {
+                'side': 'under', 'boost': round(boost, 6),
+                'water_tier': under_water_tier.get('tier'), 'hk_water': under_water_tier.get('hk_water'),
+            }
+        # 弱加成：盘口未移动（无升降盘），但单侧水位下降=暗钱进场。
+        # 强度远低于背离加成（封顶 0.03），且按水位档位缩放——只有底水才算真买。
+        ou_flat_water_nudge = None
+        line_static = ('ou_line_down' not in signals) and ('ou_line_up' not in signals)
+        if line_static and ou_line_water_divergence is None:
+            if 'over_water_drop' in signals and 'under_water_drop' not in signals:
+                over_drop = abs((over_raw_initial or 0.0) - (over_raw_final or 0.0))
+                weight = tier_weight.get(over_water_tier.get('tier'), 0.5)
+                boost = min(0.03, over_drop * 0.30) * weight
+                if boost > 1e-6:
+                    pace_shift += boost
+                    signals.append('ou_flat_line_over_backed_weak')
+                    ou_flat_water_nudge = {
+                        'side': 'over', 'boost': round(boost, 6),
+                        'water_tier': over_water_tier.get('tier'), 'hk_water': over_water_tier.get('hk_water'),
+                    }
+            elif 'under_water_drop' in signals and 'over_water_drop' not in signals:
+                under_drop = abs((under_raw_initial or 0.0) - (under_raw_final or 0.0))
+                weight = tier_weight.get(under_water_tier.get('tier'), 0.5)
+                boost = min(0.03, under_drop * 0.30) * weight
+                if boost > 1e-6:
+                    pace_shift -= boost
+                    signals.append('ou_flat_line_under_backed_weak')
+                    ou_flat_water_nudge = {
+                        'side': 'under', 'boost': round(boost, 6),
+                        'water_tier': under_water_tier.get('tier'), 'hk_water': under_water_tier.get('hk_water'),
+                    }
         balanced_high_line_over_nudge = False
         if (
             goal_pressure == 'balanced'
@@ -574,6 +696,10 @@ class PredictionPostprocessService:
             'bias_delta': round(bias_delta, 6),
             'pace_shift': round(pace_shift, 6),
             'balanced_high_line_over_nudge': balanced_high_line_over_nudge,
+            'ou_line_water_divergence': ou_line_water_divergence,
+            'ou_flat_water_nudge': ou_flat_water_nudge,
+            'over_water_tier': over_water_tier.get('tier'),
+            'under_water_tier': under_water_tier.get('tier'),
             'initial_price_format': initial_prices.get('format'),
             'final_price_format': final_prices.get('format'),
             'initial_prices': initial_prices,
@@ -2322,6 +2448,17 @@ class PredictionPostprocessService:
         elif level == 'none' and anomaly.get('available'):
             parts.append('多公司报价一致，盘口可信度高')
 
+        # 庄家操盘交叉手法判别（盘×球×欧赔×凯利）的警示标签
+        operation = ctx.get('market_operation_pattern') if isinstance(ctx.get('market_operation_pattern'), dict) else {}
+        if operation.get('available'):
+            labels = operation.get('warning_labels') if isinstance(operation.get('warning_labels'), list) else []
+            verdict = operation.get('verdict')
+            pattern_cn = operation.get('pattern_cn') or ''
+            verdict_cn = {'deceptive': '诱导', 'genuine': '真实', 'neutral': '中性'}.get(verdict, '')
+            if labels:
+                head = f'[{pattern_cn}·{verdict_cn}] ' if (pattern_cn or verdict_cn) else ''
+                parts.append(head + '/'.join(str(x) for x in labels))
+
         # 市场权重（α）档位说明
         alpha = ctx.get('market_alpha') if isinstance(ctx.get('market_alpha'), dict) else {}
         regime = alpha.get('regime')
@@ -2335,10 +2472,10 @@ class PredictionPostprocessService:
         if regime_text:
             parts.append(regime_text)
 
-        # 最可能比分概率（取前两个）
+        # 最可能比分概率（取前三个）
         if top_scores:
             score_bits = []
-            for score, prob in top_scores[:2]:
+            for score, prob in top_scores[:3]:
                 p = _f(prob)
                 if str(score).strip() and p is not None:
                     score_bits.append(f'{str(score).strip()}({p:.0%})')
@@ -2424,6 +2561,12 @@ class PredictionPostprocessService:
             'retrieved_memory': retrieved_memory or {},
             'retrieved_memory_explanation': memory_explanation,
             'market_change_narrative': self.build_market_change_narrative(current_odds, realtime, top_scores),
+            'dealer_operation_pattern': realtime.get('context_applied', {}).get('market_operation_pattern'),
+            'dealer_warning_labels': (
+                (realtime.get('context_applied', {}).get('market_operation_pattern') or {}).get('warning_labels')
+                if isinstance(realtime.get('context_applied', {}).get('market_operation_pattern'), dict)
+                else None
+            ),
             'live_betting_advice': live_betting_advice,
             'market_snapshot': self.build_market_snapshot(current_odds),
             'runtime_profile': runtime_profile,

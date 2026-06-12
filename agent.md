@@ -13,7 +13,7 @@ last_updated_date: "2026-05-15"
 > 1. `prediction_system.py` 是发现入口，真实命令实现位于 `europe_leagues/app/cli.py`  
 > 2. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
 > 3. `prediction_system.py predict-match` 执行增强预测（足彩 14 场用 `predict-fourteen-issue`）  
-> 4. 只有 SoT 联赛（五大联赛 + 世界杯）才写回 `europe_leagues/<league>/teams_*.md` + `MEMORY.md` + RAG；其余一切赛事（欧战/杯赛/友谊赛等）只输出预测结果，不写回  
+> 4. 只有 SoT 联赛（五大联赛 + 世界杯）才走完整写回 `europe_leagues/<league>/teams_*.md` + `MEMORY.md` + RAG + 归档；其余一切赛事（欧战/杯赛/友谊赛等）走 `archive_only`——仅归档 + 赛果同步 + 准确率，不写 MEMORY/RAG/teams md  
 > 5. 赛后优先用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `sync-pending-results-review` 回填  
 > 6. 结果闭环会统一刷新 accuracy / MEMORY / RAG / review-learning；`prediction_system.py accuracy --refresh --json` 仍可作为显式重建入口  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
@@ -89,12 +89,12 @@ trae_projects/
 - `EnhancedPredictor` 仍保留主流程编排职责，但大部分子能力已拆到 `domain/`、`collectors/`、`storage/`、`runtime/`
 - `agents/*.md` 与 `agent_runtime_registry.py` 共同决定运行时输出中的 `runtime_profile`
 
-## 事实写回与 runtime 边界
+## 事实写回与归档边界
 
-正式写回遵守当前双路径：
+正式写回遵守二元边界：
 
-- 五大联赛 SoT：`europe_leagues/<league>/teams_2025-26.md`
-- 欧战/杯赛滚动记忆：项目根 `MEMORY.md`
+- SoT 联赛（五大联赛 + 世界杯）完整写回：`europe_leagues/<league>/teams_2025-26.md`（世界杯 `teams_2026.md`）+ 项目根 `MEMORY.md` 滚动记忆 + RAG + 归档
+- 非 SoT 赛事（欧战/杯赛/友谊赛等）走 `archive_only`：仅归档预测 + 登记赛果同步，不写 `MEMORY.md`/RAG/teams md
 - 运行时归档与索引：`europe_leagues/.okooo-scraper/runtime/*.json`
 
 运行时抓取与缓存目录：
@@ -133,7 +133,7 @@ trae_projects/
 - 明确样本边界、降级情况与风险提示
 - 正式流程服从 `prediction_system.py` -> `app/cli.py` -> `DomainPredictor` / `EnhancedPredictor`
 - 预测持久化由 `PredictionPersistenceService` 统一编排，`ResultManager` 负责 archive / result / accuracy 底座能力
-- 正式写回遵守五大联赛 SoT + 欧战/杯赛 runtime-only 的双路径边界
+- 正式写回遵守 SoT 联赛完整写回 + 非 SoT `archive_only` 的二元边界
 
 ## Agent 分工
 
@@ -223,7 +223,7 @@ trae_projects/
 - 通过 `collect-data -> 可选快照刷新 -> predict-match` 生成临场更新结论
 - 对比原预测与新预测，避免重复堆叠旧结论
 - 必须包含“调整说明”，解释是方向改变、置信度改变还是比分排序改变
-- 五大联赛优先遵守 `teams_2025-26.md` 写回，欧战/杯赛再走 `MEMORY.md` 与 runtime-only 归档
+- SoT 联赛（五大联赛 + 世界杯）完整写回 `teams_2025-26.md` + MEMORY + RAG + 归档；非 SoT 赛事走 `archive_only`，仅归档 + 赛果同步
 
 标准格式：
 ```markdown

@@ -10,7 +10,7 @@
 >   - 抓盘口快照：`okooo_save_snapshot.py`（可加 `--odds-only` 单独补抓欧赔）
 > - **盘口四盘**：欧赔 / 凯利 / 亚盘 / 大小球，走单会话 hub 真实导航一次拿回；解析规则与排障见 [`ODDS_FETCH_GUIDE.md`](ODDS_FETCH_GUIDE.md)。
 > - **固定 IP 抗封（单机无代理，默认全开）**：三道防线 = 进程级全局频控闸（`_global_pace_gate`，默认 2.5s，可调 `--min-request-interval`）+ 节奏随机抖动（`_jittered` ±35%）+ stealth 指纹屏蔽（`_install_stealth_script` 抹掉 `navigator.webdriver` 等自动化特征）。无代理时把请求节奏放慢拉抖是降低撞验证墙的根因手段，换模型/换 UA 不是。
-> - **持久化边界（已收敛为二元）**：只有 SoT-backed 正式联赛（五大联赛 + 世界杯）才写回 teams md / `MEMORY.md` 滚动记忆 / RAG；其余一切赛事（杯赛、欧战、友谊赛等）**只输出预测结果，不做任何写回**（`persisted.skipped_reason = "non_sot_league_output_only"`）。详见 [`docs/PRD_足球预测系统_2026.md`](docs/PRD_足球预测系统_2026.md) 第 5 节。
+> - **持久化边界（已收敛为二元）**：只有 SoT-backed 正式联赛（五大联赛 + 世界杯）走完整写回（teams md / `MEMORY.md` 滚动记忆 / RAG / 归档 / 赛果同步）；其余一切赛事（杯赛、欧战、友谊赛等）走 `archive_only`——**仅归档预测 + 登记赛果同步 + 刷新准确率，不写 MEMORY/RAG/teams md**（`persisted.archive_only=True`、`memory_updated=False`）。详见 [`docs/PRD_足球预测系统_2026.md`](docs/PRD_足球预测系统_2026.md) 第 5 节。
 > - **找文档**：先看导航路由页 [`docs/INDEX.md`](docs/INDEX.md)，按场景跳转。
 > - **凯利解析关键不变量**：主/平/客三路应彼此不同；若三路坍缩成同一个返还率即为解析 bug。
 >
@@ -102,7 +102,7 @@
 
 ## SoT 写回边界（二元）
 
-当前持久化边界已收敛为二元：**只有 SoT-backed 正式联赛才写回，其余一律只输出预测结果。**
+当前持久化边界已收敛为二元：**只有 SoT-backed 正式联赛走完整写回（teams md + MEMORY + RAG + 归档 + 赛果同步）；其余赛事走 `archive_only`（仅归档 + 赛果同步 + 准确率刷新，不写 MEMORY/RAG/teams md）。**
 
 ### 1. SoT-backed competitions（唯一允许写回）
 
@@ -122,11 +122,12 @@
 
 判定逻辑见 `app/cli.py` 的 `SOT_BACKED_LEAGUE_CODES` 与 `is_sot_backed_league()`。
 
-### 2. 其余一切赛事（只输出，不写回）
+### 2. 其余一切赛事（仅归档同步，不写 MEMORY/RAG/teams md）
 
-杯赛、欧战（`europa_league` / `champions_league` / `conference_league`）、友谊赛（`friendly`）以及任何非上述六个联赛的 competition：`predict-match` 强制 `persist=False`，**不写 teams md、不写 `MEMORY.md`、不进 RAG、不进归档**。
+杯赛、欧战（`europa_league` / `champions_league` / `conference_league`）、友谊赛（`friendly`）以及任何非上述六个联赛的 competition：`predict-match` 走 `archive_only` 路径（`persist=True, archive_only=True`），**只归档预测 + 登记赛果同步 + 刷新准确率/仪表盘，不写 teams md、不写 `MEMORY.md`、不进 RAG**。
 
-- 结果标 `persisted.skipped_reason = "non_sot_league_output_only"`，无需手动 `--no-write`
+- 结果标 `persisted.archive_only = True`、`persisted.memory_updated = False`、`persisted.archived = True`
+- 对应实现：`domain/persistence.py` 的 `persist_archive_only_prediction()`
 - 直接跑 `okooo_save_snapshot.py` 快照脚本本就不写 `MEMORY.md`
 
 > 注意：**世界杯属于 SoT-backed 正式联赛**，`predict-match` 会写回 [`world_cup/teams_2026.md`](world_cup/teams_2026.md) + 滚动记忆 + 赛果同步登记。
@@ -135,7 +136,7 @@
 
 预测 side effects 由 `domain/persistence.py` 统一编排，通常会联动：
 
-- SoT 写回或 runtime-only 归档
+- SoT 完整写回，或非 SoT 的 `archive_only` 归档
 - `MEMORY.md` 滚动记忆更新
 - prediction archive 更新
 - RAG 样本 / 索引同步

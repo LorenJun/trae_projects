@@ -1,80 +1,541 @@
 {
   "_meta": {
-    "description": "国家队强度兜底表（FIFA 排名分档近似）。当某球队在 <league>/players/<队名>.json 找不到球员数据时（典型为友谊赛/世界杯/洲际赛的国家队），用本表提供差异化强度，避免所有未知球队退回同一组默认值导致预测趋同。",
-    "scale": "strength 10-95（与球员市值推算同尺度）；attack/defense 0.5-1.5（与 analyze_team_strength 同尺度，强队两值均偏高，遵循现有约定）。",
+    "description": "国家队强度表。世界杯48强采用 FIFA 官方世界排名积分线性标定（纯排名驱动，未含身价，因身价数据源被反爬封锁无法自动获取）；其余球队沿用 FIFA 分档近似。当 <league>/players/<队名>.json 无可用市值/统计数据时，用本表提供差异化强度。",
+    "scale": "strength 10-95；attack/defense 0.5-1.5。世界杯队由 FIFA 积分线性映射：strength=50+(pts-1250)/630*42。",
     "updated": "2026-06",
-    "source": "FIFA 国家队排名分档（近似）"
+    "source": "FIFA/Coca-Cola 男足世界排名官方榜（更新于 2026-06-11，via Wikipedia Module:SportsRankings）；其余队为分档近似。",
+    "wc48_ranking_basis": {
+      "fifa_update": "2026-06-11",
+      "mapping": "strength=50+(points-1250)/630*42; attack=defense=0.85+(strength-50)/42*0.46",
+      "driver": "world_ranking_points_only"
+    }
   },
-  "阿根廷": {"strength": 91, "attack": 1.31, "defense": 1.30, "tier": "S"},
-  "法国": {"strength": 90, "attack": 1.30, "defense": 1.29, "tier": "S"},
-  "西班牙": {"strength": 89, "attack": 1.29, "defense": 1.28, "tier": "S"},
-  "英格兰": {"strength": 88, "attack": 1.28, "defense": 1.27, "tier": "S"},
-  "巴西": {"strength": 88, "attack": 1.28, "defense": 1.27, "tier": "S"},
-  "葡萄牙": {"strength": 87, "attack": 1.27, "defense": 1.25, "tier": "S"},
-  "荷兰": {"strength": 86, "attack": 1.26, "defense": 1.24, "tier": "S"},
-  "比利时": {"strength": 84, "attack": 1.25, "defense": 1.22, "tier": "A"},
-  "意大利": {"strength": 83, "attack": 1.24, "defense": 1.24, "tier": "A"},
-  "德国": {"strength": 83, "attack": 1.24, "defense": 1.21, "tier": "A"},
-  "克罗地亚": {"strength": 81, "attack": 1.22, "defense": 1.20, "tier": "A"},
-  "乌拉圭": {"strength": 81, "attack": 1.22, "defense": 1.21, "tier": "A"},
-  "哥伦比亚": {"strength": 80, "attack": 1.21, "defense": 1.19, "tier": "A"},
-  "摩洛哥": {"strength": 80, "attack": 1.20, "defense": 1.21, "tier": "A"},
-  "瑞士": {"strength": 78, "attack": 1.19, "defense": 1.19, "tier": "B"},
-  "美国": {"strength": 77, "attack": 1.19, "defense": 1.16, "tier": "B"},
-  "墨西哥": {"strength": 77, "attack": 1.19, "defense": 1.16, "tier": "B"},
-  "日本": {"strength": 77, "attack": 1.19, "defense": 1.16, "tier": "B"},
-  "塞内加尔": {"strength": 77, "attack": 1.19, "defense": 1.16, "tier": "B"},
-  "伊朗": {"strength": 75, "attack": 1.17, "defense": 1.16, "tier": "B"},
-  "韩国": {"strength": 75, "attack": 1.17, "defense": 1.14, "tier": "B"},
-  "丹麦": {"strength": 75, "attack": 1.17, "defense": 1.15, "tier": "B"},
-  "厄瓜多尔": {"strength": 74, "attack": 1.16, "defense": 1.16, "tier": "B"},
-  "奥地利": {"strength": 74, "attack": 1.16, "defense": 1.15, "tier": "B"},
-  "匈牙利": {"strength": 73, "attack": 1.15, "defense": 1.14, "tier": "B"},
-  "瑞典": {"strength": 72, "attack": 1.15, "defense": 1.13, "tier": "B"},
-  "冰岛": {"strength": 71, "attack": 1.13, "defense": 1.13, "tier": "B"},
-  "澳大利亚": {"strength": 71, "attack": 1.13, "defense": 1.13, "tier": "B"},
-  "塞尔维亚": {"strength": 71, "attack": 1.14, "defense": 1.12, "tier": "B"},
-  "波兰": {"strength": 71, "attack": 1.14, "defense": 1.11, "tier": "B"},
-  "威尔士": {"strength": 70, "attack": 1.12, "defense": 1.12, "tier": "B"},
-  "苏格兰": {"strength": 70, "attack": 1.12, "defense": 1.12, "tier": "B"},
-  "突尼斯": {"strength": 69, "attack": 1.11, "defense": 1.12, "tier": "B"},
-  "土耳其": {"strength": 69, "attack": 1.12, "defense": 1.09, "tier": "B"},
-  "尼日利亚": {"strength": 69, "attack": 1.12, "defense": 1.10, "tier": "B"},
-  "埃及": {"strength": 69, "attack": 1.11, "defense": 1.10, "tier": "B"},
-  "科特迪瓦": {"strength": 69, "attack": 1.12, "defense": 1.10, "tier": "B"},
-  "阿尔及利亚": {"strength": 69, "attack": 1.12, "defense": 1.10, "tier": "B"},
-  "挪威": {"strength": 68, "attack": 1.13, "defense": 1.08, "tier": "B"},
-  "捷克": {"strength": 68, "attack": 1.10, "defense": 1.10, "tier": "B"},
-  "委内瑞拉": {"strength": 67, "attack": 1.09, "defense": 1.08, "tier": "C"},
-  "巴拉圭": {"strength": 67, "attack": 1.08, "defense": 1.09, "tier": "C"},
-  "秘鲁": {"strength": 66, "attack": 1.07, "defense": 1.08, "tier": "C"},
-  "智利": {"strength": 66, "attack": 1.08, "defense": 1.07, "tier": "C"},
-  "加纳": {"strength": 66, "attack": 1.08, "defense": 1.07, "tier": "C"},
-  "加拿大": {"strength": 66, "attack": 1.09, "defense": 1.06, "tier": "C"},
-  "沙特": {"strength": 64, "attack": 1.05, "defense": 1.06, "tier": "C"},
-  "卡塔尔": {"strength": 64, "attack": 1.05, "defense": 1.06, "tier": "C"},
-  "伊拉克": {"strength": 63, "attack": 1.04, "defense": 1.05, "tier": "C"},
-  "阿联酋": {"strength": 62, "attack": 1.03, "defense": 1.04, "tier": "C"},
-  "波黑": {"strength": 62, "attack": 1.05, "defense": 1.02, "tier": "C"},
-  "南非": {"strength": 61, "attack": 1.03, "defense": 1.02, "tier": "C"},
-  "佛得角": {"strength": 60, "attack": 1.02, "defense": 1.01, "tier": "C"},
-  "乌兹别克斯坦": {"strength": 60, "attack": 1.01, "defense": 1.02, "tier": "C"},
-  "约旦": {"strength": 60, "attack": 1.01, "defense": 1.02, "tier": "C"},
-  "刚果民主共和国": {"strength": 60, "attack": 1.02, "defense": 1.01, "tier": "C"},
-  "巴拿马": {"strength": 59, "attack": 1.01, "defense": 1.00, "tier": "C"},
-  "哥斯达黎加": {"strength": 59, "attack": 1.00, "defense": 1.01, "tier": "C"},
-  "牙买加": {"strength": 58, "attack": 1.01, "defense": 0.99, "tier": "C"},
-  "玻利维亚": {"strength": 57, "attack": 0.99, "defense": 0.99, "tier": "C"},
-  "阿曼": {"strength": 57, "attack": 0.98, "defense": 0.99, "tier": "C"},
-  "巴林": {"strength": 56, "attack": 0.97, "defense": 0.98, "tier": "C"},
-  "新西兰": {"strength": 56, "attack": 0.98, "defense": 0.97, "tier": "C"},
-  "库拉索": {"strength": 55, "attack": 0.97, "defense": 0.96, "tier": "C"},
-  "海地": {"strength": 54, "attack": 0.96, "defense": 0.95, "tier": "D"},
-  "越南": {"strength": 53, "attack": 0.95, "defense": 0.95, "tier": "D"},
-  "哈萨克斯坦": {"strength": 52, "attack": 0.94, "defense": 0.94, "tier": "D"},
-  "约旦河西岸": {"strength": 50, "attack": 0.92, "defense": 0.92, "tier": "D"},
-  "中国": {"strength": 49, "attack": 0.92, "defense": 0.92, "tier": "D"},
-  "印度尼西亚": {"strength": 47, "attack": 0.90, "defense": 0.90, "tier": "D"},
-  "泰国": {"strength": 47, "attack": 0.90, "defense": 0.90, "tier": "D"},
-  "印度": {"strength": 44, "attack": 0.87, "defense": 0.88, "tier": "D"}
+  "意大利": {
+    "strength": 83,
+    "attack": 1.24,
+    "defense": 1.24,
+    "tier": "A"
+  },
+  "丹麦": {
+    "strength": 75,
+    "attack": 1.17,
+    "defense": 1.15,
+    "tier": "B"
+  },
+  "匈牙利": {
+    "strength": 73,
+    "attack": 1.15,
+    "defense": 1.14,
+    "tier": "B"
+  },
+  "冰岛": {
+    "strength": 71,
+    "attack": 1.13,
+    "defense": 1.13,
+    "tier": "B"
+  },
+  "塞尔维亚": {
+    "strength": 71,
+    "attack": 1.14,
+    "defense": 1.12,
+    "tier": "B"
+  },
+  "波兰": {
+    "strength": 71,
+    "attack": 1.14,
+    "defense": 1.11,
+    "tier": "B"
+  },
+  "威尔士": {
+    "strength": 70,
+    "attack": 1.12,
+    "defense": 1.12,
+    "tier": "B"
+  },
+  "尼日利亚": {
+    "strength": 69,
+    "attack": 1.12,
+    "defense": 1.1,
+    "tier": "B"
+  },
+  "委内瑞拉": {
+    "strength": 67,
+    "attack": 1.09,
+    "defense": 1.08,
+    "tier": "C"
+  },
+  "秘鲁": {
+    "strength": 66,
+    "attack": 1.07,
+    "defense": 1.08,
+    "tier": "C"
+  },
+  "智利": {
+    "strength": 66,
+    "attack": 1.08,
+    "defense": 1.07,
+    "tier": "C"
+  },
+  "阿联酋": {
+    "strength": 62,
+    "attack": 1.03,
+    "defense": 1.04,
+    "tier": "C"
+  },
+  "哥斯达黎加": {
+    "strength": 59,
+    "attack": 1.0,
+    "defense": 1.01,
+    "tier": "C"
+  },
+  "牙买加": {
+    "strength": 58,
+    "attack": 1.01,
+    "defense": 0.99,
+    "tier": "C"
+  },
+  "玻利维亚": {
+    "strength": 57,
+    "attack": 0.99,
+    "defense": 0.99,
+    "tier": "C"
+  },
+  "阿曼": {
+    "strength": 57,
+    "attack": 0.98,
+    "defense": 0.99,
+    "tier": "C"
+  },
+  "巴林": {
+    "strength": 56,
+    "attack": 0.97,
+    "defense": 0.98,
+    "tier": "C"
+  },
+  "越南": {
+    "strength": 53,
+    "attack": 0.95,
+    "defense": 0.95,
+    "tier": "D"
+  },
+  "哈萨克斯坦": {
+    "strength": 52,
+    "attack": 0.94,
+    "defense": 0.94,
+    "tier": "D"
+  },
+  "约旦河西岸": {
+    "strength": 50,
+    "attack": 0.92,
+    "defense": 0.92,
+    "tier": "D"
+  },
+  "中国": {
+    "strength": 49,
+    "attack": 0.92,
+    "defense": 0.92,
+    "tier": "D"
+  },
+  "印度尼西亚": {
+    "strength": 47,
+    "attack": 0.9,
+    "defense": 0.9,
+    "tier": "D"
+  },
+  "泰国": {
+    "strength": 47,
+    "attack": 0.9,
+    "defense": 0.9,
+    "tier": "D"
+  },
+  "印度": {
+    "strength": 44,
+    "attack": 0.87,
+    "defense": 0.88,
+    "tier": "D"
+  },
+  "阿根廷": {
+    "strength": 91.8,
+    "attack": 1.308,
+    "defense": 1.308,
+    "tier": "S",
+    "fifa_rank": 1,
+    "fifa_points": 1877.27
+  },
+  "西班牙": {
+    "strength": 91.6,
+    "attack": 1.306,
+    "defense": 1.306,
+    "tier": "S",
+    "fifa_rank": 2,
+    "fifa_points": 1874.71
+  },
+  "法国": {
+    "strength": 91.4,
+    "attack": 1.303,
+    "defense": 1.303,
+    "tier": "S",
+    "fifa_rank": 3,
+    "fifa_points": 1870.7
+  },
+  "英格兰": {
+    "strength": 88.5,
+    "attack": 1.272,
+    "defense": 1.272,
+    "tier": "S",
+    "fifa_rank": 4,
+    "fifa_points": 1828.02
+  },
+  "葡萄牙": {
+    "strength": 84.5,
+    "attack": 1.228,
+    "defense": 1.228,
+    "tier": "S",
+    "fifa_rank": 5,
+    "fifa_points": 1767.85
+  },
+  "巴西": {
+    "strength": 84.4,
+    "attack": 1.227,
+    "defense": 1.227,
+    "tier": "S",
+    "fifa_rank": 6,
+    "fifa_points": 1765.86
+  },
+  "摩洛哥": {
+    "strength": 83.7,
+    "attack": 1.219,
+    "defense": 1.219,
+    "tier": "S",
+    "fifa_rank": 7,
+    "fifa_points": 1755.1
+  },
+  "荷兰": {
+    "strength": 83.6,
+    "attack": 1.218,
+    "defense": 1.218,
+    "tier": "S",
+    "fifa_rank": 8,
+    "fifa_points": 1753.57
+  },
+  "比利时": {
+    "strength": 82.8,
+    "attack": 1.209,
+    "defense": 1.209,
+    "tier": "S",
+    "fifa_rank": 9,
+    "fifa_points": 1742.24
+  },
+  "德国": {
+    "strength": 82.4,
+    "attack": 1.205,
+    "defense": 1.205,
+    "tier": "S",
+    "fifa_rank": 10,
+    "fifa_points": 1735.77
+  },
+  "克罗地亚": {
+    "strength": 81.0,
+    "attack": 1.19,
+    "defense": 1.19,
+    "tier": "A",
+    "fifa_rank": 11,
+    "fifa_points": 1714.87
+  },
+  "哥伦比亚": {
+    "strength": 79.9,
+    "attack": 1.177,
+    "defense": 1.177,
+    "tier": "A",
+    "fifa_rank": 13,
+    "fifa_points": 1698.35
+  },
+  "墨西哥": {
+    "strength": 79.2,
+    "attack": 1.17,
+    "defense": 1.17,
+    "tier": "A",
+    "fifa_rank": 14,
+    "fifa_points": 1687.48
+  },
+  "塞内加尔": {
+    "strength": 78.9,
+    "attack": 1.167,
+    "defense": 1.167,
+    "tier": "A",
+    "fifa_rank": 15,
+    "fifa_points": 1684.07
+  },
+  "乌拉圭": {
+    "strength": 78.2,
+    "attack": 1.159,
+    "defense": 1.159,
+    "tier": "A",
+    "fifa_rank": 16,
+    "fifa_points": 1673.07
+  },
+  "美国": {
+    "strength": 78.1,
+    "attack": 1.158,
+    "defense": 1.158,
+    "tier": "A",
+    "fifa_rank": 17,
+    "fifa_points": 1671.23
+  },
+  "日本": {
+    "strength": 77.4,
+    "attack": 1.15,
+    "defense": 1.15,
+    "tier": "A",
+    "fifa_rank": 18,
+    "fifa_points": 1661.58
+  },
+  "瑞士": {
+    "strength": 76.7,
+    "attack": 1.142,
+    "defense": 1.142,
+    "tier": "A",
+    "fifa_rank": 19,
+    "fifa_points": 1650.06
+  },
+  "伊朗": {
+    "strength": 74.6,
+    "attack": 1.119,
+    "defense": 1.119,
+    "tier": "A",
+    "fifa_rank": 20,
+    "fifa_points": 1619.58
+  },
+  "韩国": {
+    "strength": 72.8,
+    "attack": 1.1,
+    "defense": 1.1,
+    "tier": "B",
+    "fifa_rank": 25,
+    "fifa_points": 1591.63
+  },
+  "土耳其": {
+    "strength": 73.7,
+    "attack": 1.11,
+    "defense": 1.11,
+    "tier": "B",
+    "fifa_rank": 22,
+    "fifa_points": 1605.73
+  },
+  "厄瓜多尔": {
+    "strength": 73.2,
+    "attack": 1.104,
+    "defense": 1.104,
+    "tier": "B",
+    "fifa_rank": 23,
+    "fifa_points": 1598.52
+  },
+  "奥地利": {
+    "strength": 73.2,
+    "attack": 1.104,
+    "defense": 1.104,
+    "tier": "B",
+    "fifa_rank": 24,
+    "fifa_points": 1597.4
+  },
+  "澳大利亚": {
+    "strength": 72.0,
+    "attack": 1.091,
+    "defense": 1.091,
+    "tier": "B",
+    "fifa_rank": 27,
+    "fifa_points": 1579.34
+  },
+  "阿尔及利亚": {
+    "strength": 71.4,
+    "attack": 1.084,
+    "defense": 1.084,
+    "tier": "B",
+    "fifa_rank": 28,
+    "fifa_points": 1571.03
+  },
+  "埃及": {
+    "strength": 70.8,
+    "attack": 1.078,
+    "defense": 1.078,
+    "tier": "B",
+    "fifa_rank": 29,
+    "fifa_points": 1562.37
+  },
+  "加拿大": {
+    "strength": 70.6,
+    "attack": 1.076,
+    "defense": 1.076,
+    "tier": "B",
+    "fifa_rank": 30,
+    "fifa_points": 1559.48
+  },
+  "挪威": {
+    "strength": 70.5,
+    "attack": 1.075,
+    "defense": 1.075,
+    "tier": "B",
+    "fifa_rank": 31,
+    "fifa_points": 1557.44
+  },
+  "科特迪瓦": {
+    "strength": 69.4,
+    "attack": 1.062,
+    "defense": 1.062,
+    "tier": "B",
+    "fifa_rank": 33,
+    "fifa_points": 1540.87
+  },
+  "巴拿马": {
+    "strength": 69.3,
+    "attack": 1.061,
+    "defense": 1.061,
+    "tier": "B",
+    "fifa_rank": 34,
+    "fifa_points": 1539.16
+  },
+  "瑞典": {
+    "strength": 67.3,
+    "attack": 1.039,
+    "defense": 1.039,
+    "tier": "B",
+    "fifa_rank": 38,
+    "fifa_points": 1509.79
+  },
+  "捷克": {
+    "strength": 67.0,
+    "attack": 1.036,
+    "defense": 1.036,
+    "tier": "B",
+    "fifa_rank": 40,
+    "fifa_points": 1505.74
+  },
+  "巴拉圭": {
+    "strength": 67.0,
+    "attack": 1.036,
+    "defense": 1.036,
+    "tier": "C",
+    "fifa_rank": 41,
+    "fifa_points": 1505.35
+  },
+  "苏格兰": {
+    "strength": 66.9,
+    "attack": 1.035,
+    "defense": 1.035,
+    "tier": "C",
+    "fifa_rank": 42,
+    "fifa_points": 1503.34
+  },
+  "突尼斯": {
+    "strength": 65.1,
+    "attack": 1.015,
+    "defense": 1.015,
+    "tier": "C",
+    "fifa_rank": 45,
+    "fifa_points": 1476.41
+  },
+  "刚果民主共和国": {
+    "strength": 65.0,
+    "attack": 1.014,
+    "defense": 1.014,
+    "tier": "C",
+    "fifa_rank": 46,
+    "fifa_points": 1474.43
+  },
+  "乌兹别克斯坦": {
+    "strength": 63.9,
+    "attack": 1.002,
+    "defense": 1.002,
+    "tier": "C",
+    "fifa_rank": 50,
+    "fifa_points": 1458.73
+  },
+  "伊拉克": {
+    "strength": 63.1,
+    "attack": 0.993,
+    "defense": 0.993,
+    "tier": "C",
+    "fifa_rank": 57,
+    "fifa_points": 1446.28
+  },
+  "南非": {
+    "strength": 61.9,
+    "attack": 0.98,
+    "defense": 0.98,
+    "tier": "C",
+    "fifa_rank": 60,
+    "fifa_points": 1428.38
+  },
+  "沙特": {
+    "strength": 61.6,
+    "attack": 0.977,
+    "defense": 0.977,
+    "tier": "C",
+    "fifa_rank": 61,
+    "fifa_points": 1423.88
+  },
+  "约旦": {
+    "strength": 59.2,
+    "attack": 0.951,
+    "defense": 0.951,
+    "tier": "C",
+    "fifa_rank": 63,
+    "fifa_points": 1387.74
+  },
+  "波黑": {
+    "strength": 59.1,
+    "attack": 0.95,
+    "defense": 0.95,
+    "tier": "C",
+    "fifa_rank": 64,
+    "fifa_points": 1387.22
+  },
+  "佛得角": {
+    "strength": 58.1,
+    "attack": 0.939,
+    "defense": 0.939,
+    "tier": "C",
+    "fifa_rank": 67,
+    "fifa_points": 1371.11
+  },
+  "加纳": {
+    "strength": 56.5,
+    "attack": 0.921,
+    "defense": 0.921,
+    "tier": "D",
+    "fifa_rank": 73,
+    "fifa_points": 1346.88
+  },
+  "库拉索": {
+    "strength": 53.0,
+    "attack": 0.883,
+    "defense": 0.883,
+    "tier": "D",
+    "fifa_rank": 82,
+    "fifa_points": 1294.77
+  },
+  "海地": {
+    "strength": 52.9,
+    "attack": 0.882,
+    "defense": 0.882,
+    "tier": "D",
+    "fifa_rank": 83,
+    "fifa_points": 1293.1
+  },
+  "卡塔尔": {
+    "strength": 63.4,
+    "attack": 0.997,
+    "defense": 0.997,
+    "tier": "C",
+    "fifa_rank": 56,
+    "fifa_points": 1450.31
+  },
+  "新西兰": {
+    "strength": 51.7,
+    "attack": 0.869,
+    "defense": 0.869,
+    "tier": "D",
+    "fifa_rank": 85,
+    "fifa_points": 1275.58
+  }
 }

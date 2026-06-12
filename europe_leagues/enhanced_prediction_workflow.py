@@ -729,6 +729,7 @@ class EnhancedPredictor:
         league_hint: Optional[str] = None,
         analysis_context: Optional[Dict] = None,
         persist: bool = True,
+        archive_only: bool = False,
     ) -> Dict:
         """预测单场比赛（增强版）。
 
@@ -897,10 +898,13 @@ class EnhancedPredictor:
             )
 
         if persist:
-            self.persistence_service.persist_prediction('predict_match', cache_params, result, league_code)
-            teams_path = self.writeback.teams_file_path(league_code)
-            if result.get('storage_mode') == 'league_sot' and os.path.exists(teams_path):
-                self.writeback.write_prediction(league_code, result)
+            if archive_only:
+                self.persistence_service.persist_archive_only_prediction('predict_match', cache_params, result, league_code)
+            else:
+                self.persistence_service.persist_prediction('predict_match', cache_params, result, league_code)
+                teams_path = self.writeback.teams_file_path(league_code)
+                if result.get('storage_mode') == 'league_sot' and os.path.exists(teams_path):
+                    self.writeback.write_prediction(league_code, result)
             try:
                 from scripts.build_accuracy_dashboard import build_dashboard
                 build_dashboard(base_dir=getattr(self, 'base_dir', None))

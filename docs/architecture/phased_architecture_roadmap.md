@@ -66,10 +66,10 @@
 
 ### 2.4 存储边界问题
 
-当前双路径写回设计本身是合理的：
+当前二元写回设计本身是合理的：
 
-- 五大联赛：`teams_2025-26.md`
-- 欧战 / 杯赛：`MEMORY.md` + runtime archive
+- SoT 联赛（五大联赛 + 世界杯）：完整写回 `teams_2025-26.md` + `MEMORY.md` + RAG + 归档
+- 非 SoT 赛事：`archive_only`，仅归档 + 赛果同步
 
 但问题在于 Markdown 同时扮演：
 

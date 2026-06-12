@@ -57,7 +57,6 @@ def run_prediction(match_id: str, home_team: str, away_team: str,
         '--league', league,
         '--date', match_date,
         '--match-id', match_id,
-        '--no-refresh-odds',
         '--json'
     ]
     

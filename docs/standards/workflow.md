@@ -10,7 +10,7 @@ last_updated: "2026-05-13"
 > 1. `prediction_system.py` 是发现入口，真实命令实现位于 `europe_leagues/app/cli.py`  
 > 2. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
 > 3. `prediction_system.py predict-match` 执行增强预测，并自动接入 RAG 记忆层、历史盘口一致性与临场建议层（足彩 14 场用 `predict-fourteen-issue`）  
-> 4. 只有 SoT 联赛（五大联赛 + 世界杯）才写回 `europe_leagues/<league>/teams_*.md` + `MEMORY.md` + RAG；其余一切赛事（欧战/杯赛/友谊赛等）只输出预测结果，不写回  
+> 4. 只有 SoT 联赛（五大联赛 + 世界杯）才走完整写回 `europe_leagues/<league>/teams_*.md` + `MEMORY.md` + RAG + 归档；其余一切赛事（欧战/杯赛/友谊赛等）走 `archive_only`——仅归档 + 赛果同步，不写 MEMORY/RAG/teams md  
 > 5. 赛后优先用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `sync-pending-results-review` 回填；结果闭环会统一刷新 archive / MEMORY / RAG / review-learning  
 > 6. `prediction_system.py accuracy --refresh --json` 仍可作为显式重建入口，但正常赛果闭环后准确率会自动同步刷新  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
@@ -18,7 +18,7 @@ last_updated: "2026-05-13"
 
 本规范定义当前项目正式使用的足球预测工作流。所有流程说明都应与以下口径保持一致：
 
-- 五大联赛以 `europe_leagues/<league>/teams_2025-26.md` 为 SoT；欧战/杯赛走 `MEMORY.md` 与 runtime-only 归档
+- 五大联赛以 `europe_leagues/<league>/teams_2025-26.md` 为 SoT；欧战/杯赛走 `archive_only`，仅归档 + 赛果同步，不写 `MEMORY.md`/RAG/teams md
 - `europa_league`、`champions_league`、`conference_league` 已纳入正式 `competition config`，可直接走 `predict-match` / `harness-run`
 - 先通过赛程或 `collect-data` 定位 `match_id`
 - 再由预测主流程刷新实时快照
@@ -84,7 +84,7 @@ Step 11: 结果闭环自动刷新胜负 / 比分 / 大小球准确率、记忆�
 
 ### 必守规则
 
-- 正式写回遵守双路径：五大联赛写 `teams_2025-26.md`，欧战/杯赛写 `MEMORY.md` 与 runtime archive
+- 正式写回遵守二元边界：SoT 联赛完整写回 `teams_2025-26.md` + MEMORY + RAG + 归档；非 SoT 赛事走 `archive_only`，仅归档 + 赛果同步
 - 优先调用 `prediction_system.py` 的非交互子命令，并统一附带 `--json`
 - 除非用户明确要求只读查询，否则涉及预测、回填、统计的任务都应按既定步骤执行，不得跳步
 - 历史目录、示例模板、旧版 `predictions/` 和 `reports/` 只可参考，不可作为主流程输出目标

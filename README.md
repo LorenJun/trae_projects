@@ -25,7 +25,7 @@ last_updated_date: "2026-05-19"
 
 - 赛程采集与 `match_id` 定位
 - 单场 / 批量足球预测
-- SoT-backed 与 runtime-only 双路径持久化
+- SoT 完整写回 + 非 SoT `archive_only` 的二元持久化
 - 赛果同步、结果闭环与准确率统计
 - RAG 记忆、样本索引与赛后复盘
 - Harness 阶段化编排与审计输出
@@ -43,6 +43,8 @@ last_updated_date: "2026-05-19"
 - `auto-sync-results`
 - `result-sync-daemon`
 - `accuracy`
+- `apply-reanalysis`
+- `rag-replay-eval`
 - `sync-pending-results-review`
 - `build-season-master-review`
 - `refresh-repo-docs`
@@ -74,11 +76,11 @@ last_updated_date: "2026-05-19"
 - 结果闭环：`europe_leagues/domain/persistence.py`、`europe_leagues/runtime/result_sync.py`、`europe_leagues/result_manager.py`
 - 存储层：`europe_leagues/storage/*`、`europe_leagues/.okooo-scraper/*`
 
-## SoT / runtime-only 边界
+## SoT 写回边界（二元）
 
-### SoT-backed competitions
+### SoT-backed competitions（完整写回）
 
-以下 competition 以 markdown SoT 为主：
+以下 competition 走完整写回（teams md SoT + `MEMORY.md` 滚动记忆 + RAG + 归档 + 赛果同步）：
 
 - `premier_league`
 - `la_liga`
@@ -87,14 +89,14 @@ last_updated_date: "2026-05-19"
 - `ligue_1`
 - `world_cup`
 
-### runtime-only competitions
+### 其余一切赛事（archive_only）
 
-以下 competition 主要写入运行时归档与滚动记忆：
+以下及任何非上述六联赛的 competition 走 `archive_only`：**仅归档预测 + 登记赛果同步 + 刷新准确率，不写 `MEMORY.md`/RAG/teams md**（`persisted.archive_only=True`、`memory_updated=False`）：
 
 - `europa_league`
 - `champions_league`
 - `conference_league`
-- 其他杯赛 / 欧战扩展比赛
+- 其他杯赛 / 欧战扩展比赛 / 友谊赛
 
 ## 仓库根 skills
 
@@ -161,7 +163,7 @@ python3 prediction_system.py accuracy --refresh --json
 
 - 正式快照链默认走 `local-chrome`
 - 默认请求口径已统一为 `iPhone Safari UA + Referer: https://m.okooo.com/`
-- 公共移动设备池由 `europe_leagues/okooo_mobile_access.py` 统一维护，当前为 `100` 组随机 profile
+- 公共移动设备池由 `europe_leagues/okooo_mobile_access.py` 统一维护，当前为 `500` 组 `iPhone Safari` profile，分布在多个 iPhone device pool 上
 - 正式主动访问的移动端页面统一通过 `europe_leagues/runtime/match_ids.py` 构造，只允许纯数字 `external_match_id`
 - `internal_match_id / teams_match_id` 不允许再直接拼到澳客 `MatchID`
 - 当前阻断识别已覆盖文字风控页和滑块/图形验证页
