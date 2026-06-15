@@ -228,7 +228,7 @@ LEAGUE_CONFIG = {
             '葡萄牙', '刚果民主共和国', '乌兹别克斯坦', '哥伦比亚',
             '英格兰', '克罗地亚', '加纳', '巴拿马'
         ],
-        'avg_goals': 2.65
+        'avg_goals': 2.85
     }
 }
 
@@ -880,6 +880,7 @@ class EnhancedPredictor:
             retrieved_memory=retrieved_memory,
             current_odds=current_odds,
         )
+        result['tri_axis_consistency'] = core.get('tri_axis_consistency')
 
         # 硬性闸门：必须拿到真实盘口数据（澳客实时快照）才允许预测。
         # over_under.available 仅在通过真实盘口校验（line_source ∈ snapshot_final/initial）后才置 True，

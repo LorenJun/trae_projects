@@ -28,6 +28,14 @@ FEATURE_NAMES: Tuple[str, ...] = (
     'div_euro_hot_hcp_flat',  # 跨轴背离：欧赔热但盘不升=诱导嫌疑(利空强侧)
 )
 
+# 大小球操盘轴：以盘口 initial→final 位移为特征，标签为「实际总进球是否打穿终盘线」。
+# 符号统一为：正=利好「大球」（实际更可能打出大球）。
+OU_FEATURE_NAMES: Tuple[str, ...] = (
+    'ou_line_drop',         # 盘口降低(initial→final)：降盘=正（庄家降线诱小）
+    'ou_over_water_drop',   # over 水位下降：低水真买大=正
+    'ou_drop_lowwater',     # 降盘且低水共振：两者同向时取强信号=正
+)
+
 # 安全闸（保守：宁可不调权也不乱调）。这两个不是预测方向阈值，只是激活门槛。
 MIN_SAMPLES = 80     # 某信号有效样本不足 → 可靠度=0
 MIN_AUC_GAP = 0.07   # |AUC-0.5| 不显著 → 可靠度=0（视为噪声）
@@ -116,6 +124,33 @@ def extract_delta_vector(
     else:
         feat['div_euro_hot_hcp_flat'] = None
 
+    return feat
+
+
+def extract_ou_delta_vector(over_under: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """大小球轴：抽取盘口 initial→final 位移向量。
+
+    返回 dict（含 'final_line' 与各特征）；initial/final 的 line+over 不全时返回 None。
+    符号统一：正=利好大球。完全逐场，不含写死阈值。
+    """
+    if not isinstance(over_under, dict):
+        return None
+    oi = over_under.get('initial') if isinstance(over_under.get('initial'), dict) else {}
+    of = over_under.get('final') if isinstance(over_under.get('final'), dict) else {}
+    line_i, line_f = _f(oi.get('line')), _f(of.get('line'))
+    over_i, over_f = _f(oi.get('over')), _f(of.get('over'))
+    if None in (line_i, line_f, over_i, over_f):
+        return None
+
+    line_drop = line_i - line_f            # 降盘为正
+    over_water_drop = over_i - over_f       # over 低水(降水)为正
+    feat: Dict[str, Any] = {
+        'final_line': line_f,
+        'ou_line_drop': line_drop,
+        'ou_over_water_drop': over_water_drop,
+        # 共振：仅当降盘且低水同时成立时给出正强度，否则 0
+        'ou_drop_lowwater': (line_drop * over_water_drop) if (line_drop > 0 and over_water_drop > 0) else 0.0,
+    }
     return feat
 
 
@@ -213,6 +248,68 @@ class OperationWeightLearner:
             feat['_fav_won'] = 1 if feat['fav'] == actual else 0
             samples.append(feat)
         weights = self.learn(samples)
+        return {
+            'weights': weights,
+            'sample_count': len(samples),
+            'min_samples': self.min_samples,
+            'min_auc_gap': self.min_auc_gap,
+        }
+
+    def learn_ou(self, samples: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """大小球轴：samples 每条含各 OU 特征 + '_over_hit'(1/0)。返回 {feature: {...}}。"""
+        weights: Dict[str, Any] = {}
+        for name in OU_FEATURE_NAMES:
+            pairs = [
+                (float(s[name]), int(s['_over_hit']))
+                for s in samples
+                if s.get(name) is not None and s.get('_over_hit') in (0, 1)
+            ]
+            if not pairs:
+                continue
+            a = auc(pairs)
+            if a is None:
+                continue
+            values = [v for v, _ in pairs]
+            mean, std = _mean_std(values)
+            gap = abs(a - 0.5)
+            n = len(pairs)
+            weights[name] = {
+                'reliability': round(self._reliability(n, gap), 4),
+                'sign': 1 if a >= 0.5 else -1,
+                'auc': round(a, 4),
+                'n': n,
+                'mean': round(mean, 6),
+                'std': round(std, 6),
+            }
+        return weights
+
+    def learn_ou_from_archive(self, archive: Dict[str, Any]) -> Dict[str, Any]:
+        """大小球轴：从归档学每个 OU 操盘信号的可靠度。
+
+        标签 _over_hit：实际总进球 > 终盘线=1(打穿出大球)，< 终盘线=0。
+        恰好等于盘口线(走盘/push)的样本剔除，不计入分母。
+        """
+        samples: List[Dict[str, Any]] = []
+        for _key, entry in (archive or {}).items():
+            if not isinstance(entry, dict):
+                continue
+            ms = entry.get('market_snapshot') or {}
+            ou = ms.get('大小球') if isinstance(ms, dict) else None
+            if not isinstance(ou, dict):
+                continue
+            score = _parse_score(entry.get('actual_score'))
+            if score is None:
+                continue
+            feat = extract_ou_delta_vector(ou)
+            if feat is None:
+                continue
+            total = score[0] + score[1]
+            line_f = feat.get('final_line')
+            if line_f is None or abs(total - float(line_f)) < 1e-9:
+                continue  # push/走盘 → 剔除
+            feat['_over_hit'] = 1 if total > float(line_f) else 0
+            samples.append(feat)
+        weights = self.learn_ou(samples)
         return {
             'weights': weights,
             'sample_count': len(samples),

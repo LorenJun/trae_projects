@@ -48,12 +48,30 @@ def main() -> int:
     if active == 0:
         print('→ 当前无信号达到激活门槛，调权将退化为「仅提示不改概率」（防过拟合预期行为）。')
 
+    # 大小球操盘轴
+    ou_result = learner.learn_ou_from_archive(archive)
+    print('\n' + '#' * 78)
+    print(f'大小球操盘轴  样本: {ou_result["sample_count"]} 场（标签=实际总进球是否打穿终盘线，走盘剔除）')
+    print('=' * 78)
+    print(f'{"feature":24s} {"AUC":>7s} {"sign":>5s} {"reliability":>12s} {"n":>4s}')
+    print('-' * 78)
+    ou_active = 0
+    for name, w in ou_result['weights'].items():
+        rel = w['reliability']
+        if rel > 0:
+            ou_active += 1
+        print(f'{name:24s} {w["auc"]:7.3f} {w["sign"]:5d} {rel:12.4f} {w["n"]:4d}')
+    print('=' * 78)
+    print(f'生效信号(reliability>0): {ou_active} / {len(ou_result["weights"])}')
+
     if dry_run:
         print('\n[dry-run] 未写入文件。')
         return 0
 
     out_path = paths.runtime_file('operation_weights.json')
-    out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+    payload = dict(result)
+    payload['ou_axis'] = ou_result
+    out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
     print(f'\n已写入: {out_path}')
     return 0
 

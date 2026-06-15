@@ -977,6 +977,16 @@ class InferencePipelineService:
             '两球': -2.0,
             '两球/两球半': -2.25,
             '两球半': -2.5,
+            '两球半/三球': -2.75,
+            '三球': -3.0,
+            '三球/三球半': -3.25,
+            '三球半': -3.5,
+            '三球半/四球': -3.75,
+            '四球': -4.0,
+            '四球/四球半': -4.25,
+            '四球半': -4.5,
+            '四球半/五球': -4.75,
+            '五球': -5.0,
             '受让平手': 0.0,
             '受让平手/半球': 0.25,
             '受让平/半': 0.25,
@@ -991,6 +1001,12 @@ class InferencePipelineService:
             '受让两球': 2.0,
             '受让两球/两球半': 2.25,
             '受让两球半': 2.5,
+            '受让两球半/三球': 2.75,
+            '受让三球': 3.0,
+            '受让三球/三球半': 3.25,
+            '受让三球半': 3.5,
+            '受让三球半/四球': 3.75,
+            '受让四球': 4.0,
             '受平手': 0.0,
             '受平手/半球': 0.25,
             '受平/半': 0.25,
@@ -1006,6 +1022,12 @@ class InferencePipelineService:
             '受两球': 2.0,
             '受两球/两球半': 2.25,
             '受两球半': 2.5,
+            '受两球半/三球': 2.75,
+            '受三球': 3.0,
+            '受三球/三球半': 3.25,
+            '受三球半': 3.5,
+            '受三球半/四球': 3.75,
+            '受四球': 4.0,
         }
         return mapping.get(raw.replace(' ', ''))
 
@@ -1383,15 +1405,21 @@ class InferencePipelineService:
         if isinstance(asian_handicap, dict):
             fin = asian_handicap.get('final') if isinstance(asian_handicap.get('final'), dict) else {}
             ini = asian_handicap.get('initial') if isinstance(asian_handicap.get('initial'), dict) else {}
-            hcp_raw = (
-                fin.get('handicap') if 'handicap' in fin else fin.get('handicap_value') if 'handicap_value' in fin else fin.get('盘口值') if '盘口值' in fin else fin.get('handicap_text') if 'handicap_text' in fin else fin.get('盘口')
-            )
-            hcp_final = self._parse_handicap_value(hcp_raw)
+
+            def _resolve_handicap(row: Dict[str, Any]) -> Optional[float]:
+                # 按优先级遍历候选字段，跳过值为 None/空的键，
+                # 避免快照里 handicap=null 但 handicap_text="三球半" 时漏读文字盘口。
+                for key in ('handicap', 'handicap_value', '盘口值', 'handicap_text', '盘口'):
+                    if key in row and row[key] not in (None, ''):
+                        parsed = self._parse_handicap_value(row[key])
+                        if parsed is not None:
+                            return parsed
+                return None
+
+            hcp_final = _resolve_handicap(fin)
             hw_f = self._to_float(fin.get('home_water'))
             aw_f = self._to_float(fin.get('away_water'))
-            hcp_initial = self._parse_handicap_value(
-                ini.get('handicap') if 'handicap' in ini else ini.get('handicap_value') if 'handicap_value' in ini else ini.get('盘口值') if '盘口值' in ini else ini.get('handicap_text') if 'handicap_text' in ini else ini.get('盘口')
-            )
+            hcp_initial = _resolve_handicap(ini)
             giver = None
             if hcp_final is not None:
                 if hcp_final < -0.06:
@@ -2013,6 +2041,152 @@ class InferencePipelineService:
             return None
         return {'home': home_hist, 'away': away_hist}
 
+    @staticmethod
+    def compute_tri_axis_consistency(
+        final_prob: Optional[Dict[str, Any]],
+        over_under: Optional[Dict[str, Any]],
+        operation_pattern: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """影子层：汇总方向轴/大小球轴/操盘轴的方向，做一致性与背离检测。
+
+        纯诊断：不修改任何概率。三轴来自同一市场，高度相关，故此处只做
+        「同向→标注加强、背离→标注矛盾」的门控，不做加权叠加（避免重复计价）。
+        """
+        out: Dict[str, Any] = {
+            'available': False,
+            'direction_axis': None,
+            'ou_axis': None,
+            'operation_axis': None,
+            'agreement': None,
+            'divergence_flags': [],
+            'note': None,
+        }
+
+        # 方向轴：模型最终 1X2 的领先方向 + 强度（领先优势）
+        if isinstance(final_prob, dict):
+            probs = {k: float(final_prob.get(k) or 0.0) for k in ('home_win', 'draw', 'away_win')}
+            ranked = sorted(probs.items(), key=lambda kv: kv[1], reverse=True)
+            if ranked and ranked[0][1] > 0:
+                top, second = ranked[0], ranked[1]
+                out['direction_axis'] = {
+                    'lean': top[0],
+                    'prob': round(top[1], 4),
+                    'margin': round(top[1] - second[1], 4),
+                    'decisive': bool(top[0] != 'draw' and (top[1] - second[1]) >= 0.10),
+                }
+
+        # 大小球轴：over/under 谁占优 + 强度
+        if isinstance(over_under, dict) and over_under.get('available'):
+            ov = over_under.get('over')
+            un = over_under.get('under')
+            if isinstance(ov, (int, float)) and isinstance(un, (int, float)):
+                lean = 'over' if ov > un else 'under'
+                out['ou_axis'] = {
+                    'lean': lean,
+                    'over': round(float(ov), 4),
+                    'under': round(float(un), 4),
+                    'margin': round(abs(float(ov) - float(un)), 4),
+                    'line': over_under.get('line'),
+                }
+
+        # 操盘轴：庄家形态判定（真实/诱导/中性）+ 诱导方向
+        if isinstance(operation_pattern, dict):
+            verdict = operation_pattern.get('verdict')
+            if verdict:
+                out['operation_axis'] = {
+                    'verdict': verdict,
+                    'luring_side': operation_pattern.get('luring_side'),
+                    'strength': operation_pattern.get('strength'),
+                    'pattern_cn': operation_pattern.get('pattern_cn'),
+                }
+
+        dir_ax = out['direction_axis']
+        ou_ax = out['ou_axis']
+        op_ax = out['operation_axis']
+        flags: List[str] = []
+
+        # 背离检测 1：操盘判定为「诱导」，且诱导方向正是模型的方向倾向 → 模型可能在跟庄入坑
+        if dir_ax and op_ax and op_ax.get('verdict') == 'deceptive':
+            luring = op_ax.get('luring_side')
+            if luring and luring == dir_ax.get('lean'):
+                flags.append('direction_follows_luring_side')
+
+        # 背离检测 2：方向轴判定决定性大胜（非平局且领先显著），但大小球轴偏小球
+        #            → 「大胜却低进球」的内在矛盾（强队小胜 or 模型高估某方）
+        if dir_ax and ou_ax and dir_ax.get('decisive') and ou_ax.get('lean') == 'under':
+            flags.append('decisive_winner_but_low_scoring')
+
+        # 一致性正向：方向决定性 + 大小球偏大 + 操盘真实 → 三轴共振看好进攻方
+        agreement = None
+        if dir_ax and ou_ax and op_ax:
+            if (
+                dir_ax.get('decisive')
+                and ou_ax.get('lean') == 'over'
+                and op_ax.get('verdict') == 'genuine'
+            ):
+                agreement = 'aligned_attacking'
+            elif flags:
+                agreement = 'divergent'
+            else:
+                agreement = 'mixed'
+
+        out['divergence_flags'] = flags
+        out['agreement'] = agreement
+        out['available'] = bool(dir_ax or ou_ax or op_ax)
+        if flags:
+            out['note'] = '；'.join({
+                'direction_follows_luring_side': '方向轴与庄家诱导方向一致，警惕跟庄入坑',
+                'decisive_winner_but_low_scoring': '方向看决定性胜负但大小球偏小，存在“大胜低进球”矛盾',
+            }.get(f, f) for f in flags)
+        elif agreement == 'aligned_attacking':
+            out['note'] = '三轴共振：方向、大小球、操盘一致看好进攻方'
+
+        # 综合研判结论：把三轴揉成一句人类可读判断（纯文本输出，不改方向/概率）
+        out['verdict_summary'] = InferencePipelineService._compose_tri_axis_verdict(
+            dir_ax, ou_ax, op_ax, agreement, flags
+        )
+        return out
+
+    @staticmethod
+    def _compose_tri_axis_verdict(
+        dir_ax: Optional[Dict[str, Any]],
+        ou_ax: Optional[Dict[str, Any]],
+        op_ax: Optional[Dict[str, Any]],
+        agreement: Optional[str],
+        flags: List[str],
+    ) -> Optional[str]:
+        """将方向支持率/大小球支持率/操盘手法融合为一句研判结论。仅供人工参考。"""
+        lean_cn = {'home_win': '主胜', 'draw': '平局', 'away_win': '客胜', 'over': '大球', 'under': '小球'}
+        verdict_cn = {'deceptive': '诱导盘', 'genuine': '真实盘', 'neutral': '中性盘'}
+
+        seg: List[str] = []
+        if dir_ax:
+            d_lean = lean_cn.get(dir_ax.get('lean'), dir_ax.get('lean'))
+            d_prob = float(dir_ax.get('prob') or 0.0)
+            d_str = '强' if dir_ax.get('decisive') else ('中' if d_prob >= 0.45 else '弱')
+            seg.append(f"方向{d_str}（{d_lean} {d_prob:.0%}）")
+        if ou_ax:
+            o_lean = lean_cn.get(ou_ax.get('lean'), ou_ax.get('lean'))
+            o_prob = float(ou_ax.get('over') if ou_ax.get('lean') == 'over' else ou_ax.get('under') or 0.0)
+            seg.append(f"大小球倾向{o_lean}（{o_prob:.0%}）")
+        if op_ax and op_ax.get('verdict'):
+            seg.append(f"操盘{verdict_cn.get(op_ax.get('verdict'), op_ax.get('verdict'))}")
+        if not seg:
+            return None
+
+        if 'direction_follows_luring_side' in flags:
+            conclusion = '方向与庄家诱导同向，方向判断需打折，警惕反向爆冷'
+        elif 'decisive_winner_but_low_scoring' in flags:
+            conclusion = '方向可信，但“强势胜方+偏小球”自相矛盾——强队大胜多伴随多入球，重点警惕小球误判'
+        elif agreement == 'aligned_attacking':
+            conclusion = '三轴共振看好进攻方，方向与进球预期一致，综合可信度高'
+        elif agreement == 'mixed':
+            conclusion = '三轴无明显矛盾，可按模型方向参考'
+        else:
+            conclusion = '信号不足，按模型方向谨慎参考'
+
+        return '；'.join(seg) + ' ⇒ ' + conclusion
+
     def calibrate_lambdas_from_market(
         self,
         league_code: str,
@@ -2058,7 +2232,7 @@ class InferencePipelineService:
         best = None
         best_cost = 1e9
         total_min = max(1.2, league_avg - 0.8)
-        total_max = min(3.8, league_avg + 0.8)
+        total_max = min(5.2, league_avg + 1.6)
         for total_tick in range(int(total_min * 20), int(total_max * 20) + 1):
             total_goals = total_tick / 20.0
             for share_tick in range(20, 81, 2):
@@ -3327,6 +3501,12 @@ class InferencePipelineService:
         )
         realtime['context_applied']['review_total_goals_adjustment'] = review_total_goals_diag
 
+        realtime['context_applied']['tri_axis_consistency'] = self.compute_tri_axis_consistency(
+            final_prob=final_prob,
+            over_under=over_under,
+            operation_pattern=realtime['context_applied'].get('market_operation_pattern'),
+        )
+
         return {
             'applied_weights': applied_weights,
             'home_strength': home_strength,
@@ -3348,4 +3528,5 @@ class InferencePipelineService:
             'lightweight_rag_decision': lightweight_rag_decision,
             'away_lambda': away_lambda,
             'over_under': over_under,
+            'tri_axis_consistency': realtime['context_applied'].get('tri_axis_consistency'),
         }

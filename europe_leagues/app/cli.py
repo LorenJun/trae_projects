@@ -910,6 +910,7 @@ def run_openclaw_predict_match(args):
         return
     print(f"预测: {result['prediction']}  信心: {result['confidence']:.2%}")
     print(f"主胜/平局/客胜: {result['final_probabilities']}")
+    _print_total_goals(result.get("total_goals"), result.get("over_under"))
     _print_top_scores(result.get("top_scores"))
     over_under = result.get("over_under") if isinstance(result.get("over_under"), dict) else {}
     if over_under.get("available"):
@@ -924,6 +925,7 @@ def run_openclaw_predict_match(args):
         reason = str(over_under.get("reason") or "missing_real_market_line").strip()
         print(f"大小球: 待补真实盘口 ({reason})")
     _print_betting_advice(result)
+    _print_tri_axis(result.get("tri_axis_consistency"))
     dealer_labels = result.get("dealer_warning_labels")
     if isinstance(dealer_labels, list) and dealer_labels:
         pattern = result.get("dealer_operation_pattern") if isinstance(result.get("dealer_operation_pattern"), dict) else {}
@@ -969,6 +971,65 @@ def _print_betting_advice(result) -> None:
         print(f"临场跟单: {advice}")
 
 
+def _print_tri_axis(tri) -> None:
+    """影子层：三轴(方向/大小球/操盘)一致性诊断。仅展示，不参与概率。"""
+    if not isinstance(tri, dict) or not tri.get("available"):
+        return
+    lean_cn = {'home_win': '主胜', 'draw': '平局', 'away_win': '客胜', 'over': '大球', 'under': '小球'}
+    verdict_cn = {'deceptive': '诱导', 'genuine': '真实', 'neutral': '中性'}
+    parts = []
+    da = tri.get("direction_axis")
+    if isinstance(da, dict):
+        parts.append(f"方向→{lean_cn.get(da.get('lean'), da.get('lean'))}({da.get('prob', 0):.0%})")
+    oa = tri.get("ou_axis")
+    if isinstance(oa, dict):
+        parts.append(f"大小球→{lean_cn.get(oa.get('lean'), oa.get('lean'))}")
+    pa = tri.get("operation_axis")
+    if isinstance(pa, dict):
+        parts.append(f"操盘→{verdict_cn.get(pa.get('verdict'), pa.get('verdict'))}")
+    agree_cn = {'aligned_attacking': '三轴共振(看好进攻方)', 'divergent': '三轴背离', 'mixed': '部分一致'}
+    tag = agree_cn.get(tri.get("agreement"), tri.get("agreement") or "")
+    print(f"三轴一致性[{tag}]: {' | '.join(parts)}")
+    note = str(tri.get("note") or "").strip()
+    if note:
+        print(f"  └ {note}")
+    verdict = str(tri.get("verdict_summary") or "").strip()
+    if verdict:
+        print(f"  综合研判: {verdict}")
+
+
+def _print_total_goals(total_goals, over_under) -> None:
+    """主展示：最可能总进球数（含累积大球概率）。优于单点比分，避免泊松 top-score 偏小误导。"""
+    if not isinstance(total_goals, dict) or not total_goals.get("available"):
+        return
+    top_totals = total_goals.get("top_totals")
+    if not isinstance(top_totals, list) or not top_totals:
+        return
+    parts = []
+    for item in top_totals:
+        if isinstance(item, dict) and item.get("total") is not None:
+            try:
+                parts.append(f"{item['total']}球 ({float(item.get('prob') or 0.0):.1%})")
+            except (TypeError, ValueError):
+                parts.append(f"{item['total']}球")
+    if not parts:
+        return
+    print(f"最可能总进球: {' / '.join(parts)}")
+    buckets = total_goals.get("buckets")
+    if isinstance(buckets, dict):
+        def _cum_at_least(threshold: int) -> float:
+            acc = 0.0
+            for key, val in buckets.items():
+                base = key[:-1] if key.endswith("+") else key
+                try:
+                    if int(base) >= threshold:
+                        acc += float(val)
+                except (TypeError, ValueError):
+                    continue
+            return acc
+        print(f"  累积大球: P(≥3球) {_cum_at_least(3):.1%} | P(≥4球) {_cum_at_least(4):.1%}")
+
+
 def _print_top_scores(top_scores) -> None:
     if not isinstance(top_scores, list) or not top_scores:
         return
@@ -983,7 +1044,7 @@ def _print_top_scores(top_scores) -> None:
         elif item:
             parts.append(str(item))
     if parts:
-        print(f"比分参考 (Top {len(parts)}): {' / '.join(parts)}")
+        print(f"比分参考 (次要, Top {len(parts)}): {' / '.join(parts)}")
 
 
 def run_openclaw_predict_fourteen_issue(args):

@@ -40,11 +40,16 @@ class TeamStrengthService:
         entry = self._load_national_strength().get(team_name)
         if not isinstance(entry, dict):
             return None
+        strength_val = float(entry.get('strength', 50.0))
+        # 防守基线按实力倒置：乘法型 λ 公式为 home.attack * away.defense，
+        # 因此 defense 必须随实力下降（强队防守稳→对手少进球，弱队漏→对手多进球），
+        # 否则强弱悬殊场的主客 λ 会被乘法交叉抵消成对称值，打不出大比分。
+        defense = max(0.5, min(1.5, 0.85 + (50.0 - strength_val) / 42.0 * 0.46))
         return {
             'team': team_name,
-            'strength': float(entry.get('strength', 50.0)),
+            'strength': strength_val,
             'attack': float(entry.get('attack', 1.0)),
-            'defense': float(entry.get('defense', 1.0)),
+            'defense': defense,
             'injured_count': 0,
             'suspended_count': 0,
             'key_players_available': True,
