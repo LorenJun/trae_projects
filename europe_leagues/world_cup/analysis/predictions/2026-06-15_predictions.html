@@ -6,39 +6,45 @@
 <title>世界杯 2026-06-15 预测比分</title>
 <style>
   :root {
-    --bg: #0f1419;
-    --card: #1a2027;
-    --line: #2a323c;
-    --text: #e6edf3;
-    --muted: #8b949e;
-    --home: #4ea1ff;
-    --draw: #d6a83a;
-    --away: #ff6b6b;
-    --accent: #2ea043;
+    --bg: #FFE6EF;
+    --card: #FFF8FB;
+    --card-strong: #FFD6E4;
+    --line: #FFD0E0;
+    --text: #665860;
+    --muted: #A89098;
+    --title: #A86480;
+    --accent: #F8C8DC;
+    --home: #B5708F;
+    --draw: #E6A9C6;
+    --away: #D38BA9;
+    --bar-text: #5C3A4A;
+    --shadow: rgba(248,200,220,0.25);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-    background: var(--bg);
+    background: linear-gradient(180deg, #FFE6EF 0%, #FFF0F7 100%);
+    background-attachment: fixed;
     color: var(--text);
     line-height: 1.6;
     padding: 32px 16px;
   }
   .wrap { max-width: 1080px; margin: 0 auto; }
   header { text-align: center; margin-bottom: 8px; }
-  header h1 { font-size: 26px; font-weight: 700; }
+  header h1 { font-size: 26px; font-weight: 700; color: var(--title); }
   header .sub { color: var(--muted); font-size: 14px; margin-top: 6px; }
   .meta-note {
     text-align: center; color: var(--muted); font-size: 12px;
     margin: 12px auto 28px; max-width: 760px;
   }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 24px; }
   @media (max-width: 540px) { .grid { grid-template-columns: 1fr; } }
   .card {
     background: var(--card);
     border: 1px solid var(--line);
-    border-radius: 14px;
+    border-radius: 16px;
     padding: 20px 22px;
+    box-shadow: 0 6px 18px var(--shadow);
   }
   .card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
   .kickoff { color: var(--muted); font-size: 13px; }
@@ -48,51 +54,52 @@
   .vs { color: var(--muted); font-size: 13px; }
   .score {
     font-size: 30px; font-weight: 800; letter-spacing: 2px;
-    color: var(--accent); min-width: 78px; text-align: center;
+    color: var(--title); min-width: 78px; text-align: center;
   }
   .verdict {
-    display: inline-block; padding: 3px 12px; border-radius: 999px;
+    display: inline-block; padding: 4px 14px; border-radius: 16px;
     font-size: 13px; font-weight: 600; margin-bottom: 14px;
   }
-  .v-home { background: rgba(78,161,255,.15); color: var(--home); }
-  .v-draw { background: rgba(214,168,58,.15); color: var(--draw); }
-  .v-away { background: rgba(255,107,107,.15); color: var(--away); }
-  .bar { display: flex; height: 26px; border-radius: 6px; overflow: hidden; margin: 4px 0 6px; }
-  .bar span { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #0f1419; }
-  .b-home { background: var(--home); }
+  .v-home { background: rgba(181,112,143,.16); color: var(--home); }
+  .v-draw { background: rgba(230,169,198,.28); color: #B26088; }
+  .v-away { background: rgba(211,139,169,.20); color: var(--away); }
+  .bar { display: flex; height: 26px; border-radius: 10px; overflow: hidden; margin: 4px 0 6px; }
+  .bar span { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: var(--bar-text); }
+  .b-home { background: var(--home); color: #FFF8FB; }
   .b-draw { background: var(--draw); }
-  .b-away { background: var(--away); }
+  .b-away { background: var(--away); color: #FFF8FB; }
   .prob-legend { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 16px; }
   .scores-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
   .chip {
-    background: #0f1419; border: 1px solid var(--line); border-radius: 8px;
+    background: #FFF0F6; border: 1px solid var(--line); border-radius: 12px;
     padding: 5px 10px; font-size: 13px;
   }
-  .chip b { color: var(--accent); }
+  .chip b { color: var(--title); }
   .chip i { color: var(--muted); font-style: normal; font-size: 11px; margin-left: 4px; }
   .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; }
   .kv span b { color: var(--text); font-weight: 600; }
   footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 30px; }
   .result-row {
     display: flex; align-items: center; gap: 10px; justify-content: center;
-    margin: 6px 0 12px; padding: 8px 10px; border-radius: 8px;
-    background: rgba(255,255,255,.03); border: 1px dashed var(--line);
+    margin: 6px 0 12px; padding: 8px 10px; border-radius: 12px;
+    background: #FFF0F6; border: 1px dashed var(--line);
   }
-  .result-row .final { font-size: 22px; font-weight: 800; letter-spacing: 1px; color: #fff; }
-  .hit { color: var(--accent); font-weight: 700; }
+  .result-row .final { font-size: 22px; font-weight: 800; letter-spacing: 1px; color: var(--title); }
+  .hit { color: var(--home); font-weight: 700; }
   .miss { color: var(--away); font-weight: 700; }
   .tri-verdict {
     font-size: 12px; color: var(--text); line-height: 1.55;
-    background: rgba(78,161,255,.06); border-left: 3px solid var(--home);
-    border-radius: 4px; padding: 8px 10px; margin: 10px 0 2px;
+    background: rgba(181,112,143,.12); border-left: 3px solid var(--home);
+    border-radius: 12px; padding: 10px 12px; margin: 10px 0 2px;
   }
-  .tri-verdict b { color: var(--draw); }
+  .tri-verdict b { color: var(--title); }
   .review-banner {
     max-width: 880px; margin: 0 auto 24px; padding: 14px 18px;
-    background: rgba(46,160,67,.08); border: 1px solid rgba(46,160,67,.3);
-    border-radius: 10px; font-size: 13px; color: var(--text); line-height: 1.7;
+    background: linear-gradient(180deg, #FFF8FB 0%, #FFF0F7 100%); border: 1px solid var(--line);
+    border-radius: 16px; font-size: 13px; color: var(--text); line-height: 1.7;
+    box-shadow: 0 4px 14px var(--shadow);
   }
-  .review-banner h2 { font-size: 15px; margin-bottom: 6px; color: var(--accent); }
+  .review-banner h2 { font-size: 15px; margin-bottom: 6px; color: var(--title); }
 </style>
 </head>
 <body>

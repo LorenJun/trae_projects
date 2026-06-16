@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>世界杯预测复盘 · 风险提示报告</title>
+<style>
+  :root {
+    --bg: #FFE6EF; --card: #FFF8FB; --card-strong: #FFD6E4; --line: #FFD0E0;
+    --text: #665860; --muted: #A89098; --title: #A86480; --accent: #F8C8DC;
+    --home: #B5708F; --draw: #E6A9C6; --away: #D38BA9; --warn: #C77F9E;
+    --bar-text: #5C3A4A; --shadow: rgba(248,200,220,0.25);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: linear-gradient(180deg, #FFE6EF 0%, #FFF0F7 100%); background-attachment: fixed; color: var(--text); font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; padding: 28px 16px; line-height: 1.6; }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 24px; }
+  header h1 { font-size: 22px; font-weight: 800; color: var(--title); }
+  header .sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; margin-bottom: 24px; box-shadow: 0 6px 18px var(--shadow); }
+  h2 { font-size: 16px; font-weight: 700; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); color: var(--title); }
+  h2 .icon { margin-right: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: center; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  .hit { color: var(--home); font-weight: 700; }
+  .miss { color: var(--away); font-weight: 700; }
+  .big { color: var(--warn); font-weight: 700; }
+  .risk-banner {
+    background: linear-gradient(180deg, #FFF8FB 0%, #FFF0F7 100%); border: 1px solid var(--line);
+    border-radius: 16px; padding: 14px 16px; margin-bottom: 24px; box-shadow: 0 4px 14px var(--shadow);
+  }
+  .risk-banner h3 { color: var(--warn); font-size: 15px; margin-bottom: 8px; }
+  .risk-banner p { font-size: 13px; color: var(--text); }
+  .risk-list { list-style: none; }
+  .risk-list li { font-size: 13.5px; padding: 10px 0 10px 28px; position: relative; border-bottom: 1px solid var(--line); }
+  .risk-list li:last-child { border-bottom: none; }
+  .risk-list li::before { content: "⚠"; position: absolute; left: 4px; color: var(--warn); font-weight: 700; }
+  .risk-list b { color: var(--warn); }
+  .stat-row { display: flex; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
+  .stat { flex: 1; min-width: 120px; text-align: center; background: #FFF0F6; border: 1px solid var(--line); border-radius: 12px; padding: 12px 6px; }
+  .stat b { display: block; font-size: 22px; }
+  .stat i { font-style: normal; color: var(--muted); font-size: 12px; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 12px; }
+  .t-diverge { background: rgba(211,139,169,.20); color: var(--away); }
+  .t-align { background: rgba(181,112,143,.16); color: var(--home); }
+  .t-mixed { background: rgba(168,144,152,.16); color: var(--muted); }
+  .match-risk { font-size: 13px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .match-risk:last-child { border-bottom: none; }
+  .match-risk .name { font-weight: 700; font-size: 14px; }
+  .match-risk .lv { float: right; }
+  .lv-high { color: var(--away); font-weight: 700; }
+  .lv-mid { color: var(--warn); font-weight: 700; }
+  .lv-low { color: var(--home); font-weight: 700; }
+  .match-risk .desc { color: var(--muted); margin-top: 4px; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>世界杯预测复盘 · 风险提示报告</h1>
+    <div class="sub">6-15 复盘结论 + 6-16 待赛风险清单 · europe_leagues 正式预测链</div>
+  </header>
+
+  <div class="risk-banner">
+    <h3>⚠ 核心风险结论：大小球系统性押小，连爆大球</h3>
+    <p>6-15 四场<b>全部判小球，仅中 1 场</b>；其中三场实际打出 8、4、6 球大球。这与 Poisson 单一最可能比分系统性压低总进球的已知缺陷一致，本批样本极端放大了该缺陷。<b>当前对"小球"的判断须整体保守看待，尤其强队大胜局。</b></p>
+  </div>
+
+  <section>
+    <h2><span class="icon">📊</span>6-15 复盘统计</h2>
+    <div class="stat-row">
+      <div class="stat"><b style="color:var(--home)">2/4</b><i>方向命中 50%</i></div>
+      <div class="stat"><b class="miss">1/4</b><i>大小球命中 25%</i></div>
+      <div class="stat"><b class="big">3 场</b><i>实际大球（判小未中）</i></div>
+      <div class="stat"><b style="color:var(--home)">1/1</b><i>三轴背离 flag 命中</i></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="icon">🔍</span>6-15 逐场复盘</h2>
+    <table>
+      <thead><tr><th>比赛</th><th>赛果</th><th>总进球</th><th>方向</th><th>大小球</th><th>三轴 flag</th></tr></thead>
+      <tbody>
+        <tr><td>德国 vs 库拉索</td><td>7-1</td><td class="big">8</td><td class="hit">主胜✓</td><td class="miss">判小✗</td><td><span class="tag t-diverge">背离✓命中</span></td></tr>
+        <tr><td>荷兰 vs 日本</td><td>2-2</td><td class="big">4</td><td class="miss">主胜✗</td><td class="miss">判小✗</td><td>无记录</td></tr>
+        <tr><td>科特迪瓦 vs 厄瓜多尔</td><td>1-0</td><td>1</td><td class="miss">平局✗</td><td class="hit">判小✓</td><td>无记录</td></tr>
+        <tr><td>瑞典 vs 突尼斯</td><td>5-1</td><td class="big">6</td><td class="hit">主胜✓</td><td class="miss">判小✗</td><td>符合剧本(未记录)</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2><span class="icon">🎯</span>三轴背离 flag 验证</h2>
+    <p style="font-size:13.5px;">德国是唯一带三轴记录的样本，flag <b style="color:var(--away)">decisive_winner_but_low_scoring</b>（强主胜+判小球）当场就标了"大胜低进球矛盾"，赛果 8 球完全坐实；瑞典 5-1 也符合同型剧本但预测早于落库未记录。<b style="color:var(--home)">2 个实际样本，剧本均成立</b>——首签正向，但样本仍少，继续累积，暂不接入概率修正。</p>
+  </section>
+
+  <section>
+    <h2><span class="icon">⚠</span>结构性风险清单（操作要点）</h2>
+    <ul class="risk-list">
+      <li><b>强主胜 + 判小球 = 高危背离</b>：模型一旦同时给出"决定性主胜"和"小球"，应强烈怀疑小球判断——强队大胜往往伴随多入球（德国 7-1、瑞典 5-1 实证）。</li>
+      <li><b>低信心均势局方向无 edge</b>：方向信心 < 42% 的局（如荷兰 37%、科特迪瓦 40%），方向参考价值低，平局风险高，不宜重仓。</li>
+      <li><b>降盘低水买大需警惕真大球</b>：总进球盘下降但水位偏向大球（操盘"降盘买大"），是大球的潜在信号，与模型判小冲突时优先信市场。</li>
+      <li><b>FIFA 兜底队力误差偏大</b>：缺真实球员数据的球队（多数世界杯队）更依赖市场盘口，模型自身 λ 可信度打折。</li>
+      <li><b>欧赔临场反向收紧 = 反打风险</b>：模型方向与欧赔临场资金流相反时（如伊朗欧赔主升），警惕"同向反打"爆冷。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="icon">📋</span>6-16 待赛风险标注（基于上述教训）</h2>
+    <div class="match-risk">
+      <span class="name">西班牙 vs 佛得角</span><span class="lv lv-high">风险：高</span>
+      <div class="desc">主胜 64.9% + 判小球 63.4% @3.75 → <b style="color:var(--away)">三轴背离，与德国/瑞典同型</b>。盘口升到 3.75 压小水但模型小球倾向反而加深——这正是"强主胜爆大球"的高危信号，<b>重点警惕被低估的大球</b>。</div>
+    </div>
+    <div class="match-risk">
+      <span class="name">比利时 vs 埃及</span><span class="lv lv-mid">风险：中（防平局）</span>
+      <div class="desc">主胜 47.6% 但平局 32.8% 贴身，方向偏弱。临场与 RAG 均提示防平局、降主胜仓位。大小球接近五五开，无明显 edge。</div>
+    </div>
+    <div class="match-risk">
+      <span class="name">沙特 vs 乌拉圭</span><span class="lv lv-mid">风险：中（防平局）</span>
+      <div class="desc">客胜 43.3% 与平局 34.9% 贴身，乌拉圭赔率走高显示市场略不看好。降盘买大信号 vs 模型低进球客胜有出入，方向不稳。</div>
+    </div>
+    <div class="match-risk">
+      <span class="name">伊朗 vs 新西兰</span><span class="lv lv-low">风险：低（信号最协调）</span>
+      <div class="desc">主胜 47.4% + 大球 58.6% + 降盘买大，三轴方向一致、判大不判小，无背离。四场中信号最协调；唯防欧赔主升带来的反打风险。</div>
+    </div>
+  </section>
+
+  <footer>
+    生成时间 2026-06-15 · 基于 6-15 实战复盘 · 三轴仅诊断不改方向 · 风险提示仅供研究参考，非投注建议
+  </footer>
+</div>
+</body>
+</html>

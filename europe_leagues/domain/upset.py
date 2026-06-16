@@ -494,21 +494,21 @@ class UpsetAnalyzer:
                     
             # 判断强队是主队还是客队
             is_strong_home = result['strong_team'] == home_team
-            
-            # 强队让球不足的情况
-            if is_strong_home:
-                # 主队是强队，应该让球
-                if handicap_num < 0.5 and result['strength_advantage'] >= 20:
-                    gap = 20 - handicap_num * 10
-                    warning_factors.append(f"{home_team}实力强{result['strength_advantage']:.0f}分但仅让{handicap_value}球，盘口过浅")
-                elif handicap_num < 0.25 and result['strength_advantage'] >= 15:
-                    gap = 15 - handicap_num * 10
-                    warning_factors.append(f"{home_team}实力占优但盘口让球不足")
-            else:
-                # 客队是强队，应该受让或让球
-                if handicap_num > -0.5 and result['strength_advantage'] >= 20:
-                    gap = 20 + handicap_num * 10
-                    warning_factors.append(f"{away_team}实力强{result['strength_advantage']:.0f}分但盘口{handicap_value}球，未获足够支持")
+            strong_name = home_team if is_strong_home else away_team
+
+            # 亚盘约定：主让球时 handicap_value 为负（如 -1.25 表示主队让 1.25 球）。
+            # 强队实际让出的球数 = 主强取 -handicap_num，客强取 +handicap_num；
+            # 仅当强队让球数明显不足以匹配实力差时，才视为「盘口过浅/让球不足」。
+            favorite_giving = (-handicap_num) if is_strong_home else handicap_num
+
+            if favorite_giving < 0.5 and result['strength_advantage'] >= 20:
+                gap = 20 - favorite_giving * 10
+                warning_factors.append(
+                    f"{strong_name}实力强{result['strength_advantage']:.0f}分但仅让{favorite_giving:.2f}球，盘口过浅"
+                )
+            elif favorite_giving < 0.25 and result['strength_advantage'] >= 15:
+                gap = 15 - favorite_giving * 10
+                warning_factors.append(f"{strong_name}实力占优但盘口让球不足")
                     
             # 水位异常 - 强队水位过高
             if is_strong_home and home_water > 1.0:

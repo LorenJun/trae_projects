@@ -1,8 +1,8 @@
 ---
 title: Europe Leagues 项目架构与模块划分
 owner: europe_leagues
-version: v2.4
-last_updated: 2026-05-08
+version: v2.5
+last_updated: 2026-06-16
 ---
 
 # Europe Leagues 项目架构与模块划分（技术分析）
@@ -222,7 +222,7 @@ flowchart TB
 | 特征服务 | `domain/features.py` | EWMA、analysis context、上下文增强与赛前补齐 |
 | 赔率服务 | `domain/odds.py` | 盘口解析、真实大小球线补齐、历史赔率参考 |
 | 临场服务 | `domain/live.py` | 实时刷新、已有快照复用、driver 透传、上下文注入 |
-| 推理服务 | `domain/inference.py` | 组织核心推理输入、盘口/概率校准与主预测输出 |
+| 推理服务 | `domain/inference.py` | 组织核心推理输入、盘口/概率校准与主预测输出；并产出 `tri_axis_consistency` 影子诊断层（见 3.7） |
 | 后处理 | `domain/postprocess.py` | 概率归一、凯利、review-learning 调整、结果对象整形与 RAG 解释文本拼装 |
 | 持久化 | `domain/persistence.py` | 作为 `PredictionPersistenceService` owner 编排预测落盘，统一写入 `MEMORY.md`、runtime archive、滚动记忆样本、RAG 索引与赛果同步登记 |
 | RAG 服务 | `domain/rag.py` | 封装 `HybridRAGService`，供主链读取结构化相似案例与轻量决策增强 |
@@ -309,6 +309,51 @@ RAG 当前真实依赖的数据源包括：
 这些文件说明当前仓库仍不是“完全收敛到一个 package”：
 - 正式主链已经收敛
 - 但维护、回填、补数、兼容与调试仍大量依赖根目录脚本
+
+---
+
+## 3.7 三轴影子诊断层（tri_axis_consistency）
+
+这是 `domain/inference.py` 在主预测之外产出的一个**纯诊断影子层**，落在结果对象的 `tri_axis_consistency` 字段。核心纪律：**只标注、不改方向、不改概率、不加权**。三轴/各信号同源于同一市场、彼此高度相关，所以这里做的是「同向→标注加强、背离→标注矛盾」的门控，绝不做加权叠加（避免重复计价）。
+
+实现入口：`InferencePipelineService.compute_tri_axis_consistency(...)`，调用点在 `domain/inference.py` 主链尾部，输入取自当前 odds 快照（`欧赔/亚值/凯利/大小球`）。
+
+### 轴与信号构成
+
+| 轴 / 信号 | 来源 | 含义 |
+|---|---|---|
+| 方向轴 `direction_axis` | 模型最终 1X2 | 领先方向 + 强度（`decisive`=非平局且领先 ≥0.10） |
+| 大小球轴 `ou_axis` | 大小球概率 | over/under 谁占优 + 强度 |
+| 操盘轴 `operation_axis` | 庄家形态判定 | 真实盘/诱导盘/中性盘 + 诱导方向 |
+| 临场资金轴 `market_drift` | 封盘热门赔率漂移 | 封盘最低赔率方相对开盘的赔率漂移（见下） |
+
+### 临场资金轴 + 置信度质检层（`market_drift`）
+
+`_compute_market_drift(...)` 计算「封盘热门（封盘最低赔率方）相对开盘的赔率漂移」：
+- `favorite_drifting_out=True`：封盘热门赔率较开盘上行（资金离场、热门走冷），经验上与平局/爆冷正相关
+- 阈值 `+0.05` 仅作监控基线，样本不足以调参
+
+关键设计是**置信度质检层**：欧赔/亚值/凯利数学同源（同一笔资金投射到不同盘口），它们同向移动是「真实资金流」的相互印证，可滤掉单家欧赔抓取噪声——但**不是独立证据，绝不加权**。`drift_confidence`：
+- `high`：欧赔走冷 + 亚值或凯利同向印证（≥1 个）→ 真实资金流
+- `low`：欧赔孤证（亚值、凯利均不印证或缺失）→ 疑似抓取噪声，**降级不触发背离标记**
+- `n/a`：欧赔未达阈值，无需质检
+
+大小球漂移（`ou_line_drift`，line/水位）是唯一真正独立的维度（总进球预期，与胜负方向资金无关），**单独记录、不并入胜负资金共振**。
+
+持久化字段：`market_drift` 含 `favorite_side/favorite_open/favorite_close/drift/threshold/favorite_drifting_out/favorite_steaming_in/drift_confidence/confirmations/confirm_count/ou_line_drift`。
+
+### 背离标记与研判结论
+
+`divergence_flags` 三类背离（纯标注）：
+- `direction_follows_luring_side`：方向轴与庄家诱导方向一致 → 警惕跟庄入坑
+- `decisive_winner_but_low_scoring`：方向看决定性大胜但大小球偏小 → “大胜低进球”矛盾
+- `favorite_drifting_out_against_direction`：封盘热门走冷、资金离场且与模型方向同向 → 平局/爆冷风险上升。**质检门控：仅当 `drift_confidence=high` 才触发，孤证降级不报**
+
+`verdict_summary` 把三轴揉成一句人类可读研判（`_compose_tri_axis_verdict`），仅供人工参考。CLI `_print_tri_axis`（`app/cli.py`）以「临场→{热门}走冷(±X·共振/孤证)」展示。
+
+### 持久化与回测
+
+`tri_axis_consistency`（含嵌套 `market_drift`）在 `result_manager.py` 的 compact 白名单内，归档自动持久化到 `.okooo-scraper/runtime/prediction_archive.json`，供后续回测。全量 68 样本回测中，封盘走冷场按置信度切分：共振(high)组热门没兑现约 70%，孤证(low)组被正确降级，验证质检层确实在区分真实资金流与单源噪声。
 
 ---
 
@@ -547,6 +592,7 @@ flowchart LR
 | 新增命令或调整参数 | `app/cli.py` | `prediction_system.py` 仅保留兼容 |
 | 新增 pipeline | `harness/football.py`、`harness/core.py` | 先定义 stage，再补 handler |
 | 调整主预测编排 | `enhanced_prediction_workflow.py`、`domain/predictor.py` | 主链入口仍集中在这里 |
+| 调整三轴诊断/临场资金质检 | `domain/inference.py`（`compute_tri_axis_consistency` / `_compute_market_drift`） | 纯标记不改方向；质检门控见 3.7，CLI 展示在 `_print_tri_axis` |
 | 调整临场快照/driver | `domain/live.py`、`collectors/okooo.py` | 优先围绕 `local-chrome` 正式链调整；`browser-use` 仅看显式调试场景 |
 | 调整 RAG 索引与解释 | `runtime/rag_store.py`、`domain/rag.py`、`domain/postprocess.py` | 一边改索引，一边改解释文本 |
 | 调整写回与归档 | `domain/persistence.py`、`domain/writeback.py`、`storage/*` | 注意 SoT、MEMORY、runtime archive 的一致性 |
@@ -563,6 +609,7 @@ flowchart LR
 本次文档更新以当前代码与目录现状为准，重点核对了以下文件：
 - 入口与命令：`prediction_system.py`、`app/cli.py`
 - 编排：`domain/predictor.py`、`enhanced_prediction_workflow.py`、`harness/core.py`、`harness/football.py`
+- 推理诊断层：`domain/inference.py`（`compute_tri_axis_consistency` / `_compute_market_drift` / `_compose_tri_axis_verdict`）、`app/cli.py`（`_print_tri_axis`）
 - 采集：`collectors/okooo.py`
 - 存储与 runtime：`storage/__init__.py`、`storage/archive.py`、`storage/accuracy.py`、`storage/teams_md.py`、`runtime/paths.py`、`runtime/memory_samples.py`、`runtime/result_sync.py`、`runtime/rag_store.py`
 - 领域写回：`domain/live.py`、`domain/persistence.py`、`domain/reporting.py`、`domain/writeback.py`

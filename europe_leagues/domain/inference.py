@@ -2046,6 +2046,10 @@ class InferencePipelineService:
         final_prob: Optional[Dict[str, Any]],
         over_under: Optional[Dict[str, Any]],
         operation_pattern: Optional[Dict[str, Any]],
+        european_odds: Optional[Dict[str, Any]] = None,
+        asian_handicap: Optional[Dict[str, Any]] = None,
+        kelly: Optional[Dict[str, Any]] = None,
+        over_under_odds: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """影子层：汇总方向轴/大小球轴/操盘轴的方向，做一致性与背离检测。
 
@@ -2057,6 +2061,7 @@ class InferencePipelineService:
             'direction_axis': None,
             'ou_axis': None,
             'operation_axis': None,
+            'market_drift': None,
             'agreement': None,
             'divergence_flags': [],
             'note': None,
@@ -2100,9 +2105,17 @@ class InferencePipelineService:
                     'pattern_cn': operation_pattern.get('pattern_cn'),
                 }
 
+        # 临场资金轴：封盘热门(最低赔率方)相对开盘的赔率漂移。
+        # 经验观测（世界杯 16 场回测）：封盘热门赔率走高(资金离场) → 热门不兑现/爆冷概率显著上升。
+        # 纯诊断标记，不改方向/概率；阈值仅作监控基线，样本不足以调参。
+        out['market_drift'] = InferencePipelineService._compute_market_drift(
+            european_odds, asian_handicap=asian_handicap, kelly=kelly, over_under_odds=over_under_odds
+        )
+
         dir_ax = out['direction_axis']
         ou_ax = out['ou_axis']
         op_ax = out['operation_axis']
+        md_ax = out['market_drift']
         flags: List[str] = []
 
         # 背离检测 1：操盘判定为「诱导」，且诱导方向正是模型的方向倾向 → 模型可能在跟庄入坑
@@ -2115,6 +2128,17 @@ class InferencePipelineService:
         #            → 「大胜却低进球」的内在矛盾（强队小胜 or 模型高估某方）
         if dir_ax and ou_ax and dir_ax.get('decisive') and ou_ax.get('lean') == 'under':
             flags.append('decisive_winner_but_low_scoring')
+
+        # 背离检测 3：封盘热门赔率走高（资金临场离场），且模型方向与该热门方向一致
+        #            → 我们押的方向正被市场资金抛弃，平局/爆冷风险上升。
+        #            质检门控：仅当亚值/凯利共振印证(drift_confidence=high)才触发，
+        #            欧赔孤证(low)疑似抓取噪声，降级不报背离。
+        if md_ax and md_ax.get('favorite_drifting_out') and dir_ax:
+            if (
+                md_ax.get('favorite_side') == dir_ax.get('lean')
+                and md_ax.get('drift_confidence') == 'high'
+            ):
+                flags.append('favorite_drifting_out_against_direction')
 
         # 一致性正向：方向决定性 + 大小球偏大 + 操盘真实 → 三轴共振看好进攻方
         agreement = None
@@ -2137,14 +2161,133 @@ class InferencePipelineService:
             out['note'] = '；'.join({
                 'direction_follows_luring_side': '方向轴与庄家诱导方向一致，警惕跟庄入坑',
                 'decisive_winner_but_low_scoring': '方向看决定性胜负但大小球偏小，存在“大胜低进球”矛盾',
+                'favorite_drifting_out_against_direction': '封盘热门赔率走高、资金临场离场，且与模型方向同向，平局/爆冷风险上升',
             }.get(f, f) for f in flags)
         elif agreement == 'aligned_attacking':
             out['note'] = '三轴共振：方向、大小球、操盘一致看好进攻方'
 
         # 综合研判结论：把三轴揉成一句人类可读判断（纯文本输出，不改方向/概率）
         out['verdict_summary'] = InferencePipelineService._compose_tri_axis_verdict(
-            dir_ax, ou_ax, op_ax, agreement, flags
+            dir_ax, ou_ax, op_ax, agreement, flags, md_ax
         )
+        return out
+
+    @staticmethod
+    def _compute_market_drift(
+        european_odds: Optional[Dict[str, Any]],
+        asian_handicap: Optional[Dict[str, Any]] = None,
+        kelly: Optional[Dict[str, Any]] = None,
+        over_under_odds: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """计算封盘热门(最低赔率方)相对开盘的赔率漂移，并用亚值/凯利做共振质检。纯诊断，不改概率。
+
+        favorite_drifting_out=True 表示封盘热门赔率较开盘上行（资金离场、热门走冷），
+        经验上与平局/爆冷正相关；阈值 +0.05 仅作监控基线。
+
+        质检层：欧赔/亚值/凯利数学同源，同向移动是「真实资金流」的相互印证，可滤掉单家
+        欧赔抓取噪声。drift_confidence:
+          - high  : 欧赔走冷 + 亚值或凯利同向印证（≥1 个）
+          - low   : 欧赔孤证（亚值、凯利均不印证或缺失）—— 疑似抓取噪声，不应触发背离标记
+          - n/a   : 欧赔未达阈值，无需质检
+        大小球漂移(line/水位)作为独立维度记录，不并入胜负资金共振。
+        """
+        if not isinstance(european_odds, dict):
+            return None
+        ini = european_odds.get('initial')
+        fin = european_odds.get('final')
+        if not isinstance(ini, dict) or not isinstance(fin, dict):
+            return None
+
+        def _f(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        sides = {}
+        for key, lean in (('home', 'home_win'), ('draw', 'draw'), ('away', 'away_win')):
+            oi, ofn = _f(ini.get(key)), _f(fin.get(key))
+            if oi and ofn and min(oi, ofn) > 1.01:
+                sides[lean] = (oi, ofn)
+        if not sides:
+            return None
+
+        # 封盘热门 = 封盘最低赔率方
+        fav_lean = min(sides, key=lambda k: sides[k][1])
+        fav_open, fav_close = sides[fav_lean]
+        drift = round(fav_close - fav_open, 4)
+        threshold = 0.05
+        drifting_out = drift > threshold
+        steaming_in = drift < -threshold
+
+        out: Dict[str, Any] = {
+            'favorite_side': fav_lean,
+            'favorite_open': round(fav_open, 4),
+            'favorite_close': round(fav_close, 4),
+            'drift': drift,
+            'threshold': threshold,
+            'favorite_drifting_out': drifting_out,
+            'favorite_steaming_in': steaming_in,
+        }
+
+        # ——共振质检：仅在欧赔达阈值（走冷或进场）时才做交叉印证——
+        confirmations: Dict[str, Any] = {}
+        if drifting_out or steaming_in:
+            expect_out = drifting_out  # True=资金离热门，False=资金进热门
+
+            # 亚值印证：热门方水位变化。水位升=该侧资金离场。
+            ya_conf = None
+            if isinstance(asian_handicap, dict):
+                yi = asian_handicap.get('initial') if isinstance(asian_handicap.get('initial'), dict) else {}
+                yf = asian_handicap.get('final') if isinstance(asian_handicap.get('final'), dict) else {}
+                water_key = 'home_water' if fav_lean == 'home_win' else ('away_water' if fav_lean == 'away_win' else None)
+                if water_key:
+                    wi, wf = _f(yi.get(water_key)), _f(yf.get(water_key))
+                    if wi is not None and wf is not None:
+                        w_drift = round(wf - wi, 4)
+                        # 水位升(>0)=热门资金离场，与“走冷”同向
+                        ya_conf = {
+                            'fav_water_drift': w_drift,
+                            'agree': (w_drift > 0) == expect_out and abs(w_drift) >= 0.02,
+                        }
+            if ya_conf is not None:
+                confirmations['asian'] = ya_conf
+
+            # 凯利印证：热门方凯利指数变化。凯利升=庄家让利/资金离场。
+            ke_conf = None
+            if isinstance(kelly, dict):
+                ki = kelly.get('initial') if isinstance(kelly.get('initial'), dict) else {}
+                kf = kelly.get('final') if isinstance(kelly.get('final'), dict) else {}
+                kkey = {'home_win': 'home', 'draw': 'draw', 'away_win': 'away'}[fav_lean]
+                kvi, kvf = _f(ki.get(kkey)), _f(kf.get(kkey))
+                if kvi is not None and kvf is not None:
+                    k_drift = round(kvf - kvi, 4)
+                    ke_conf = {
+                        'fav_kelly_drift': k_drift,
+                        'agree': (k_drift > 0) == expect_out and abs(k_drift) >= 0.005,
+                    }
+            if ke_conf is not None:
+                confirmations['kelly'] = ke_conf
+
+            agree_count = sum(1 for c in confirmations.values() if c.get('agree'))
+            out['confirmations'] = confirmations
+            out['confirm_count'] = agree_count
+            out['drift_confidence'] = 'high' if agree_count >= 1 else 'low'
+        else:
+            out['drift_confidence'] = 'n/a'
+
+        # ——大小球漂移：独立维度，仅记录不并入胜负共振——
+        if isinstance(over_under_odds, dict):
+            oi = over_under_odds.get('initial') if isinstance(over_under_odds.get('initial'), dict) else {}
+            ofn = over_under_odds.get('final') if isinstance(over_under_odds.get('final'), dict) else {}
+            li, lf = _f(oi.get('line')), _f(ofn.get('line'))
+            if li is not None and lf is not None:
+                out['ou_line_drift'] = {
+                    'initial_line': li,
+                    'final_line': lf,
+                    'line_drift': round(lf - li, 4),  # 负=降盘(看小)，正=升盘(看大)
+                }
+
         return out
 
     @staticmethod
@@ -2154,6 +2297,7 @@ class InferencePipelineService:
         op_ax: Optional[Dict[str, Any]],
         agreement: Optional[str],
         flags: List[str],
+        md_ax: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """将方向支持率/大小球支持率/操盘手法融合为一句研判结论。仅供人工参考。"""
         lean_cn = {'home_win': '主胜', 'draw': '平局', 'away_win': '客胜', 'over': '大球', 'under': '小球'}
@@ -2171,10 +2315,15 @@ class InferencePipelineService:
             seg.append(f"大小球倾向{o_lean}（{o_prob:.0%}）")
         if op_ax and op_ax.get('verdict'):
             seg.append(f"操盘{verdict_cn.get(op_ax.get('verdict'), op_ax.get('verdict'))}")
+        if md_ax and md_ax.get('favorite_drifting_out'):
+            fav = lean_cn.get(md_ax.get('favorite_side'), md_ax.get('favorite_side'))
+            seg.append(f"临场资金离场（{fav}封盘走冷 {md_ax.get('drift'):+.3f}）")
         if not seg:
             return None
 
-        if 'direction_follows_luring_side' in flags:
+        if 'favorite_drifting_out_against_direction' in flags:
+            conclusion = '模型方向正被市场资金临场抛弃，热门走冷——平局/爆冷风险上升，方向需打折'
+        elif 'direction_follows_luring_side' in flags:
             conclusion = '方向与庄家诱导同向，方向判断需打折，警惕反向爆冷'
         elif 'decisive_winner_but_low_scoring' in flags:
             conclusion = '方向可信，但“强势胜方+偏小球”自相矛盾——强队大胜多伴随多入球，重点警惕小球误判'
@@ -3505,6 +3654,10 @@ class InferencePipelineService:
             final_prob=final_prob,
             over_under=over_under,
             operation_pattern=realtime['context_applied'].get('market_operation_pattern'),
+            european_odds=european_odds,
+            asian_handicap=current_odds.get('亚值') if isinstance(current_odds, dict) else None,
+            kelly=current_odds.get('凯利') if isinstance(current_odds, dict) else None,
+            over_under_odds=current_odds.get('大小球') if isinstance(current_odds, dict) else None,
         )
 
         return {

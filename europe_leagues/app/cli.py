@@ -987,6 +987,16 @@ def _print_tri_axis(tri) -> None:
     pa = tri.get("operation_axis")
     if isinstance(pa, dict):
         parts.append(f"操盘→{verdict_cn.get(pa.get('verdict'), pa.get('verdict'))}")
+    md = tri.get("market_drift")
+    if isinstance(md, dict):
+        fav = lean_cn.get(md.get('favorite_side'), md.get('favorite_side'))
+        conf = md.get('drift_confidence')
+        conf_cn = {'high': '共振', 'low': '孤证', 'n/a': ''}.get(conf, conf or '')
+        suffix = f"·{conf_cn}" if conf_cn else ""
+        if md.get('favorite_drifting_out'):
+            parts.append(f"临场→{fav}走冷({md.get('drift', 0):+.3f}{suffix})")
+        elif md.get('favorite_steaming_in'):
+            parts.append(f"临场→{fav}进场({md.get('drift', 0):+.3f}{suffix})")
     agree_cn = {'aligned_attacking': '三轴共振(看好进攻方)', 'divergent': '三轴背离', 'mixed': '部分一致'}
     tag = agree_cn.get(tri.get("agreement"), tri.get("agreement") or "")
     print(f"三轴一致性[{tag}]: {' | '.join(parts)}")
@@ -1166,10 +1176,11 @@ def run_openclaw_save_result(args):
 
 def run_openclaw_auto_sync_results(args):
     def _execute():
-        from runtime.result_sync import sync_due_prediction_results
+        from runtime.result_sync import sync_due_prediction_results, _run_upset_density_monitor
 
         result = sync_due_prediction_results(limit=args.limit)
         result["runtime_profile"] = get_command_runtime_profile("auto-sync-results")
+        _run_upset_density_monitor(result)
         return result
 
     if args.json:
@@ -1188,6 +1199,13 @@ def run_openclaw_auto_sync_results(args):
             print(f"- 已同步: {item.get('home_team')} vs {item.get('away_team')} -> {item.get('actual_score')}")
         else:
             print(f"- 未更新: {item.get('match_id')} ({item.get('reason')})")
+    density = report.get("upset_density")
+    if density:
+        flag = "⚠ 告警" if density.get("alert") else "✓ 正常"
+        print(
+            f"冷门密度监控: z={density['z']} "
+            f"(实际命中 {density['hits']}/{density['n']}, 期望 {density['expected_hits']}) [{flag}]"
+        )
 
 
 def run_openclaw_result_sync_daemon(args):

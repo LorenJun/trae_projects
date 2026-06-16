@@ -50,6 +50,8 @@
 5. `domain/persistence.py` 负责预测落盘 side effects
 6. `runtime/result_sync.py` 与 `result_manager.py` 负责赛果同步、结果闭环与衍生数据更新
 
+> **三轴影子诊断层**：`domain/inference.py` 在主预测之外产出 `tri_axis_consistency`（方向轴/大小球轴/操盘轴 + 临场资金轴）。临场资金轴 = 封盘热门赔率漂移，带置信度质检层（欧赔走冷用亚值/凯利同向共振印证，`drift_confidence` high/low/n/a，过滤单家抓取噪声）。**纯标记、不改方向、不加权**，随归档持久化供回测。技术口径见 [`docs/architecture/europe_leagues_architecture.md`](../docs/architecture/europe_leagues_architecture.md) 第 3.7 节。
+
 ### 共享基础模块（单一事实源 / 无状态工具）
 
 为避免魔法数字与纯逻辑散落在巨石文件里，下列模块集中收口可复用基础能力：

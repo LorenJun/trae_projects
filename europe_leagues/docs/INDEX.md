@@ -17,6 +17,7 @@
 | 抓盘口反复撞验证墙 / 固定 IP 单机抗封 | [`../ODDS_FETCH_GUIDE.md`](../ODDS_FETCH_GUIDE.md) | 「固定 IP 单机抗封三道防线」 |
 | 本机 odds.php 被拦截排障 | [`../../debug-local-odds-access.md`](../../debug-local-odds-access.md) | 全文 |
 | 爆冷预警怎么用 | [`upset_warning_guide.md`](./upset_warning_guide.md) | 全文 |
+| 三轴诊断/临场资金质检层口径 | [`../../docs/architecture/europe_leagues_architecture.md`](../../docs/architecture/europe_leagues_architecture.md) | 第 3.7 节 |
 | 看历史爆冷案例 | [`../爆冷案例库.md`](../爆冷案例库.md) | 按联赛/类型检索 |
 
 ---

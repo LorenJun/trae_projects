@@ -76,6 +76,46 @@ def _winner_label(home: str, away: str, code: str | None) -> str:
     return "—"
 
 
+def _normalize_ou(value) -> dict | None:
+    """把预测大小球归一为 {'side': '大'/'小', 'line': float}。兼容多种存储形态。"""
+    if not value:
+        return None
+    if isinstance(value, dict):
+        side = str(value.get("side") or "").strip()
+        line = value.get("line")
+        if side in ("大", "小") and line is not None:
+            try:
+                return {"side": side, "line": float(line)}
+            except (TypeError, ValueError):
+                return None
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    side = "大" if "大" in text else ("小" if "小" in text else "")
+    if not side:
+        return None
+    import re as _re
+
+    m = _re.search(r"(\d+(?:\.\d+)?)", text)
+    if not m:
+        return None
+    return {"side": side, "line": float(m.group(1))}
+
+
+def _parse_score_pair(score: str) -> tuple[int, int] | None:
+    import re as _re
+
+    m = _re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", str(score or ""))
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+def _fmt_line(line: float) -> str:
+    return str(int(line)) if float(line).is_integer() else str(line)
+
+
 def collect_dashboard_data(rm: ResultManager, days: int) -> dict:
     """从 ResultManager 拉取真实统计，整理为前端需要的结构。
 
@@ -122,6 +162,25 @@ def collect_dashboard_data(rm: ResultManager, days: int) -> dict:
         actual_score = str(s.get("actual_score") or "").strip()
         score_hit = bool(pred_scores) and actual_score in pred_scores
 
+        # 逐场大小球判定：预测方向/盘口 vs 实际总进球
+        ou = _normalize_ou(s.get("predicted_ou"))
+        ou_pred_label = ""
+        ou_actual_label = ""
+        ou_status = ""  # hit / miss / push / ""
+        score_pair = _parse_score_pair(actual_score)
+        if ou:
+            ou_pred_label = f"{ou['side']}{_fmt_line(ou['line'])}"
+            if score_pair is not None:
+                total = score_pair[0] + score_pair[1]
+                line = float(ou["line"])
+                if abs(total - line) < 1e-9:
+                    ou_status = "push"
+                    ou_actual_label = f"{total}球 走水"
+                else:
+                    actual_side = "大" if total > line else "小"
+                    ou_status = "hit" if actual_side == ou["side"] else "miss"
+                    ou_actual_label = f"{total}球·{actual_side}"
+
         # 累加到所属分组
         agg = groups[grp]
         agg["total"] += 1
@@ -151,6 +210,9 @@ def collect_dashboard_data(rm: ResultManager, days: int) -> dict:
                 "actual_score": actual_score,
                 "score_hit": score_hit,
                 "has_score": bool(pred_scores) and bool(actual_score),
+                "ou_pred_label": ou_pred_label,
+                "ou_actual_label": ou_actual_label,
+                "ou_status": ou_status,
             }
         )
     matches.sort(key=lambda m: (m["date"], m["time"]), reverse=True)
@@ -359,7 +421,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .matches::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 999px; }
   .match {
     scroll-snap-align: start;
-    display: grid; grid-template-columns: 86px 1fr auto; gap: 14px; align-items: center;
+    display: grid; grid-template-columns: 86px 1fr; gap: 14px; align-items: start;
     background: var(--card); border: 1px solid var(--card-border);
     border-radius: 16px; padding: 15px 18px;
     transition: transform .15s ease, border-color .15s ease;
@@ -367,19 +429,30 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   }
   .match:hover { transform: translateX(4px); border-color: rgba(91,140,255,0.4); }
   @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-  .m-date { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .m-date { font-size: 12px; color: var(--muted); line-height: 1.5; padding-top: 2px; }
   .m-date .lg { display: inline-block; margin-top: 4px; font-size: 11px; color: #aec3ff; background: rgba(91,140,255,0.14); padding: 2px 8px; border-radius: 999px; }
   .m-core .teams { font-size: 15.5px; font-weight: 650; }
   .m-core .teams .vs { color: var(--muted); margin: 0 8px; font-weight: 400; }
-  .m-core .detail { margin-top: 7px; font-size: 12.5px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
-  .m-core .detail b { color: #cdd8f5; font-weight: 600; }
-  .m-core .detail .ok { color: var(--green); }
-  .m-core .detail .no { color: var(--red); }
-  .m-flags { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
-  .tag { font-size: 11.5px; font-weight: 700; padding: 4px 11px; border-radius: 999px; white-space: nowrap; }
-  .tag.hit { background: rgba(52,211,153,0.16); color: var(--green); border: 1px solid rgba(52,211,153,0.35); }
-  .tag.miss { background: rgba(251,113,133,0.14); color: var(--red); border: 1px solid rgba(251,113,133,0.32); }
-  .tag.sc-hit { background: rgba(251,191,36,0.15); color: var(--amber); border: 1px solid rgba(251,191,36,0.33); }
+  .m-dims { margin-top: 10px; display: flex; flex-direction: column; gap: 7px; }
+  .dim {
+    display: grid; grid-template-columns: 52px 1fr auto; gap: 10px; align-items: center;
+    background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.05);
+    border-left: 3px solid rgba(255,255,255,0.12);
+    border-radius: 10px; padding: 7px 12px;
+  }
+  .dim.hit { border-left-color: var(--green); }
+  .dim.miss { border-left-color: var(--red); }
+  .dim.push { border-left-color: var(--amber); }
+  .dim .d-label { font-size: 12px; font-weight: 700; color: #aec3ff; }
+  .dim .d-flow { font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .dim .d-flow b { color: #eef2ff; font-weight: 650; }
+  .dim .d-pred b { color: #cdd8f5; }
+  .dim .d-arrow { color: var(--muted); opacity: .7; }
+  .dim .d-badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+  .d-badge.hit { background: rgba(52,211,153,0.16); color: var(--green); border: 1px solid rgba(52,211,153,0.35); }
+  .d-badge.miss { background: rgba(251,113,133,0.14); color: var(--red); border: 1px solid rgba(251,113,133,0.32); }
+  .d-badge.push { background: rgba(251,191,36,0.15); color: var(--amber); border: 1px solid rgba(251,191,36,0.33); }
+  .d-badge.none { background: rgba(255,255,255,0.05); color: var(--muted); border: 1px solid rgba(255,255,255,0.08); }
   .empty { text-align: center; color: var(--muted); padding: 50px 0; font-size: 14px; }
 
   /* 分组切换标签 */
@@ -627,8 +700,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     const leaguesInPool = [...new Set(pool.map(m => m.league))];
     const filterDefs = [
       { key: 'all', label: '全部' },
-      { key: 'hit', label: '✓ 胜负命中' },
-      { key: 'miss', label: '✗ 胜负未中' },
+      { key: 'hit', label: '✓ 方向命中' },
+      { key: 'miss', label: '✗ 方向未中' },
+      { key: 'ou_hit', label: '✓ 大小球命中' },
+      { key: 'ou_miss', label: '✗ 大小球未中' },
       { key: 'score', label: '★ 比分命中' },
     ].concat(leaguesInPool.map(code => {
       const m = pool.find(x => x.league === code);
@@ -665,10 +740,27 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     let list = matchesInGroup();
     if (activeFilter === 'hit') list = list.filter(m => m.win_hit);
     else if (activeFilter === 'miss') list = list.filter(m => !m.win_hit);
+    else if (activeFilter === 'ou_hit') list = list.filter(m => m.ou_status === 'hit');
+    else if (activeFilter === 'ou_miss') list = list.filter(m => m.ou_status === 'miss');
     else if (activeFilter === 'score') list = list.filter(m => m.score_hit);
     else if (activeFilter.startsWith('lg:')) list = list.filter(m => m.league === activeFilter.slice(3));
 
     if (!list.length) { matchWrap.appendChild(el('div', 'empty', '没有符合条件的比赛')); return; }
+
+    const badge = (status) => {
+      if (status === 'hit') return '<span class="d-badge hit">✓ 命中</span>';
+      if (status === 'miss') return '<span class="d-badge miss">✗ 未中</span>';
+      if (status === 'push') return '<span class="d-badge push">― 走水</span>';
+      return '<span class="d-badge none">—</span>';
+    };
+    const dimRow = (label, predHtml, actualHtml, status) =>
+      `<div class="dim ${status || 'none'}">` +
+        `<span class="d-label">${label}</span>` +
+        `<span class="d-flow"><span class="d-pred">${predHtml || '—'}</span>` +
+        `<span class="d-arrow">→</span>` +
+        `<span class="d-actual">${actualHtml || '—'}</span></span>` +
+        badge(status) +
+      `</div>`;
 
     list.forEach((m, idx) => {
       const row = el('div', 'match');
@@ -677,24 +769,35 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       const date = el('div', 'm-date',
         `${m.date || '—'}<br>${m.time || ''}<br><span class="lg">${m.league_short}</span>`);
 
-      const scoreLine = m.has_score
-        ? `<span>比分预测 <b>${m.predicted_scores.join(' / ')}</b> · 实际 <b>${m.actual_score}</b> ` +
-          `<span class="${m.score_hit ? 'ok' : 'no'}">${m.score_hit ? '命中' : '未中'}</span></span>`
-        : (m.actual_score ? `<span>实际比分 <b>${m.actual_score}</b></span>` : '');
+      // 方向
+      const dirRow = dimRow('方向',
+        `<b>${m.predicted_winner_label}</b>`,
+        `<b>${m.actual_winner_label}</b>`,
+        m.win_hit ? 'hit' : 'miss');
+
+      // 大小球
+      const ouRow = m.ou_pred_label
+        ? dimRow('大小球',
+            `<b>${m.ou_pred_label}</b>`,
+            m.ou_actual_label ? `<b>${m.ou_actual_label}</b>` : '—',
+            m.ou_status || 'none')
+        : '';
+
+      // 比分
+      const scoreRow = m.has_score
+        ? dimRow('比分',
+            `<b>${m.predicted_scores.join(' / ')}</b>`,
+            `<b>${m.actual_score}</b>`,
+            m.score_hit ? 'hit' : 'miss')
+        : (m.actual_score
+            ? dimRow('比分', '—', `<b>${m.actual_score}</b>`, 'none')
+            : '');
 
       const core = el('div', 'm-core',
         `<div class="teams">${m.home}<span class="vs">vs</span>${m.away}</div>` +
-        `<div class="detail">` +
-          `<span>预测 <b>${m.predicted_winner_label}</b></span>` +
-          `<span>结果 <b>${m.actual_winner_label}</b></span>` +
-          scoreLine +
-        `</div>`);
+        `<div class="m-dims">` + dirRow + ouRow + scoreRow + `</div>`);
 
-      const flags = el('div', 'm-flags');
-      flags.appendChild(el('span', 'tag ' + (m.win_hit ? 'hit' : 'miss'), m.win_hit ? '✓ 命中' : '✗ 未中'));
-      if (m.score_hit) flags.appendChild(el('span', 'tag sc-hit', '★ 比分'));
-
-      row.appendChild(date); row.appendChild(core); row.appendChild(flags);
+      row.appendChild(date); row.appendChild(core);
       matchWrap.appendChild(row);
     });
   }

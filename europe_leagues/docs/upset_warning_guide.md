@@ -71,6 +71,7 @@ python3 prediction_system.py harness-run \
 - 触发因素
 - 是否与盘口 / 大小球 / 历史盘路一致
 - 最终建议是否只是“防冷提示”，还是已经影响主结论方向
+- `tri_axis_consistency`：三轴影子诊断层。尤其看 `market_drift.favorite_drifting_out`（封盘热门走冷、资金离场，经验上与平局/爆冷正相关）及其 `drift_confidence`（high=亚值/凯利共振印证，low=欧赔孤证疑似噪声）。仅 `high` 时才会标 `favorite_drifting_out_against_direction` 背离。该层纯标记、不改方向，详见架构文档 3.7 节
 
 ## 预警的实际含义
 

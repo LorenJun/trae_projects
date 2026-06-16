@@ -1106,6 +1106,26 @@ def sync_due_prediction_results(
     }
 
 
+def _run_upset_density_monitor(report: Dict[str, Any]) -> None:
+    """有新结算时附带计算冷门密度 z 值，失败不影响赛果同步主流程。"""
+    if not report.get("updated_count"):
+        return
+    try:
+        from tools.monitor_upset_density import run_monitor
+
+        record = run_monitor()
+        if record:
+            report["upset_density"] = {
+                "z": record["stat"]["z"],
+                "alert": record["alert"],
+                "expected_hits": record["stat"]["expected_hits"],
+                "hits": record["stat"]["hits"],
+                "n": record["stat"]["n"],
+            }
+    except Exception as exc:  # noqa: BLE001
+        report["upset_density_error"] = str(exc)
+
+
 def run_result_sync_daemon(
     base_dir: Optional[str] = None,
     *,
@@ -1116,6 +1136,7 @@ def run_result_sync_daemon(
     last_report: Dict[str, Any] = {}
     while True:
         last_report = sync_due_prediction_results(base_dir, limit=50)
+        _run_upset_density_monitor(last_report)
         cycles += 1
         if max_cycles and cycles >= max_cycles:
             break
