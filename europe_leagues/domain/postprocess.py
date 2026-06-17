@@ -614,17 +614,17 @@ class PredictionPostprocessService:
         elif bias_final <= -0.03:
             goal_pressure = 'under'
         direction = 1.0 if goal_pressure == 'over' else -1.0 if goal_pressure == 'under' else 0.0
-        pace_shift = direction * (abs(line_delta) * 0.08 + abs(bias_delta) * 0.25 + abs(bias_final) * 0.06)
+        pace_shift = direction * (abs(line_delta) * 0.12 + abs(bias_delta) * 0.36 + abs(bias_final) * 0.10)
         # 盘水背离：降盘却把大球水位压低（暗钱买大），或升盘却把小球水位压低。
         # 明面盘口与暗钱方向相反 → 视为诱导信号，给被加注一侧额外加成。
         # 加成强度按香港水位档位缩放：底水(低水)最强、中水折半、高水基本忽略。
-        tier_weight = {'low': 1.0, 'mid': 0.5, 'high': 0.15}
+        tier_weight = {'low': 1.0, 'mid': 0.65, 'high': 0.25}
         over_water_tier = self.classify_water_tier(final_prices.get('over_decimal'))
         under_water_tier = self.classify_water_tier(final_prices.get('under_decimal'))
         ou_line_water_divergence = None
         if 'ou_line_down' in signals and 'over_water_drop' in signals and goal_pressure == 'over':
             weight = tier_weight.get(over_water_tier.get('tier'), 0.5)
-            boost = min(0.09, abs(line_delta) * 0.10 + abs(bias_delta) * 0.20) * weight
+            boost = min(0.14, abs(line_delta) * 0.14 + abs(bias_delta) * 0.28) * weight
             pace_shift += boost
             signals.append('ou_line_down_over_backed_divergence')
             ou_line_water_divergence = {
@@ -633,7 +633,7 @@ class PredictionPostprocessService:
             }
         elif 'ou_line_up' in signals and 'under_water_drop' in signals and goal_pressure == 'under':
             weight = tier_weight.get(under_water_tier.get('tier'), 0.5)
-            boost = min(0.09, abs(line_delta) * 0.10 + abs(bias_delta) * 0.20) * weight
+            boost = min(0.14, abs(line_delta) * 0.14 + abs(bias_delta) * 0.28) * weight
             pace_shift -= boost
             signals.append('ou_line_up_under_backed_divergence')
             ou_line_water_divergence = {
@@ -641,14 +641,14 @@ class PredictionPostprocessService:
                 'water_tier': under_water_tier.get('tier'), 'hk_water': under_water_tier.get('hk_water'),
             }
         # 弱加成：盘口未移动（无升降盘），但单侧水位下降=暗钱进场。
-        # 强度远低于背离加成（封顶 0.03），且按水位档位缩放——只有底水才算真买。
+        # 强度低于背离加成（封顶 0.05），且按水位档位缩放——只有底水才算真买。
         ou_flat_water_nudge = None
         line_static = ('ou_line_down' not in signals) and ('ou_line_up' not in signals)
         if line_static and ou_line_water_divergence is None:
             if 'over_water_drop' in signals and 'under_water_drop' not in signals:
                 over_drop = abs((over_raw_initial or 0.0) - (over_raw_final or 0.0))
                 weight = tier_weight.get(over_water_tier.get('tier'), 0.5)
-                boost = min(0.03, over_drop * 0.30) * weight
+                boost = min(0.05, over_drop * 0.45) * weight
                 if boost > 1e-6:
                     pace_shift += boost
                     signals.append('ou_flat_line_over_backed_weak')
@@ -659,7 +659,7 @@ class PredictionPostprocessService:
             elif 'under_water_drop' in signals and 'over_water_drop' not in signals:
                 under_drop = abs((under_raw_initial or 0.0) - (under_raw_final or 0.0))
                 weight = tier_weight.get(under_water_tier.get('tier'), 0.5)
-                boost = min(0.03, under_drop * 0.30) * weight
+                boost = min(0.05, under_drop * 0.45) * weight
                 if boost > 1e-6:
                     pace_shift -= boost
                     signals.append('ou_flat_line_under_backed_weak')

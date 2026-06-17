@@ -30,6 +30,18 @@
   .matchup .team { font-size: 17px; font-weight: 700; }
   .matchup .vs { color: var(--muted); font-size: 12px; }
   .time { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .result-banner {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    background: linear-gradient(180deg, #FFEAF3 0%, #FFD6E4 100%);
+    border: 1px solid var(--card-strong); border-radius: 12px;
+    padding: 9px 12px; margin-bottom: 12px;
+  }
+  .result-banner .r-score { font-size: 15px; font-weight: 800; color: var(--title); }
+  .result-banner .r-total { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+  .r-tag { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 10px; }
+  .r-hit { background: rgba(120,170,110,.22); color: #5C8A4A; }
+  .r-miss { background: rgba(211,139,169,.24); color: var(--away); }
+  .r-push { background: rgba(168,144,152,.18); color: var(--muted); }
   .verdict { display: inline-block; font-size: 13px; font-weight: 700; padding: 4px 14px; border-radius: 16px; margin-bottom: 12px; }
   .v-home { background: rgba(181,112,143,.16); color: var(--home); }
   .v-draw { background: rgba(230,169,198,.28); color: #B26088; }
@@ -101,30 +113,37 @@
     <div class="card">
       <div class="matchup"><span class="team" style="color:var(--home)">法国</span><span class="vs">VS</span><span class="team" style="color:var(--away)">塞内加尔</span></div>
       <div class="time">06-17 03:00</div>
-      <div style="text-align:center;"><span class="verdict v-home">主胜 · 47.1%</span></div>
+      <div class="result-banner">
+        <span class="r-score">终场 3-1</span>
+        <span class="r-tag r-hit">方向✓</span>
+        <span class="r-tag r-miss">比分✗</span>
+        <span class="r-tag r-miss">判小球✗</span>
+        <span class="r-total">4球</span>
+      </div>
+      <div style="text-align:center;"><span class="verdict v-home">主胜 · 47.9%</span></div>
       <div class="bar">
-        <span class="b-home" style="width:47.9%">48%</span>
-        <span class="b-draw" style="width:33.6%">34%</span>
+        <span class="b-home" style="width:48.3%">48%</span>
+        <span class="b-draw" style="width:33.1%">33%</span>
         <span class="b-away" style="width:18.5%">19%</span>
       </div>
       <div class="prob-legend"><span>主胜</span><span>平局</span><span>客胜</span></div>
-      <div class="total-row">最可能总进球：<b>2 球</b>(26.4%) / 3球(20.6%) / 1球(20.0%)</div>
+      <div class="total-row">最可能总进球：<b>3 球</b>(24.0%) / 2球(22.1%) / 4球(16.7%)</div>
       <div class="scores-row">
-        <span class="chip"><b>1-0</b><i>37.3%</i></span>
-        <span class="chip"><b>1-1</b><i>34.1%</i></span>
-        <span class="chip"><b>2-1</b><i>28.6%</i></span>
+        <span class="chip"><b>1-0</b><i>11.9%</i></span>
+        <span class="chip"><b>1-1</b><i>10.9%</i></span>
+        <span class="chip"><b>2-0</b><i>10.7%</i></span>
       </div>
-      <div class="ou-row">大小球：<b>大球 52.0%</b> / 小球 48.0% @ 2.5 <span style="color:var(--draw)">（盘口降 2.75→2.5）</span></div>
+      <div class="ou-row">大小球：<b>小球 52.3%</b> / 大球 47.7% @ 2.75 <span style="color:var(--draw)">（盘口未动 2.75）</span></div>
       <div class="odds-box">
         <div class="obx-title">真实盘口原始数据 <span>· 澳客实时采集</span></div>
-        <div class="odds-line"><span class="k">欧赔</span><span class="v">开 1.43 / 4.37 / 6.66 → 终 <b>1.46 / 4.32 / 6.66</b> <em>（13家共识）</em></span></div>
-        <div class="odds-line"><span class="k">亚盘</span><span class="v">开 一/球半(-1.25) → 终 <b>一球(-1.00)</b> 水位 1.85/2.06 <em>（单家）</em></span></div>
-        <div class="odds-line"><span class="k">凯利</span><span class="v">主 0.95 / 平 0.93 / 客 0.91</span></div>
-        <div class="odds-line"><span class="k">大小</span><span class="v">大 1.83 / 小 1.92 @ 2.5</span></div>
+        <div class="odds-line"><span class="k">欧赔</span><span class="v">开 1.43 / 4.37 / 6.66 → 终 <b>1.47 / 4.45 / 6.43</b> <em>（13家共识）</em></span></div>
+        <div class="odds-line"><span class="k">亚盘</span><span class="v">开 一/球半(-1.25) → 终 <b>一球(-1.00)</b> 水位 1.82/2.11 <em>（单家）</em></span></div>
+        <div class="odds-line"><span class="k">凯利</span><span class="v">主 0.95 / 平 0.95 / 客 0.91</span></div>
+        <div class="odds-line"><span class="k">大小</span><span class="v">大 1.80 / 小 1.97 @ 2.75</span></div>
       </div>
-      <div class="tri-verdict tri-mixed">
-        <span class="tag">部分一致</span>：方向强（主胜 48%）；大小球倾向大球（52%）；操盘中性盘 ⇒ <b>三轴无明显矛盾，可按模型方向参考</b><br>
-        <span style="color:var(--muted)">临场资金：封盘热门（法国）赔率微升 +0.034（n/a）；总进球盘有漂移；爆冷低(36)。</span>
+      <div class="tri-verdict tri-diverge">
+        <span class="tag">三轴背离</span>：方向强（主胜 48%）；大小球倾向小球（52%）；操盘中性盘 ⇒ <b>方向可信，但“强势胜方+偏小球”自相矛盾——强队大胜多伴随多入球，重点警惕小球误判</b><br>
+        <span style="color:var(--muted)">临场资金：封盘热门（法国）赔率微升 +0.046（n/a）；总进球盘未漂移；爆冷低(30)。</span>
       </div>
     </div>
 
@@ -132,30 +151,37 @@
     <div class="card">
       <div class="matchup"><span class="team" style="color:var(--home)">伊拉克</span><span class="vs">VS</span><span class="team" style="color:var(--away)">挪威</span></div>
       <div class="time">06-17 06:00</div>
-      <div style="text-align:center;"><span class="verdict v-away">客胜 · 49.8%</span></div>
+      <div class="result-banner">
+        <span class="r-score">终场 1-4</span>
+        <span class="r-tag r-hit">方向✓</span>
+        <span class="r-tag r-hit">比分✓</span>
+        <span class="r-tag r-hit">判大球✓</span>
+        <span class="r-total">5球</span>
+      </div>
+      <div style="text-align:center;"><span class="verdict v-away">客胜 · 52.6%</span></div>
       <div class="bar">
-        <span class="b-home" style="width:21.0%">21%</span>
-        <span class="b-draw" style="width:28.4%">28%</span>
-        <span class="b-away" style="width:50.6%">51%</span>
+        <span class="b-home" style="width:20.2%">20%</span>
+        <span class="b-draw" style="width:26.8%">27%</span>
+        <span class="b-away" style="width:53.0%">53%</span>
       </div>
       <div class="prob-legend"><span>主胜</span><span>平局</span><span>客胜</span></div>
-      <div class="total-row">最可能总进球：<b>3 球</b>(24.1%) / 2球(21.7%) / 4球(17.4%)</div>
+      <div class="total-row">最可能总进球：<b>2 球</b>(24.5%) / 3球(21.6%) / 1球(16.9%)</div>
       <div class="scores-row">
-        <span class="chip"><b>1-1</b><i>41.9%</i></span>
-        <span class="chip"><b>0-2</b><i>29.8%</i></span>
-        <span class="chip"><b>0-0</b><i>28.3%</i></span>
+        <span class="chip"><b>1-3</b><i>6.7%</i></span>
+        <span class="chip"><b>0-4</b><i>5.6%</i></span>
+        <span class="chip"><b>1-4</b><i>3.7%</i></span>
       </div>
-      <div class="ou-row">大小球：<b>小球 50.2%</b> / 大球 49.8% @ 3 <span style="color:var(--draw)">（盘口升 2.75→3）</span></div>
+      <div class="ou-row">大小球：<b>大球 50.4%</b> / 小球 49.6% @ 3 <span style="color:var(--draw)">（盘口升 2.75→3）</span></div>
       <div class="odds-box">
         <div class="obx-title">真实盘口原始数据 <span>· 澳客实时采集</span></div>
-        <div class="odds-line"><span class="k">欧赔</span><span class="v">开 9.03 / 5.22 / 1.33 → 终 <b>13.15 / 6.92 / 1.20</b> <em>（13家共识）</em></span></div>
-        <div class="odds-line"><span class="k">亚盘</span><span class="v">开 受球半 → 终 <b>受球半/两球</b> 水位 1.98/2.01 <em>（均盘兜底）</em></span></div>
-        <div class="odds-line"><span class="k">凯利</span><span class="v">主 0.90 / 平 0.97 / 客 0.95</span></div>
-        <div class="odds-line"><span class="k">大小</span><span class="v">大 1.96 / 小 1.87 @ 3</span></div>
+        <div class="odds-line"><span class="k">欧赔</span><span class="v">开 9.08 / 5.23 / 1.32 → 终 <b>12.85 / 6.56 / 1.21</b> <em>（13家共识）</em></span></div>
+        <div class="odds-line"><span class="k">亚盘</span><span class="v">开 受球半 → 终 <b>受球半/两球</b> 水位 2.12/1.95 <em>（均盘兜底）</em></span></div>
+        <div class="odds-line"><span class="k">凯利</span><span class="v">主 0.96 / 平 0.97 / 客 0.94</span></div>
+        <div class="odds-line"><span class="k">大小</span><span class="v">大 2.03 / 小 1.80 @ 3</span></div>
       </div>
-      <div class="tri-verdict tri-diverge">
-        <span class="tag">三轴背离</span>：方向强（客胜 51%）；大小球倾向小球（50%）；操盘诱导盘 ⇒ <b>方向可信，但“强势胜方+偏小球”自相矛盾——强队大胜多伴随多入球，重点警惕小球误判</b><br>
-        <span style="color:var(--muted)">临场资金：封盘热门（挪威）赔率走低 −0.125（孤证（low））；总进球盘有漂移；爆冷低(17)。</span>
+      <div class="tri-verdict tri-mixed">
+        <span class="tag">部分一致</span>：方向强（客胜 53%）；大小球倾向大球（50%）；操盘诱导盘 ⇒ <b>三轴无明显矛盾，可按模型方向参考</b><br>
+        <span style="color:var(--muted)">临场资金：封盘热门（挪威）赔率走低 −0.108（共振（high））；总进球盘有漂移；爆冷低(17)。</span>
       </div>
     </div>
 
@@ -163,33 +189,33 @@
     <div class="card">
       <div class="matchup"><span class="team" style="color:var(--home)">阿根廷</span><span class="vs">VS</span><span class="team" style="color:var(--away)">阿尔及利亚</span></div>
       <div class="time">06-17 09:00</div>
-      <div style="text-align:center;"><span class="verdict v-home">主胜 · 51.1%</span></div>
+      <div style="text-align:center;"><span class="verdict v-home">主胜 · 45.1%</span></div>
       <div class="bar">
-        <span class="b-home" style="width:51.8%">52%</span>
-        <span class="b-draw" style="width:32.9%">33%</span>
-        <span class="b-away" style="width:15.3%">15%</span>
+        <span class="b-home" style="width:45.5%">45%</span>
+        <span class="b-draw" style="width:33.9%">34%</span>
+        <span class="b-away" style="width:20.6%">21%</span>
       </div>
       <div class="prob-legend"><span>主胜</span><span>平局</span><span>客胜</span></div>
-      <div class="total-row">最可能总进球：<b>2 球</b>(26.5%) / 3球(20.6%) / 1球(20.2%)</div>
+      <div class="total-row">最可能总进球：<b>2 球</b>(26.0%) / 3球(21.0%) / 1球(19.1%)</div>
       <div class="scores-row">
-        <span class="chip"><b>1-0</b><i>38.0%</i></span>
-        <span class="chip"><b>2-0</b><i>36.8%</i></span>
-        <span class="chip"><b>2-1</b><i>25.2%</i></span>
+        <span class="chip"><b>2-1</b><i>8.7%</i></span>
+        <span class="chip"><b>1-2</b><i>7.6%</i></span>
+        <span class="chip"><b>2-2</b><i>5.4%</i></span>
       </div>
-      <div class="ou-row">大小球：<b>大球 51.7%</b> / 小球 48.3% @ 2.5 <span style="color:var(--draw)">（盘口未动 2.5）</span></div>
+      <div class="ou-row">大小球：<b>大球 53.0%</b> / 小球 47.0% @ 2.5 <span style="color:var(--draw)">（盘口未动 2.5）</span></div>
       <div class="odds-box">
         <div class="obx-title">真实盘口原始数据 <span>· 澳客实时采集</span></div>
-        <div class="odds-line"><span class="k">欧赔</span><span class="v">开 1.36 / 4.55 / 8.15 → 终 <b>1.38 / 4.52 / 8.22</b> <em>（13家共识）</em></span></div>
-        <div class="odds-line"><span class="k">亚盘</span><span class="v">一/球半(-1.25)未动 水位 1.98/1.93 <em>（单家）</em></span></div>
-        <div class="odds-line"><span class="k">凯利</span><span class="v">主 0.94 / 平 0.94 / 客 0.91</span></div>
-        <div class="odds-line"><span class="k">大小</span><span class="v">大 1.93 / 小 1.85 @ 2.5</span></div>
+        <div class="odds-line"><span class="k">欧赔</span><span class="v">开 1.36 / 4.55 / 8.15 → 终 <b>1.51 / 4.11 / 6.53</b> <em>（13家共识）</em></span></div>
+        <div class="odds-line"><span class="k">亚盘</span><span class="v">开 一/球半(-1.25) → 终 <b>平手(0.00)</b> 水位 1.19/4.96 <em>（单家）</em></span></div>
+        <div class="odds-line"><span class="k">凯利</span><span class="v">主 0.96 / 平 0.94 / 客 0.89</span></div>
+        <div class="odds-line"><span class="k">大小</span><span class="v">大 1.85 / 小 1.89 @ 2.5</span></div>
       </div>
-      <div class="upset-row upset-mid">
-        <b>🟡 爆冷预警 中(51)</b>：实力差距大(+20.4)；历史同向反打(5次)；阿根廷水位偏高(1.98)，庄家赔付压力大
+      <div class="upset-row upset-high">
+        <b>🔴 爆冷预警 高(71)</b>：实力差距大(+20.4)；历史同向反打(5次)；阿根廷实力强20分但仅让-0.00球，盘口过浅
       </div>
-      <div class="tri-verdict tri-mixed">
-        <span class="tag">部分一致</span>：方向强（主胜 52%）；大小球倾向大球（52%）；操盘中性盘 ⇒ <b>三轴无明显矛盾，可按模型方向参考</b><br>
-        <span style="color:var(--muted)">临场资金：封盘热门（阿根廷）赔率微升 +0.022（n/a）；总进球盘未漂移；爆冷中(51)。</span>
+      <div class="tri-verdict tri-diverge">
+        <span class="tag">三轴背离</span>：方向强（主胜 46%）；大小球倾向大球（53%）；操盘诱导盘；临场资金离场（主胜封盘走冷 +0.150） ⇒ <b>模型方向正被市场资金临场抛弃，热门走冷——平局/爆冷风险上升，方向需打折</b><br>
+        <span style="color:var(--muted)">临场资金：封盘热门（阿根廷）赔率走高 +0.150（共振（high））；总进球盘未漂移；爆冷高(71)。</span>
       </div>
     </div>
 
@@ -197,37 +223,37 @@
     <div class="card">
       <div class="matchup"><span class="team" style="color:var(--home)">奥地利</span><span class="vs">VS</span><span class="team" style="color:var(--away)">约旦</span></div>
       <div class="time">06-17 12:00</div>
-      <div style="text-align:center;"><span class="verdict v-home">主胜 · 50.2%</span></div>
+      <div style="text-align:center;"><span class="verdict v-home">主胜 · 51.0%</span></div>
       <div class="bar">
-        <span class="b-home" style="width:51.0%">51%</span>
-        <span class="b-draw" style="width:33.2%">33%</span>
-        <span class="b-away" style="width:15.8%">16%</span>
+        <span class="b-home" style="width:51.4%">51%</span>
+        <span class="b-draw" style="width:32.5%">33%</span>
+        <span class="b-away" style="width:16.1%">16%</span>
       </div>
       <div class="prob-legend"><span>主胜</span><span>平局</span><span>客胜</span></div>
-      <div class="total-row">最可能总进球：<b>2 球</b>(23.7%) / 3球(23.4%) / 1球(17.4%)</div>
+      <div class="total-row">最可能总进球：<b>2 球</b>(25.5%) / 3球(21.3%) / 1球(18.4%)</div>
       <div class="scores-row">
-        <span class="chip"><b>1-0</b><i>37.5%</i></span>
-        <span class="chip"><b>2-0</b><i>35.5%</i></span>
-        <span class="chip"><b>2-1</b><i>27.0%</i></span>
+        <span class="chip"><b>2-1</b><i>9.7%</i></span>
+        <span class="chip"><b>3-0</b><i>7.7%</i></span>
+        <span class="chip"><b>3-1</b><i>6.2%</i></span>
       </div>
-      <div class="ou-row">大小球：<b>小球 54.8%</b> / 大球 45.2% @ 2.75 <span style="color:var(--draw)">（盘口未动 2.75）</span></div>
+      <div class="ou-row">大小球：<b>大球 54.5%</b> / 小球 45.5% @ 2.5 <span style="color:var(--draw)">（盘口降 3→2.5）</span></div>
       <div class="odds-box">
         <div class="obx-title">真实盘口原始数据 <span>· 澳客实时采集</span></div>
-        <div class="odds-line"><span class="k">欧赔</span><span class="v">开 1.31 / 5.21 / 8.36 → 终 <b>1.34 / 5.12 / 8.20</b> <em>（13家共识）</em></span></div>
-        <div class="odds-line"><span class="k">亚盘</span><span class="v">开 球半(-1.50) → 终 <b>一/球半(-1.25)</b> 水位 1.85/2.06 <em>（单家）</em></span></div>
-        <div class="odds-line"><span class="k">凯利</span><span class="v">主 0.95 / 平 0.95 / 客 0.92</span></div>
-        <div class="odds-line"><span class="k">大小</span><span class="v">大 1.89 / 小 1.89 @ 2.75</span></div>
+        <div class="odds-line"><span class="k">欧赔</span><span class="v">开 1.31 / 5.21 / 8.36 → 终 <b>1.39 / 4.75 / 8.16</b> <em>（13家共识）</em></span></div>
+        <div class="odds-line"><span class="k">亚盘</span><span class="v">开 球半(-1.50) → 终 <b>一/球半(-1.25)</b> 水位 1.97/1.96 <em>（单家）</em></span></div>
+        <div class="odds-line"><span class="k">凯利</span><span class="v">主 0.96 / 平 0.94 / 客 0.93</span></div>
+        <div class="odds-line"><span class="k">大小</span><span class="v">大 1.87 / 小 1.96 @ 2.5</span></div>
       </div>
       <div class="tri-verdict tri-diverge">
-        <span class="tag">三轴背离</span>：方向强（主胜 51%）；大小球倾向小球（55%）；操盘中性盘 ⇒ <b>方向可信，但“强势胜方+偏小球”自相矛盾——强队大胜多伴随多入球，重点警惕小球误判</b><br>
-        <span style="color:var(--muted)">临场资金：封盘热门（奥地利）赔率微升 +0.035（n/a）；总进球盘未漂移；爆冷低(38)。</span>
+        <span class="tag">三轴背离</span>：方向强（主胜 51%）；大小球倾向大球（54%）；操盘中性盘；临场资金离场（主胜封盘走冷 +0.079） ⇒ <b>模型方向正被市场资金临场抛弃，热门走冷——平局/爆冷风险上升，方向需打折</b><br>
+        <span style="color:var(--muted)">临场资金：封盘热门（奥地利）赔率走高 +0.079（共振（high））；总进球盘有漂移；爆冷低(30)。</span>
       </div>
     </div>
 
   </div>
 
   <footer>
-    更新时间 2026-06-16（已按最新临场盘口刷新）· europe_leagues 正式预测链 · 三轴综合研判 + 临场资金质检层（仅诊断、不改方向）· 仅供研究参考，非投注建议
+    更新时间 2026-06-17（已按最新临场盘口刷新）· europe_leagues 正式预测链 · 三轴综合研判 + 临场资金质检层（仅诊断、不改方向）· 仅供研究参考，非投注建议
   </footer>
 </body>
 </html>

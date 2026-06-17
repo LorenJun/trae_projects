@@ -2862,7 +2862,7 @@ class InferencePipelineService:
             diag['reason'] = 'market_signal_flat'
             diag['market_pace_shift'] = 0.0
             return home_lambda, away_lambda, diag
-        target_total = max(0.8, min(4.2, current_total + pace_shift * 3.0))
+        target_total = max(0.8, min(4.2, current_total + pace_shift * 3.6))
         new_home = max(0.15, target_total * share)
         new_away = max(0.15, target_total * (1.0 - share))
         diag.update(
@@ -2934,10 +2934,10 @@ class InferencePipelineService:
             if market_signal.get('available'):
                 final_bias = float(market_signal.get('bias_final') or 0.0)
                 if final_bias >= 0.03:
-                    over_under['over'] = max(0.0, float(over_under.get('over') or 0.0) - min(0.03, final_bias * 0.12))
-                    over_under['under'] = min(1.0, float(over_under.get('under') or 0.0) + min(0.03, final_bias * 0.12))
+                    over_under['over'] = max(0.0, float(over_under.get('over') or 0.0) - min(0.05, final_bias * 0.18))
+                    over_under['under'] = min(1.0, float(over_under.get('under') or 0.0) + min(0.05, final_bias * 0.18))
                 elif final_bias <= -0.03:
-                    shift = min(0.03, abs(final_bias) * 0.12)
+                    shift = min(0.05, abs(final_bias) * 0.18)
                     over_under['over'] = min(1.0, float(over_under.get('over') or 0.0) + shift)
                     over_under['under'] = max(0.0, float(over_under.get('under') or 0.0) - shift)
 
@@ -3213,6 +3213,34 @@ class InferencePipelineService:
                 realtime['context_applied']['match_intelligence_lambda_scale'] = {'home_lambda_scale': home_scale, 'away_lambda_scale': away_scale}
         except Exception as exc:
             realtime['context_applied']['match_intelligence_lambda_scale'] = {'error': str(exc)}
+
+        # 世界杯 FIFA 兜底队力下，λ 被市场校准压低，高进球尾部（≥4 球）被系统性低估，
+        # 复盘 18 场实测总进球均值 3.06 而模型最可能仅 2 球。对 world_cup 做尾部上抬：
+        # 仅当合计 λ 低于联赛进球基准时按缺口补足，保持主客 λ 占比不变，
+        # 真实球员数据缺失（fallback）时补偿更强。中位场次不翻盘，只拉起爆大球尾部质量。
+        if league_code == 'world_cup':
+            total_lambda_pre = home_lambda + away_lambda
+            target_total_lambda = float(league_avg_goals)
+            if total_lambda_pre > 0 and total_lambda_pre < target_total_lambda:
+                gap_ratio = (target_total_lambda - total_lambda_pre) / target_total_lambda
+                close_rate = 0.42 if strength_quality != 'real' else 0.22
+                scale = 1.0 + gap_ratio * close_rate
+                scale = min(scale, 1.12)
+                home_lambda *= scale
+                away_lambda *= scale
+                realtime['context_applied']['world_cup_tail_uplift'] = {
+                    'applied': True,
+                    'strength_quality': strength_quality,
+                    'total_lambda_before': round(total_lambda_pre, 4),
+                    'total_lambda_after': round(home_lambda + away_lambda, 4),
+                    'scale': round(scale, 4),
+                }
+            else:
+                realtime['context_applied']['world_cup_tail_uplift'] = {
+                    'applied': False,
+                    'reason': 'lambda_already_at_or_above_baseline',
+                    'total_lambda_before': round(total_lambda_pre, 4),
+                }
 
         home_xg = home_lambda * 0.8
         away_xg = away_lambda * 0.8

@@ -25,6 +25,8 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -32,8 +34,29 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PRED_DIR = PROJECT_ROOT / "world_cup" / "analysis" / "predictions"
+TEAMS_MD = PROJECT_ROOT / "world_cup" / "teams_2026.md"
 
 WEEKDAY_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+
+
+def load_actual_results(date: str) -> dict:
+    """从 teams_2026.md 读取指定日期已回填的真实赛果。
+    返回 {(主队, 客队): "比分"}，比分为 "-" 视为未完赛、跳过。
+    """
+    results: dict = {}
+    if not TEAMS_MD.exists():
+        return results
+    for line in TEAMS_MD.read_text(encoding="utf-8").splitlines():
+        if not line.startswith(f"| {date} "):
+            continue
+        cols = [c.strip() for c in line.split("|")]
+        if len(cols) < 7:
+            continue
+        home, score, away = cols[3], cols[4], cols[5]
+        if re.match(r"^\d+-\d+$", score):
+            results[(home, away)] = score
+    return results
+
 
 
 def _fmt_pct(x: float) -> str:
@@ -210,15 +233,50 @@ def _total_goals_row(d: dict) -> str:
     return f'<div class="total-row">最可能总进球：{body}</div>'
 
 
+def _poisson_pmf(lam: float, k: int) -> float:
+    return math.exp(-lam) * lam ** k / math.factorial(k)
+
+
+def _scores_for_side(d: dict) -> list[tuple[str, float]]:
+    """按大小球判定方向，从泊松比分网格中筛选同侧比分（判大球只出大球比分，反之亦然）。
+    无 λ 或无盘口线时回退到原始 top_scores。
+    """
+    eg = d.get("expected_goals") or {}
+    lam_h, lam_a = eg.get("home"), eg.get("away")
+    ou = d.get("over_under") or {}
+    line = ou.get("line")
+    over_p, under_p = ou.get("over") or 0.0, ou.get("under") or 0.0
+    side = "大" if over_p >= under_p else "小"
+    if lam_h is None or lam_a is None or line is None:
+        fallback = []
+        for item in (d.get("top_scores") or [])[:3]:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                fallback.append((str(item[0]), float(item[1])))
+            elif isinstance(item, dict):
+                fallback.append((str(item.get("score")), float(item.get("prob") or 0.0)))
+        return fallback
+    try:
+        lf = float(line)
+        lam_h, lam_a = float(lam_h), float(lam_a)
+    except (TypeError, ValueError):
+        return []
+    grid: list[tuple[str, float]] = []
+    for i in range(8):
+        for j in range(8):
+            total = i + j
+            if side == "大" and total <= lf:
+                continue
+            if side == "小" and total >= lf:
+                continue
+            grid.append((f"{i}-{j}", _poisson_pmf(lam_h, i) * _poisson_pmf(lam_a, j)))
+    grid.sort(key=lambda x: x[1], reverse=True)
+    return grid[:3]
+
+
 def _scores_row(d: dict) -> str:
-    scores = d.get("top_scores") or []
     chips = []
-    for item in scores[:3]:
-        if isinstance(item, (list, tuple)) and len(item) >= 2:
-            sc, p = item[0], item[1]
-        elif isinstance(item, dict):
-            sc, p = item.get("score"), item.get("prob")
-        else:
+    for sc, p in _scores_for_side(d):
+        if not sc:
             continue
         chips.append(f'<span class="chip"><b>{html.escape(str(sc))}</b><i>{_fmt_pct(p)}</i></span>')
     if not chips:
@@ -311,7 +369,53 @@ def _upset_block(d: dict) -> str:
     )
 
 
-def render_card(d: dict, time: str | None) -> str:
+def _result_banner(d: dict, actual_score: str | None) -> str:
+    """已完赛场次：渲染真实赛果 + 方向/比分/大小球命中标记。"""
+    if not actual_score or not re.match(r"^\d+-\d+$", actual_score):
+        return ""
+    hg, ag = (int(x) for x in actual_score.split("-"))
+    total = hg + ag
+    actual_dir = "主胜" if hg > ag else ("客胜" if ag > hg else "平局")
+    pred = d.get("prediction") or ""
+    dir_hit = pred == actual_dir
+    # 比分命中：真实比分在展示的同侧 Top3 预测比分内
+    top = [sc for sc, _ in _scores_for_side(d)]
+    score_hit = actual_score in top
+    # 大小球命中
+    ou = d.get("over_under") or {}
+    line = ou.get("line")
+    ou_txt = ""
+    if line is not None:
+        over_p, under_p = ou.get("over") or 0.0, ou.get("under") or 0.0
+        pred_side = "大" if over_p >= under_p else "小"
+        try:
+            lf = float(line)
+            real_side = "大" if total > lf else ("小" if total < lf else "走")
+        except (TypeError, ValueError):
+            real_side = "走"
+        if real_side == "走":
+            ou_txt = f'<span class="r-tag r-push">大小走盘</span>'
+        else:
+            ou_hit = pred_side == real_side
+            mk = "✓" if ou_hit else "✗"
+            cls = "r-hit" if ou_hit else "r-miss"
+            ou_txt = f'<span class="r-tag {cls}">判{pred_side}球{mk}</span>'
+    dmk = "✓" if dir_hit else "✗"
+    dcls = "r-hit" if dir_hit else "r-miss"
+    smk = "✓" if score_hit else "✗"
+    scls = "r-hit" if score_hit else "r-miss"
+    return (
+        '<div class="result-banner">\n'
+        f'        <span class="r-score">终场 {hg}-{ag}</span>\n'
+        f'        <span class="r-tag {dcls}">方向{dmk}</span>\n'
+        f'        <span class="r-tag {scls}">比分{smk}</span>\n'
+        f'        {ou_txt}\n'
+        f'        <span class="r-total">{total}球</span>\n'
+        "      </div>"
+    )
+
+
+def render_card(d: dict, time: str | None, actual_score: str | None = None) -> str:
     home = html.escape(d.get("home_team") or "")
     away = html.escape(d.get("away_team") or "")
     cls, vtext = _verdict_block(d)
@@ -326,6 +430,11 @@ def render_card(d: dict, time: str | None) -> str:
         f'      <div class="matchup"><span class="team" style="color:var(--home)">{home}</span>'
         f'<span class="vs">VS</span><span class="team" style="color:var(--away)">{away}</span></div>',
         f'      <div class="time">{html.escape(time_label)}</div>',
+    ]
+    banner = _result_banner(d, actual_score)
+    if banner:
+        parts.append(f"      {banner}")
+    parts += [
         f'      <div style="text-align:center;"><span class="verdict {cls}">{html.escape(vtext)}</span></div>',
         f"      {_bars(d)}",
         '      <div class="prob-legend"><span>主胜</span><span>平局</span><span>客胜</span></div>',
@@ -380,6 +489,18 @@ def render_html(date: str, cards: list[str]) -> str:
   .matchup .team {{ font-size: 17px; font-weight: 700; }}
   .matchup .vs {{ color: var(--muted); font-size: 12px; }}
   .time {{ color: var(--muted); font-size: 12px; margin-bottom: 14px; }}
+  .result-banner {{
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    background: linear-gradient(180deg, #FFEAF3 0%, #FFD6E4 100%);
+    border: 1px solid var(--card-strong); border-radius: 12px;
+    padding: 9px 12px; margin-bottom: 12px;
+  }}
+  .result-banner .r-score {{ font-size: 15px; font-weight: 800; color: var(--title); }}
+  .result-banner .r-total {{ margin-left: auto; font-size: 11.5px; color: var(--muted); }}
+  .r-tag {{ font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 10px; }}
+  .r-hit {{ background: rgba(120,170,110,.22); color: #5C8A4A; }}
+  .r-miss {{ background: rgba(211,139,169,.24); color: var(--away); }}
+  .r-push {{ background: rgba(168,144,152,.18); color: var(--muted); }}
   .verdict {{ display: inline-block; font-size: 13px; font-weight: 700; padding: 4px 14px; border-radius: 16px; margin-bottom: 12px; }}
   .v-home {{ background: rgba(181,112,143,.16); color: var(--home); }}
   .v-draw {{ background: rgba(230,169,198,.28); color: #B26088; }}
@@ -495,11 +616,13 @@ def main() -> int:
     output = Path(args.output) if args.output else PRED_DIR / f"{args.date}_predictions.html"
     output.parent.mkdir(parents=True, exist_ok=True)
 
+    actual_results = load_actual_results(args.date)
     cards = []
     for m in matches:
         print(f"[预测] {m['home']} vs {m['away']} ...", file=sys.stderr)
         d = run_prediction(m["home"], m["away"], args.date, m.get("time"))
-        cards.append(render_card(d, m.get("time")))
+        actual = actual_results.get((m["home"], m["away"]))
+        cards.append(render_card(d, m.get("time"), actual))
 
     output.write_text(render_html(args.date, cards), encoding="utf-8")
     print(f"[完成] 已生成 {output}（{len(cards)} 场）", file=sys.stderr)

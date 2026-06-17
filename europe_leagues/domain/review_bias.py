@@ -195,6 +195,10 @@ class ReviewBiasService:
                 "base_over_shift": 0.04,
                 "base_under_shift": 0.006,
             },
+            "world_cup": {
+                "base_over_shift": 0.045,
+                "base_under_shift": 0.004,
+            },
         },
         "total_goals": {
             "line_window": [2.5, 3.0, 3.5],
@@ -212,6 +216,18 @@ class ReviewBiasService:
             "bundesliga": {
                 "base_over_shift": 0.04,
                 "max_total_shift": 0.065
+            },
+            "world_cup": {
+                "base_over_shift": 0.055,
+                "base_under_shift": 0.004,
+                "max_total_shift": 0.09,
+                "high_bucket_targets": {
+                    "3": 0.34,
+                    "4": 0.3,
+                    "5": 0.2,
+                    "6": 0.1,
+                    "7+": 0.06
+                }
             }
         },
     }
@@ -312,7 +328,7 @@ class ReviewBiasService:
         effect = ""
         shift = 0.0
         if near_focus_line and under_prob >= over_prob:
-            shift = min(0.06, base_over_shift + motivation_bonus)
+            shift = min(0.08, base_over_shift + motivation_bonus)
             adjusted["over"] = min(1.0, over_prob + shift)
             adjusted["under"] = max(0.0, under_prob - shift)
             effect = "review-bias-over"
