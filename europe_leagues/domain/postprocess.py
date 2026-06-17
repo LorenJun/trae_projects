@@ -640,6 +640,27 @@ class PredictionPostprocessService:
                 'side': 'under', 'boost': round(boost, 6),
                 'water_tier': under_water_tier.get('tier'), 'hk_water': under_water_tier.get('hk_water'),
             }
+        # 临场压盘诱多识别：赛前格局被压（降盘）但大球静态处在中低水位，
+        # 庄家压低大小球盘面、却不肯为大球开出高赔付（中低水=不鼓励买大），
+        # 是典型「压盘诱小、暗里防大」的操盘手法 → 给 over 侧加成，把比分推向大格局。
+        # 与上面的「背离加成」互斥（背离要求水位还在下降；此处只看静态中低水）。
+        ou_line_down_low_water_trap = None
+        if (
+            'ou_line_down' in signals
+            and ou_line_water_divergence is None
+            and over_water_tier.get('available')
+            and over_water_tier.get('tier') in ('low', 'mid')
+            and goal_pressure != 'under'
+        ):
+            weight = tier_weight.get(over_water_tier.get('tier'), 0.5)
+            boost = min(0.10, abs(line_delta) * 0.12 + max(0.0, bias_delta) * 0.18 + 0.03) * weight
+            if boost > 1e-6:
+                pace_shift += boost
+                signals.append('ou_line_down_low_water_over_trap')
+                ou_line_down_low_water_trap = {
+                    'side': 'over', 'boost': round(boost, 6),
+                    'water_tier': over_water_tier.get('tier'), 'hk_water': over_water_tier.get('hk_water'),
+                }
         # 弱加成：盘口未移动（无升降盘），但单侧水位下降=暗钱进场。
         # 强度低于背离加成（封顶 0.05），且按水位档位缩放——只有底水才算真买。
         ou_flat_water_nudge = None
@@ -697,6 +718,7 @@ class PredictionPostprocessService:
             'pace_shift': round(pace_shift, 6),
             'balanced_high_line_over_nudge': balanced_high_line_over_nudge,
             'ou_line_water_divergence': ou_line_water_divergence,
+            'ou_line_down_low_water_trap': ou_line_down_low_water_trap,
             'ou_flat_water_nudge': ou_flat_water_nudge,
             'over_water_tier': over_water_tier.get('tier'),
             'under_water_tier': under_water_tier.get('tier'),

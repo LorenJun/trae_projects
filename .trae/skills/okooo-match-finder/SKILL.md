@@ -137,7 +137,7 @@ python3 prediction_system.py predict-match \
 
 1. 是否拿到正确 `match_id`
 2. 是否日期不对
-3. 是否球队简称未收录到 `okooo_team_aliases.json`
+3. 是否球队简称未收录到 `okooo_team_aliases.json`（**长队名尤需注意**：澳客对长名常用简称，如「刚果民主共和国」澳客写「民主刚果」、「乌兹别克斯坦」写「乌兹别克斯」；缺别名会因前缀截断匹配失败、抓不到盘口触发 `missing_real_market_line`，需在对应联赛区块补别名）
 4. 是否忘记传 `match_time`
 5. 是否命中了错误赛程缓存，导致 `date_click=false` 或赛程行内嵌日期不一致
 6. 是否复用了错误 `match_id` 或旧快照文件，触发 `missing_real_line`

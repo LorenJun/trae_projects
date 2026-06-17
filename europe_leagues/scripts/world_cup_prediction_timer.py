@@ -68,6 +68,7 @@ PRE_MATCH_MINUTES = 60     # 赛前 1 小时触发
 STALE_AFTER_HOURS = 3      # 开赛 N 小时后仍无赛果 => 监控疑似卡住
 MAX_FAILS = 3              # 刷新连续失败次数阈值 => 提示重启
 ALERT_COOLDOWN_MINUTES = 30  # 同类告警最短间隔，避免刷屏
+SYNC_LIMIT = 10            # 每轮自动回填赛果的最大尝试场数
 
 LAUNCHD_LABEL = "com.europeleagues.worldcuptimer"
 SCORE_RE = re.compile(r"^\d+-\d+$")
@@ -281,6 +282,43 @@ def refresh_date_from_schedule(date: str, schedule: list[dict] | None = None) ->
     return len(todays)
 
 
+def auto_sync_results() -> bool:
+    """调用正式结果闭环 auto-sync-results 自动回填已完赛赛果。
+    返回是否有比赛被新回填（用于决定是否触发网页重生成）。
+    """
+    cmd = [sys.executable, "prediction_system.py", "auto-sync-results",
+           "--limit", str(SYNC_LIMIT), "--json"]
+    try:
+        proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT),
+                              capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log(f"自动回填赛果调用失败：{exc}")
+        return False
+    if proc.returncode != 0:
+        log(f"自动回填赛果返回非零（returncode={proc.returncode}）")
+        return False
+    out = proc.stdout or ""
+    idx = out.find("{")
+    if idx < 0:
+        return False
+    try:
+        payload = json.loads(out[idx:])
+    except json.JSONDecodeError:
+        return False
+    data = payload.get("data", payload) if isinstance(payload, dict) else {}
+    synced_n = data.get("updated_count")
+    if synced_n is None:
+        updates = data.get("updates") or []
+        synced_n = sum(1 for u in updates if isinstance(u, dict) and u.get("updated"))
+    try:
+        synced_n = int(synced_n)
+    except (TypeError, ValueError):
+        synced_n = 0
+    if synced_n > 0:
+        log(f"✓ 自动回填赛果 {synced_n} 场")
+    return synced_n > 0
+
+
 # ----------------------------- 触发 / 监控 / 健康 -----------------------------
 
 def evaluate_triggers(schedule: list[dict], state: dict, now: datetime) -> list[str]:
@@ -371,8 +409,37 @@ def run_cycle(now: datetime, *, do_refresh: bool = True) -> tuple[list[str], dic
         save_state(state)
         return [], None
 
+    # 已开赛但未回填的比赛 => 自动尝试回填赛果，回填成功后把对应日期并入刷新集合，
+    # 使「赛果 + 终场比分 + 最新大小球/欧赔/亚盘水位」自动刷上网页。
+    newly_finished_dates: set[str] = set()
+    if do_refresh:
+        kicked_unfinished = [
+            m for m in schedule
+            if not m["finished"] and (_kickoff_dt(m) is not None) and now >= _kickoff_dt(m)
+        ]
+        if kicked_unfinished:
+            finished_before = {_match_key(m) for m in schedule if m["finished"]}
+            try:
+                if auto_sync_results():
+                    schedule = parse_schedule()
+                    for m in schedule:
+                        if m["finished"] and _match_key(m) not in finished_before:
+                            newly_finished_dates.add(m["date"])
+            except (OSError, subprocess.SubprocessError) as exc:
+                log(f"自动回填赛果异常：{exc}")
+
+    # 自动剔除：pre_match_done 中已完赛的比赛键移除，保持其仅含「未完赛」的赛前去重项。
+    finished_keys = {_match_key(m) for m in schedule if m["finished"]}
+    prev_done = state.get("pre_match_done", [])
+    pruned = [k for k in prev_done if k not in finished_keys]
+    if len(pruned) != len(prev_done):
+        log(f"✓ 从 pre_match_done 自动剔除 {len(prev_done) - len(pruned)} 场已完赛比赛")
+        state["pre_match_done"] = sorted(pruned)
+
     cur = update_monitor(schedule, state, now)
-    due = evaluate_triggers(schedule, state, now)
+    due = set(evaluate_triggers(schedule, state, now))
+    due |= newly_finished_dates
+    due = sorted(due)
 
     if do_refresh:
         for date in due:

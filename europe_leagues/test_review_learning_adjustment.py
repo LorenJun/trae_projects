@@ -1990,6 +1990,36 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertEqual(signal["ou_line_water_divergence"]["water_tier"], "low")
         self.assertGreater(signal["ou_line_water_divergence"]["boost"], 0.0)
 
+    def test_line_down_static_low_water_flags_over_trap_and_pushes_pace_up(self):
+        signal = self.service.extract_over_under_market_signal(
+            {
+                "大小球": {
+                    "initial": {"line": 3.0, "over": 0.82, "under": 0.98},
+                    "final": {"line": 2.5, "over": 0.82, "under": 0.98},
+                }
+            }
+        )
+        self.assertTrue(signal["available"])
+        self.assertIn("ou_line_down", signal["signals"])
+        self.assertIn("ou_line_down_low_water_over_trap", signal["signals"])
+        self.assertIsNotNone(signal["ou_line_down_low_water_trap"])
+        self.assertEqual(signal["ou_line_down_low_water_trap"]["side"], "over")
+        self.assertIn(signal["ou_line_down_low_water_trap"]["water_tier"], ("low", "mid"))
+        self.assertGreater(signal["pace_shift"], 0.0)
+
+    def test_line_down_high_water_does_not_flag_over_trap(self):
+        signal = self.service.extract_over_under_market_signal(
+            {
+                "大小球": {
+                    "initial": {"line": 3.0, "over": 1.05, "under": 0.80},
+                    "final": {"line": 2.5, "over": 1.08, "under": 0.78},
+                }
+            }
+        )
+        self.assertTrue(signal["available"])
+        self.assertNotIn("ou_line_down_low_water_over_trap", signal["signals"])
+        self.assertIsNone(signal["ou_line_down_low_water_trap"])
+
     def test_flat_line_over_water_drop_adds_weak_over_nudge(self):
         signal = self.service.extract_over_under_market_signal(
             {"大小球": {"initial": {"line": 2.25, "over": 1.95, "under": 1.85},
@@ -2778,6 +2808,96 @@ class InferenceConfidenceCalibrationTest(unittest.TestCase):
         self.assertEqual(diag["reason"], "no_reliable_signal_label_only")
         self.assertEqual(adjusted["home_win"], 0.50)
         self.assertEqual(adjusted["draw"], 0.28)
+
+    def _dir_matrix(self, euro, asian):
+        service = object.__new__(InferencePipelineService)
+        sentiment = service.detect_market_movement_sentiment(
+            european_odds=euro, asian_handicap=asian,
+        )
+        pattern = service.classify_market_operation_pattern(
+            european_odds=euro, asian_handicap=asian,
+            ou_signal={"available": True, "signals": [], "ou_line_water_divergence": None, "ou_flat_water_nudge": None},
+            kelly={"final": {"draw": 1.00}}, market_sentiment=sentiment,
+        )
+        return pattern, pattern.get("direction_handicap_matrix")
+
+    def test_dir_matrix_line_up_high_water_euro_fav_down_blocks_up_genuine(self):
+        # 升盘+上盘高水(港水0.98)+欧赔主降 → 阻上(主真赢)
+        pattern, dm = self._dir_matrix(
+            {"initial": {"home": 1.80, "draw": 3.5, "away": 4.5}, "final": {"home": 1.70, "draw": 3.55, "away": 4.6}},
+            {"initial": {"handicap": -0.5, "home_water": 1.90, "away_water": 1.95},
+             "final": {"handicap": -0.75, "home_water": 1.98, "away_water": 1.88}},
+        )
+        self.assertIsNotNone(dm)
+        self.assertEqual(dm["verdict_dir"], "block_up_home_genuine")
+        self.assertEqual(dm["water_side"], "favorite")
+        self.assertEqual(dm["water_tier"], "high")
+        self.assertAlmostEqual(dm["water_final"], 0.98, places=4)
+
+    def test_dir_matrix_line_up_high_water_euro_fav_up_lures_up(self):
+        # 升盘+上盘高水+欧赔主升 → 诱上(主难赢)
+        pattern, dm = self._dir_matrix(
+            {"initial": {"home": 1.70, "draw": 3.4, "away": 4.5}, "final": {"home": 1.80, "draw": 3.4, "away": 4.3}},
+            {"initial": {"handicap": -0.5, "home_water": 1.90, "away_water": 1.95},
+             "final": {"handicap": -0.75, "home_water": 1.99, "away_water": 1.87}},
+        )
+        self.assertIsNotNone(dm)
+        self.assertEqual(dm["verdict_dir"], "lure_up_home_fade")
+        self.assertEqual(dm["water_tier"], "high")
+
+    def test_dir_matrix_line_up_low_water_lures_hot_death(self):
+        # 升盘+上盘低水(港水0.83)+欧赔主升 → 诱上(大热必死)
+        pattern, dm = self._dir_matrix(
+            {"initial": {"home": 1.70, "draw": 3.4, "away": 4.5}, "final": {"home": 1.78, "draw": 3.4, "away": 4.3}},
+            {"initial": {"handicap": -0.5, "home_water": 1.90, "away_water": 1.95},
+             "final": {"handicap": -0.75, "home_water": 1.83, "away_water": 2.02}},
+        )
+        self.assertIsNotNone(dm)
+        self.assertEqual(dm["verdict_dir"], "lure_up_hot_death")
+        self.assertEqual(dm["water_tier"], "low")
+
+    def test_dir_matrix_line_down_low_water_euro_dog_down_protects_dog(self):
+        # 降盘+下盘低水(港水0.82)+客赔降 → 防客(客拿分)
+        pattern, dm = self._dir_matrix(
+            {"initial": {"home": 1.70, "draw": 3.4, "away": 4.8}, "final": {"home": 1.74, "draw": 3.4, "away": 4.4}},
+            {"initial": {"handicap": -0.75, "home_water": 1.95, "away_water": 1.95},
+             "final": {"handicap": -0.5, "home_water": 2.0, "away_water": 1.82}},
+        )
+        self.assertIsNotNone(dm)
+        self.assertEqual(dm["verdict_dir"], "protect_dog_genuine")
+        self.assertEqual(dm["water_side"], "underdog")
+        self.assertEqual(dm["water_tier"], "low")
+        self.assertAlmostEqual(dm["water_final"], 0.82, places=4)
+
+    def test_dir_matrix_line_down_high_water_blocks_down(self):
+        # 降盘+下盘高水(港水0.99) → 阻下(客难打出)
+        pattern, dm = self._dir_matrix(
+            {"initial": {"home": 1.70, "draw": 3.4, "away": 4.5}, "final": {"home": 1.70, "draw": 3.4, "away": 4.5}},
+            {"initial": {"handicap": -0.75, "home_water": 1.92, "away_water": 1.92},
+             "final": {"handicap": -0.5, "home_water": 1.88, "away_water": 1.99}},
+        )
+        self.assertIsNotNone(dm)
+        self.assertEqual(dm["verdict_dir"], "block_down_dog_hard")
+        self.assertEqual(dm["water_tier"], "high")
+
+    def test_dir_matrix_label_surfaces_into_tri_axis_verdict_summary(self):
+        # 让球口诀必须透传到三轴研判文本(临场提示)，而非内部丢弃
+        euro = {"initial": {"home": 1.80, "draw": 3.5, "away": 4.5},
+                "final": {"home": 1.70, "draw": 3.55, "away": 4.6}}
+        asian = {"initial": {"handicap": -0.5, "home_water": 1.90, "away_water": 1.95},
+                 "final": {"handicap": -0.75, "home_water": 1.98, "away_water": 1.88}}
+        pattern, dm = self._dir_matrix(euro, asian)
+        self.assertEqual(dm["verdict_dir"], "block_up_home_genuine")
+        tri = InferencePipelineService.compute_tri_axis_consistency(
+            final_prob={"home_win": 0.55, "draw": 0.27, "away_win": 0.18},
+            over_under={"available": True, "over": 0.52, "under": 0.48, "line": 2.5},
+            operation_pattern=pattern,
+            european_odds=euro,
+            asian_handicap=asian,
+        )
+        self.assertEqual(tri["direction_handicap"]["verdict_dir"], "block_up_home_genuine")
+        self.assertIn("让球口诀", tri["verdict_summary"])
+        self.assertIn("阻上(主真赢)", tri["verdict_summary"])
 
     def test_market_operation_pattern_light_euro_pump_not_flagged_deceptive(self):
         """真实回归：墨西哥2-0南非——热门仅轻度走热(-4.3%)+盘不动，正常强队被看好，不应误判诱导。"""

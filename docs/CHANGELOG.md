@@ -2,7 +2,7 @@
 title: 仓库变更日志
 owner: trae_projects
 version: v1
-last_updated: 2026-06-06
+last_updated: 2026-06-17
 ---
 
 # CHANGELOG
@@ -13,6 +13,41 @@ last_updated: 2026-06-06
 - 代码：`/Users/bytedance/trae_projects/europe_leagues`
 - 技能：`/Users/bytedance/trae_projects/.trae/skills`
 - 文档：仓库根与 `europe_leagues/` 下相关 `md`
+
+---
+
+## 2026-06-17
+
+### 1. 让球方向操盘手法矩阵（升降盘 × 水位 × 欧赔方向）
+
+`domain/inference.py` 的 `classify_market_operation_pattern` 新增「亚盘升降盘 × 让球方水位档位 × 欧赔方向」方向手法矩阵，6 条规则映射阻上/诱上/防客/诱客/阻下，输出 `direction_handicap_matrix`。世界杯无伤病数据，用欧赔热门方升/降代理「有无利空」。水位字段存小数赔率全值，判档前转港水（`赔率-1`）。矩阵只产软性 deception/corroboration 分 + 方向标签，不单独加权改概率。
+
+口诀标签经 `compute_tri_axis_consistency` 透传到 `tri_axis_consistency.direction_handicap`，由 `_compose_tri_axis_verdict` 以「让球口诀[…]」并入研判文本，并在世界杯日报网页「临场资金」研判行展示。
+
+### 2. 临场压盘诱多识别（`ou_line_down_low_water_trap`）
+
+`domain/postprocess.py` 的 `extract_over_under_market_signal` 新增：赛前格局被压（降盘）但 over 侧静态处中低水位时，判「压盘诱小、暗里防大」，给 over 侧 `pace_shift` 加成（上限 0.10，按水位档位缩放），把比分推向大格局，追加信号 `ou_line_down_low_water_over_trap`。与盘水背离加成互斥。
+
+### 3. 定时器完赛自动回填 + 刷新
+
+`scripts/world_cup_prediction_timer.py` 新增 `auto_sync_results()`，`run_cycle` 每轮对「已开赛未回填」的比赛调用正式结果闭环 `auto-sync-results`，回填成功后把对应日期并入刷新集合，自动把终场比分 + 最新大小球/欧赔/亚盘水位刷上网页。
+
+### 4. 世界杯日报比分/总进球渲染口径收口
+
+`scripts/build_world_cup_daily_html.py`：
+- `_scores_for_side`：方向硬约束（绝不出反向爆冷比分）+ 大小球同侧 + 爆冷/平局放行（`_allowed_outcomes`）+ 候选集内条件归一化；不足 3 个时按胜平负第二高方向补足，仍空才回退到概率最高一侧。
+- `_total_goals_row`：「最可能总进球」只列与大小球判定同侧的总进球档并重新归一化，消除「3 球众数 vs 小球累积」的展示口径矛盾。
+
+### 5. 澳客队名别名补齐
+
+`okooo_team_aliases.json` 的 `world_cup` / `世界杯` 区块补「刚果民主共和国」（民主刚果/刚果(金)/刚果金/DR刚果…）与「乌兹别克斯坦」别名，修复长队名前缀截断导致赛事匹配失败、抓不到真实盘口（`missing_real_market_line`）的问题。
+
+关联文件：
+- `europe_leagues/domain/inference.py`、`europe_leagues/domain/postprocess.py`
+- `europe_leagues/scripts/world_cup_prediction_timer.py`、`europe_leagues/scripts/build_world_cup_daily_html.py`
+- `europe_leagues/okooo_team_aliases.json`、`europe_leagues/test_review_learning_adjustment.py`
+- `docs/architecture/europe_leagues_architecture.md` 3.7 节
+- `.trae/skills/world-cup-daily-predictions-page/SKILL.md`、`.trae/skills/world-cup-prediction-timer/SKILL.md`
 
 ---
 

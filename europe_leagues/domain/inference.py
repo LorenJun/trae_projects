@@ -1823,6 +1823,102 @@ class InferencePipelineService:
                 csig.append('handicap_up_endorsed')
                 labels.append('✅升盘背书·庄家愿为赢球加深让步')
 
+        # ——亚盘升降盘 × 水位档位 × 欧赔方向：让球方向操盘手法矩阵——
+        # 用户规则（世界杯无伤病数据，用欧赔主队升/降代理「有无利空」）：
+        #   升盘+上盘高水+欧赔主降 → 阻上(主真赢)；+欧赔主升 → 诱上(主难赢)
+        #   升盘+上盘低水 → 绝大多数诱上(大热必死)
+        #   降盘+下盘低水+欧赔客降 → 防客(客拿分)；+欧赔客升/急降盘 → 诱客(客无分)
+        #   降盘+下盘高水 → 阻下(客难打出)
+        # 仅当亚盘动(hm)且能取到让球方终盘水位时启用；输出方向标签 + 软性诱/印证分。
+        dir_matrix: Optional[Dict[str, Any]] = None
+        if hm and fav_side in ('home', 'away') and isinstance(asian_handicap, dict):
+            a_fin = asian_handicap.get('final') if isinstance(asian_handicap.get('final'), dict) else {}
+            fav_water_f = (
+                self._to_float(a_fin.get('home_water')) if fav_side == 'home'
+                else self._to_float(a_fin.get('away_water'))
+            )
+            dog_water_f = (
+                self._to_float(a_fin.get('away_water')) if fav_side == 'home'
+                else self._to_float(a_fin.get('home_water'))
+            )
+            line_up = handicap_deepened  # 让球加深=升盘(抬门槛)
+            line_down = (
+                isinstance(hcp_i, (int, float)) and isinstance(hcp_f, (int, float))
+                and abs(float(hcp_i)) - abs(float(hcp_f)) > 0.06
+            )
+            # 欧赔方向代理利空：热门赔率降=被加注(无利空/真热)，升=被看衰(有利空嫌疑)
+            fav_odds_down = isinstance(fav_move, (int, float)) and float(fav_move) <= -0.02
+            fav_odds_up = isinstance(fav_move, (int, float)) and float(fav_move) >= 0.02
+            dog_odds_down = isinstance(dog_move, (int, float)) and float(dog_move) <= -0.02
+            sharp_line_move = (
+                isinstance(hcp_i, (int, float)) and isinstance(hcp_f, (int, float))
+                and abs(abs(float(hcp_i)) - abs(float(hcp_f))) >= 0.20
+            )
+            verdict_dir = None
+            water_used = None
+            water_tier = None
+            # 升盘看上盘(热门)水位。水位字段存小数赔率全值，需转港水(=赔率-1)再判档。
+            if line_up and isinstance(fav_water_f, float):
+                hk = round(fav_water_f - 1.0, 4)
+                water_used = hk
+                fav_low = hk <= 0.85
+                fav_high = hk >= 0.95
+                water_tier = 'low' if fav_low else 'high' if fav_high else 'mid'
+                if fav_high:
+                    if fav_odds_down:
+                        verdict_dir = 'block_up_home_genuine'
+                        corroboration += 0.16
+                        csig.append('line_up_high_water_euro_down_block_up')
+                        labels.append('✅升盘配高水+欧赔主降·阻上(主真赢)')
+                    elif fav_odds_up:
+                        verdict_dir = 'lure_up_home_fade'
+                        deception += 0.22
+                        dsig.append('line_up_high_water_euro_up_lure_up')
+                        labels.append('⚠️升盘配高水+欧赔主升·诱上(主难赢)')
+                elif fav_low and not fav_odds_down:
+                    # 升盘配低水默认诱上(大热必死)；若欧赔同时深压主队(被加注)
+                    # 属 smart money 背书，不判诱，让位给既有升盘背书印证逻辑。
+                    verdict_dir = 'lure_up_hot_death'
+                    deception += 0.26
+                    dsig.append('line_up_low_water_lure_up_hot_death')
+                    labels.append('⚠️升盘配低水·诱上(大热必死)')
+            # 降盘看下盘(客/受让方)水位。水位字段存小数赔率全值，需转港水(=赔率-1)再判档。
+            elif line_down and isinstance(dog_water_f, float):
+                hk = round(dog_water_f - 1.0, 4)
+                water_used = hk
+                dog_low = hk <= 0.85
+                dog_high = hk >= 0.95
+                water_tier = 'low' if dog_low else 'high' if dog_high else 'mid'
+                if dog_low:
+                    if fav_odds_up or dog_odds_down:
+                        # 主队被看衰(利空) / 客队被加注 → 防客(客拿分)。利空优先于急降盘。
+                        verdict_dir = 'protect_dog_genuine'
+                        deception += 0.20
+                        dsig.append('line_down_low_water_protect_dog')
+                        labels.append('⚠️降盘配下盘低水+主看衰/客加注·防客(客拿分)')
+                    elif fav_odds_down or sharp_line_move:
+                        # 主队被加注/无利空 + 临场急降盘 → 诱客(客无分,主稳)
+                        verdict_dir = 'lure_dog_no_point'
+                        corroboration += 0.16
+                        csig.append('line_down_low_water_lure_dog')
+                        labels.append('✅降盘配下盘低水+主加注/急降·诱客(客无分,主稳)')
+                elif dog_high:
+                    verdict_dir = 'block_down_dog_hard'
+                    corroboration += 0.14
+                    csig.append('line_down_high_water_block_down')
+                    labels.append('✅降盘配下盘高水·阻下(客难打出,主稳)')
+            if verdict_dir is not None:
+                dir_matrix = {
+                    'verdict_dir': verdict_dir,
+                    'fav_side': fav_side,
+                    'line_move': 'up' if line_up else 'down' if line_down else 'flat',
+                    'water_side': 'favorite' if line_up else 'underdog',
+                    'water_final': round(water_used, 4) if isinstance(water_used, float) else None,
+                    'water_tier': water_tier,
+                    'fav_odds_move': round(float(fav_move), 4) if isinstance(fav_move, (int, float)) else None,
+                    'dog_odds_move': round(float(dog_move), 4) if isinstance(dog_move, (int, float)) else None,
+                }
+
         # ——大小球轴（进球轴，独立于方向判定）——
         goal_labels: List[str] = []
         div = ou.get('ou_line_water_divergence') if isinstance(ou.get('ou_line_water_divergence'), dict) else None
@@ -1895,6 +1991,7 @@ class InferencePipelineService:
             'warning_labels': labels,
             'luring_side': fav_side if verdict == 'deceptive' else None,
             'recommended_extra_retreat': extra_retreat,
+            'direction_handicap_matrix': dir_matrix,
         })
         return diag
 
@@ -2104,6 +2201,10 @@ class InferencePipelineService:
                     'strength': operation_pattern.get('strength'),
                     'pattern_cn': operation_pattern.get('pattern_cn'),
                 }
+            # 升降盘×水位×欧赔方向 让球方向口诀（透传到研判文本，供临场提示）
+            dh = operation_pattern.get('direction_handicap_matrix')
+            if isinstance(dh, dict) and dh.get('verdict_dir'):
+                out['direction_handicap'] = dh
 
         # 临场资金轴：封盘热门(最低赔率方)相对开盘的赔率漂移。
         # 经验观测（世界杯 16 场回测）：封盘热门赔率走高(资金离场) → 热门不兑现/爆冷概率显著上升。
@@ -2168,7 +2269,7 @@ class InferencePipelineService:
 
         # 综合研判结论：把三轴揉成一句人类可读判断（纯文本输出，不改方向/概率）
         out['verdict_summary'] = InferencePipelineService._compose_tri_axis_verdict(
-            dir_ax, ou_ax, op_ax, agreement, flags, md_ax
+            dir_ax, ou_ax, op_ax, agreement, flags, md_ax, out.get('direction_handicap')
         )
         return out
 
@@ -2298,10 +2399,19 @@ class InferencePipelineService:
         agreement: Optional[str],
         flags: List[str],
         md_ax: Optional[Dict[str, Any]] = None,
+        dir_handicap: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """将方向支持率/大小球支持率/操盘手法融合为一句研判结论。仅供人工参考。"""
         lean_cn = {'home_win': '主胜', 'draw': '平局', 'away_win': '客胜', 'over': '大球', 'under': '小球'}
         verdict_cn = {'deceptive': '诱导盘', 'genuine': '真实盘', 'neutral': '中性盘'}
+        dir_handicap_cn = {
+            'block_up_home_genuine': '升盘配高水+欧赔主降·阻上(主真赢)',
+            'lure_up_home_fade': '升盘配高水+欧赔主升·诱上(主难赢)',
+            'lure_up_hot_death': '升盘配低水·诱上(大热必死)',
+            'protect_dog_genuine': '降盘配下盘低水+主看衰/客加注·防客(客拿分)',
+            'lure_dog_no_point': '降盘配下盘低水+主加注/急降·诱客(客无分,主稳)',
+            'block_down_dog_hard': '降盘配下盘高水·阻下(客难打出,主稳)',
+        }
 
         seg: List[str] = []
         if dir_ax:
@@ -2315,6 +2425,10 @@ class InferencePipelineService:
             seg.append(f"大小球倾向{o_lean}（{o_prob:.0%}）")
         if op_ax and op_ax.get('verdict'):
             seg.append(f"操盘{verdict_cn.get(op_ax.get('verdict'), op_ax.get('verdict'))}")
+        if isinstance(dir_handicap, dict) and dir_handicap.get('verdict_dir'):
+            dh_cn = dir_handicap_cn.get(dir_handicap.get('verdict_dir'))
+            if dh_cn:
+                seg.append(f"让球口诀[{dh_cn}]")
         if md_ax and md_ax.get('favorite_drifting_out'):
             fav = lean_cn.get(md_ax.get('favorite_side'), md_ax.get('favorite_side'))
             seg.append(f"临场资金离场（{fav}封盘走冷 {md_ax.get('drift'):+.3f}）")

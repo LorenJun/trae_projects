@@ -324,8 +324,29 @@ RAG 当前真实依赖的数据源包括：
 |---|---|---|
 | 方向轴 `direction_axis` | 模型最终 1X2 | 领先方向 + 强度（`decisive`=非平局且领先 ≥0.10） |
 | 大小球轴 `ou_axis` | 大小球概率 | over/under 谁占优 + 强度 |
-| 操盘轴 `operation_axis` | 庄家形态判定 | 真实盘/诱导盘/中性盘 + 诱导方向 |
+| 操盘轴 `operation_axis` | 庄家形态判定 | 真实盘/诱导盘/中性盘 + 诱导方向（含让球方向手法矩阵，见下） |
 | 临场资金轴 `market_drift` | 封盘热门赔率漂移 | 封盘最低赔率方相对开盘的赔率漂移（见下） |
+
+### 让球方向操盘手法矩阵（`direction_handicap_matrix`）
+
+`classify_market_operation_pattern(...)` 在操盘轴内附带一张「亚盘升降盘 × 让球方水位档位 × 欧赔方向」的方向手法矩阵，落在判定结果的 `direction_handicap_matrix`，并经三轴层透传到 `tri_axis_consistency.direction_handicap`，最终以「让球口诀[…]」并入 `verdict_summary`。
+
+口径（世界杯无伤病/阵容数据，用**欧赔热门方升/降**代理「有无利空」：热门赔率降=被加注/真热，升=被看衰/疑似利空）：
+
+| 盘口 | 看哪侧水位 | 欧赔方向 | 判定 `verdict_dir` | 含义 |
+|---|---|---|---|---|
+| 升盘（让球加深） | 上盘(热门)高水 | 主降 | `block_up_home_genuine` | ✅阻上(主真赢) |
+| 升盘 | 上盘高水 | 主升 | `lure_up_home_fade` | ⚠️诱上(主难赢) |
+| 升盘 | 上盘低水 | —（非主降） | `lure_up_hot_death` | ⚠️诱上(大热必死) |
+| 降盘（门槛降低） | 下盘(客)低水 | 主升/客降 | `protect_dog_genuine` | ⚠️防客(客拿分) |
+| 降盘 | 下盘低水 | 主降/急降盘 | `lure_dog_no_point` | ✅诱客(客无分,主稳) |
+| 降盘 | 下盘高水 | — | `block_down_dog_hard` | ✅阻下(客难打出,主稳) |
+
+实现要点：
+- **水位口径**：`home_water/away_water` 存的是小数赔率全值，判档前先转港水（`港水=赔率-1`），再按 ≤0.85 低 / ≥0.95 高 / 之间 中分档。
+- **触发门控**：仅当亚盘有动作（`hm`）且能取到让球方终盘水位时启用；升盘看热门(上盘)水位、降盘看客队(下盘)水位。
+- **优先级**：降盘+下盘低水时，「主看衰/客加注→防客」优先于「急降盘→诱客」。升盘+低水若欧赔同时深压主队（smart money 背书）则不判诱上，让位给既有升盘背书印证逻辑。
+- **纪律一致**：矩阵只产出软性 `deception/corroboration` 分与方向标签，并入既有操盘判定，**不单独加权改概率**；权重不足时仅打标。
 
 ### 临场资金轴 + 置信度质检层（`market_drift`）
 
@@ -339,6 +360,10 @@ RAG 当前真实依赖的数据源包括：
 - `n/a`：欧赔未达阈值，无需质检
 
 大小球漂移（`ou_line_drift`，line/水位）是唯一真正独立的维度（总进球预期，与胜负方向资金无关），**单独记录、不并入胜负资金共振**。
+
+#### 临场压盘诱多识别（`ou_line_down_low_water_trap`，`domain/postprocess.py`）
+
+大小球水位引擎 `extract_over_under_market_signal(...)` 新增一条静态手法识别：当赛前格局被压（`ou_line_down` 降盘）、但 over 侧静态处在**中低水位**（庄家压低盘面却不肯为大球开高赔付），且模型未判小球（`goal_pressure != 'under'`）、且与「盘水背离加成」互斥（背离要求水位仍在下降，此处只看静态中低水）时，判定为「压盘诱小、暗里防大」，给 over 侧加成 `pace_shift`（上限 0.10，按水位档位缩放），把比分推向大格局，并追加信号 `ou_line_down_low_water_over_trap`。
 
 持久化字段：`market_drift` 含 `favorite_side/favorite_open/favorite_close/drift/threshold/favorite_drifting_out/favorite_steaming_in/drift_confidence/confirmations/confirm_count/ou_line_drift`。
 
@@ -609,7 +634,7 @@ flowchart LR
 本次文档更新以当前代码与目录现状为准，重点核对了以下文件：
 - 入口与命令：`prediction_system.py`、`app/cli.py`
 - 编排：`domain/predictor.py`、`enhanced_prediction_workflow.py`、`harness/core.py`、`harness/football.py`
-- 推理诊断层：`domain/inference.py`（`compute_tri_axis_consistency` / `_compute_market_drift` / `_compose_tri_axis_verdict`）、`app/cli.py`（`_print_tri_axis`）
+- 推理诊断层：`domain/inference.py`（`compute_tri_axis_consistency` / `_compute_market_drift` / `_compose_tri_axis_verdict` / `classify_market_operation_pattern` 让球方向手法矩阵）、`domain/postprocess.py`（`extract_over_under_market_signal` 临场压盘诱多识别）、`app/cli.py`（`_print_tri_axis`）
 - 采集：`collectors/okooo.py`
 - 存储与 runtime：`storage/__init__.py`、`storage/archive.py`、`storage/accuracy.py`、`storage/teams_md.py`、`runtime/paths.py`、`runtime/memory_samples.py`、`runtime/result_sync.py`、`runtime/rag_store.py`
 - 领域写回：`domain/live.py`、`domain/persistence.py`、`domain/reporting.py`、`domain/writeback.py`

@@ -222,7 +222,46 @@ def _ou_row(d: dict) -> str:
 
 def _total_goals_row(d: dict) -> str:
     tg = d.get("total_goals") or {}
+    buckets = tg.get("buckets") or {}
     tops = tg.get("top_totals") or []
+    if not tops and not buckets:
+        return ""
+
+    ou = d.get("over_under") or {}
+    line = ou.get("line")
+    over_p, under_p = ou.get("over") or 0.0, ou.get("under") or 0.0
+
+    same_side = []
+    if buckets and line is not None:
+        try:
+            lf = float(line)
+            side = "大" if over_p >= under_p else "小"
+            picked = []
+            for key, prob in buckets.items():
+                m = re.match(r"^(\d+)", str(key))
+                if not m:
+                    continue
+                total = int(m.group(1))
+                # 尾桶 '7+' 视为该档下界(7)，仍属大球侧
+                in_side = total > lf if side == "大" else total < lf
+                if in_side:
+                    picked.append((str(key), float(prob or 0.0)))
+            mass = sum(p for _, p in picked)
+            if mass > 0:
+                picked = [(k, p / mass) for k, p in picked]
+                picked.sort(key=lambda x: x[1], reverse=True)
+                same_side = picked[:3]
+        except (TypeError, ValueError):
+            same_side = []
+
+    if same_side:
+        head_k, head_p = same_side[0]
+        body = f"<b>{head_k} 球</b>({_fmt_pct(head_p)})"
+        rest = " / ".join(f"{k}球({_fmt_pct(p)})" for k, p in same_side[1:3])
+        if rest:
+            body += f" / {rest}"
+        return f'<div class="total-row">最可能总进球：{body}</div>'
+
     if not tops:
         return ""
     head = tops[0]
@@ -237,9 +276,48 @@ def _poisson_pmf(lam: float, k: int) -> float:
     return math.exp(-lam) * lam ** k / math.factorial(k)
 
 
+def _direction_of(d: dict) -> str:
+    """预测方向：主胜/客胜/平局；缺失时按概率推断。"""
+    pred = (d.get("prediction") or d.get("predicted_winner") or "").strip()
+    if pred in ("主胜", "客胜", "平局"):
+        return pred
+    probs = d.get("all_probabilities") or {}
+    if probs:
+        return max(("主胜", "平局", "客胜"), key=lambda k: probs.get(k) or 0.0)
+    return ""
+
+
+DRAW_HINT_THRESHOLD = 0.30  # 平局概率达此值视为「有平局数据」，允许纳入平局比分
+
+
+def _allowed_outcomes(d: dict) -> set[str]:
+    """允许展示的胜负结果集合：默认仅预测方向；
+    当模型提示爆冷（中/高）时并入反向胜负 + 平局；当平局概率达标时并入平局。
+    """
+    direction = _direction_of(d)
+    if direction not in ("主胜", "客胜", "平局"):
+        return {"主胜", "平局", "客胜"}
+    allowed = {direction}
+    probs = d.get("all_probabilities") or {}
+    if (probs.get("平局") or 0.0) >= DRAW_HINT_THRESHOLD:
+        allowed.add("平局")
+    level = (d.get("upset_potential") or {}).get("level")
+    if level in ("中", "高"):
+        if direction == "主胜":
+            allowed.update({"客胜", "平局"})
+        elif direction == "客胜":
+            allowed.update({"主胜", "平局"})
+        else:
+            allowed.update({"主胜", "客胜"})
+    return allowed
+
+
 def _scores_for_side(d: dict) -> list[tuple[str, float]]:
-    """按大小球判定方向，从泊松比分网格中筛选同侧比分（判大球只出大球比分，反之亦然）。
-    无 λ 或无盘口线时回退到原始 top_scores。
+    """按方向 + 大小球判定，从泊松比分网格中筛选比分。
+    方向以预测胜负方为准：判主胜剔除客胜（反向爆冷）比分，判客胜剔除主胜比分，
+    判平局只留平局比分；大小球同侧（判大球只出大球比分，反之）。
+    例外：当模型提示爆冷（中/高）或平局概率达标时，按 _allowed_outcomes 放行
+    对应的平局 / 爆冷比分。无 λ 或无盘口线时回退到原始 top_scores（仍按允许集过滤）。
     """
     eg = d.get("expected_goals") or {}
     lam_h, lam_a = eg.get("home"), eg.get("away")
@@ -247,30 +325,92 @@ def _scores_for_side(d: dict) -> list[tuple[str, float]]:
     line = ou.get("line")
     over_p, under_p = ou.get("over") or 0.0, ou.get("under") or 0.0
     side = "大" if over_p >= under_p else "小"
+    allowed = _allowed_outcomes(d)
+
+    def _dir_ok(i: int, j: int) -> bool:
+        outcome = "主胜" if i > j else ("客胜" if i < j else "平局")
+        return outcome in allowed
+
     if lam_h is None or lam_a is None or line is None:
         fallback = []
-        for item in (d.get("top_scores") or [])[:3]:
+        for item in (d.get("top_scores") or [])[:6]:
             if isinstance(item, (list, tuple)) and len(item) >= 2:
-                fallback.append((str(item[0]), float(item[1])))
+                sc, p = str(item[0]), float(item[1])
             elif isinstance(item, dict):
-                fallback.append((str(item.get("score")), float(item.get("prob") or 0.0)))
-        return fallback
+                sc, p = str(item.get("score")), float(item.get("prob") or 0.0)
+            else:
+                continue
+            m = re.match(r"^(\d+)-(\d+)$", sc)
+            if m and not _dir_ok(int(m.group(1)), int(m.group(2))):
+                continue
+            fallback.append((sc, p))
+        return fallback[:3]
     try:
         lf = float(line)
         lam_h, lam_a = float(lam_h), float(lam_a)
     except (TypeError, ValueError):
         return []
-    grid: list[tuple[str, float]] = []
-    for i in range(8):
-        for j in range(8):
-            total = i + j
-            if side == "大" and total <= lf:
-                continue
-            if side == "小" and total >= lf:
-                continue
-            grid.append((f"{i}-{j}", _poisson_pmf(lam_h, i) * _poisson_pmf(lam_a, j)))
-    grid.sort(key=lambda x: x[1], reverse=True)
-    return grid[:3]
+
+    def _build(apply_dir: bool, apply_ou: bool) -> list[tuple[str, float]]:
+        grid: list[tuple[str, float]] = []
+        for i in range(8):
+            for j in range(8):
+                total = i + j
+                if apply_ou and side == "大" and total <= lf:
+                    continue
+                if apply_ou and side == "小" and total >= lf:
+                    continue
+                if apply_dir and not _dir_ok(i, j):
+                    continue
+                grid.append((f"{i}-{j}", _poisson_pmf(lam_h, i) * _poisson_pmf(lam_a, j)))
+        if not grid:
+            return []
+        # 在「盘口λ + 方向 + 大小球」三重约束的候选集内归一化，
+        # chip 显示的是「给定该约束下」的条件概率（概率高的比分）。
+        mass = sum(p for _, p in grid) or 1.0
+        grid = [(sc, p / mass) for sc, p in grid]
+        grid.sort(key=lambda x: x[1], reverse=True)
+        return grid[:3]
+
+    def _fallback_top_outcome() -> list[tuple[str, float]]:
+        """实在没有比分时，回退到胜负平中概率最高一侧的比分（不放开方向出反向爆冷）。"""
+        probs = d.get("all_probabilities") or {}
+        top = max(("主胜", "平局", "客胜"), key=lambda k: probs.get(k) or 0.0) if probs else "主胜"
+        return _scores_of_outcome(top)
+
+    def _scores_of_outcome(outcome: str) -> list[tuple[str, float]]:
+        grid: list[tuple[str, float]] = []
+        for i in range(8):
+            for j in range(8):
+                oc = "主胜" if i > j else ("客胜" if i < j else "平局")
+                if oc != outcome:
+                    continue
+                grid.append((f"{i}-{j}", _poisson_pmf(lam_h, i) * _poisson_pmf(lam_a, j)))
+        if not grid:
+            return []
+        mass = sum(p for _, p in grid) or 1.0
+        grid = [(sc, p / mass) for sc, p in grid]
+        grid.sort(key=lambda x: x[1], reverse=True)
+        return grid
+
+    # 优先「允许集 + 大小球」双约束，再退到仅方向。
+    primary = _build(True, True) or _build(True, False)
+    if not primary:
+        return _fallback_top_outcome()[:3]
+    # 比分不足 3 个：看胜平负第二高方向，从该方向补概率最大的比分凑足。
+    if len(primary) < 3:
+        probs = d.get("all_probabilities") or {}
+        ranked = sorted(("主胜", "平局", "客胜"), key=lambda k: probs.get(k) or 0.0, reverse=True)
+        have = {sc for sc, _ in primary}
+        for outcome in ranked[1:]:
+            for sc, p in _scores_of_outcome(outcome):
+                if sc not in have:
+                    primary.append((sc, p))
+                    have.add(sc)
+                    break
+            if len(primary) >= 3:
+                break
+    return primary[:3]
 
 
 def _scores_row(d: dict) -> str:
