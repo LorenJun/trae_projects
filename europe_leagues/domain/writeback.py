@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from runtime.match_ids import first_valid_external_match_id
 from storage.teams_md import TeamsMarkdownStore
+from domain.score_projection import project_scores_for_side
 
 
 def _normalize_team_name(value: str) -> str:
@@ -140,14 +141,22 @@ def format_upset_note(upset: Any) -> str:
 
 def format_score_ou_note(prediction: Dict[str, Any]) -> str:
     prediction_text, _ = resolve_prediction_summary(prediction)
-    top_scores = prediction.get('top_scores') or []
-    score_parts = []
-    if isinstance(top_scores, list):
+    projected = project_scores_for_side(prediction)
+    score_parts: List[str] = []
+    if projected:
         score_parts = _filter_score_candidates(
-            '/'.join(str(item[0]).strip() for item in top_scores if isinstance(item, (list, tuple)) and item),
+            '/'.join(str(sc).strip() for sc, _ in projected if sc),
             prediction_text,
             limit=3,
         )
+    if not score_parts:
+        top_scores = prediction.get('top_scores') or []
+        if isinstance(top_scores, list):
+            score_parts = _filter_score_candidates(
+                '/'.join(str(item[0]).strip() for item in top_scores if isinstance(item, (list, tuple)) and item),
+                prediction_text,
+                limit=3,
+            )
     score_note = f"比分:{'/'.join(score_parts)}" if score_parts else ''
 
     over_under = prediction.get('over_under') or {}

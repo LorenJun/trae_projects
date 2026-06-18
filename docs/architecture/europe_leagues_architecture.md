@@ -1,8 +1,8 @@
 ---
 title: Europe Leagues 项目架构与模块划分
 owner: europe_leagues
-version: v2.5
-last_updated: 2026-06-16
+version: v2.6
+last_updated: 2026-06-18
 ---
 
 # Europe Leagues 项目架构与模块划分（技术分析）
@@ -222,8 +222,9 @@ flowchart TB
 | 特征服务 | `domain/features.py` | EWMA、analysis context、上下文增强与赛前补齐 |
 | 赔率服务 | `domain/odds.py` | 盘口解析、真实大小球线补齐、历史赔率参考 |
 | 临场服务 | `domain/live.py` | 实时刷新、已有快照复用、driver 透传、上下文注入 |
-| 推理服务 | `domain/inference.py` | 组织核心推理输入、盘口/概率校准与主预测输出；并产出 `tri_axis_consistency` 影子诊断层（见 3.7） |
-| 后处理 | `domain/postprocess.py` | 概率归一、凯利、review-learning 调整、结果对象整形与 RAG 解释文本拼装 |
+| 推理服务 | `domain/inference.py` | 组织核心推理输入、盘口/概率校准与主预测输出；产出 `tri_axis_consistency` 影子诊断层（见 3.7）；`apply_market_operation_adjustment` 用让球 6 口诀常开偏置驱动胜平负概率 |
+| 比分投影 | `domain/score_projection.py` | 比分（top3）唯一数据源：亚值口诀定方向、OU 6 规则定大小球，在泊松网格交集上取条件概率（见 3.8） |
+| 后处理 | `domain/postprocess.py` | 概率归一、凯利、review-learning 调整、大小球水位引擎（`extract_over_under_market_signal` 含 OU 操盘 6 规则）、结果对象整形与 RAG 解释文本拼装 |
 | 持久化 | `domain/persistence.py` | 作为 `PredictionPersistenceService` owner 编排预测落盘，统一写入 `MEMORY.md`、runtime archive、滚动记忆样本、RAG 索引与赛果同步登记 |
 | RAG 服务 | `domain/rag.py` | 封装 `HybridRAGService`，供主链读取结构化相似案例与轻量决策增强 |
 | 报告服务 | `domain/reporting.py` | 预测报告格式化与 RAG 记忆解释输出 |
@@ -346,7 +347,12 @@ RAG 当前真实依赖的数据源包括：
 - **水位口径**：`home_water/away_water` 存的是小数赔率全值，判档前先转港水（`港水=赔率-1`），再按 ≤0.85 低 / ≥0.95 高 / 之间 中分档。
 - **触发门控**：仅当亚盘有动作（`hm`）且能取到让球方终盘水位时启用；升盘看热门(上盘)水位、降盘看客队(下盘)水位。
 - **优先级**：降盘+下盘低水时，「主看衰/客加注→防客」优先于「急降盘→诱客」。升盘+低水若欧赔同时深压主队（smart money 背书）则不判诱上，让位给既有升盘背书印证逻辑。
-- **纪律一致**：矩阵只产出软性 `deception/corroboration` 分与方向标签，并入既有操盘判定，**不单独加权改概率**；权重不足时仅打标。
+
+> **2026-06-18 起口径变化（常开偏置 + 驱动比分方向）**：原「矩阵只打标、不单独加权改概率」的纪律已调整。现行口径分两条落地链路：
+> 1. **驱动胜平负概率（`apply_market_operation_adjustment`，常开偏置路）**：历史学习权重路（`operation_weight_learner`）在世界杯样本不足（< `MIN_SAMPLES=80`）时 `reliability=0`，导致 6 口诀过去只透传标签。现新增类常量 `_DIRECTION_MATRIX_BIAS`（6 口诀 → 强侧视角有符号偏置）+ `_direction_matrix_bias` classmethod，构成**不依赖历史样本量的常开矩阵偏置路** `delta_matrix`（`±0.04` 封顶 = bias×0.18），与历史权重路 `delta_learned` 同向求和后合成 `delta`（`±0.06` 封顶）；正=印证强侧（从平局让给强侧），负=诱导（从强侧回撤，60% 平局 / 40% 冷门）。两路皆 0 时早退 `no_signal_label_only`。
+> 2. **驱动比分方向（`domain/score_projection.py`，见 3.8）**：`verdict_dir` 经 `_VERDICT_DIR_INTENT` 映射为比分方向意图（印证类→强侧获胜；诱导类→平局+弱侧），覆盖原「模型 1X2 定方向」。
+>
+> 三轴影子层本身仍只标注、不改概率；上述加权发生在**主链 `apply_market_operation_adjustment` 与比分投影模块**，不在三轴诊断层内。
 
 ### 临场资金轴 + 置信度质检层（`market_drift`）
 
@@ -379,6 +385,21 @@ RAG 当前真实依赖的数据源包括：
 ### 持久化与回测
 
 `tri_axis_consistency`（含嵌套 `market_drift`）在 `result_manager.py` 的 compact 白名单内，归档自动持久化到 `.okooo-scraper/runtime/prediction_archive.json`，供后续回测。全量 68 样本回测中，封盘走冷场按置信度切分：共振(high)组热门没兑现约 70%，孤证(low)组被正确降级，验证质检层确实在区分真实资金流与单源噪声。
+
+---
+
+## 3.8 比分投影单一数据源（`domain/score_projection.py`）
+
+比分（top3 预测比分）此前散落在三处各算各的：网页卡片用本地实现按「方向+大小球」从泊松网格重算，而 `MEMORY.md` 与 `teams_2026.md` 直接取模型原始 `top_scores`，导致同一场三处对不上。2026-06 起抽出 `domain/score_projection.py` 作为**唯一比分数据源**，网页 `scripts/build_world_cup_daily_html.py`、写回 `domain/writeback.py`、持久化 `domain/persistence.py` 全部 import 它，模型原始 `top_scores` 仅作兜底。
+
+核心三函数：
+- `direction_of(d)`：**比分方向**。优先用亚值让球口诀 `verdict_dir` 经 `_VERDICT_DIR_INTENT` 映射——印证类（`block_up_home_genuine`/`lure_dog_no_point`/`block_down_dog_hard`）→ 让球方(`fav_side`)获胜；诱导类（`lure_up_home_fade`/`lure_up_hot_death`/`protect_dog_genuine`）→ 强侧不赢，在 平局/弱侧 中取模型概率更高者。**口诀未触发时回退模型 1X2**。口诀来源优先 `tri_axis_consistency.direction_handicap`，回退 `realtime.context_applied.market_operation_pattern.direction_handicap_matrix`。
+- `allowed_outcomes(d)`：允许展示的胜负结果集合。印证类仅放行强侧获胜；诱导类放行 平局+弱侧；爆冷（中/高）再全放行。无口诀时回退模型方向，并保留「平局概率达标并入平局 / 方向为平局并入第二高方向 / 爆冷放行反向」逻辑。
+- `project_scores_for_side(d)`：在「方向允许集 ∩ 大小球同侧」的泊松网格格子上算条件概率，取 top3。大小球侧由 OU 操盘 6 规则经 `over_under` 概率体现（`_build(apply_dir, apply_ou)`）。候选不足 3 个时尾部在 `allowed_outcomes` 内放宽 OU 凑满 top3（既有契约），不再无视方向从全 1X2 拉取。
+
+> **已知缺陷（待修）**：方向=平局 且 OU 判大球 且不对称 λ 时，平局比分（对角线）与「大球同侧」硬约束求交集后，merge-then-sort 可能把平局比分全部挤掉。建议修法「方向保底配额」（平局方向至少保留 1 个平局比分再用第二方向补足），尚未实施。
+
+回归测试 `test_score_projection_direction.py`（8 例）覆盖印证/诱导/无口诀回退/OU 约束/来源回退；用真实分类器 `classify_market_operation_pattern` 构造模拟盘口验证过 `lure_up_home_fade`、`lure_up_hot_death` 两条诱导口诀能正确把比分方向从主胜翻为平局/弱侧。
 
 ---
 

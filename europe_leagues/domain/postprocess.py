@@ -705,6 +705,29 @@ class PredictionPostprocessService:
             )
             balanced_high_line_over_nudge = True
             signals.append('ou_high_line_balanced_over_nudge')
+        # 复盘特征（24场）：低盘线（小组赛常见 2.0–2.5）+ 中性水位（大小赔率几乎对开，
+        # 庄家无倾向）+ 盘口未升、无暗钱买大信号 → 实际几乎一边倒走小（3/3）。
+        # 与上面的「高线均势诱大」对称：低线均势更应偏小。仅在无任何 over 加成时生效，
+        # 给一个小幅负 pace_shift 把比分往小格局收。
+        balanced_low_line_under_nudge = False
+        if (
+            goal_pressure == 'balanced'
+            and not balanced_high_line_over_nudge
+            and final_line <= 2.5
+            and abs(bias_final) <= 0.02
+            and line_delta <= 0.0
+            and 'over_water_drop' not in signals
+            and ou_line_water_divergence is None
+            and ou_line_down_low_water_trap is None
+            and ou_flat_water_nudge is None
+        ):
+            pace_shift = min(
+                -0.008,
+                -(0.008 + abs(min(0.0, line_delta)) * 0.06),
+            )
+            pace_shift = max(pace_shift, -0.016)
+            balanced_low_line_under_nudge = True
+            signals.append('ou_low_line_balanced_under_nudge')
         return {
             'available': True,
             'goal_pressure': goal_pressure,
@@ -717,6 +740,7 @@ class PredictionPostprocessService:
             'bias_delta': round(bias_delta, 6),
             'pace_shift': round(pace_shift, 6),
             'balanced_high_line_over_nudge': balanced_high_line_over_nudge,
+            'balanced_low_line_under_nudge': balanced_low_line_under_nudge,
             'ou_line_water_divergence': ou_line_water_divergence,
             'ou_line_down_low_water_trap': ou_line_down_low_water_trap,
             'ou_flat_water_nudge': ou_flat_water_nudge,

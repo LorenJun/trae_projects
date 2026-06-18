@@ -38,6 +38,7 @@ from runtime.memory_dedupe import (
 from runtime.memory_samples import sync_prediction_memory_samples
 from runtime.match_ids import first_valid_external_match_id
 from runtime.paths import get_default_paths
+from domain.score_projection import project_scores_for_side
 from runtime.rag_store import sync_rag_index
 from runtime.result_sync import LEAGUE_SOT_CODES, register_prediction_result_sync
 from storage.accuracy import AccuracyStatsStore
@@ -1033,9 +1034,13 @@ class PredictionPersistenceService:
         key = display_identity
 
         top_scores = []
-        for item in result.get('top_scores', [])[:3]:
-            if isinstance(item, (list, tuple)) and item:
-                top_scores.append(str(item[0]))
+        for sc, _ in project_scores_for_side(result)[:3]:
+            if sc:
+                top_scores.append(str(sc))
+        if not top_scores:
+            for item in result.get('top_scores', [])[:3]:
+                if isinstance(item, (list, tuple)) and item:
+                    top_scores.append(str(item[0]))
         if not top_scores:
             for item in result.get('predicted_scores', [])[:3]:
                 text = str(item or '').strip()
@@ -1234,10 +1239,11 @@ class PredictionPersistenceService:
         prediction = str(result.get('prediction') or '').strip()
         predicted_winner = str(result.get('predicted_winner') or {'主胜': 'home', '客胜': 'away', '平局': 'draw'}.get(prediction, '')).strip()
         top_scores = result.get('top_scores') if isinstance(result.get('top_scores'), list) else []
-        predicted_scores = []
-        for item in top_scores[:3]:
-            if isinstance(item, (list, tuple)) and item:
-                predicted_scores.append(str(item[0]))
+        predicted_scores = [str(sc) for sc, _ in project_scores_for_side(result)[:3] if sc]
+        if not predicted_scores:
+            for item in top_scores[:3]:
+                if isinstance(item, (list, tuple)) and item:
+                    predicted_scores.append(str(item[0]))
         over_under = result.get('over_under') if isinstance(result.get('over_under'), dict) else {}
         over_under_available = (
             bool(over_under)

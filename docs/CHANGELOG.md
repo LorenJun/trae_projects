@@ -2,7 +2,7 @@
 title: 仓库变更日志
 owner: trae_projects
 version: v1
-last_updated: 2026-06-17
+last_updated: 2026-06-18
 ---
 
 # CHANGELOG
@@ -13,6 +13,55 @@ last_updated: 2026-06-17
 - 代码：`/Users/bytedance/trae_projects/europe_leagues`
 - 技能：`/Users/bytedance/trae_projects/.trae/skills`
 - 文档：仓库根与 `europe_leagues/` 下相关 `md`
+
+---
+
+## 2026-06-18
+
+### 0. 比分方向改由亚值让球口诀驱动 + OU 6 规则定大小球（`domain/score_projection.py`）
+
+此前比分方向 `direction_of` 取模型 1X2 概率最高方向。按用户要求改为：**亚值让球口诀(verdict_dir)定比分方向，OU 操盘 6 规则定大球/小球**，再在交集内按方向概率选比分。
+
+- 新增 `_VERDICT_DIR_INTENT` 映射：印证类（`block_up_home_genuine`/`lure_dog_no_point`/`block_down_dog_hard`）→ `fav`（让球方获胜方向）；诱导类（`lure_up_home_fade`/`lure_up_hot_death`/`protect_dog_genuine`）→ `fade`（强侧不赢）。
+- 新增 `_direction_handicap`：优先 `tri_axis_consistency.direction_handicap`，回退 `realtime.context_applied.market_operation_pattern.direction_handicap_matrix`。
+- `direction_of`：口诀触发时——印证类取强侧获胜；诱导类在 平局/弱侧 中取模型概率更高者（用户选「平局+弱侧都放行」）。`allowed_outcomes`：印证类仅放行强侧获胜，诱导类放行 平局+弱侧（爆冷中/高时再全放行）。
+- **未触发口诀时回退模型 1X2**（用户选择），保留原有平局达标/平局方向扩张/爆冷放行逻辑。
+- `project_scores_for_side` 尾部 top3 补足改为仅在 `allowed_outcomes` 内取，不再无视方向从全 1X2 拉取，避免泄漏越界比分。
+- OU 侧维持既有 `_build` 大小球同侧硬约束（6 规则经 `over_under` 概率体现）；候选不足 3 个时尾部允许放宽 OU 凑满 top3（既有契约）。
+
+新增 `test_score_projection_direction.py`（8 例）覆盖印证/诱导/无口诀回退/OU 约束/来源回退。全量 456 测试通过。
+
+### 1. 让球方向 6 口诀常开偏置：冷启动也能驱动胜平负概率（`domain/inference.py`）
+
+此前 `apply_market_operation_adjustment` 只消费第二层历史学习权重（`operation_weight_learner`），而世界杯样本量 < `MIN_SAMPLES=80` → 各信号 `reliability=0` → 让球方向矩阵 6 口诀（`direction_handicap_matrix.verdict_dir`）只作为标签透传，**从不改胜平负概率**。
+
+按「始终叠加」改造，新增常开矩阵偏置路（不依赖历史样本量）：
+- 新增类常量 `_DIRECTION_MATRIX_BIAS`：6 口诀 → 强侧视角有符号偏置（`block_up_home_genuine`+0.16 / `lure_up_home_fade`−0.22 / `lure_up_hot_death`−0.26 / `protect_dog_genuine`−0.20 / `lure_dog_no_point`+0.16 / `block_down_dog_hard`+0.14），幅度沿用 classifier 内各口诀软分量级；
+- 新增 `_direction_matrix_bias` classmethod 从 `pattern_diag` 取出口诀偏置；
+- 重写 `apply_market_operation_adjustment`：`delta_learned`（历史权重路，样本足才非 0）+ `delta_matrix`（口诀路，常开，`±0.04` 封顶 = bias×0.18）两路同向求和，合成 `delta` 再 `±0.06` 封顶；正=印证强侧（从平局让给强侧），负=诱导（从强侧回撤，60% 给平局、40% 给冷门）。两路皆 0 时早退 `no_signal_label_only`（原 `no_reliable_signal_label_only`，因含义已扩为「学习权重与口诀均无信号」）。
+
+OU 操盘 6 规则本就经 `pace_shift → target_total → λ`（`inference.py`）驱动比分与大小球概率，无需改动；本次只补齐让球 6 口诀对胜平负概率的缺失链路。新增 2 个冷启动单测（`weights={}` 下 `lure_up_hot_death` 压低强侧、`block_up_home_genuine` 抬升强侧）。全量 448 测试通过。
+
+### 1. 比分口径单一数据源：网页 / MEMORY / teams_2026.md 统一（`domain/score_projection.py`）
+
+此前网页卡片用 `_scores_for_side` 按「方向 + 大小球」从泊松网格重算比分，而 MEMORY.md 与 teams_2026.md 的 `比分:` 直接取模型原始 `top_scores`，导致同一场比赛三处比分对不上（如加拿大 vs 卡塔尔：网页 3-0/2-1/3-1，记忆 1-1/2-0/2-1）。
+
+将重算逻辑（`direction_of` / `allowed_outcomes` / `project_scores_for_side`）抽到新模块 `domain/score_projection.py` 作为唯一数据源：
+- 网页 `scripts/build_world_cup_daily_html.py` 删除本地重复实现，改为 import；
+- 写回侧 `domain/persistence.py`（MEMORY 条目 `score_summary` + 持久化 payload `predicted_scores`）与 `domain/writeback.py`（teams_2026.md `format_score_ou_note`）均改用 `project_scores_for_side`，模型原始 `top_scores` 作为兜底。
+
+至此三处比分完全一致，复盘/护栏修正也能体现在网页与记忆中。446 测试通过。
+
+> 补充：方向判定为「平局」且大小球判「大球」时，平局比分（对角线 0-0/1-1…）与「大球同侧（总进球>盘线）」硬约束求交集会塌缩到 2-2/3-3/4-4 等大比分。`allowed_outcomes` 增加：方向为平局时额外并入胜平负**第二高方向**的比分（如第二高为主胜则补 2-1/3-0/3-1），避免失真。
+
+### 2. 大小球低线均势偏小修正（`ou_low_line_balanced_under_nudge`）
+
+复盘 24 场已完赛世界杯小组赛大小球（命中 11/24=45.8%，押大押小各约 46%，接近抛硬币）。结构化水位特征显示：
+
+- 降盘 + over 侧低水（暗钱买大）→ 实际走大 4/4=100%（引擎既有 `ou_line_down_low_water_over_trap` 已正确捕捉）；
+- 关键盲点：低盘线（≤2.5，小组赛常见）+ 中性水位（大小赔率差 < 0.04，庄家无倾向）+ 盘口未升、无暗钱买大信号 → 实际几乎一边倒走小（3/3），但模型仅命中 1/3。
+
+`domain/postprocess.py` 的 `extract_over_under_market_signal` 新增与既有 `balanced_high_line_over_nudge`（高线均势诱大）对称的规则：`goal_pressure == balanced` 且终盘线 ≤2.5、`|bias_final| ≤ 0.02`、未升盘、无任何 over 暗钱/背离/诱多加成时，给一个小幅负 `pace_shift`（−0.008 ～ −0.016）把比分往小格局收，追加信号 `ou_low_line_balanced_under_nudge`。回测在 24 场上触发 1 场（巴西vs摩洛哥），方向正确，零误报。
 
 ---
 

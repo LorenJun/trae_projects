@@ -2019,6 +2019,31 @@ class InferencePipelineService:
         self._operation_weights_cache = weights
         return weights
 
+    # 让球方向矩阵 6 口诀 → 强侧视角有符号偏置（正=印证强侧，负=诱导回撤）。
+    # 幅度沿用 classify_market_operation_pattern 中各口诀的软分量级，确保口诀间相对强弱一致。
+    _DIRECTION_MATRIX_BIAS: Dict[str, float] = {
+        'block_up_home_genuine': 0.16,    # 升盘配高水+欧赔主降·阻上(主真赢) → 印证
+        'lure_up_home_fade': -0.22,       # 升盘配高水+欧赔主升·诱上(主难赢) → 诱导
+        'lure_up_hot_death': -0.26,       # 升盘配低水·诱上(大热必死) → 诱导
+        'protect_dog_genuine': -0.20,     # 降盘配下盘低水·防客(客拿分) → 诱导(强侧回撤)
+        'lure_dog_no_point': 0.16,        # 降盘配下盘低水·诱客(客无分,主稳) → 印证
+        'block_down_dog_hard': 0.14,      # 降盘配下盘高水·阻下(客难打出,主稳) → 印证
+    }
+
+    @classmethod
+    def _direction_matrix_bias(cls, pattern_diag: Optional[Dict[str, Any]]) -> Tuple[float, Optional[str]]:
+        """从让球方向矩阵口诀导出常开方向偏置（不依赖历史样本量）。
+
+        返回 (bias, verdict_dir)；bias 为强侧视角有符号量，无口诀时返回 (0.0, None)。
+        """
+        if not isinstance(pattern_diag, dict):
+            return 0.0, None
+        dh = pattern_diag.get('direction_handicap_matrix')
+        if not isinstance(dh, dict):
+            return 0.0, None
+        verdict_dir = dh.get('verdict_dir')
+        return cls._DIRECTION_MATRIX_BIAS.get(verdict_dir, 0.0), verdict_dir
+
     def apply_market_operation_adjustment(
         self,
         *,
@@ -2050,16 +2075,27 @@ class InferencePipelineService:
         if weights is None:
             weights = self._load_operation_weights()
         fav_side = pattern_diag.get('favored_side')
-        if not isinstance(delta_vector, dict) or fav_side not in ('home', 'away'):
-            diag['reason'] = 'missing_delta_or_favorite'
+        if fav_side not in ('home', 'away'):
+            diag['reason'] = 'missing_favorite'
             return final_prob, diag
 
-        score, active = score_delta(delta_vector, weights)
+        # 第二层：历史学习权重路（样本足够才生效，否则 score=0、active=[]）
+        score, active = score_delta(delta_vector, weights) if isinstance(delta_vector, dict) else (0.0, [])
         diag['score'] = round(score, 4)
         diag['active_signals'] = active
-        if not active or abs(score) < 1e-9:
-            # 无可靠信号(系数全0/样本不足) → 不改概率，仅提示。这是防过拟合的预期行为。
-            diag['reason'] = 'no_reliable_signal_label_only'
+
+        # 常开：让球方向矩阵 6 口诀偏置（不依赖历史样本量，世界杯等冷启动场景也生效）
+        matrix_bias, matrix_verdict_dir = self._direction_matrix_bias(pattern_diag)
+        diag['matrix_verdict_dir'] = matrix_verdict_dir
+
+        # 两路方向偏置（强侧视角：正=印证强侧 / 负=诱导回撤）各自压幅后求和。
+        delta_learned = round(math.tanh(score) * 0.05, 4) if (active and abs(score) >= 1e-9) else 0.0
+        delta_matrix = round(max(-0.04, min(0.04, matrix_bias * 0.18)), 4) if matrix_bias else 0.0
+        diag['delta_learned'] = delta_learned
+        diag['delta_matrix'] = delta_matrix
+        if abs(delta_learned) < 1e-9 and abs(delta_matrix) < 1e-9:
+            # 学习权重与口诀均无信号 → 不改概率，仅透传标签。
+            diag['reason'] = 'no_signal_label_only'
             return final_prob, diag
 
         p_h = float(final_prob.get('home_win') or 0.0)
@@ -2071,8 +2107,8 @@ class InferencePipelineService:
             return final_prob, diag
         p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
 
-        # 连续力度：score 经 tanh 压到 (-1,1)，再封顶 ±0.05。逐场连续，无写死阈值。
-        delta = round(math.tanh(score) * 0.05, 4)
+        # 合成方向力度，封顶 ±0.06（两路同向时略放宽，仍受控）。逐场连续、无写死方向阈值。
+        delta = round(max(-0.06, min(0.06, delta_learned + delta_matrix)), 4)
         fav_p = p_h if fav_side == 'home' else p_a
 
         if delta < 0:  # 诱导嫌疑：从强侧回撤，60%给平局、40%给冷门
@@ -2104,6 +2140,7 @@ class InferencePipelineService:
             'applied': True,
             'favored_side': fav_side,
             'direction': 'deceptive' if delta < 0 else 'endorse',
+            'delta_total': delta,
         })
         return final_prob, diag
 

@@ -1972,6 +1972,35 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertIn("ou_high_line_balanced_over_nudge", signal["signals"])
         self.assertGreaterEqual(signal["pace_shift"], 0.008)
 
+    def test_extract_over_under_market_signal_adds_low_line_balanced_under_nudge(self):
+        signal = self.service.extract_over_under_market_signal(
+            {
+                "大小球": {
+                    "initial": {"line": 2.25, "over": 1.93, "under": 1.91},
+                    "final": {"line": 2.25, "over": 1.93, "under": 1.91},
+                }
+            }
+        )
+        self.assertTrue(signal["available"])
+        self.assertEqual(signal["goal_pressure"], "balanced")
+        self.assertTrue(signal["balanced_low_line_under_nudge"])
+        self.assertIn("ou_low_line_balanced_under_nudge", signal["signals"])
+        self.assertLessEqual(signal["pace_shift"], -0.008)
+        self.assertGreaterEqual(signal["pace_shift"], -0.016)
+
+    def test_low_line_under_nudge_skipped_when_over_smart_money_present(self):
+        signal = self.service.extract_over_under_market_signal(
+            {
+                "大小球": {
+                    "initial": {"line": 2.25, "over": 1.95, "under": 1.85},
+                    "final": {"line": 2.25, "over": 1.88, "under": 1.92},
+                }
+            }
+        )
+        self.assertTrue(signal["available"])
+        self.assertFalse(signal["balanced_low_line_under_nudge"])
+        self.assertNotIn("ou_low_line_balanced_under_nudge", signal["signals"])
+
     def test_extract_over_under_market_signal_detects_line_down_over_backed_divergence(self):
         signal = self.service.extract_over_under_market_signal(
             {
@@ -2763,9 +2792,9 @@ class InferenceConfidenceCalibrationTest(unittest.TestCase):
             delta_vector={"fav": "home", "euro_fav_imp_move": 0.02},
             weights={},
         )
-        # 两层动态调权：系数全0(样本不足)→不改概率，仅透传标签
+        # 两层动态调权：系数全0(样本不足)+无口诀→不改概率，仅透传标签
         self.assertFalse(diag["applied"])
-        self.assertEqual(diag["reason"], "no_reliable_signal_label_only")
+        self.assertEqual(diag["reason"], "no_signal_label_only")
         self.assertEqual(adjusted["home_win"], 0.55)
         self.assertEqual(adjusted["draw"], 0.27)
 
@@ -2805,7 +2834,7 @@ class InferenceConfidenceCalibrationTest(unittest.TestCase):
         )
         # 两层动态调权：系数全0(样本不足)→不改概率，仅透传标签
         self.assertFalse(diag["applied"])
-        self.assertEqual(diag["reason"], "no_reliable_signal_label_only")
+        self.assertEqual(diag["reason"], "no_signal_label_only")
         self.assertEqual(adjusted["home_win"], 0.50)
         self.assertEqual(adjusted["draw"], 0.28)
 
@@ -2899,6 +2928,52 @@ class InferenceConfidenceCalibrationTest(unittest.TestCase):
         self.assertIn("让球口诀", tri["verdict_summary"])
         self.assertIn("阻上(主真赢)", tri["verdict_summary"])
 
+    def test_dir_matrix_bias_shifts_probability_in_cold_start(self):
+        # 冷启动(无历史样本，weights={})下，让球口诀仍须改概率：诱上(大热必死)→压低强侧
+        service = object.__new__(InferencePipelineService)
+        pattern, dm = self._dir_matrix(
+            {"initial": {"home": 1.70, "draw": 3.4, "away": 4.5}, "final": {"home": 1.78, "draw": 3.4, "away": 4.3}},
+            {"initial": {"handicap": -0.5, "home_water": 1.90, "away_water": 1.95},
+             "final": {"handicap": -0.75, "home_water": 1.83, "away_water": 2.02}},
+        )
+        self.assertEqual(dm["verdict_dir"], "lure_up_hot_death")
+        adjusted, diag = service.apply_market_operation_adjustment(
+            final_prob={"home_win": 0.52, "draw": 0.26, "away_win": 0.22},
+            pattern_diag=pattern,
+            delta_vector=None,
+            weights={},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["matrix_verdict_dir"], "lure_up_hot_death")
+        self.assertEqual(diag["direction"], "deceptive")
+        self.assertEqual(diag["delta_learned"], 0.0)
+        self.assertLess(diag["delta_matrix"], 0.0)
+        self.assertLess(adjusted["home_win"], 0.52)
+        self.assertGreater(adjusted["draw"], 0.26)
+        self.assertAlmostEqual(adjusted["home_win"] + adjusted["draw"] + adjusted["away_win"], 1.0, places=6)
+
+    def test_dir_matrix_bias_endorses_strong_side_in_cold_start(self):
+        # 冷启动下，印证类口诀(阻上·主真赢)→从平局让给强侧，强侧概率上升
+        service = object.__new__(InferencePipelineService)
+        pattern, dm = self._dir_matrix(
+            {"initial": {"home": 1.80, "draw": 3.5, "away": 4.5}, "final": {"home": 1.70, "draw": 3.55, "away": 4.6}},
+            {"initial": {"handicap": -0.5, "home_water": 1.90, "away_water": 1.95},
+             "final": {"handicap": -0.75, "home_water": 1.98, "away_water": 1.88}},
+        )
+        self.assertEqual(dm["verdict_dir"], "block_up_home_genuine")
+        adjusted, diag = service.apply_market_operation_adjustment(
+            final_prob={"home_win": 0.50, "draw": 0.30, "away_win": 0.20},
+            pattern_diag=pattern,
+            delta_vector=None,
+            weights={},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["direction"], "endorse")
+        self.assertGreater(diag["delta_matrix"], 0.0)
+        self.assertGreater(adjusted["home_win"], 0.50)
+        self.assertLess(adjusted["draw"], 0.30)
+        self.assertAlmostEqual(adjusted["home_win"] + adjusted["draw"] + adjusted["away_win"], 1.0, places=6)
+
     def test_market_operation_pattern_light_euro_pump_not_flagged_deceptive(self):
         """真实回归：墨西哥2-0南非——热门仅轻度走热(-4.3%)+盘不动，正常强队被看好，不应误判诱导。"""
         service = object.__new__(InferencePipelineService)
@@ -2976,7 +3051,7 @@ class InferenceConfidenceCalibrationTest(unittest.TestCase):
             weights={},
         )
         self.assertFalse(diag["applied"])
-        self.assertEqual(diag["reason"], "no_reliable_signal_label_only")
+        self.assertEqual(diag["reason"], "no_signal_label_only")
 
     def test_operation_weight_learner_below_sample_threshold_yields_zero_reliability(self):
         """样本不足 → reliability=0（仅提示不调权，防过拟合的自动退化）。"""

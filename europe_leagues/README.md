@@ -50,7 +50,9 @@
 5. `domain/persistence.py` 负责预测落盘 side effects
 6. `runtime/result_sync.py` 与 `result_manager.py` 负责赛果同步、结果闭环与衍生数据更新
 
-> **三轴影子诊断层**：`domain/inference.py` 在主预测之外产出 `tri_axis_consistency`（方向轴/大小球轴/操盘轴 + 临场资金轴）。操盘轴含「让球方向手法矩阵」（亚盘升降盘 × 水位档位 × 欧赔方向 → 阻上/诱上/防客/诱客/阻下，以「让球口诀」并入研判文本）。临场资金轴 = 封盘热门赔率漂移，带置信度质检层（欧赔走冷用亚值/凯利同向共振印证，`drift_confidence` high/low/n/a，过滤单家抓取噪声）。**纯标记、不改方向、不加权**，随归档持久化供回测。技术口径见 [`docs/architecture/europe_leagues_architecture.md`](../docs/architecture/europe_leagues_architecture.md) 第 3.7 节。
+> **三轴影子诊断层**：`domain/inference.py` 在主预测之外产出 `tri_axis_consistency`（方向轴/大小球轴/操盘轴 + 临场资金轴）。操盘轴含「让球方向手法矩阵」（亚盘升降盘 × 水位档位 × 欧赔方向 → 阻上/诱上/防客/诱客/阻下，以「让球口诀」并入研判文本）。临场资金轴 = 封盘热门赔率漂移，带置信度质检层（欧赔走冷用亚值/凯利同向共振印证，`drift_confidence` high/low/n/a，过滤单家抓取噪声）。三轴层本身**纯标记、不改概率**，随归档持久化供回测。技术口径见 [`docs/architecture/europe_leagues_architecture.md`](../docs/architecture/europe_leagues_architecture.md) 第 3.7 节。
+>
+> **2026-06-18 起让球 6 口诀已进入打分链路**（不再只是标签）：① 经 `apply_market_operation_adjustment` 的常开矩阵偏置驱动**胜平负概率**（世界杯样本不足、历史学习权重失效时仍生效）；② 经 `domain/score_projection.py` 驱动**比分方向**（印证类→强侧获胜、诱导类→平局+弱侧），大小球侧由 OU 操盘 6 规则决定，详见架构文档第 3.8 节。比分（`top_scores`）已统一由 `score_projection` 单一数据源产出，网页 / `MEMORY.md` / `teams_2026.md` 三处一致。
 
 ### 共享基础模块（单一事实源 / 无状态工具）
 

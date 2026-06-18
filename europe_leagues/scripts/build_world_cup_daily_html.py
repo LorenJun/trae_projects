@@ -25,7 +25,6 @@ from __future__ import annotations
 import argparse
 import html
 import json
-import math
 import re
 import subprocess
 import sys
@@ -33,6 +32,16 @@ from datetime import datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from domain.score_projection import (  # noqa: E402
+    DRAW_HINT_THRESHOLD,
+    allowed_outcomes as _allowed_outcomes,
+    direction_of as _direction_of,
+    project_scores_for_side as _scores_for_side,
+)
+
 PRED_DIR = PROJECT_ROOT / "world_cup" / "analysis" / "predictions"
 TEAMS_MD = PROJECT_ROOT / "world_cup" / "teams_2026.md"
 
@@ -197,6 +206,83 @@ def _odds_box(d: dict) -> str:
     )
 
 
+def _institution_lean(d: dict) -> str:
+    """从真实盘口推导「机构看好走向」：方向（欧赔隐含概率+亚盘水位佐证）+ 大小球（大小赔率对比）。
+    纯盘口口径、不依赖模型，并与模型预测对比标注一致/分歧。盘口缺失则不渲染对应行。
+    """
+    ms = d.get("market_snapshot") or {}
+    eu = (ms.get("欧赔") or {}).get("final") or {}
+    ya = (ms.get("亚值") or {}).get("final") or {}
+    ou = (ms.get("大小球") or {}).get("final") or {}
+
+    rows = []
+
+    # 方向：欧赔去水归一隐含概率，取最高一项
+    h, dr, a = eu.get("home"), eu.get("draw"), eu.get("away")
+    inst_dir = None
+    dir_txt = ""
+    try:
+        if h and dr and a:
+            ih, idr, ia = 1.0 / float(h), 1.0 / float(dr), 1.0 / float(a)
+            s = ih + idr + ia
+            pairs = [("主胜", ih / s, "var(--home)"), ("平局", idr / s, "var(--draw)"),
+                     ("客胜", ia / s, "var(--away)")]
+            pairs.sort(key=lambda x: x[1], reverse=True)
+            inst_dir, p_top, color = pairs[0]
+            dir_txt = f'<b style="color:{color}">{inst_dir}</b>（隐含 {_fmt_pct(p_top)}）'
+    except (TypeError, ValueError, ZeroDivisionError):
+        dir_txt = ""
+
+    # 亚盘水位佐证：低水一方为机构受注方
+    hw, aw = ya.get("home_water"), ya.get("away_water")
+    try:
+        if hw is not None and aw is not None and abs(float(hw) - float(aw)) >= 0.02:
+            side = "上盘(主)" if float(hw) < float(aw) else "下盘(客)"
+            dir_txt += f'，亚盘{side}低水 {_fmt_num(min(float(hw), float(aw)))} 受注'
+    except (TypeError, ValueError):
+        pass
+
+    if dir_txt:
+        model_dir = d.get("prediction") or ""
+        agree = ""
+        if inst_dir and model_dir:
+            agree = ('<span class="inst-ok">与模型一致</span>' if inst_dir == model_dir
+                     else '<span class="inst-diff">与模型分歧</span>')
+        rows.append(f'<div class="inst-line"><span class="inst-k">方向</span>'
+                    f'<span class="inst-v">{dir_txt} {agree}</span></div>')
+
+    # 大小球：低赔一方为机构看好侧
+    ov, un, line = ou.get("over"), ou.get("under"), ou.get("line")
+    try:
+        if ov and un:
+            ovf, unf = float(ov), float(un)
+            if abs(ovf - unf) < 0.04:
+                ou_txt = f'<b>中性</b>（大 {_fmt_num(ovf)} ≈ 小 {_fmt_num(unf)} @ {_fmt_line(line)}）'
+                inst_ou = None
+            else:
+                inst_ou = "大球" if ovf < unf else "小球"
+                ou_txt = f'<b>{inst_ou}</b>（大 {_fmt_num(ovf)} / 小 {_fmt_num(unf)} @ {_fmt_line(line)}）'
+            mou = d.get("over_under") or {}
+            model_ou = "大球" if (mou.get("over") or 0.0) >= (mou.get("under") or 0.0) else "小球"
+            agree = ""
+            if inst_ou:
+                agree = ('<span class="inst-ok">与模型一致</span>' if inst_ou == model_ou
+                         else '<span class="inst-diff">与模型分歧</span>')
+            rows.append(f'<div class="inst-line"><span class="inst-k">大小球</span>'
+                        f'<span class="inst-v">{ou_txt} {agree}</span></div>')
+    except (TypeError, ValueError):
+        pass
+
+    if not rows:
+        return ""
+    return (
+        '<div class="inst-box">\n'
+        '        <div class="inst-title">🏦 机构看好走向 <span>· 盘口隐含、非模型</span></div>\n        '
+        + "\n        ".join(rows)
+        + "\n      </div>"
+    )
+
+
 def _ou_row(d: dict) -> str:
     ou = d.get("over_under") or {}
     over = ou.get("over") or 0.0
@@ -270,147 +356,6 @@ def _total_goals_row(d: dict) -> str:
     if rest:
         body += f" / {rest}"
     return f'<div class="total-row">最可能总进球：{body}</div>'
-
-
-def _poisson_pmf(lam: float, k: int) -> float:
-    return math.exp(-lam) * lam ** k / math.factorial(k)
-
-
-def _direction_of(d: dict) -> str:
-    """预测方向：主胜/客胜/平局；缺失时按概率推断。"""
-    pred = (d.get("prediction") or d.get("predicted_winner") or "").strip()
-    if pred in ("主胜", "客胜", "平局"):
-        return pred
-    probs = d.get("all_probabilities") or {}
-    if probs:
-        return max(("主胜", "平局", "客胜"), key=lambda k: probs.get(k) or 0.0)
-    return ""
-
-
-DRAW_HINT_THRESHOLD = 0.30  # 平局概率达此值视为「有平局数据」，允许纳入平局比分
-
-
-def _allowed_outcomes(d: dict) -> set[str]:
-    """允许展示的胜负结果集合：默认仅预测方向；
-    当模型提示爆冷（中/高）时并入反向胜负 + 平局；当平局概率达标时并入平局。
-    """
-    direction = _direction_of(d)
-    if direction not in ("主胜", "客胜", "平局"):
-        return {"主胜", "平局", "客胜"}
-    allowed = {direction}
-    probs = d.get("all_probabilities") or {}
-    if (probs.get("平局") or 0.0) >= DRAW_HINT_THRESHOLD:
-        allowed.add("平局")
-    level = (d.get("upset_potential") or {}).get("level")
-    if level in ("中", "高"):
-        if direction == "主胜":
-            allowed.update({"客胜", "平局"})
-        elif direction == "客胜":
-            allowed.update({"主胜", "平局"})
-        else:
-            allowed.update({"主胜", "客胜"})
-    return allowed
-
-
-def _scores_for_side(d: dict) -> list[tuple[str, float]]:
-    """按方向 + 大小球判定，从泊松比分网格中筛选比分。
-    方向以预测胜负方为准：判主胜剔除客胜（反向爆冷）比分，判客胜剔除主胜比分，
-    判平局只留平局比分；大小球同侧（判大球只出大球比分，反之）。
-    例外：当模型提示爆冷（中/高）或平局概率达标时，按 _allowed_outcomes 放行
-    对应的平局 / 爆冷比分。无 λ 或无盘口线时回退到原始 top_scores（仍按允许集过滤）。
-    """
-    eg = d.get("expected_goals") or {}
-    lam_h, lam_a = eg.get("home"), eg.get("away")
-    ou = d.get("over_under") or {}
-    line = ou.get("line")
-    over_p, under_p = ou.get("over") or 0.0, ou.get("under") or 0.0
-    side = "大" if over_p >= under_p else "小"
-    allowed = _allowed_outcomes(d)
-
-    def _dir_ok(i: int, j: int) -> bool:
-        outcome = "主胜" if i > j else ("客胜" if i < j else "平局")
-        return outcome in allowed
-
-    if lam_h is None or lam_a is None or line is None:
-        fallback = []
-        for item in (d.get("top_scores") or [])[:6]:
-            if isinstance(item, (list, tuple)) and len(item) >= 2:
-                sc, p = str(item[0]), float(item[1])
-            elif isinstance(item, dict):
-                sc, p = str(item.get("score")), float(item.get("prob") or 0.0)
-            else:
-                continue
-            m = re.match(r"^(\d+)-(\d+)$", sc)
-            if m and not _dir_ok(int(m.group(1)), int(m.group(2))):
-                continue
-            fallback.append((sc, p))
-        return fallback[:3]
-    try:
-        lf = float(line)
-        lam_h, lam_a = float(lam_h), float(lam_a)
-    except (TypeError, ValueError):
-        return []
-
-    def _build(apply_dir: bool, apply_ou: bool) -> list[tuple[str, float]]:
-        grid: list[tuple[str, float]] = []
-        for i in range(8):
-            for j in range(8):
-                total = i + j
-                if apply_ou and side == "大" and total <= lf:
-                    continue
-                if apply_ou and side == "小" and total >= lf:
-                    continue
-                if apply_dir and not _dir_ok(i, j):
-                    continue
-                grid.append((f"{i}-{j}", _poisson_pmf(lam_h, i) * _poisson_pmf(lam_a, j)))
-        if not grid:
-            return []
-        # 在「盘口λ + 方向 + 大小球」三重约束的候选集内归一化，
-        # chip 显示的是「给定该约束下」的条件概率（概率高的比分）。
-        mass = sum(p for _, p in grid) or 1.0
-        grid = [(sc, p / mass) for sc, p in grid]
-        grid.sort(key=lambda x: x[1], reverse=True)
-        return grid[:3]
-
-    def _fallback_top_outcome() -> list[tuple[str, float]]:
-        """实在没有比分时，回退到胜负平中概率最高一侧的比分（不放开方向出反向爆冷）。"""
-        probs = d.get("all_probabilities") or {}
-        top = max(("主胜", "平局", "客胜"), key=lambda k: probs.get(k) or 0.0) if probs else "主胜"
-        return _scores_of_outcome(top)
-
-    def _scores_of_outcome(outcome: str) -> list[tuple[str, float]]:
-        grid: list[tuple[str, float]] = []
-        for i in range(8):
-            for j in range(8):
-                oc = "主胜" if i > j else ("客胜" if i < j else "平局")
-                if oc != outcome:
-                    continue
-                grid.append((f"{i}-{j}", _poisson_pmf(lam_h, i) * _poisson_pmf(lam_a, j)))
-        if not grid:
-            return []
-        mass = sum(p for _, p in grid) or 1.0
-        grid = [(sc, p / mass) for sc, p in grid]
-        grid.sort(key=lambda x: x[1], reverse=True)
-        return grid
-
-    # 优先「允许集 + 大小球」双约束，再退到仅方向。
-    primary = _build(True, True) or _build(True, False)
-    if not primary:
-        return _fallback_top_outcome()[:3]
-    # 比分不足 3 个：看胜平负第二高方向，从该方向补概率最大的比分凑足。
-    if len(primary) < 3:
-        probs = d.get("all_probabilities") or {}
-        ranked = sorted(("主胜", "平局", "客胜"), key=lambda k: probs.get(k) or 0.0, reverse=True)
-        have = {sc for sc, _ in primary}
-        for outcome in ranked[1:]:
-            for sc, p in _scores_of_outcome(outcome):
-                if sc not in have:
-                    primary.append((sc, p))
-                    have.add(sc)
-                    break
-            if len(primary) >= 3:
-                break
-    return primary[:3]
 
 
 def _scores_row(d: dict) -> str:
@@ -583,6 +528,9 @@ def render_card(d: dict, time: str | None, actual_score: str | None = None) -> s
         f"      {_ou_row(d)}",
         f"      {_odds_box(d)}",
     ]
+    lean = _institution_lean(d)
+    if lean:
+        parts.append(f"      {lean}")
     upset = _upset_block(d)
     if upset:
         parts.append(f"      {upset}")
@@ -605,61 +553,87 @@ def render_html(date: str, cards: list[str]) -> str:
 <title>世界杯 {date} 预测</title>
 <style>
   :root {{
-    --bg: #FFE6EF; --card: #FFF8FB; --card-strong: #FFD6E4; --line: #FFD0E0;
-    --text: #665860; --muted: #A89098; --title: #A86480; --accent: #F8C8DC;
-    --home: #B5708F; --draw: #E6A9C6; --away: #D38BA9;
-    --bar-text: #5C3A4A; --shadow: rgba(248,200,220,0.25);
+    --bg: #0A0E1A; --card: rgba(22,28,44,0.72); --card-strong: rgba(36,44,68,0.85); --line: rgba(120,140,190,0.16);
+    --text: #D9DEEC; --muted: #8089A3; --title: #E8C887; --accent: #6E8BFF;
+    --home: #4FD1B5; --draw: #E0B45C; --away: #F08CA8;
+    --bar-text: #0A0E1A; --shadow: rgba(0,0,0,0.45);
   }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ background: linear-gradient(180deg, #FFE6EF 0%, #FFF0F7 100%); background-attachment: fixed; color: var(--text); font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; padding: 28px 16px; line-height: 1.5; }}
-  header {{ text-align: center; margin-bottom: 24px; }}
-  header h1 {{ font-size: 22px; font-weight: 800; color: var(--title); }}
-  header .sub {{ color: var(--muted); font-size: 13px; margin-top: 6px; }}
+  body {{
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(110,139,255,0.14) 0%, transparent 55%),
+      radial-gradient(1000px 500px at 100% 0%, rgba(232,200,135,0.10) 0%, transparent 50%),
+      linear-gradient(170deg, #090C16 0%, #0D1222 45%, #0A0F1C 100%);
+    background-attachment: fixed; color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    padding: 36px 16px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+  }}
+  header {{ text-align: center; margin-bottom: 28px; }}
+  header h1 {{
+    font-size: 26px; font-weight: 800; letter-spacing: .5px;
+    background: linear-gradient(92deg, #F4DBA0 0%, #E8C887 35%, #C9A24F 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }}
+  header .sub {{ color: var(--muted); font-size: 13px; margin-top: 8px; letter-spacing: .2px; }}
   .meta-note {{ max-width: 880px; margin: 0 auto 24px; color: var(--muted); font-size: 12px; text-align: center; line-height: 1.7; }}
   .legend-banner {{
-    max-width: 880px; margin: 0 auto 24px; padding: 14px 18px;
-    background: linear-gradient(180deg, #FFF8FB 0%, #FFF0F7 100%); border: 1px solid var(--line);
-    border-radius: 16px; font-size: 12.5px; color: var(--text); line-height: 1.7;
-    box-shadow: 0 4px 14px var(--shadow);
+    max-width: 880px; margin: 0 auto 28px; padding: 16px 20px;
+    background: linear-gradient(160deg, rgba(28,35,56,0.72) 0%, rgba(18,23,38,0.72) 100%);
+    border: 1px solid var(--line); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-radius: 18px; font-size: 12.5px; color: var(--text); line-height: 1.75;
+    box-shadow: 0 10px 34px var(--shadow);
   }}
   .legend-banner b {{ color: var(--title); }}
   .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 24px; max-width: 880px; margin: 0 auto; }}
-  .card {{ background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 20px 20px 18px; box-shadow: 0 6px 18px var(--shadow); }}
+  .card {{
+    position: relative; background: var(--card); border: 1px solid var(--line);
+    border-radius: 18px; padding: 22px 20px 18px;
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 14px 40px var(--shadow), inset 0 1px 0 rgba(255,255,255,0.05);
+    transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+  }}
+  .card::before {{
+    content: ""; position: absolute; inset: 0; border-radius: 18px; padding: 1px;
+    background: linear-gradient(140deg, rgba(232,200,135,0.4), rgba(110,139,255,0.12) 40%, transparent 70%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; opacity: .5;
+  }}
+  .card:hover {{ transform: translateY(-4px); border-color: rgba(232,200,135,0.35); box-shadow: 0 20px 52px rgba(0,0,0,0.55); }}
   .matchup {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }}
-  .matchup .team {{ font-size: 17px; font-weight: 700; }}
+  .matchup .team {{ font-size: 17px; font-weight: 700; color: var(--text); }}
   .matchup .vs {{ color: var(--muted); font-size: 12px; }}
   .time {{ color: var(--muted); font-size: 12px; margin-bottom: 14px; }}
   .result-banner {{
     display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-    background: linear-gradient(180deg, #FFEAF3 0%, #FFD6E4 100%);
-    border: 1px solid var(--card-strong); border-radius: 12px;
+    background: linear-gradient(135deg, rgba(232,200,135,0.16) 0%, rgba(110,139,255,0.10) 100%);
+    border: 1px solid rgba(232,200,135,0.26); border-radius: 12px;
     padding: 9px 12px; margin-bottom: 12px;
   }}
   .result-banner .r-score {{ font-size: 15px; font-weight: 800; color: var(--title); }}
   .result-banner .r-total {{ margin-left: auto; font-size: 11.5px; color: var(--muted); }}
   .r-tag {{ font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 10px; }}
-  .r-hit {{ background: rgba(120,170,110,.22); color: #5C8A4A; }}
-  .r-miss {{ background: rgba(211,139,169,.24); color: var(--away); }}
-  .r-push {{ background: rgba(168,144,152,.18); color: var(--muted); }}
+  .r-hit {{ background: rgba(79,209,181,.18); color: var(--home); }}
+  .r-miss {{ background: rgba(240,140,168,.20); color: var(--away); }}
+  .r-push {{ background: rgba(128,137,163,.18); color: var(--muted); }}
   .verdict {{ display: inline-block; font-size: 13px; font-weight: 700; padding: 4px 14px; border-radius: 16px; margin-bottom: 12px; }}
-  .v-home {{ background: rgba(181,112,143,.16); color: var(--home); }}
-  .v-draw {{ background: rgba(230,169,198,.28); color: #B26088; }}
-  .v-away {{ background: rgba(211,139,169,.20); color: var(--away); }}
-  .bar {{ display: flex; height: 26px; border-radius: 10px; overflow: hidden; font-size: 11px; font-weight: 700; color: var(--bar-text); margin-bottom: 4px; }}
-  .b-home {{ background: var(--home); display: flex; align-items: center; justify-content: center; color: #FFF8FB; }}
-  .b-draw {{ background: var(--draw); display: flex; align-items: center; justify-content: center; }}
-  .b-away {{ background: var(--away); display: flex; align-items: center; justify-content: center; color: #FFF8FB; }}
+  .v-home {{ background: rgba(79,209,181,.16); color: var(--home); }}
+  .v-draw {{ background: rgba(224,180,92,.18); color: var(--draw); }}
+  .v-away {{ background: rgba(240,140,168,.16); color: var(--away); }}
+  .bar {{ display: flex; height: 26px; border-radius: 10px; overflow: hidden; font-size: 11px; font-weight: 700; color: var(--bar-text); margin-bottom: 4px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04); }}
+  .b-home {{ background: linear-gradient(180deg, #5FE0C4 0%, #3FB89E 100%); display: flex; align-items: center; justify-content: center; color: #07271F; }}
+  .b-draw {{ background: linear-gradient(180deg, #ECC66E 0%, #C99B45 100%); display: flex; align-items: center; justify-content: center; color: #2A1E04; }}
+  .b-away {{ background: linear-gradient(180deg, #F49BB4 0%, #D96E8E 100%); display: flex; align-items: center; justify-content: center; color: #2E0C18; }}
   .prob-legend {{ display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 14px; }}
   .total-row {{ font-size: 12.5px; color: var(--text); margin-bottom: 10px; }}
   .total-row b {{ color: var(--title); }}
   .scores-row {{ display: flex; gap: 8px; margin-bottom: 12px; }}
-  .chip {{ flex: 1; text-align: center; background: #FFF0F6; border: 1px solid var(--line); border-radius: 12px; padding: 8px 4px; }}
+  .chip {{ flex: 1; text-align: center; background: rgba(110,139,255,0.07); border: 1px solid var(--line); border-radius: 12px; padding: 8px 4px; }}
   .chip b {{ display: block; font-size: 15px; color: var(--title); }}
   .chip i {{ font-style: normal; color: var(--muted); font-size: 11px; }}
   .ou-row {{ font-size: 12px; color: var(--muted); margin-bottom: 12px; }}
   .ou-row b {{ color: var(--text); }}
   .odds-box {{
-    background: #FFF0F6; border: 1px solid var(--line);
+    background: rgba(12,16,28,0.5); border: 1px solid var(--line);
     border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; font-size: 11.5px;
   }}
   .odds-box .obx-title {{ font-size: 11px; color: var(--title); font-weight: 700; margin-bottom: 7px; letter-spacing: .3px; }}
@@ -669,23 +643,35 @@ def render_html(date: str, cards: list[str]) -> str:
   .odds-line .v {{ color: var(--text); text-align: right; flex: 1; font-variant-numeric: tabular-nums; }}
   .odds-line .v b {{ color: var(--title); }}
   .odds-line .v em {{ font-style: normal; color: var(--muted); }}
+  .inst-box {{
+    background: linear-gradient(135deg, rgba(232,200,135,0.10) 0%, rgba(110,139,255,0.07) 100%);
+    border: 1px solid rgba(232,200,135,0.22); border-radius: 12px;
+    padding: 11px 14px; margin-bottom: 12px; font-size: 11.5px;
+  }}
+  .inst-title {{ font-size: 11px; color: var(--title); font-weight: 700; margin-bottom: 7px; letter-spacing: .3px; }}
+  .inst-title span {{ color: var(--muted); font-weight: 400; }}
+  .inst-line {{ display: flex; gap: 8px; padding: 3px 0; align-items: baseline; }}
+  .inst-line .inst-k {{ color: var(--muted); flex: 0 0 42px; }}
+  .inst-line .inst-v {{ color: var(--text); flex: 1; line-height: 1.5; }}
+  .inst-ok {{ color: var(--home); font-weight: 700; margin-left: 4px; }}
+  .inst-diff {{ color: var(--away); font-weight: 700; margin-left: 4px; }}
   .tri-verdict {{
     font-size: 12px; color: var(--text); line-height: 1.55;
     border-radius: 12px; padding: 10px 12px; margin: 6px 0 2px;
   }}
-  .tri-diverge {{ background: rgba(211,139,169,.14); border-left: 3px solid var(--away); }}
-  .tri-aligned {{ background: rgba(181,112,143,.12); border-left: 3px solid var(--home); }}
-  .tri-mixed {{ background: rgba(168,144,152,.12); border-left: 3px solid var(--muted); }}
+  .tri-diverge {{ background: rgba(240,140,168,.12); border-left: 3px solid var(--away); }}
+  .tri-aligned {{ background: rgba(79,209,181,.12); border-left: 3px solid var(--home); }}
+  .tri-mixed {{ background: rgba(128,137,163,.12); border-left: 3px solid var(--muted); }}
   .tri-verdict .tag {{ font-weight: 700; }}
   .tri-diverge .tag {{ color: var(--away); }}
   .tri-aligned .tag {{ color: var(--home); }}
   .tri-mixed .tag {{ color: var(--muted); }}
   .upset-row {{ font-size: 12px; margin: 8px 0 2px; padding: 9px 12px; border-radius: 12px; }}
-  .upset-high {{ background: rgba(211,139,169,.20); border-left: 3px solid var(--away); color: var(--text); }}
+  .upset-high {{ background: rgba(240,140,168,.16); border-left: 3px solid var(--away); color: var(--text); }}
   .upset-high b {{ color: var(--away); }}
-  .upset-mid {{ background: rgba(230,169,198,.26); border-left: 3px solid var(--draw); color: var(--text); }}
-  .upset-mid b {{ color: #B26088; }}
-  footer {{ text-align: center; color: var(--muted); font-size: 12px; margin-top: 30px; }}
+  .upset-mid {{ background: rgba(224,180,92,.16); border-left: 3px solid var(--draw); color: var(--text); }}
+  .upset-mid b {{ color: var(--draw); }}
+  footer {{ text-align: center; color: var(--muted); font-size: 12px; margin-top: 36px; }}
 </style>
 </head>
 <body>
