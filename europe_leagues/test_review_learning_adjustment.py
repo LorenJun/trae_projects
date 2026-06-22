@@ -1093,6 +1093,19 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertLess(adjusted["over"], 0.56)
         self.assertGreater(adjusted["under"], 0.44)
 
+    def test_apply_review_over_under_adjustment_vetoed_by_under_low_water(self):
+        over_under = {"available": True, "line": 2.25, "over": 0.4967, "under": 0.5033}
+        adjusted, diag = self.service.apply_review_over_under_adjustment(
+            over_under=over_under,
+            league_code="world_cup",
+            review_learning={"over_under_bias": {"recommended_over_shift": 0.045}},
+            suppress_over_shift=True,
+        )
+        self.assertFalse(diag["applied"])
+        self.assertEqual(diag["reason"], "under_low_water_veto")
+        self.assertEqual(adjusted["over"], 0.4967)
+        self.assertEqual(adjusted["under"], 0.5033)
+
     def test_rerank_top_scores_applies_three_layer_score_adjustment(self):
         reranked, diag = self.service.rerank_top_scores(
             [("3-0", 0.18), ("2-1", 0.17), ("1-0", 0.16), ("2-0", 0.15)],
@@ -2001,6 +2014,55 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertFalse(signal["balanced_low_line_under_nudge"])
         self.assertNotIn("ou_low_line_balanced_under_nudge", signal["signals"])
 
+    def test_strength_mismatch_pushes_over_on_low_line(self):
+        signal = self.service.extract_over_under_market_signal(
+            {
+                "欧赔": {"final": {"home": 1.53, "draw": 4.1, "away": 6.1}},
+                "大小球": {
+                    "initial": {"line": 2.5, "over": 1.851, "under": 1.933},
+                    "final": {"line": 2.5, "over": 1.851, "under": 1.933},
+                },
+            }
+        )
+        self.assertTrue(signal["available"])
+        self.assertGreaterEqual(signal["fav_prob"], 0.60)
+        self.assertIn("ou_strength_mismatch_over_push", signal["signals"])
+        self.assertIsNotNone(signal["mismatch_over_push"])
+        self.assertGreater(signal["pace_shift"], 0.0)
+
+    def test_strength_mismatch_not_pushed_when_market_prices_under(self):
+        # 2.75 线、强队大热，但大小球盘口显式偏小（钱压小球）：
+        # 修正1 不应再用「强弱差」盲目推大去对抗市场的小球定价。
+        signal = self.service.extract_over_under_market_signal(
+            {
+                "欧赔": {"final": {"home": 1.3, "draw": 5.5, "away": 9.0}},
+                "大小球": {
+                    "initial": {"line": 2.75, "over": 2.05, "under": 1.75},
+                    "final": {"line": 2.75, "over": 2.10, "under": 1.72},
+                },
+            }
+        )
+        self.assertTrue(signal["available"])
+        self.assertEqual(signal["goal_pressure"], "under")
+        self.assertGreaterEqual(signal["fav_prob"], 0.60)
+        self.assertIsNone(signal["mismatch_over_push"])
+        self.assertNotIn("ou_strength_mismatch_over_push", signal["signals"])
+
+    def test_strong_favorite_blocks_low_line_under_nudge(self):
+        signal = self.service.extract_over_under_market_signal(
+            {
+                "欧赔": {"final": {"home": 1.9, "draw": 3.4, "away": 4.25}},
+                "大小球": {
+                    "initial": {"line": 2.25, "over": 1.93, "under": 1.91},
+                    "final": {"line": 2.25, "over": 1.93, "under": 1.91},
+                },
+            }
+        )
+        self.assertTrue(signal["available"])
+        self.assertGreater(signal["strength_mismatch"], 0.15)
+        self.assertFalse(signal["balanced_low_line_under_nudge"])
+        self.assertNotIn("ou_low_line_balanced_under_nudge", signal["signals"])
+
     def test_extract_over_under_market_signal_detects_line_down_over_backed_divergence(self):
         signal = self.service.extract_over_under_market_signal(
             {
@@ -2185,6 +2247,168 @@ class ReviewLearningAdjustmentTest(unittest.TestCase):
         self.assertTrue(diag["refined"]["reused_market_signal"])
         self.assertEqual(diag["refined"]["market_signal_shift"], 0.0)
         self.assertLess(over_under["over"], 0.54)
+
+    def _conviction_inference(self):
+        return InferencePipelineService(
+            league_config={},
+            team_manager=None,
+            match_intelligence_engine=_DummyMatchIntelligenceEngine(),
+            odds_reference=None,
+            upset_analyzer=None,
+            model_fusion=None,
+            poisson_model=_DummyPoissonModel(),
+            weight_adjuster=None,
+            league_ou_learning=None,
+            postprocess_service=self.service,
+        )
+
+    def test_ou_always_neutral_policy_never_commits(self):
+        inference = self._conviction_inference()
+        # 方案 A：即便边际很大且市场真实同向，恒定中性策略也不提交方向。
+        diag = inference._assess_over_under_conviction(
+            {"over": 0.60, "under": 0.40, "line": 2.5},
+            {
+                "大小球": {
+                    "initial": {"line": 2.5, "over": 1.85, "under": 2.0},
+                    "final": {"line": 2.5, "over": 1.80, "under": 2.10},
+                }
+            },
+        )
+        self.assertFalse(diag["commit"])
+        self.assertEqual(diag["reason"], "ou_neutral_policy")
+
+    def test_real_market_over_under_is_neutral_under_policy(self):
+        inference = self._conviction_inference()
+        over_under, diag = inference.build_real_market_over_under(
+            home_lambda=1.6,
+            away_lambda=1.5,
+            predicted_outcome="平局",
+            strength_diff=0,
+            current_odds={
+                "大小球": {
+                    "initial": {"line": 2.5, "over": 1.85, "under": 2.0},
+                    "final": {"line": 2.5, "over": 1.80, "under": 2.10},
+                }
+            },
+            analysis_context={},
+            match_intelligence={},
+            realtime_context_applied={},
+        )
+        self.assertTrue(over_under["available"])
+        self.assertTrue(over_under["ou_neutral"])
+        self.assertEqual(over_under["neutral_reason"], "ou_neutral_policy")
+        self.assertFalse(diag["conviction"]["commit"])
+
+    def test_ou_policy_config_file_overrides_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_dir = Path(temp_dir) / "config"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            (config_dir / "prediction_policy.json").write_text(
+                json.dumps({"over_under": {"always_neutral": False, "min_conviction_margin": 0.2}}),
+                encoding="utf-8",
+            )
+            inference = InferencePipelineService(
+                league_config={},
+                team_manager=None,
+                match_intelligence_engine=_DummyMatchIntelligenceEngine(),
+                odds_reference=None,
+                upset_analyzer=None,
+                model_fusion=None,
+                poisson_model=_DummyPoissonModel(),
+                weight_adjuster=None,
+                league_ou_learning=None,
+                postprocess_service=self.service,
+                base_dir=temp_dir,
+            )
+        self.assertFalse(inference.ou_always_neutral)
+        self.assertEqual(inference.ou_min_conviction_margin, 0.2)
+        # 配置关闭恒定中性后，强证据场次应恢复提交方向。
+        diag = inference._assess_over_under_conviction(
+            {"over": 0.65, "under": 0.35, "line": 2.5},
+            {
+                "大小球": {
+                    "initial": {"line": 2.5, "over": 1.85, "under": 2.0},
+                    "final": {"line": 2.5, "over": 1.80, "under": 2.10},
+                }
+            },
+        )
+        self.assertTrue(diag["commit"])
+        self.assertEqual(diag["reason"], "committed")
+
+    def test_ou_conviction_low_margin_does_not_commit(self):
+        inference = self._conviction_inference()
+        inference.ou_always_neutral = False
+        diag = inference._assess_over_under_conviction(
+            {"over": 0.52, "under": 0.48, "line": 2.5}, None
+        )
+        self.assertFalse(diag["commit"])
+        self.assertEqual(diag["reason"], "low_margin")
+
+    def test_ou_conviction_reverse_money_alone_cannot_commit(self):
+        inference = self._conviction_inference()
+        inference.ou_always_neutral = False
+        diag = inference._assess_over_under_conviction(
+            {"over": 0.58, "under": 0.42, "line": 2.0},
+            {
+                "大小球": {
+                    "initial": {"line": 2.5, "over": 2.0, "under": 1.8175},
+                    "final": {"line": 2.0, "over": 1.81, "under": 2.0525},
+                }
+            },
+        )
+        self.assertFalse(diag["commit"])
+        self.assertEqual(diag["reason"], "reverse_money_only")
+        self.assertTrue(diag["reverse_money"])
+
+    def test_ou_conviction_genuine_agreement_commits(self):
+        inference = self._conviction_inference()
+        inference.ou_always_neutral = False
+        diag = inference._assess_over_under_conviction(
+            {"over": 0.58, "under": 0.42, "line": 2.5},
+            {
+                "大小球": {
+                    "initial": {"line": 2.5, "over": 1.85, "under": 2.0},
+                    "final": {"line": 2.5, "over": 1.80, "under": 2.10},
+                }
+            },
+        )
+        self.assertTrue(diag["commit"])
+        self.assertEqual(diag["reason"], "committed")
+        self.assertFalse(diag["reverse_money"])
+        self.assertEqual(diag["market_side"], "over")
+        self.assertEqual(diag["model_side"], "over")
+
+    def test_ou_conviction_strong_margin_without_market_is_neutral(self):
+        inference = self._conviction_inference()
+        inference.ou_always_neutral = False
+        diag = inference._assess_over_under_conviction(
+            {"over": 0.60, "under": 0.40, "line": 2.5}, None
+        )
+        self.assertFalse(diag["commit"])
+        self.assertEqual(diag["reason"], "no_market_corroboration")
+
+    def test_real_market_over_under_marks_neutral_when_margin_too_small(self):
+        inference = self._conviction_inference()
+        inference.ou_always_neutral = False
+        over_under, diag = inference.build_real_market_over_under(
+            home_lambda=1.4,
+            away_lambda=1.35,
+            predicted_outcome="平局",
+            strength_diff=0,
+            current_odds={
+                "大小球": {
+                    "initial": {"line": 2.5, "over": 1.95, "under": 1.95},
+                    "final": {"line": 2.5, "over": 1.95, "under": 1.95},
+                }
+            },
+            analysis_context={},
+            match_intelligence={},
+            realtime_context_applied={},
+        )
+        self.assertTrue(over_under["available"])
+        self.assertTrue(over_under["ou_neutral"])
+        self.assertEqual(over_under["neutral_reason"], "low_margin")
+        self.assertFalse(diag["conviction"]["commit"])
 
     def test_build_three_layer_runtime_context_tolerates_invalid_strength_diff(self):
         context = self.service.build_three_layer_runtime_context(

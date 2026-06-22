@@ -354,6 +354,20 @@ def extract_current_odds(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         company_mode = totals.get("company_mode")
         if company_mode:
             totals_out["company_mode"] = company_mode
+    lineup_raw = snapshot.get("阵容", {}) or {}
+    lineup_out: Dict[str, Any] = {}
+    if isinstance(lineup_raw, dict) and lineup_raw.get("found"):
+        for k in (
+            "home_squad_value_wan", "away_squad_value_wan",
+            "home_starting_value_wan", "away_starting_value_wan",
+            "home_injury_count", "away_injury_count",
+            "home_injury_value_wan", "away_injury_value_wan",
+            "home_starting_xi", "away_starting_xi",
+        ):
+            if lineup_raw.get(k) is not None:
+                lineup_out[k] = lineup_raw.get(k)
+        if lineup_out:
+            lineup_out["available"] = True
     market_status = {
         "by_market": {
             "欧赔": _market_fetch_status(snapshot.get("欧赔"), market_key="欧赔", normalized_block=europe_out),
@@ -380,6 +394,7 @@ def extract_current_odds(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "亚值": asian_out,
         "大小球": totals_out,
         "凯利": {"initial": kelly.get("initial", {}), "final": kelly.get("final", {})},
+        "阵容": lineup_out,
         "离散率": snapshot.get("离散率", {}) or {},
         "market_fetch_status": market_status["by_market"],
         "market_coverage": market_status["market_coverage"],

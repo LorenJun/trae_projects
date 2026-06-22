@@ -1050,8 +1050,14 @@ class PredictionPersistenceService:
 
         over_under = result.get('over_under') if isinstance(result.get('over_under'), dict) else {}
         predicted_ou = result.get('predicted_ou') if isinstance(result.get('predicted_ou'), dict) else {}
-        ou_available = bool(over_under) and bool(over_under.get('available', True))
-        if ou_available:
+        ou_neutral = bool(over_under.get('stakes_neutral') or over_under.get('ou_neutral'))
+        ou_available = bool(over_under) and bool(over_under.get('available', True)) and not ou_neutral
+        if ou_neutral:
+            ou_line = over_under.get('line')
+            line_label = f'{ou_line:g}' if isinstance(ou_line, (int, float)) else '?'
+            neutral_tag = '动机扭曲' if over_under.get('stakes_neutral') else '证据不足'
+            ou_summary = f'中性 {line_label} ({neutral_tag})'
+        elif ou_available:
             over_prob = float(over_under.get('over') or 0.0)
             under_prob = float(over_under.get('under') or 0.0)
             ou_line = over_under.get('line')
@@ -1171,6 +1177,19 @@ class PredictionPersistenceService:
 
             if match:
                 existing_entries = self._extract_memory_entry_lines(match.group('body'))
+                matched_existing = [
+                    existing_entry
+                    for existing_entry in existing_entries
+                    if self._memory_entry_matches_aliases(existing_entry, entry_prefixes, memory_id_markers)
+                ]
+                # 已回填赛果的比赛不允许被重新预测覆盖，避免已完赛记录被打回未完赛。
+                if any(self._memory_entry_is_completed(item) for item in matched_existing):
+                    logger.info(
+                        '跳过 MEMORY 覆盖：%s vs %s 已有赛果，保留已完赛记录',
+                        home_team or normalized_home,
+                        away_team or normalized_away,
+                    )
+                    return
                 retained_entries = [
                     existing_entry
                     for existing_entry in existing_entries
@@ -1248,6 +1267,8 @@ class PredictionPersistenceService:
         over_under_available = (
             bool(over_under)
             and bool(over_under.get('available', True))
+            and not over_under.get('stakes_neutral')
+            and not over_under.get('ou_neutral')
             and isinstance(over_under.get('line'), (int, float))
         )
         predicted_ou = None

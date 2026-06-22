@@ -35,13 +35,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from domain.score_projection import (  # noqa: E402
-    DRAW_HINT_THRESHOLD,
-    allowed_outcomes as _allowed_outcomes,
-    direction_of as _direction_of,
-    project_scores_for_side as _scores_for_side,
-)
-
 PRED_DIR = PROJECT_ROOT / "world_cup" / "analysis" / "predictions"
 TEAMS_MD = PROJECT_ROOT / "world_cup" / "teams_2026.md"
 
@@ -263,11 +256,14 @@ def _institution_lean(d: dict) -> str:
                 inst_ou = "大球" if ovf < unf else "小球"
                 ou_txt = f'<b>{inst_ou}</b>（大 {_fmt_num(ovf)} / 小 {_fmt_num(unf)} @ {_fmt_line(line)}）'
             mou = d.get("over_under") or {}
-            model_ou = "大球" if (mou.get("over") or 0.0) >= (mou.get("under") or 0.0) else "小球"
+            model_neutral = bool(mou.get("ou_neutral") or mou.get("stakes_neutral"))
             agree = ""
-            if inst_ou:
+            if inst_ou and not model_neutral:
+                model_ou = "大球" if (mou.get("over") or 0.0) >= (mou.get("under") or 0.0) else "小球"
                 agree = ('<span class="inst-ok">与模型一致</span>' if inst_ou == model_ou
                          else '<span class="inst-diff">与模型分歧</span>')
+            elif inst_ou and model_neutral:
+                agree = '<span class="inst-diff">模型中性·不下注</span>'
             rows.append(f'<div class="inst-line"><span class="inst-k">大小球</span>'
                         f'<span class="inst-v">{ou_txt} {agree}</span></div>')
     except (TypeError, ValueError):
@@ -288,6 +284,19 @@ def _ou_row(d: dict) -> str:
     over = ou.get("over") or 0.0
     under = ou.get("under") or 0.0
     line = ou.get("line")
+    if ou.get("stakes_neutral"):
+        # 动机扭曲场次：大小球单边不可信，展示为中性/不建议。
+        return (
+            f'<div class="ou-row">大小球：<b style="color:var(--draw)">中性·不建议</b> '
+            f'@ {_fmt_line(line)} <span style="color:var(--muted)">（出线情景失真）</span></div>'
+        )
+    if ou.get("ou_neutral"):
+        # 大小球转中性：方案 A 恒定中性(无 edge) 或证据不足，均展示为中性/不建议。
+        tag = "无统计优势" if ou.get("neutral_reason") == "ou_neutral_policy" else "盘口信号不足"
+        return (
+            f'<div class="ou-row">大小球：<b style="color:var(--draw)">中性·不建议</b> '
+            f'@ {_fmt_line(line)} <span style="color:var(--muted)">（{tag}）</span></div>'
+        )
     side = "大球" if over >= under else "小球"
     main = max(over, under)
     other = min(over, under)
@@ -316,9 +325,10 @@ def _total_goals_row(d: dict) -> str:
     ou = d.get("over_under") or {}
     line = ou.get("line")
     over_p, under_p = ou.get("over") or 0.0, ou.get("under") or 0.0
+    ou_neutral = bool(ou.get("ou_neutral") or ou.get("stakes_neutral"))
 
     same_side = []
-    if buckets and line is not None:
+    if buckets and line is not None and not ou_neutral:
         try:
             lf = float(line)
             side = "大" if over_p >= under_p else "小"
@@ -358,11 +368,24 @@ def _total_goals_row(d: dict) -> str:
     return f'<div class="total-row">最可能总进球：{body}</div>'
 
 
+def _model_scores(d: dict) -> list[tuple[str, float]]:
+    """直接取模型预测的原始比分 top_scores，网页不再做任何方向/大小球处理。"""
+    out: list[tuple[str, float]] = []
+    for item in (d.get("top_scores") or [])[:3]:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            sc, p = str(item[0]), float(item[1] or 0.0)
+        elif isinstance(item, dict):
+            sc, p = str(item.get("score")), float(item.get("prob") or 0.0)
+        else:
+            continue
+        if sc:
+            out.append((sc, p))
+    return out
+
+
 def _scores_row(d: dict) -> str:
     chips = []
-    for sc, p in _scores_for_side(d):
-        if not sc:
-            continue
+    for sc, p in _model_scores(d):
         chips.append(f'<span class="chip"><b>{html.escape(str(sc))}</b><i>{_fmt_pct(p)}</i></span>')
     if not chips:
         return ""
@@ -454,6 +477,36 @@ def _upset_block(d: dict) -> str:
     )
 
 
+def _stakes_block(d: dict) -> str:
+    """出线情景 / 动机扭曲提示：只识别情景并提示对冲，不预测剧本方向。"""
+    sc = d.get("stakes_scenario") or {}
+    if not isinstance(sc, dict) or not sc.get("distortion"):
+        return ""
+    summary = html.escape(str(sc.get("summary") or "动机扭曲"))
+    penalty = sc.get("confidence_penalty") or 0.0
+    scale = sc.get("stake_scale")
+    bits = []
+    try:
+        if float(penalty):
+            bits.append(f"已降信心 {abs(float(penalty)):.2f}")
+    except (TypeError, ValueError):
+        pass
+    try:
+        if scale is not None:
+            bits.append("已清仓" if float(scale) == 0.0 else f"仓位×{float(scale):g}")
+    except (TypeError, ValueError):
+        pass
+    if sc.get("ou_neutral"):
+        bits.append("大小球转中性")
+    tail = ("；".join(bits) + "。") if bits else ""
+    return (
+        '<div class="upset-row upset-mid">\n'
+        f'        <b>🎭 出线情景预警</b>：{summary}。<span style="color:var(--muted)">'
+        f'仅对冲不确定性、不预测剧本方向；{tail}</span>\n'
+        "      </div>"
+    )
+
+
 def _result_banner(d: dict, actual_score: str | None) -> str:
     """已完赛场次：渲染真实赛果 + 方向/比分/大小球命中标记。"""
     if not actual_score or not re.match(r"^\d+-\d+$", actual_score):
@@ -463,14 +516,16 @@ def _result_banner(d: dict, actual_score: str | None) -> str:
     actual_dir = "主胜" if hg > ag else ("客胜" if ag > hg else "平局")
     pred = d.get("prediction") or ""
     dir_hit = pred == actual_dir
-    # 比分命中：真实比分在展示的同侧 Top3 预测比分内
-    top = [sc for sc, _ in _scores_for_side(d)]
+    # 比分命中：真实比分在模型预测的 Top3 原始比分内
+    top = [sc for sc, _ in _model_scores(d)]
     score_hit = actual_score in top
-    # 大小球命中
+    # 大小球命中：中性场（方案A/动机扭曲/证据不足）不下注、不计命中
     ou = d.get("over_under") or {}
     line = ou.get("line")
     ou_txt = ""
-    if line is not None:
+    if ou.get("ou_neutral") or ou.get("stakes_neutral"):
+        ou_txt = '<span class="r-tag r-push">大小中性·不计</span>'
+    elif line is not None:
         over_p, under_p = ou.get("over") or 0.0, ou.get("under") or 0.0
         pred_side = "大" if over_p >= under_p else "小"
         try:
@@ -531,6 +586,9 @@ def render_card(d: dict, time: str | None, actual_score: str | None = None) -> s
     lean = _institution_lean(d)
     if lean:
         parts.append(f"      {lean}")
+    stakes = _stakes_block(d)
+    if stakes:
+        parts.append(f"      {stakes}")
     upset = _upset_block(d)
     if upset:
         parts.append(f"      {upset}")

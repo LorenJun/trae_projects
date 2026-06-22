@@ -101,6 +101,38 @@ class DirectionFromAsianHandicapTest(unittest.TestCase):
         h, a = map(int, scores[0][0].split("-"))
         self.assertLess(h + a, 2.5, f"{scores[0][0]} 首选应遵守小球 < 2.5")
 
+    def test_weak_ou_signal_rescues_direction_mode_score(self):
+        # 大小球接近五五开（|over-under| < 0.10）：硬切不应丢掉方向上的众数比分。
+        # λ_home=3.03/λ_away=0.74、大3.5 仅 0.527：原始众数 3-0(total=3≤3.5) 会被大球硬切剔除。
+        d = _base(
+            all_probabilities={"主胜": 0.67, "平局": 0.18, "客胜": 0.15},
+            expected_goals={"home": 3.03, "away": 0.74},
+            over_under={"over": 0.527, "under": 0.473, "line": 3.5},
+            prediction="主胜",
+        )
+        scores = project_scores_for_side(d)
+        self.assertTrue(scores)
+        # 弱信号软化应救回被硬切的众数比分 3-0，且其概率最高位列首选。
+        self.assertEqual(scores[0][0], "3-0")
+        # 比分方向仍须为主胜（软化只放宽大小球，不动方向）。
+        for sc, _ in scores:
+            h, a = map(int, sc.split("-"))
+            self.assertGreater(h, a, f"{sc} 应为主胜比分")
+
+    def test_strong_ou_signal_keeps_hard_cut(self):
+        # 大小球信号强（|over-under| >= 0.10）：硬切保持决定性，不救回反向大小球比分。
+        d = _base(
+            all_probabilities={"主胜": 0.46, "平局": 0.27, "客胜": 0.27},
+            expected_goals={"home": 1.82, "away": 1.25},
+            over_under={"over": 0.70, "under": 0.30, "line": 2.25},
+            prediction="主胜",
+        )
+        scores = project_scores_for_side(d)
+        self.assertTrue(scores)
+        for sc, _ in scores:
+            h, a = map(int, sc.split("-"))
+            self.assertGreater(h + a, 2.25, f"{sc} 强信号判大球应 > 2.25")
+
     def test_realtime_matrix_fallback_path(self):
         # 口诀来源回退：tri_axis 缺失时从 realtime.context_applied 取
         d = _base(prediction="平局")
@@ -115,6 +147,91 @@ class DirectionFromAsianHandicapTest(unittest.TestCase):
         }
         self.assertEqual(direction_of(d), "主胜")
         self.assertEqual(allowed_outcomes(d), {"主胜"})
+
+
+class EndToEndVerdictFromRealClassifierTest(unittest.TestCase):
+    """端到端：真实分类器 classify_market_operation_pattern 从模拟盘口产出口诀，
+    再喂给 score_projection，确认诱导类口诀把比分方向从「主胜」真正翻走。
+    """
+
+    def _classify(self, asian_handicap, market_sentiment, european_odds):
+        from domain.inference import InferencePipelineService
+        svc = object.__new__(InferencePipelineService)  # 分类器只用静态辅助方法
+        pat = svc.classify_market_operation_pattern(
+            european_odds=european_odds,
+            asian_handicap=asian_handicap,
+            ou_signal={"available": True, "signals": []},
+            market_sentiment=market_sentiment,
+        )
+        return pat.get("direction_handicap_matrix")
+
+    def _scores_payload(self, dh, probs, over_under, eg):
+        return {
+            "tri_axis_consistency": {"direction_handicap": dh},
+            "all_probabilities": probs,
+            "over_under": over_under,
+            "expected_goals": eg,
+            "prediction": "主胜",
+        }
+
+    def test_lure_up_home_fade_flips_direction_off_home_win(self):
+        # 升盘(让球加深) + 上盘(主)高水 + 欧赔主队升(被看衰) → 诱上·主难赢
+        dh = self._classify(
+            asian_handicap={
+                "initial": {"handicap": -0.5, "home_water": 0.95, "away_water": 0.95},
+                "final": {"handicap": -0.75, "home_water": 1.97, "away_water": 1.85},
+            },
+            market_sentiment={
+                "market_favorite": "home", "handicap_initial": -0.5, "handicap_final": -0.75,
+                "fav_odds_move": +0.05, "dog_odds_move": -0.03, "signals": [],
+            },
+            european_odds={"home": 2.10, "draw": 3.30, "away": 3.60},
+        )
+        self.assertIsNotNone(dh)
+        self.assertEqual(dh.get("verdict_dir"), "lure_up_home_fade")
+
+        d = self._scores_payload(
+            dh,
+            probs={"主胜": 0.42, "平局": 0.33, "客胜": 0.25},  # 模型本来看主胜
+            over_under={"over": 0.58, "under": 0.42, "line": 2.5},
+            eg={"home": 1.5, "away": 1.2},
+        )
+        self.assertNotEqual(direction_of(d), "主胜")  # 方向被翻走
+        self.assertNotIn("主胜", allowed_outcomes(d))
+        for sc, _ in project_scores_for_side(d):
+            h, a = map(int, sc.split("-"))
+            self.assertFalse(h > a, f"{sc} 不应为主胜比分（强侧不赢）")
+
+    def test_lure_up_hot_death_flips_direction_off_home_win(self):
+        # 升盘(让球加深) + 上盘(主)低水 + 欧赔主队未降 → 大热必死
+        dh = self._classify(
+            asian_handicap={
+                "initial": {"handicap": -0.5, "home_water": 0.90, "away_water": 0.90},
+                "final": {"handicap": -0.75, "home_water": 1.80, "away_water": 2.05},
+            },
+            market_sentiment={
+                "market_favorite": "home", "handicap_initial": -0.5, "handicap_final": -0.75,
+                "fav_odds_move": +0.01, "dog_odds_move": -0.01, "signals": [],
+            },
+            european_odds={"home": 1.65, "draw": 3.60, "away": 5.00},  # 主队大热
+        )
+        self.assertIsNotNone(dh)
+        self.assertEqual(dh.get("verdict_dir"), "lure_up_hot_death")
+
+        d = self._scores_payload(
+            dh,
+            probs={"主胜": 0.55, "平局": 0.27, "客胜": 0.18},  # 模型强烈看主胜(大热)
+            over_under={"over": 0.46, "under": 0.54, "line": 2.5},  # 6规则判小球
+            eg={"home": 1.5, "away": 1.0},
+        )
+        self.assertNotEqual(direction_of(d), "主胜")  # 大热被做死，方向翻走
+        self.assertNotIn("主胜", allowed_outcomes(d))
+        scores = project_scores_for_side(d)
+        self.assertTrue(scores)
+        for sc, _ in scores:
+            h, a = map(int, sc.split("-"))
+            self.assertFalse(h > a, f"{sc} 不应为主胜比分（大热必死）")
+            self.assertLessEqual(h + a, 2, f"{sc} 判小球总进球应≤2")
 
 
 if __name__ == "__main__":

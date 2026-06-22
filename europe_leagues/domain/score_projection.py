@@ -143,6 +143,12 @@ def project_scores_for_side(d: Dict[str, Any]) -> List[Tuple[str, float]]:
     line = ou.get("line")
     over_p, under_p = ou.get("over") or 0.0, ou.get("under") or 0.0
     side = "大" if over_p >= under_p else "小"
+    # 大小球转中性（方案A恒定中性 / 出线情景失真 / 证据不足）时，单边不可信，
+    # 不得用大小球硬切比分网格，仅按方向投影。
+    ou_neutral = bool(ou.get("ou_neutral") or ou.get("stakes_neutral"))
+    # 大小球信号强度：over/under 越接近五五开，硬切越不该一刀切掉方向上的众数比分。
+    ou_margin = abs(over_p - under_p)
+    OU_WEAK_MARGIN = 0.10
     allowed = allowed_outcomes(d)
 
     def _dir_ok(i: int, j: int) -> bool:
@@ -208,9 +214,29 @@ def project_scores_for_side(d: Dict[str, Any]) -> List[Tuple[str, float]]:
         top = max(("主胜", "平局", "客胜"), key=lambda k: probs.get(k) or 0.0) if probs else "主胜"
         return _scores_of_outcome(top)
 
-    primary = _build(True, True) or _build(True, False)
+    primary = (_build(True, False) if ou_neutral else _build(True, True)) or _build(True, False)
     if not primary:
         return _fallback_top_outcome()[:3]
+    # 弱信号软化：大小球接近五五开（|over-under| < OU_WEAK_MARGIN）时，硬切会把方向上真正的
+    # 众数比分（如大3.5仅0.53却剔除了3-0）一刀切掉，观感过度自信且自相矛盾。
+    # 此时救回被 OU 硬切剔除的、方向允许集内概率最高的比分，并入候选后按方向网格的
+    # 原始泊松质量统一重算相对概率（避免「OU∩方向」与「纯方向」两套归一基底打架）。
+    # 中性场已不做 OU 硬切，无需软化救回。
+    if not ou_neutral and ou_margin < OU_WEAK_MARGIN:
+        have = {sc for sc, _ in primary}
+        rescued_sc = next((sc for sc, _ in _build(True, False) if sc not in have), None)
+        if rescued_sc is not None:
+            candidates = list(have) + [rescued_sc]
+            raw: Dict[str, float] = {}
+            for sc in candidates:
+                ci, cj = (int(x) for x in sc.split("-"))
+                raw[sc] = _poisson_pmf(lam_h, ci) * _poisson_pmf(lam_a, cj)
+            mass = sum(raw.values()) or 1.0
+            primary = sorted(
+                ((sc, raw[sc] / mass) for sc in candidates),
+                key=lambda x: x[1],
+                reverse=True,
+            )[:3]
     if len(primary) < 3:
         probs = d.get("all_probabilities") or {}
         allowed = allowed_outcomes(d)

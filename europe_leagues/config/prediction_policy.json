@@ -1,0 +1,8 @@
+{
+  "_comment": "预测策略配置。由 domain/inference.py 的 InferencePipelineService 在初始化时加载，覆盖代码内默认值；缺失或字段非法时回退默认。",
+  "over_under": {
+    "_comment": "大小球判定策略。方案 A：always_neutral=true 时恒定中性、不提交任何单边方向，且不计入准确率。依据：36 场反解诊断显示模型 total_λ 紧贴盘口线(均差 −0.04)、盘口本身居中(实际大球率 47%)、模型偏离盘口命中率仅 37%(负 alpha)。如需恢复证据闸门，将 always_neutral 改为 false；min_conviction_margin 仅在 always_neutral=false 时生效。",
+    "always_neutral": true,
+    "min_conviction_margin": 0.10
+  }
+}

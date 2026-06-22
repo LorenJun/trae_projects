@@ -850,7 +850,11 @@ class ResultManager:
         over_under = entry.get('over_under') if isinstance(entry.get('over_under'), dict) else {}
         fp_over_under = full_prediction.get('over_under') if isinstance(full_prediction.get('over_under'), dict) else {}
         predicted_ou = self._normalize_predicted_ou_value(entry.get('predicted_ou'))
-        if not predicted_ou:
+        ou_neutral = bool(
+            over_under.get('stakes_neutral') or over_under.get('ou_neutral')
+            or fp_over_under.get('stakes_neutral') or fp_over_under.get('ou_neutral')
+        )
+        if not predicted_ou and not ou_neutral:
             derived_line = over_under.get('line')
             if derived_line in (None, ''):
                 derived_line = fp_over_under.get('line')
@@ -3752,10 +3756,14 @@ class ResultManager:
         predicted_score = '/'.join(predicted_scores) if predicted_scores else ''
         predicted_ou = None
         over_under = enhanced_pred.get('over_under', {})
+        ou_neutral = isinstance(over_under, dict) and bool(
+            over_under.get('stakes_neutral') or over_under.get('ou_neutral')
+        )
         over_under_available = (
             isinstance(over_under, dict)
             and bool(over_under.get('available', True))
             and isinstance(over_under.get('line'), (int, float))
+            and not ou_neutral
         )
         if over_under_available:
             predicted_ou = {
@@ -3785,6 +3793,8 @@ class ResultManager:
                 if over_under_available and enhanced_pred.get('over_under', {}).get('over', 0) > enhanced_pred.get('over_under', {}).get('under', 0)
                 else '小球'
                 if over_under_available
+                else '中性'
+                if ou_neutral
                 else '待补真实盘口'
             ),
             'predicted_ou': predicted_ou,

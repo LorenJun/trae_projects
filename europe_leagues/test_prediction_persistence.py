@@ -1129,6 +1129,52 @@ class PredictionMemoryCleanupTest(unittest.TestCase):
         self.assertIn("巴塞罗那 vs 皇家贝蒂斯", content)
         self.assertNotIn("巴萨 vs 贝蒂斯", content)
 
+    def test_update_prediction_memory_keeps_completed_entry_on_repredict(self):
+        self.memory_path.write_text(
+            "\n".join(
+                [
+                    "# Test Memory",
+                    "",
+                    "<!-- prediction-memory:start -->",
+                    "> 滚动预测准确率： 已完赛 1 场 | 胜平负 0.0% (0/1) | 比分 0.0% (0/1) | 大小球 0.0% (0/1)",
+                    "",
+                    "#### 已完赛",
+                    "",
+                    "- [world_cup|2026-06-20|土耳其|巴拉圭] 2026-06-20 世界杯 土耳其 vs 巴拉圭 | MatchID: 1315858",
+                    "  预测: 主胜 (51.5%) | 比分: 2-1 > 1-2 > 2-2 | 大小球: 大球 2.25 (66.9%)",
+                    "  ■ 赛果: 客胜 0-1",
+                    "  · MatchID: 1315858 | 记忆ID: world_cup|2026-06-20|土耳其|巴拉圭 | 更新时间: 2026-06-20 16:18:55",
+                    "<!-- prediction-memory:end -->",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        service = PredictionPersistenceService(base_dir=str(self.base_dir), cache=None, result_manager=None)
+        service.update_prediction_memory(
+            {
+                "league_code": "world_cup",
+                "league_name": "世界杯",
+                "match_date": "2026-06-20",
+                "home_team": "土耳其",
+                "away_team": "巴拉圭",
+                "prediction": "主胜",
+                "match_id": "1315858",
+                "memory_id": "1315858",
+                "confidence": 0.547,
+                "top_scores": [("2-1", 0.2), ("1-2", 0.1)],
+                "over_under": {"available": False, "reason": "missing_real_market_line"},
+            }
+        )
+
+        content = self.memory_path.read_text(encoding="utf-8")
+        self.assertIn("#### 已完赛", content)
+        self.assertNotIn("#### 未完赛", content)
+        self.assertIn("■ 赛果: 客胜 0-1", content)
+        self.assertIn("预测: 主胜 (51.5%)", content)
+        self.assertNotIn("预测: 主胜 (54.7%)", content)
+
     def test_update_prediction_memory_prefers_real_match_id_over_synthetic_duplicate(self):
         self.memory_path.write_text(
             "\n".join(

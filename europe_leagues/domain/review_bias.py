@@ -300,6 +300,7 @@ class ReviewBiasService:
         league_code: Optional[str],
         review_learning: Optional[Dict[str, Any]],
         match_intelligence: Optional[Dict[str, Any]] = None,
+        suppress_over_shift: bool = False,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         diag: Dict[str, Any] = {"applied": False, "signals": []}
         if not isinstance(over_under, dict) or not over_under.get("available"):
@@ -328,6 +329,12 @@ class ReviewBiasService:
         effect = ""
         shift = 0.0
         if near_focus_line and under_prob >= over_prob:
+            if suppress_over_shift:
+                # 市场已明确「钱压小球」（小球侧底水 / 大小球盘口显式偏小）：
+                # 禁用复盘纠偏的「补大球」上抬，避免把已压到小球侧的 over 概率重新顶回大球。
+                # 仅否决这一条 over-push 分支，under-protection 分支不受影响。
+                diag["reason"] = "under_low_water_veto"
+                return adjusted, diag
             shift = min(0.08, base_over_shift + motivation_bonus)
             adjusted["over"] = min(1.0, over_prob + shift)
             adjusted["under"] = max(0.0, under_prob - shift)

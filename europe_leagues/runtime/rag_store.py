@@ -90,6 +90,9 @@ def _parse_actual_total_goals(actual_score: str) -> Optional[int]:
 def _predict_ou_direction(over_under: Dict[str, Any]) -> str:
     if not isinstance(over_under, dict):
         return ""
+    # 方案A中性场（ou_neutral / stakes_neutral）不落单边方向，避免污染 RAG 案例的预测方向字段。
+    if over_under.get("ou_neutral") or over_under.get("stakes_neutral"):
+        return ""
     over = _safe_float(over_under.get("over")) or 0.0
     under = _safe_float(over_under.get("under")) or 0.0
     if over <= 0 and under <= 0:

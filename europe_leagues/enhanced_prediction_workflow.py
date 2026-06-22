@@ -26,6 +26,7 @@ from domain.upset import UpsetAnalyzer
 from domain.writeback import TeamsWritebackGateway
 from runtime.paths import get_default_paths
 from collectors.aliasing import load_team_alias_map, normalize_team_name
+from domain.group_stakes import assess_stakes_scenario
 
 # 添加项目路径
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -402,6 +403,7 @@ class EnhancedPredictor:
             league_ou_learning=self.league_ou_learning,
             postprocess_service=self.postprocess_service,
             rating_service=self.rating_service,
+            base_dir=self.base_dir,
         )
         self.runtime_profile = get_runtime_profile(
             ["data_collector", "match_analyzer", "odds_analyzer"]
@@ -807,6 +809,32 @@ class EnhancedPredictor:
         fusion_result = core["fusion_result"]
         lightweight_rag_decision = core.get("lightweight_rag_decision") or {}
 
+        # 5.4 世界杯小组赛"出线情景 / 动机扭曲"对冲：末轮已出线躺平、控分、默契球等场次
+        # 常规盘口/模型会系统性失真。此处只识别情景并对冲不确定性（降信心 / 降仓 / 大小球转中性），
+        # 绝不预测剧本方向。可被 analysis_context['stakes_scenario'] 手动覆盖（--context-file）。
+        stakes_scenario = {}
+        if league_code == 'world_cup':
+            try:
+                manual = analysis_context.get('stakes_scenario') if isinstance(analysis_context, dict) else None
+                if isinstance(manual, dict) and manual:
+                    stakes_scenario = manual
+                else:
+                    stakes_scenario = assess_stakes_scenario(
+                        home=home_team,
+                        away=away_team,
+                        teams_md_path=str(self.paths.teams_file(league_code)),
+                    )
+            except Exception as e:
+                stakes_scenario = {'distortion': False, 'type': 'normal', 'summary': f'情景判定异常: {e}'}
+            if stakes_scenario.get('distortion'):
+                penalty = float(stakes_scenario.get('confidence_penalty') or 0.0)
+                if penalty:
+                    confidence = max(0.0, min(1.0, confidence + penalty))
+                if stakes_scenario.get('ou_neutral') and isinstance(over_under, dict):
+                    over_under = dict(over_under)
+                    over_under['stakes_neutral'] = True
+            realtime["context_applied"]["stakes_scenario"] = stakes_scenario
+
         # 5.5 凯利仓位建议（基于模型概率 + 欧赔/竞彩赔率；输出半凯利封顶5% + 1/4凯利封顶3%）
         staking = {}
         try:
@@ -818,6 +846,12 @@ class EnhancedPredictor:
                 cap_quarter=0.03,
             )
             recommended = kelly.get("recommended", {}) if isinstance(kelly, dict) else {}
+            # 动机扭曲场次按 stake_scale 下调仓位（默契球/双方躺平直接归零）。
+            if stakes_scenario.get('distortion') and isinstance(recommended, dict) and recommended.get('fraction'):
+                scale = float(stakes_scenario.get('stake_scale', 1.0) or 0.0)
+                recommended = dict(recommended)
+                recommended['fraction'] = round(float(recommended['fraction']) * scale, 6)
+                recommended['stakes_scaled'] = scale
             staking = {"kelly": kelly, "recommended": recommended}
             realtime["context_applied"]["staking_kelly"] = {"available": bool(kelly.get("available")), "recommended": recommended}
         except Exception as e:
@@ -881,6 +915,8 @@ class EnhancedPredictor:
             current_odds=current_odds,
         )
         result['tri_axis_consistency'] = core.get('tri_axis_consistency')
+        if stakes_scenario:
+            result['stakes_scenario'] = stakes_scenario
 
         # 硬性闸门：必须拿到真实盘口数据（澳客实时快照）才允许预测。
         # over_under.available 仅在通过真实盘口校验（line_source ∈ snapshot_final/initial）后才置 True，

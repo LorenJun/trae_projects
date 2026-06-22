@@ -664,6 +664,7 @@ class MatchIntelligenceEngine:
         signals: List[str] = []
         trap_side = "none"
         trap_strength = 0.0
+        fav_cold_draw_risk = 0.0
         if home_score >= 0.05:
             signals.append("主胜赔率/水位走强")
         if away_score >= 0.05:
@@ -754,6 +755,20 @@ class MatchIntelligenceEngine:
                 signals.append("客队热门拉低但客水同步抬升，诱客风险增强")
                 trap_side = "away"
                 trap_strength = max(trap_strength, min(0.16, 0.055 + (a_water_f - a_water_i) * 0.22))
+            # 升盘升水（庄家加深让球却同步抬热门方水位）：独立于 home/away_score 的净额对冲，
+            # 因为"欧赔收紧(利好热门)"与"主水反升(利空热门)"会在 home_score 里相消成中性，
+            # 把这个高平局形态抹平。这里用未对冲的原始盘口加深量+热门水位升幅单独识别。
+            if hcp_i_raw is not None and hcp_f_raw is not None:
+                hcp_deepen = abs(hcp_f_raw) - abs(hcp_i_raw)
+                if hcp_deepen >= 0.2:
+                    fav_water_rise = None
+                    if hcp_f_raw < -0.06 and h_water_i is not None and h_water_f is not None:
+                        fav_water_rise = h_water_f - h_water_i
+                    elif hcp_f_raw > 0.06 and a_water_i is not None and a_water_f is not None:
+                        fav_water_rise = a_water_f - a_water_i
+                    if fav_water_rise is not None and fav_water_rise >= 0.05:
+                        fav_cold_draw_risk = min(0.18, 0.06 + hcp_deepen * 0.12 + fav_water_rise * 0.18)
+                        signals.append("升盘升水：庄家加深让球却抬热门水位，热门易被冷平")
             asian_direction, asian_strength, _ = direction_from_scores(asian_scores, min_top=0.03, min_gap=0.018)
 
         if "庄家有防平倾向" in signals:
@@ -883,6 +898,7 @@ class MatchIntelligenceEngine:
                     "reason": reason,
                     "trap_side": trap_side,
                     "strength": round(trap_strength, 4),
+                    "fav_cold_draw_risk": round(fav_cold_draw_risk, 4),
                 },
                 "capital_flow": {
                     "source": "odds_water_kelly_proxy",
@@ -923,6 +939,61 @@ class MatchIntelligenceEngine:
         )
         return out
 
+    @staticmethod
+    def _derive_lineup_edge(current_odds: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """okooo 阵容(form.php) 首发身价 + 缺阵 → 主客实力偏置(home_adv/away_adv 增量)。
+
+        身价差用对数比值压缩极端值（6x 差距不至于把 λ 顶到上限），缺阵按人数+身价
+        损失折算。返回的 home_edge/away_edge 与既有 quant_adjustment 的 adv 同量纲，
+        由调用方累加后统一截断，避免与 key_players/possession 重复计权。
+        """
+        out: Dict[str, Any] = {"available": False, "home_edge": 0.0, "away_edge": 0.0, "signals": []}
+        if not isinstance(current_odds, dict):
+            return out
+        lineup = current_odds.get("阵容")
+        if not isinstance(lineup, dict) or not (lineup.get("available") or lineup.get("found")):
+            return out
+        hv = MatchIntelligenceEngine._to_float(lineup.get("home_starting_value_wan"))
+        av = MatchIntelligenceEngine._to_float(lineup.get("away_starting_value_wan"))
+        if not hv or not av or hv <= 0 or av <= 0:
+            return out
+        import math
+
+        # 身价对数比：±0.06 上限（约对应 4x 以上差距才打满）
+        value_edge = max(-0.06, min(0.06, math.log(hv / av) * 0.05))
+        home_edge = value_edge
+        away_edge = -value_edge
+        signals: List[str] = []
+        if abs(value_edge) >= 0.012:
+            ratio = hv / av if hv >= av else av / hv
+            stronger = "主" if hv >= av else "客"
+            signals.append(f"首发身价{stronger}强 {max(hv, av):.0f}万 vs {min(hv, av):.0f}万 (~{ratio:.1f}x)")
+
+        # 缺阵：人数 + 身价损失，转成对对方的相对加成
+        h_inj_n = MatchIntelligenceEngine._to_float(lineup.get("home_injury_count")) or 0.0
+        a_inj_n = MatchIntelligenceEngine._to_float(lineup.get("away_injury_count")) or 0.0
+        h_inj_v = MatchIntelligenceEngine._to_float(lineup.get("home_injury_value_wan")) or 0.0
+        a_inj_v = MatchIntelligenceEngine._to_float(lineup.get("away_injury_value_wan")) or 0.0
+        # 缺阵权重以首发总身价为基准做归一，避免不同量级球队不可比
+        h_loss = (a_inj_n * 0.006) + (a_inj_v / max(hv, av) * 0.20)  # 客队缺阵 → 利好主队
+        a_loss = (h_inj_n * 0.006) + (h_inj_v / max(hv, av) * 0.20)  # 主队缺阵 → 利好客队
+        inj_edge = max(-0.05, min(0.05, h_loss - a_loss))
+        home_edge += inj_edge
+        away_edge -= inj_edge
+        if h_inj_n or a_inj_n:
+            signals.append(f"缺阵 主{int(h_inj_n)}人/{h_inj_v:.0f}万 vs 客{int(a_inj_n)}人/{a_inj_v:.0f}万")
+
+        out.update({
+            "available": True,
+            "home_edge": round(home_edge, 4),
+            "away_edge": round(away_edge, 4),
+            "value_edge": round(value_edge, 4),
+            "injury_edge": round(inj_edge, 4),
+            "home_starting_value_wan": hv,
+            "away_starting_value_wan": av,
+            "signals": signals,
+        })
+        return out
 
     def _build_match_intelligence(
         self,
@@ -1008,6 +1079,14 @@ class MatchIntelligenceEngine:
         injury_edge = (float(away_strength.get("injured_count", 0)) - float(home_strength.get("injured_count", 0))) / 10.0
         home_adv += injury_edge * 0.12
         away_adv -= injury_edge * 0.12
+        # okooo 阵容(form.php) 首发身价 + 临场缺阵：仅在抓到真实首发时叠加，
+        # 与上面的 key_players/possession/strength 缺阵分量量纲一致，统一在末尾截断。
+        lineup_edge = self._derive_lineup_edge(current_odds)
+        if lineup_edge.get("available"):
+            home_adv += float(lineup_edge.get("home_edge") or 0.0)
+            away_adv += float(lineup_edge.get("away_edge") or 0.0)
+            for s in lineup_edge.get("signals") or []:
+                signals.append(s)
         mot_edge = (home_mot.get("score", 75.0) - away_mot.get("score", 75.0)) / 100.0
         home_adv += mot_edge * 0.20
         away_adv -= mot_edge * 0.20
@@ -1048,6 +1127,7 @@ class MatchIntelligenceEngine:
         psychology_label = str(psychology.get("label") or "unknown")
         trap_side = str(psychology.get("trap_side") or "none")
         trap_strength = float(psychology.get("strength") or 0.0)
+        fav_cold_draw_risk = float(psychology.get("fav_cold_draw_risk") or 0.0)
         flow_scale = 1.0
         if trap_side == flow_dir and trap_strength > 0:
             flow_scale = max(0.35, 1.0 - trap_strength * 3.2)
@@ -1084,6 +1164,9 @@ class MatchIntelligenceEngine:
             home_adv += min(0.016, 0.004 + trap_strength * 0.10)
             draw_bias += min(0.02, 0.006 + trap_strength * 0.12)
             signals.append("庄家心理识别为诱客，抑制客队方向过热")
+        if fav_cold_draw_risk > 0:
+            # 升盘升水：温和上调平局质量，不硬翻 argmax（受 draw_bias 上限 0.05 统一约束）。
+            draw_bias += min(0.02, 0.006 + fav_cold_draw_risk * 0.08)
         resonance = market.get("market_resonance") if isinstance(market.get("market_resonance"), dict) else {}
         resonance_label = str(resonance.get("label") or "balanced")
         resonance_score = float(resonance.get("resonance_score") or 0.0)
@@ -1236,6 +1319,13 @@ class MatchIntelligenceEngine:
                 "resonance_prob_delta_away": round(resonance_prob_delta_away, 4),
                 "resonance_prob_delta_draw": round(resonance_prob_delta_draw, 4),
                 "resonance_ou_delta": round(max(-0.05, min(0.05, resonance_ou_delta)), 4),
+                "lineup_edge": {
+                    "available": bool(lineup_edge.get("available")),
+                    "home_edge": round(float(lineup_edge.get("home_edge") or 0.0), 4),
+                    "away_edge": round(float(lineup_edge.get("away_edge") or 0.0), 4),
+                    "value_edge": round(float(lineup_edge.get("value_edge") or 0.0), 4),
+                    "injury_edge": round(float(lineup_edge.get("injury_edge") or 0.0), 4),
+                },
             },
         }
 

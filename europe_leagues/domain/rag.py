@@ -43,6 +43,10 @@ class HybridRAGService:
         market_snapshot: Optional[Dict[str, Any]],
     ) -> str:
         over_under = current_over_under if isinstance(current_over_under, dict) else {}
+        # 方案A中性场（ou_neutral / stakes_neutral）大小球无 edge，不给方向，
+        # 避免 RAG 叙事产出「大小球可优先关注X方向」的单边建议、也不据此偏置案例匹配。
+        if over_under.get("ou_neutral") or over_under.get("stakes_neutral"):
+            return ""
         over_prob = HybridRAGService._safe_float(over_under.get("over"))
         under_prob = HybridRAGService._safe_float(over_under.get("under"))
         if over_prob is not None and under_prob is not None and abs(over_prob - under_prob) > 1e-9:

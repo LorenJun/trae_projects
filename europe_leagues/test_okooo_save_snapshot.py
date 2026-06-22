@@ -17,6 +17,7 @@ from okooo_save_snapshot import (
     _find_match_id_from_schedule_cache,
     _is_blocked_text,
     _is_verification_required_payload,
+    _market_is_usable,
     _mobile_league_url,
     _navigate_schedule_to_month,
     _normalize_okooo_league_name,
@@ -25,6 +26,7 @@ from okooo_save_snapshot import (
     _run_with_retries,
     _run_with_verification_reentry,
     _select_best_schedule_row,
+    _snapshot_has_usable_odds,
     _team_aliases,
     _time_tokens,
 )
@@ -1137,6 +1139,52 @@ class OkoooSaveSnapshotTest(unittest.TestCase):
                 )
 
         mock_cache.assert_not_called()
+
+
+class SnapshotUsableOddsGuardTest(unittest.TestCase):
+    """熔断/空盘口保护：判定一次抓取是否拿到了真实可用盘口。"""
+
+    def _circuit_open_market(self):
+        return {
+            "final": {
+                "blocked": True,
+                "verification_required": True,
+                "status": "verification_required",
+                "error": "ttl_circuit_open",
+                "breaker_open": True,
+            }
+        }
+
+    def test_market_is_usable_rejects_circuit_open(self):
+        self.assertFalse(_market_is_usable(self._circuit_open_market()))
+
+    def test_market_is_usable_rejects_empty_and_non_dict(self):
+        self.assertFalse(_market_is_usable({}))
+        self.assertFalse(_market_is_usable({"final": {}}))
+        self.assertFalse(_market_is_usable(None))
+
+    def test_market_is_usable_accepts_real_quote(self):
+        good = {"final": {"home": 2.0149, "draw": 3.3296, "away": 3.8134}}
+        self.assertTrue(_market_is_usable(good))
+
+    def test_snapshot_has_usable_odds_false_when_all_blocked(self):
+        payload = {
+            "欧赔": self._circuit_open_market(),
+            "亚值": self._circuit_open_market(),
+            "大小球": self._circuit_open_market(),
+        }
+        self.assertFalse(_snapshot_has_usable_odds(payload))
+
+    def test_snapshot_has_usable_odds_true_when_any_market_usable(self):
+        payload = {
+            "欧赔": self._circuit_open_market(),
+            "亚值": {"final": {"handicap_text": "半球", "home_water": 2.03, "away_water": 1.91}},
+            "大小球": self._circuit_open_market(),
+        }
+        self.assertTrue(_snapshot_has_usable_odds(payload))
+
+    def test_snapshot_has_usable_odds_false_on_empty_payload(self):
+        self.assertFalse(_snapshot_has_usable_odds({}))
 
 
 if __name__ == "__main__":

@@ -165,7 +165,20 @@ def format_score_ou_note(prediction: Dict[str, Any]) -> str:
         line = over_under.get('line')
         over_prob = over_under.get('over')
         under_prob = over_under.get('under')
-        if isinstance(line, (int, float)) and isinstance(over_prob, (int, float)) and isinstance(under_prob, (int, float)):
+        if over_under.get('stakes_neutral'):
+            # 动机扭曲场次：大小球单边不可信，降级为"中性/不建议"。
+            if isinstance(line, (int, float)):
+                over_under_note = f'大小:中性{line:g}(动机扭曲)'
+            else:
+                over_under_note = '大小:中性(动机扭曲)'
+        elif over_under.get('ou_neutral'):
+            # 大小球转中性：方案 A 恒定中性(无 edge) 或证据不足，均不给单边方向。
+            neutral_tag = '不下注' if over_under.get('neutral_reason') == 'ou_neutral_policy' else '证据不足'
+            if isinstance(line, (int, float)):
+                over_under_note = f'大小:中性{line:g}({neutral_tag})'
+            else:
+                over_under_note = f'大小:中性({neutral_tag})'
+        elif isinstance(line, (int, float)) and isinstance(over_prob, (int, float)) and isinstance(under_prob, (int, float)):
             side = '大' if over_prob >= under_prob else '小'
             over_under_note = f'大小:{side}{line:g}({max(over_prob, under_prob):.2f})'
 
@@ -241,7 +254,12 @@ def build_prediction_note(prediction: Dict[str, Any]) -> str:
     # 备注内联，去掉分句分隔符里的换行风险并限长，避免撑爆单行备注
     narrative = re.sub(r'\s+', '', narrative)
     narrative_note = f'解读:{narrative[:120]}' if narrative else ''
-    return f"预测:{prediction_text} 信心:{confidence:.2f} {score_ou_note} {upset_note}{(' ' + dyn) if dyn else ''}{(' ' + match_id_note) if match_id_note else ''}{(' ' + narrative_note) if narrative_note else ''}".strip()
+    stakes_note = ''
+    stakes = prediction.get('stakes_scenario')
+    if isinstance(stakes, dict) and stakes.get('distortion'):
+        summary = _sanitize_note_fragment(stakes.get('summary')) or '动机扭曲'
+        stakes_note = f'情景:{summary}'
+    return f"预测:{prediction_text} 信心:{confidence:.2f} {score_ou_note} {upset_note}{(' ' + stakes_note) if stakes_note else ''}{(' ' + dyn) if dyn else ''}{(' ' + match_id_note) if match_id_note else ''}{(' ' + narrative_note) if narrative_note else ''}".strip()
 
 
 def update_teams_md_prediction_notes(

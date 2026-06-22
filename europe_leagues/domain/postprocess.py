@@ -419,12 +419,14 @@ class PredictionPostprocessService:
         league_code: Optional[str],
         review_learning: Optional[Dict[str, Any]],
         match_intelligence: Optional[Dict[str, Any]] = None,
+        suppress_over_shift: bool = False,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         return self.review_bias.apply_review_over_under_adjustment(
             over_under=over_under,
             league_code=league_code,
             review_learning=review_learning,
             match_intelligence=match_intelligence,
+            suppress_over_shift=suppress_over_shift,
         )
 
     @staticmethod
@@ -615,6 +617,25 @@ class PredictionPostprocessService:
             goal_pressure = 'under'
         direction = 1.0 if goal_pressure == 'over' else -1.0 if goal_pressure == 'under' else 0.0
         pace_shift = direction * (abs(line_delta) * 0.12 + abs(bias_delta) * 0.36 + abs(bias_final) * 0.10)
+        # 欧赔终盘强弱差：用于大小球结构修正（强队大胜倾向走大、势均才偏小）。
+        # fav_prob = 去水归一后强侧（主/客取高者）获胜隐含概率；mismatch = 主客胜率差。
+        fav_prob = None
+        mismatch = 0.0
+        euro = current_odds.get('欧赔') if isinstance(current_odds, dict) else None
+        euro_final = euro.get('final') if isinstance(euro, dict) and isinstance(euro.get('final'), dict) else {}
+        euro_home = self._safe_float(euro_final.get('home'))
+        euro_draw = self._safe_float(euro_final.get('draw'))
+        euro_away = self._safe_float(euro_final.get('away'))
+        if (
+            euro_home and euro_draw and euro_away
+            and euro_home > 1.01 and euro_draw > 1.01 and euro_away > 1.01
+        ):
+            inv_sum = 1.0 / euro_home + 1.0 / euro_draw + 1.0 / euro_away
+            if inv_sum > 0:
+                prob_home = (1.0 / euro_home) / inv_sum
+                prob_away = (1.0 / euro_away) / inv_sum
+                fav_prob = max(prob_home, prob_away)
+                mismatch = abs(prob_home - prob_away)
         # 盘水背离：降盘却把大球水位压低（暗钱买大），或升盘却把小球水位压低。
         # 明面盘口与暗钱方向相反 → 视为诱导信号，给被加注一侧额外加成。
         # 加成强度按香港水位档位缩放：底水(低水)最强、中水折半、高水基本忽略。
@@ -688,6 +709,28 @@ class PredictionPostprocessService:
                         'side': 'under', 'boost': round(boost, 6),
                         'water_tier': under_water_tier.get('tier'), 'hk_water': under_water_tier.get('hk_water'),
                     }
+        # 修正1（实力悬殊→推大）：复盘 6-19 三场强弱分明的对决（瑞士4-1、加拿大6-0）模型却判小球。
+        # 当强侧获胜隐含概率显著高（fav_prob ≥ 0.60）、盘线不高（≤2.75）、且大小球盘口本身中性，
+        # 给 over 侧正向 pace_shift：强队进攻碾压倾向打出超盘线的总进球。
+        # 关键约束：仅在 goal_pressure == 'balanced'（市场无大小球倾向）时触发。
+        # 若市场已显式压小球（goal_pressure == 'under'，如 2.75 线的葡萄牙vs刚果 bias≈-0.05），
+        # 不能用「强弱差」盲目推大去对抗市场的小球定价——那会抹掉正确的小球边际、并挡住修正3。
+        mismatch_over_push = None
+        if (
+            fav_prob is not None
+            and fav_prob >= 0.60
+            and final_line <= 2.75
+            and goal_pressure == 'balanced'
+            and ou_line_water_divergence is None
+        ):
+            boost = min(0.045, (fav_prob - 0.60) * 0.30 + 0.012)
+            if boost > 1e-6:
+                pace_shift += boost
+                signals.append('ou_strength_mismatch_over_push')
+                mismatch_over_push = {
+                    'side': 'over', 'boost': round(boost, 6),
+                    'fav_prob': round(fav_prob, 4),
+                }
         balanced_high_line_over_nudge = False
         if (
             goal_pressure == 'balanced'
@@ -705,14 +748,51 @@ class PredictionPostprocessService:
             )
             balanced_high_line_over_nudge = True
             signals.append('ou_high_line_balanced_over_nudge')
+        # 修正3（静态水位分层→推小）：6-19 墨西哥vs韩国复盘——盘口未动、小球侧终盘 1.85(港水0.85=底水)、
+        # 大球侧 1.95(中水)，钱明显压小球，但 bias_final=-0.026 落在 balanced 带、又超出低线偏小规则的
+        # |bias|≤0.02 闸门 → 全部规则失灵，base λ 误判「大58%」。补一条「静态水位档位不对称」识别：
+        # 低线(≤2.75) + 小球侧底水 + 大球侧非底水 + 非统治级强队(fav_prob<0.60) + 无任何买大信号 → 推小。
+        under_low_water_nudge = None
+        under_tier = under_water_tier.get('tier')
+        over_tier = over_water_tier.get('tier')
+        if (
+            goal_pressure != 'over'
+            and not balanced_high_line_over_nudge
+            and mismatch_over_push is None
+            and (fav_prob is None or fav_prob < 0.60)
+            and final_line <= 2.75
+            and under_water_tier.get('available')
+            and under_tier == 'low'
+            and over_tier in ('mid', 'high')
+            and 'over_water_drop' not in signals
+            and ou_line_water_divergence is None
+            and ou_line_down_low_water_trap is None
+            and line_delta <= 0.0
+        ):
+            under_hk = under_water_tier.get('hk_water') or 0.85
+            over_hk = over_water_tier.get('hk_water') or 0.95
+            water_gap = max(0.0, float(over_hk) - float(under_hk))
+            boost = min(0.024, water_gap * 0.15 + 0.012)
+            if boost > 1e-6:
+                pace_shift -= boost
+                signals.append('ou_low_line_under_low_water')
+                under_low_water_nudge = {
+                    'side': 'under', 'boost': round(boost, 6),
+                    'under_hk': round(float(under_hk), 4), 'over_hk': round(float(over_hk), 4),
+                }
         # 复盘特征（24场）：低盘线（小组赛常见 2.0–2.5）+ 中性水位（大小赔率几乎对开，
         # 庄家无倾向）+ 盘口未升、无暗钱买大信号 → 实际几乎一边倒走小（3/3）。
         # 与上面的「高线均势诱大」对称：低线均势更应偏小。仅在无任何 over 加成时生效，
         # 给一个小幅负 pace_shift 把比分往小格局收。
+        # 修正2（势均护栏）：6-19 复盘发现强弱悬殊的大胜场（如瑞士/加拿大）会被误判小球，
+        # 故仅在双方实力接近（mismatch ≤ 0.15）且修正1未推大时才允许偏小。
         balanced_low_line_under_nudge = False
         if (
             goal_pressure == 'balanced'
             and not balanced_high_line_over_nudge
+            and under_low_water_nudge is None
+            and mismatch_over_push is None
+            and mismatch <= 0.15
             and final_line <= 2.5
             and abs(bias_final) <= 0.02
             and line_delta <= 0.0
@@ -741,6 +821,10 @@ class PredictionPostprocessService:
             'pace_shift': round(pace_shift, 6),
             'balanced_high_line_over_nudge': balanced_high_line_over_nudge,
             'balanced_low_line_under_nudge': balanced_low_line_under_nudge,
+            'under_low_water_nudge': under_low_water_nudge,
+            'mismatch_over_push': mismatch_over_push,
+            'fav_prob': round(fav_prob, 6) if fav_prob is not None else None,
+            'strength_mismatch': round(mismatch, 6),
             'ou_line_water_divergence': ou_line_water_divergence,
             'ou_line_down_low_water_trap': ou_line_down_low_water_trap,
             'ou_flat_water_nudge': ou_flat_water_nudge,

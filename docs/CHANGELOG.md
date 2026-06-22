@@ -63,6 +63,21 @@ OU 操盘 6 规则本就经 `pace_shift → target_total → λ`（`inference.py
 
 `domain/postprocess.py` 的 `extract_over_under_market_signal` 新增与既有 `balanced_high_line_over_nudge`（高线均势诱大）对称的规则：`goal_pressure == balanced` 且终盘线 ≤2.5、`|bias_final| ≤ 0.02`、未升盘、无任何 over 暗钱/背离/诱多加成时，给一个小幅负 `pace_shift`（−0.008 ～ −0.016）把比分往小格局收，追加信号 `ou_low_line_balanced_under_nudge`。回测在 24 场上触发 1 场（巴西vs摩洛哥），方向正确，零误报。
 
+### 3. 澳客阵容（首发身价 + 缺阵）永久接入预测链并驱动 λ（`form.php` → 身价/缺阵 → 主客 λ）
+
+把澳客「阵容」标签（`https://m.okooo.com/match/form.php?MatchID=<id>`）正式接入快照采集与正式预测链，用首发身价对比与缺阵损失微调主客进攻强度 λ，让实力差/临场减员能体现到胜平负、比分与大小球概率上。
+
+- 采集（`okooo_save_snapshot.py`）：`local-chrome` 点开「阵容」标签 → 8× `scrollBy` 触发懒加载 → 回滚顶部解析 `document.body.innerText`，抽出首发身价/总身价/缺阵人数与身价损失/首发名单（统一归一到「万」）。修复 `_extract_all_markets_with_fallback`（`main()` 实际入口）重建 bundle 时丢掉 `lineup` 的问题，在校验返回与正常返回两路都带上 `lineup`，payload 新增 `阵容` 键。
+- 传输（`okooo_live_snapshot.py`）：`extract_current_odds` 把快照 `阵容` 归一到 `current_odds["阵容"]`（`found` → `available`），随 `match.odds_data` 流入正式预测链。
+- 调 λ（`domain/intelligence.py`）：新增 `_derive_lineup_edge`——首发身价对数比 `log(hv/av)*0.05`（封顶 ±0.06）得 `value_edge`，缺阵按「对方缺阵助我」计 `人数×0.006 + 身价损失/max身价×0.20`（封顶 ±0.05）得 `injury_edge`，合成主客 `home_adv/away_adv` 增量并入 `quant_adjustment`，最终 `home/away_lambda_scale = clip(1.0 + adv×0.6, 0.90~1.10)`；`quant_adjustment.lineup_edge` 落诊断字段，并把「首发身价/缺阵」摘要追加为研判 signal。
+- 验证：捷克 vs 南非（`MatchID=1315854`）首发身价 8938万 vs 1345万（~6.6x）、南非缺阵 2 人 → `home_lambda_scale=1.0454 / away_lambda_scale=0.9546`（主胜 49.6%→45.6% 后随其他链路收敛，记忆条目追加风险行）。
+
+新增 `test_lineup_lambda_adjustment.py`（12 例）覆盖传输（含未找到/缺字段跳过）与 λ-edge（等身价无偏置/强弱单调+封顶/缺阵助对手+封顶/不可用安全/真实捷克南非）。全量 470 测试通过（skipped=1）。
+
+关联文件：
+- `europe_leagues/okooo_save_snapshot.py`、`europe_leagues/okooo_live_snapshot.py`
+- `europe_leagues/domain/intelligence.py`、`europe_leagues/test_lineup_lambda_adjustment.py`
+
 ---
 
 ## 2026-06-17

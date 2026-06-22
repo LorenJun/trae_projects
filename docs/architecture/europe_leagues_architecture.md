@@ -230,7 +230,7 @@ flowchart TB
 | 报告服务 | `domain/reporting.py` | 预测报告格式化与 RAG 记忆解释输出 |
 | 文本写回 | `domain/writeback.py` | 写回 `teams_2025-26.md` 备注列 |
 | 球队实力 | `domain/team_strength.py` | 球队强弱、伤病与比赛画像支撑 |
-| 情报/爆冷 | `domain/intelligence.py`、`domain/upset.py` | 市场共振、爆冷风险、错配提示 |
+| 情报/爆冷 | `domain/intelligence.py`、`domain/upset.py` | 市场共振、爆冷风险、错配提示；`_derive_lineup_edge` 用首发身价+缺阵驱动主客 λ（见 3.9） |
 
 要点：
 - `EnhancedPredictor` 仍然是当前主链核心，不是极薄壳
@@ -400,6 +400,23 @@ RAG 当前真实依赖的数据源包括：
 > **已知缺陷（待修）**：方向=平局 且 OU 判大球 且不对称 λ 时，平局比分（对角线）与「大球同侧」硬约束求交集后，merge-then-sort 可能把平局比分全部挤掉。建议修法「方向保底配额」（平局方向至少保留 1 个平局比分再用第二方向补足），尚未实施。
 
 回归测试 `test_score_projection_direction.py`（8 例）覆盖印证/诱导/无口诀回退/OU 约束/来源回退；用真实分类器 `classify_market_operation_pattern` 构造模拟盘口验证过 `lure_up_home_fade`、`lure_up_hot_death` 两条诱导口诀能正确把比分方向从主胜翻为平局/弱侧。
+
+---
+
+## 3.9 阵容驱动 λ（首发身价 + 缺阵 → 进攻强度）
+
+澳客「阵容」标签（`form.php`，`https://m.okooo.com/match/form.php?MatchID=<id>`）作为常开数据腿接入正式预测链，把首发身价对比与缺阵损失折算成主客进攻强度 λ 的乘性微调，让实力差与临场减员体现到胜平负/比分/大小球概率上。
+
+数据流：
+- 采集 `okooo_save_snapshot.py`：`local-chrome` 点开「阵容」标签 → 8× `scrollBy` 触发懒加载 → 回滚顶部解析 `document.body.innerText`，抽出首发身价/总身价/缺阵人数与身价损失/首发名单（统一归一到「万」），写入快照 `阵容` 键。
+- 传输 `okooo_live_snapshot.py`：`extract_current_odds` 把快照 `阵容` 归一到 `current_odds["阵容"]`（`found` → `available`），随 `match.odds_data` 流入推理链。
+- 调 λ `domain/intelligence.py`：`_derive_lineup_edge(current_odds)` 计算
+  - `value_edge = clip(log(首发身价_主/首发身价_客) × 0.05, ±0.06)`；
+  - `injury_edge = clip(对方缺阵贡献 − 我方缺阵贡献, ±0.05)`，单边贡献 = `缺阵人数 × 0.006 + 缺阵身价损失 / max(主,客首发身价) × 0.20`（对方缺阵助我）；
+  - 合成 `home_adv/away_adv` 增量，并入 `_build_match_intelligence` 的 `quant_adjustment`，最终 `home/away_lambda_scale = clip(1.0 + adv × 0.6, 0.90 ~ 1.10)`；
+  - `quant_adjustment.lineup_edge` 落诊断字段（available/home_edge/away_edge/value_edge/injury_edge），并把「首发身价/缺阵」摘要追加为研判 signal。阵容不可用或身价缺失时安全早退（零偏置）。
+
+回归测试 `test_lineup_lambda_adjustment.py`（12 例）覆盖传输（含未找到/缺字段跳过）与 λ-edge（等身价无偏置/强弱单调+封顶/缺阵助对手+封顶/不可用安全/真实捷克 vs 南非）。实测捷克 vs 南非（首发身价 8938万 vs 1345万 ~6.6x、南非缺阵 2 人）→ `home_lambda_scale=1.0454 / away_lambda_scale=0.9546`。
 
 ---
 

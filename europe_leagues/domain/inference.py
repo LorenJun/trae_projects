@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from domain.constants import resolve_home_advantage, resolve_rho
@@ -12,6 +14,14 @@ from models import DixonColesModel
 
 class InferencePipelineService:
     REAL_OU_LINE_SOURCES = {'snapshot_final', 'snapshot_initial'}
+    # 以下为「大小球判定策略」默认值，可被 config/prediction_policy.json 覆盖（见 _load_ou_policy）。
+    # 大小球只有在「模型边际足够」时才允许提交方向；否则转中性不建议。
+    # 复盘 35 场：单场大小球命中率仅 ~34%，且各置信度档位无差异，故以边际+市场同向为闸门。
+    OU_MIN_CONVICTION_MARGIN = 0.10
+    # 方案 A：大小球恒定中性。36 场反解诊断显示模型 total_λ 已紧贴盘口线（均差 −0.04），
+    # 而模型相对盘口的偏移命中率仅 37%（负 alpha）——单边选边本质无 edge。
+    # 故默认不再提交任何大小球方向，只保留盘口展示与诊断，不计入准确率。
+    OU_ALWAYS_NEUTRAL = True
 
     def __init__(
         self,
@@ -27,6 +37,7 @@ class InferencePipelineService:
         league_ou_learning: Any,
         postprocess_service: Any,
         rating_service: Any = None,
+        base_dir: Optional[str] = None,
     ):
         self.league_config = league_config
         self.team_manager = team_manager
@@ -39,6 +50,42 @@ class InferencePipelineService:
         self.league_ou_learning = league_ou_learning
         self.postprocess_service = postprocess_service
         self.rating_service = rating_service
+        self.base_dir = Path(base_dir).resolve() if base_dir else Path(__file__).resolve().parent.parent
+        # 实例级大小球策略：默认取类常量，再用 config/prediction_policy.json 覆盖（若存在且合法）。
+        self.ou_always_neutral = self.OU_ALWAYS_NEUTRAL
+        self.ou_min_conviction_margin = self.OU_MIN_CONVICTION_MARGIN
+        self._load_ou_policy()
+
+    def _load_ou_policy(self) -> None:
+        """从 config/prediction_policy.json 读取大小球策略，覆盖默认值。
+
+        文件缺失或字段非法时静默回退到类常量默认，保证无配置也能运行。
+        识别字段（over_under 块）：
+          - always_neutral: bool   → 是否恒定中性（方案 A）
+          - min_conviction_margin: float → 闸门最小边际（仅 always_neutral=false 时生效）
+        """
+        config_path = self.base_dir / "config" / "prediction_policy.json"
+        if not config_path.exists():
+            return
+        try:
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        if not isinstance(payload, dict):
+            return
+        ou_block = payload.get("over_under")
+        if not isinstance(ou_block, dict):
+            return
+        if isinstance(ou_block.get("always_neutral"), bool):
+            self.ou_always_neutral = ou_block["always_neutral"]
+        margin = ou_block.get("min_conviction_margin")
+        try:
+            if margin is not None:
+                margin = float(margin)
+                if 0.0 <= margin <= 1.0:
+                    self.ou_min_conviction_margin = margin
+        except (TypeError, ValueError):
+            pass
 
     @staticmethod
     def _to_float(value: Any) -> Optional[float]:
@@ -1220,6 +1267,58 @@ class InferencePipelineService:
         total = ph + pd + pa
         return {'home_win': ph / total, 'draw': pd / total, 'away_win': pa / total}
 
+    def _apply_draw_proximity_promotion(
+        self,
+        *,
+        ranked_probabilities: List[Tuple[str, float]],
+        european_odds: Optional[Dict[str, Any]],
+        home_advantage: float,
+        gap_threshold: float = 0.05,
+        market_draw_floor: float = 0.27,
+    ) -> Tuple[List[Tuple[str, float]], Dict[str, Any]]:
+        """平局接近触发：中立场地下，当平局排第 2 且与最高仅差 gap_threshold、
+        且市场欧赔隐含平局相对偏高时，把平局提升为 top-1。
+
+        仅在中立场地（home_advantage<=1.0，世界杯非东道主）启用：联赛 1.12 /
+        友谊赛 1.03 / 东道主 1.08 均不触发，保证零回归。不改动概率本身，只调整
+        最终选边，吃下 argmax 临门差（平局做次高态）的平局场次。
+        """
+        diag: Dict[str, Any] = {'applied': False}
+        if not (home_advantage <= 1.0 + 1e-9):
+            diag['reason'] = 'venue_not_neutral'
+            return ranked_probabilities, diag
+        if not ranked_probabilities or len(ranked_probabilities) < 2:
+            diag['reason'] = 'insufficient_ranking'
+            return ranked_probabilities, diag
+        top_label, top_prob = ranked_probabilities[0]
+        second_label, second_prob = ranked_probabilities[1]
+        if top_label == '平局' or second_label != '平局':
+            diag['reason'] = 'draw_not_runner_up'
+            return ranked_probabilities, diag
+        gap = float(top_prob) - float(second_prob)
+        diag['model_gap'] = round(gap, 4)
+        if gap > gap_threshold + 1e-9:
+            diag['reason'] = 'gap_too_large'
+            return ranked_probabilities, diag
+        market_probs = self._market_implied_1x2(european_odds)
+        market_draw = float(market_probs.get('draw')) if isinstance(market_probs, dict) else None
+        diag['market_draw'] = round(market_draw, 4) if market_draw is not None else None
+        if market_draw is None or market_draw < market_draw_floor:
+            diag['reason'] = 'market_draw_not_elevated'
+            return ranked_probabilities, diag
+        promoted = [ranked_probabilities[1], ranked_probabilities[0]] + list(ranked_probabilities[2:])
+        diag.update({
+            'applied': True,
+            'reason': 'draw_proximity_promotion',
+            'gap_threshold': gap_threshold,
+            'market_draw_floor': market_draw_floor,
+            'from_label': top_label,
+            'to_label': '平局',
+            'top_prob': round(float(top_prob), 4),
+            'draw_prob': round(float(second_prob), 4),
+        })
+        return promoted, diag
+
     def _resolve_market_alpha(
         self,
         market_probs: Optional[Dict[str, float]],
@@ -1635,16 +1734,19 @@ class InferencePipelineService:
         p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
 
         strength = float(sentiment.get('strength') or 0.0)
-        take = min(0.07, strength * 0.10)
+        retreat_coef = float(getattr(self, 'sentiment_retreat_coef', 0.10))
+        retreat_cap = float(getattr(self, 'sentiment_retreat_cap', 0.07))
+        draw_share = float(getattr(self, 'sentiment_retreat_draw_share', 0.6))
+        take = min(retreat_cap, strength * retreat_coef)
         luring_p = p_h if luring == 'home' else p_a
         actual = min(take, max(0.0, luring_p - 0.02))
         if actual < 0.004:
             diag['reason'] = 'delta_below_threshold'
             return final_prob, diag
 
-        # 回撤分配：60% 给平局、40% 给被看衰侧
-        give_draw = actual * 0.6
-        give_dog = actual * 0.4
+        # 回撤分配：draw_share 给平局、其余给被看衰侧
+        give_draw = actual * draw_share
+        give_dog = actual * (1.0 - draw_share)
         if luring == 'home':
             p_h -= actual
             p_d += give_draw
@@ -2214,14 +2316,18 @@ class InferencePipelineService:
                     'decisive': bool(top[0] != 'draw' and (top[1] - second[1]) >= 0.10),
                 }
 
-        # 大小球轴：over/under 谁占优 + 强度
+        # 大小球轴：over/under 谁占优 + 强度。
+        # 方案A中性场（ou_neutral / stakes_neutral）大小球无 edge、不下注，
+        # 这里标记为中性 lean，使其不参与「大胜低进球」背离与「共振看好进攻」判定。
         if isinstance(over_under, dict) and over_under.get('available'):
             ov = over_under.get('over')
             un = over_under.get('under')
+            ou_neutral = bool(over_under.get('ou_neutral') or over_under.get('stakes_neutral'))
             if isinstance(ov, (int, float)) and isinstance(un, (int, float)):
-                lean = 'over' if ov > un else 'under'
+                lean = 'neutral' if ou_neutral else ('over' if ov > un else 'under')
                 out['ou_axis'] = {
                     'lean': lean,
+                    'neutral': ou_neutral,
                     'over': round(float(ov), 4),
                     'under': round(float(un), 4),
                     'margin': round(abs(float(ov) - float(un)), 4),
@@ -2457,9 +2563,12 @@ class InferencePipelineService:
             d_str = '强' if dir_ax.get('decisive') else ('中' if d_prob >= 0.45 else '弱')
             seg.append(f"方向{d_str}（{d_lean} {d_prob:.0%}）")
         if ou_ax:
-            o_lean = lean_cn.get(ou_ax.get('lean'), ou_ax.get('lean'))
-            o_prob = float(ou_ax.get('over') if ou_ax.get('lean') == 'over' else ou_ax.get('under') or 0.0)
-            seg.append(f"大小球倾向{o_lean}（{o_prob:.0%}）")
+            if ou_ax.get('neutral') or ou_ax.get('lean') == 'neutral':
+                seg.append("大小球中性（不下注）")
+            else:
+                o_lean = lean_cn.get(ou_ax.get('lean'), ou_ax.get('lean'))
+                o_prob = float(ou_ax.get('over') if ou_ax.get('lean') == 'over' else ou_ax.get('under') or 0.0)
+                seg.append(f"大小球倾向{o_lean}（{o_prob:.0%}）")
         if op_ax and op_ax.get('verdict'):
             seg.append(f"操盘{verdict_cn.get(op_ax.get('verdict'), op_ax.get('verdict'))}")
         if isinstance(dir_handicap, dict) and dir_handicap.get('verdict_dir'):
@@ -2578,6 +2687,7 @@ class InferencePipelineService:
         home_lambda: float,
         away_lambda: float,
         strength_diff: float,
+        suppress_over_uplift: bool = False,
     ) -> Tuple[float, float, Dict[str, Any]]:
         learning = self.league_ou_learning.get_recent_learning(league_code=league_code, match_date=match_date)
         diag: Dict[str, Any] = {'applied': False, 'league_code': league_code, 'home_team': home_team, 'away_team': away_team, 'learning': learning}
@@ -2597,6 +2707,10 @@ class InferencePipelineService:
         clean_sheet_rate = float(learning.get('clean_sheet_rate') or 0.0)
         sample_weight = min(0.22, 0.08 + sample_size * 0.008)
         target_total = base_total * (1.0 - sample_weight) + recent_avg * sample_weight
+        # 小球侧底水否决：市场已明确「钱压小球」时，不允许联赛学习层把 λ 往上 blend，
+        # 也禁用 over 系的 total_scale 加成，只保留向下修正。
+        if suppress_over_uplift and recent_avg > base_total:
+            target_total = base_total
         total_scale = 1.0
         signals: List[str] = []
         if over25_rate >= 0.60:
@@ -2611,6 +2725,9 @@ class InferencePipelineService:
         elif over35_rate <= 0.12:
             total_scale -= 0.02
             signals.append('low_over35')
+        if suppress_over_uplift:
+            total_scale = min(total_scale, 1.0)
+            signals.append('under_low_water_veto')
         target_total *= total_scale
         target_total = max(0.8, min(4.2, target_total))
         current_share = float(home_lambda) / base_total if base_total > 0 else 0.5
@@ -2975,6 +3092,13 @@ class InferencePipelineService:
         if implied_total is not None:
             anchor_weight = 0.85 if strength_quality == 'flat' else 0.6
             target_total = current_total * (1.0 - anchor_weight) + implied_total * anchor_weight
+            # pace_shift 也需在锚定分支生效：去水会把「小球/大球侧水位档位差」洗成近中性，
+            # implied_total 因此丢失「钱压某一侧」的静态水位信号（如 6-19 墨西哥小球底水被去水抹平）。
+            # postprocess 的 pace_shift 显式保留了该信号，这里叠加进锚定后的总进球。
+            pace_shift_anchor = float(market_signal.get('pace_shift') or 0.0)
+            if abs(pace_shift_anchor) >= 1e-9:
+                target_total += pace_shift_anchor * 3.6
+                diag['anchor_pace_shift'] = round(pace_shift_anchor, 6)
             target_total = max(0.8, min(4.5, target_total))
             effective_share = share
             if ah_diag.get('applied'):
@@ -3112,6 +3236,12 @@ class InferencePipelineService:
         over_under['available'] = True
         over_under['requires_real_market_line'] = True
         over_under['used_real_market_line'] = True
+        conviction_diag = self._assess_over_under_conviction(over_under, current_odds)
+        if not conviction_diag.get('commit'):
+            over_under['ou_neutral'] = True
+            over_under['neutral_reason'] = conviction_diag.get('reason') or 'low_ou_conviction'
+        over_under['conviction'] = conviction_diag
+        diag['conviction'] = conviction_diag
         diag.update(
             {
                 'available': True,
@@ -3120,6 +3250,55 @@ class InferencePipelineService:
             }
         )
         return over_under, diag
+
+    def _assess_over_under_conviction(
+        self,
+        over_under: Dict[str, Any],
+        current_odds: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """大小球方向可信度闸门。
+
+        复盘结论：单场大小球命中率仅 ~34%，且与模型置信度无相关——盘口微动噪声被当成了信号。
+        因此默认不提交方向（转中性），仅当「模型边际足够」且「市场资金真实同向」时才落方向。
+        关键：反向资金诱导（暗钱背离 ou_line_water_divergence）不计入同向证据，
+        即便它把 over/under 推到某一侧，也不允许据此提交方向——只保留为展示标签。
+        """
+        over = self._to_float(over_under.get('over'))
+        under = self._to_float(over_under.get('under'))
+        if over is None or under is None:
+            return {'commit': False, 'reason': 'invalid_ou_probs', 'margin': None}
+        margin = abs(over - under)
+        model_side = 'over' if over >= under else 'under'
+        market_signal = {}
+        if self.postprocess_service:
+            market_signal = self.postprocess_service.extract_over_under_market_signal(current_odds) or {}
+        goal_pressure = str(market_signal.get('goal_pressure') or 'balanced')
+        market_side = 'over' if goal_pressure == 'over' else 'under' if goal_pressure == 'under' else None
+        reverse_money = bool(market_signal.get('ou_line_water_divergence'))
+        market_agrees = (market_side == model_side)
+        genuine_agree = market_agrees and not reverse_money
+        if self.ou_always_neutral:
+            commit = False
+            reason = 'ou_neutral_policy'
+        else:
+            commit = bool(margin >= self.ou_min_conviction_margin and genuine_agree)
+            if commit:
+                reason = 'committed'
+            elif reverse_money and market_agrees:
+                reason = 'reverse_money_only'
+            elif margin < self.ou_min_conviction_margin:
+                reason = 'low_margin'
+            else:
+                reason = 'no_market_corroboration'
+        return {
+            'commit': commit,
+            'reason': reason,
+            'margin': round(float(margin), 4),
+            'model_side': model_side,
+            'market_side': market_side,
+            'reverse_money': reverse_money,
+            'min_margin': self.ou_min_conviction_margin,
+        }
 
     def apply_real_totals_outcome_adjustment(
         self,
@@ -3341,6 +3520,25 @@ class InferencePipelineService:
             realtime['context_applied']['market_ou_lambda_calibration'] = market_ou_lambda_diag
         except Exception as exc:
             realtime['context_applied']['market_ou_lambda_calibration'] = {'applied': False, 'error': str(exc)}
+        # 小球侧否决标志（两级解耦）：
+        # ① under_low_water_veto（窄）：仅小球侧底水加成（under_low_water_nudge，最强「钱买小」信号）。
+        #    抑制后续 λ 上抬环节（联赛学习上调 + 世界杯尾部上抬），让市场底水定调。
+        #    保持窄口径：普通偏小盘口不应连 world_cup 尾部补偿一起关掉（fallback λ 本就低估进球）。
+        # ② suppress_review_over_push（宽）：底水信号 或 大小球盘口显式偏小（goal_pressure == 'under'）。
+        #    仅否决「复盘补大球」这条后置 over-push，避免把已定价小球的盘口（如 2.75 葡萄牙vs刚果、
+        #    2.25 墨西哥vs南非）重新顶回大球；λ 上抬环节不受此标志影响。
+        under_low_water_veto = False
+        suppress_review_over_push = False
+        try:
+            _msig = market_ou_lambda_diag.get('market_signal') if isinstance(market_ou_lambda_diag, dict) else None
+            if isinstance(_msig, dict):
+                if _msig.get('under_low_water_nudge'):
+                    under_low_water_veto = True
+                if _msig.get('under_low_water_nudge') or _msig.get('goal_pressure') == 'under':
+                    suppress_review_over_push = True
+        except Exception:
+            under_low_water_veto = False
+            suppress_review_over_push = False
         try:
             home_lambda, away_lambda, ou_learning_diag = self.apply_league_ou_learning(
                 league_code=league_code,
@@ -3350,6 +3548,7 @@ class InferencePipelineService:
                 home_lambda=home_lambda,
                 away_lambda=away_lambda,
                 strength_diff=strength_diff,
+                suppress_over_uplift=under_low_water_veto,
             )
             realtime['context_applied']['league_over_under_learning'] = ou_learning_diag
         except Exception as exc:
@@ -3372,7 +3571,14 @@ class InferencePipelineService:
         if league_code == 'world_cup':
             total_lambda_pre = home_lambda + away_lambda
             target_total_lambda = float(league_avg_goals)
-            if total_lambda_pre > 0 and total_lambda_pre < target_total_lambda:
+            if under_low_water_veto:
+                # 小球侧底水否决：市场已明确「钱压小球」，不再把 λ 往联赛基准上抬。
+                realtime['context_applied']['world_cup_tail_uplift'] = {
+                    'applied': False,
+                    'reason': 'under_low_water_veto',
+                    'total_lambda_before': round(total_lambda_pre, 4),
+                }
+            elif total_lambda_pre > 0 and total_lambda_pre < target_total_lambda:
                 gap_ratio = (target_total_lambda - total_lambda_pre) / target_total_lambda
                 close_rate = 0.42 if strength_quality != 'real' else 0.22
                 scale = 1.0 + gap_ratio * close_rate
@@ -3604,6 +3810,7 @@ class InferencePipelineService:
             league_code=league_code,
             review_learning=review_learning,
             match_intelligence=match_intelligence,
+            suppress_over_shift=suppress_review_over_push,
         )
         realtime['context_applied']['review_over_under_adjustment'] = review_ou_diag
         final_prob, real_ou_outcome_diag = self.apply_real_totals_outcome_adjustment(
@@ -3759,6 +3966,15 @@ class InferencePipelineService:
                 ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
                 main_prediction = ranked_probabilities[0][0]
                 confidence = ranked_probabilities[0][1]
+        ranked_probabilities, draw_proximity_diag = self._apply_draw_proximity_promotion(
+            ranked_probabilities=ranked_probabilities,
+            european_odds=european_odds,
+            home_advantage=home_advantage,
+        )
+        realtime['context_applied']['draw_proximity_promotion'] = draw_proximity_diag
+        if draw_proximity_diag.get('applied'):
+            main_prediction = ranked_probabilities[0][0]
+            confidence = ranked_probabilities[0][1]
         confidence, confidence_diag = self._calibrate_confidence_with_league_learning(
             confidence=confidence,
             applied_weights=applied_weights,

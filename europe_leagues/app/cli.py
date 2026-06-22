@@ -913,7 +913,17 @@ def run_openclaw_predict_match(args):
     _print_total_goals(result.get("total_goals"), result.get("over_under"))
     _print_top_scores(result.get("top_scores"))
     over_under = result.get("over_under") if isinstance(result.get("over_under"), dict) else {}
-    if over_under.get("available"):
+    if over_under.get("ou_neutral") or over_under.get("stakes_neutral"):
+        line = over_under.get("line")
+        line_label = f"{float(line):g}" if isinstance(line, (int, float)) else "?"
+        if over_under.get("stakes_neutral"):
+            tag = "出线情景失真"
+        elif over_under.get("neutral_reason") == "ou_neutral_policy":
+            tag = "无统计优势"
+        else:
+            tag = "盘口信号不足"
+        print(f"大小球: 中性·不下注 @ {line_label}（{tag}）")
+    elif over_under.get("available"):
         line = over_under.get("line")
         line_label = f"{float(line):g}" if isinstance(line, (int, float)) else "?"
         print(
@@ -975,7 +985,7 @@ def _print_tri_axis(tri) -> None:
     """影子层：三轴(方向/大小球/操盘)一致性诊断。仅展示，不参与概率。"""
     if not isinstance(tri, dict) or not tri.get("available"):
         return
-    lean_cn = {'home_win': '主胜', 'draw': '平局', 'away_win': '客胜', 'over': '大球', 'under': '小球'}
+    lean_cn = {'home_win': '主胜', 'draw': '平局', 'away_win': '客胜', 'over': '大球', 'under': '小球', 'neutral': '中性·不下注'}
     verdict_cn = {'deceptive': '诱导', 'genuine': '真实', 'neutral': '中性'}
     parts = []
     da = tri.get("direction_axis")

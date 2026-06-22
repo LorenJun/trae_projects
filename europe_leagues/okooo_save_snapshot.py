@@ -22,6 +22,7 @@ import os
 import random
 import re
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass
@@ -1644,6 +1645,34 @@ def _is_success_payload(data: Dict[str, Any]) -> bool:
     return True
 
 
+def _market_is_usable(market: Any) -> bool:
+    """一个盘口（欧赔/亚值/大小球）是否拿到了真实可用数据。
+
+    熔断/风控时盘口会被标记为 blocked/verification_required（如 ttl_circuit_open），
+    或整段为空；这两种都不算可用，不能覆盖已有的好快照。
+    """
+    if not isinstance(market, dict):
+        return False
+    if market.get("blocked") or _is_verification_required_payload(market):
+        return False
+    final = market.get("final")
+    if isinstance(final, dict) and (final.get("blocked") or _is_verification_required_payload(final)):
+        return False
+    # final 至少要有一项真实报价字段才算可用。
+    return bool(final) and any(
+        v not in (None, "", {}, [])
+        for k, v in final.items()
+        if k not in {"blocked", "verification_required", "status", "error"}
+    )
+
+
+def _snapshot_has_usable_odds(payload: Dict[str, Any]) -> bool:
+    """快照里三大盘口（欧赔/亚值/大小球）只要有任意一项可用即视为有效抓取。"""
+    if not isinstance(payload, dict):
+        return False
+    return any(_market_is_usable(payload.get(k)) for k in ("欧赔", "亚值", "大小球"))
+
+
 def _classify_retry_error_message(msg: str) -> str:
     """Classify retry errors so we can fail fast on clearly non-recoverable cases."""
     s = (msg or "").lower()
@@ -3054,6 +3083,113 @@ def _current_url(bu: BrowserUse) -> str:
         return ""
 
 
+def _parse_lineup_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
+    """Parse okooo form.php (阵容) page: squad/starting-XI value + injuries + XI.
+
+    The page is a mirrored two-column layout that linearises to
+    ``[home] [label] [away]`` per row. We extract the aggregate signals that
+    actually drive λ (total squad value, starting-XI value, injury count) plus a
+    best-effort starting-XI player list. Values are normalised to 万 (10k EUR).
+    """
+    js = r"""
+(() => {
+  const blocked = (document.body?.innerText||'').includes('访问被阻断') || (document.title||'').includes('405');
+  if (blocked) return JSON.stringify({blocked:true});
+  const body = document.body?.innerText || '';
+  const compact = body.replace(/\s+/g, ' ').trim();
+  if (!/阵容|首发/.test(compact)) return JSON.stringify({found:false});
+
+  const toWan = (s) => {
+    if (!s) return null;
+    const m = String(s).match(/([\d.]+)\s*(亿|万)?/);
+    if (!m) return null;
+    let v = parseFloat(m[1]);
+    if (m[2] === '亿') v *= 10000;
+    return +v.toFixed(2);
+  };
+  const parseInjury = (s) => {
+    s = String(s || '');
+    if (/无缺阵|暂无/.test(s)) return {count: 0, value_wan: 0};
+    const cm = s.match(/(\d+)\s*人/);
+    const vm = s.match(/([\d.]+\s*[亿万])/);
+    return {count: cm ? parseInt(cm[1], 10) : 0, value_wan: vm ? toWan(vm[1]) : 0};
+  };
+
+  const result = {found: false};
+
+  // 阵容概览: 总身价 (home left / away right)
+  let m = compact.match(/阵容概览\s*([\d.]+\s*[亿万])\s*总身价[€\s]*([\d.]+\s*[亿万])/);
+  if (m) { result.home_squad_value_wan = toWan(m[1]); result.away_squad_value_wan = toWan(m[2]); }
+
+  // 伤停身价 row: home injury token (left) / away injury token (right)
+  m = compact.match(/总身价[€\s]*[\d.]+\s*[亿万]\s*(无缺阵|[\d.]+\s*[亿万]?\s*\d+\s*人)\s*伤停身价[€\s]*(无缺阵|([\d.]+\s*[亿万])?\s*\d+\s*人)/);
+  if (m) {
+    const h = parseInjury(m[1]); const a = parseInjury(m[2]);
+    result.home_injury_count = h.count; result.home_injury_value_wan = h.value_wan;
+    result.away_injury_count = a.count; result.away_injury_value_wan = a.value_wan;
+  }
+
+  // 首发 row in 阵容实力对比: home starting value / away starting value
+  m = compact.match(/([\d.]+\s*[亿万])\s*\d+cm\s*\/\s*\d+岁\s*首发\s*\d+cm\s*\/\s*\d+岁\s*([\d.]+\s*[亿万])/);
+  if (m) { result.home_starting_value_wan = toWan(m[1]); result.away_starting_value_wan = toWan(m[2]); }
+
+  // Best-effort starting XI player lists from 首发阵容对比 .. 预计伤停 section
+  let seg = compact;
+  const segStart = compact.indexOf('首发阵容对比');
+  const segEnd = compact.indexOf('预计伤停');
+  if (segStart >= 0) seg = compact.slice(segStart, segEnd > segStart ? segEnd : undefined);
+  const homePlayers = [];
+  const awayPlayers = [];
+  let pm;
+  const homeRe = /(\d{1,2})\s+([\u4e00-\u9fff·]{2,})\s+(门将|后卫|中场|前锋)\s+€\s*([\d.]+\s*万)/g;
+  while ((pm = homeRe.exec(seg)) && homePlayers.length < 14) {
+    homePlayers.push({number: parseInt(pm[1],10), name: pm[2], position: pm[3], value_wan: toWan(pm[4])});
+  }
+  const awayRe = /(\d{1,2})\s+(门将|后卫|中场|前锋)\s+([\u4e00-\u9fff·]{2,})\s+€\s*([\d.]+\s*万)/g;
+  while ((pm = awayRe.exec(seg)) && awayPlayers.length < 14) {
+    awayPlayers.push({number: parseInt(pm[1],10), position: pm[2], name: pm[3], value_wan: toWan(pm[4])});
+  }
+  if (homePlayers.length) result.home_starting_xi = homePlayers;
+  if (awayPlayers.length) result.away_starting_xi = awayPlayers;
+
+  // success requires the core λ signal: both sides' starting-XI value
+  result.found = (result.home_starting_value_wan != null && result.away_starting_value_wan != null);
+  return JSON.stringify(result);
+})()
+"""
+    return bu.eval_json(js)
+
+
+def _pull_lineup_leg(bu: BrowserUse, history_url: str, dwell: float) -> Dict[str, Any]:
+    """From the hub, click 阵容 -> form.php, scroll to render lazy content, parse.
+
+    form.php lazy-loads the starting-XI block on scroll, so we step-scroll to the
+    bottom before parsing. Returns the lineup payload (or blocked/found:false).
+    """
+    _open_ready(bu, history_url, settle_seconds=2.0)
+    lineup_click = _click_visible_text(bu, ["阵容", "首发阵容", "首发"], settle_seconds=HUB_NAV_SETTLE_SECONDS)
+    lineup_url = _current_url(bu)
+    if _page_blocked_now(bu):
+        return {"blocked": True, "url": lineup_url or history_url, "_blocked_at": "hub_nav_zhenrong", "_flow": "hub_nav_zhenrong", "_click": lineup_click}
+    # form.php lazy-loads on scroll; step to the bottom to render the full XI.
+    for _ in range(8):
+        try:
+            bu.eval_json("(() => { window.scrollBy(0, document.body.scrollHeight); return '{}'; })()")
+        except Exception:
+            break
+        time.sleep(1.0)
+    try:
+        bu.eval_json("(() => { window.scrollTo(0, 0); return '{}'; })()")
+    except Exception:
+        pass
+    time.sleep(dwell)
+    lineup = _parse_lineup_on_current_page(bu)
+    lineup["url"] = _current_url(bu) or lineup_url or history_url
+    lineup["_flow"] = "hub_nav_zhenrong"
+    lineup["_click"] = lineup_click
+    return lineup
+
+
 def _pull_odds_leg(bu: BrowserUse, history_url: str, dwell: float) -> Dict[str, Any]:
     """From the hub, click 欧值 -> odds.php and parse 欧赔 + the inner 凯利 tab.
 
@@ -3207,6 +3343,14 @@ def _extract_all_markets_from_hub(bu: BrowserUse, history_url: str, market_dwell
     europe = odds_legs.get("europe") or {}
     kelly = odds_legs.get("kelly") or {}
 
+    # 3) Lineup leg (阵容 -> form.php): best-effort starting-XI value + injuries.
+    # Non-critical: a walled/empty lineup never escalates the bundle, since the
+    # four odds markets are what gate success.
+    try:
+        lineup = _pull_lineup_leg(bu, history_url, dwell)
+    except Exception as exc:
+        lineup = {"found": False, "_error": str(exc)[:200], "_flow": "hub_nav_zhenrong"}
+
     asian_ok = _is_success_payload(asian)
     totals_ok = _is_success_payload(totals)
     blocked_markets = [
@@ -3229,6 +3373,7 @@ def _extract_all_markets_from_hub(bu: BrowserUse, history_url: str, market_dwell
             "kelly": kelly,
             "asian": asian,
             "totals": totals,
+            "lineup": lineup,
         }
 
     bundle = {
@@ -3243,6 +3388,7 @@ def _extract_all_markets_from_hub(bu: BrowserUse, history_url: str, market_dwell
         "kelly": kelly,
         "asian": asian,
         "totals": totals,
+        "lineup": lineup,
     }
     if blocked_markets:
         bundle["_partial_blocked_at"] = ",".join(blocked_markets)
@@ -3424,12 +3570,13 @@ def _extract_all_markets_with_fallback(match_id: str, history_url: str, client_f
         breaker_match_id=match_id,
     )
     if _is_verification_required_payload(hub):
-        return {"europe": hub, "kelly": hub, "asian": hub, "totals": hub}
+        return {"europe": hub, "kelly": hub, "asian": hub, "totals": hub, "lineup": None}
 
     europe = dict(hub.get("europe") or {}) if isinstance(hub, dict) else {}
     kelly = dict(hub.get("kelly") or {}) if isinstance(hub, dict) else {}
     asian = dict(hub.get("asian") or {}) if isinstance(hub, dict) else {}
     totals = dict(hub.get("totals") or {}) if isinstance(hub, dict) else {}
+    lineup = hub.get("lineup") if isinstance(hub, dict) else None
 
     odds_walled = (europe.get("blocked") or kelly.get("blocked")) and not (
         _is_success_payload(europe) or _is_success_payload(kelly)
@@ -3460,7 +3607,7 @@ def _extract_all_markets_with_fallback(match_id: str, history_url: str, client_f
                 rec_kelly["_recovered_via"] = "odds_fresh_session"
                 kelly = rec_kelly
 
-    return {"europe": europe, "kelly": kelly, "asian": asian, "totals": totals}
+    return {"europe": europe, "kelly": kelly, "asian": asian, "totals": totals, "lineup": lineup}
 
 
 def main() -> None:
@@ -3661,6 +3808,7 @@ def main() -> None:
             "亚值": None,
             "大小球": None,
             "凯利": None,
+            "阵容": None,
         }
         # Single warm hub session: land on the home page, open the match hub
         # once, then flip 欧赔/凯利/亚值/大小球 tabs in-page. Per-market fallbacks
@@ -3702,11 +3850,33 @@ def main() -> None:
                 if not args.odds_only:
                     payload["亚值"] = all_markets.get("asian")
                     payload["大小球"] = all_markets.get("totals")
+                    payload["阵容"] = all_markets.get("lineup")
 
         if args.overwrite:
             payload["_note"] = "overwrite=true: same event writes to a stable filename"
         if existing:
             payload["_note_match_id_overwrite"] = f"match_id={match_id}: overwrote existing snapshot file"
+
+        # 熔断/空盘口保护：本次抓取若三大盘口全部 blocked/空（如 ttl_circuit_open 风控熔断），
+        # 不要用这份废快照覆盖已有的好快照，避免污染下游 predict 写回。
+        if not _snapshot_has_usable_odds(payload):
+            prior_ok = False
+            if existing and existing.exists():
+                try:
+                    prior = json.loads(existing.read_text(encoding="utf-8"))
+                    prior_ok = _snapshot_has_usable_odds(prior)
+                except Exception:
+                    prior_ok = False
+            if prior_ok:
+                print(
+                    f"[skip] 本次抓取盘口为空/被熔断，保留已有有效快照不覆盖: {existing}",
+                    file=sys.stderr,
+                )
+                print(str(existing))
+                return
+            # 没有可保留的旧快照时，仍写出占位快照，但显式标注无可用盘口。
+            payload["_note_no_usable_odds"] = "scrape returned no usable odds (blocked/empty); not a valid market snapshot"
+
         out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         print(str(out_path))
     finally:

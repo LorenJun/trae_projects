@@ -249,7 +249,7 @@ class EloRatingSystem:
         """设置球队评级"""
         self.ratings[team] = rating
 
-    def predict_match(self, home_team: str, away_team: str) -> Dict[str, float]:
+    def predict_match(self, home_team: str, away_team: str, home_advantage: Optional[float] = None) -> Dict[str, float]:
         """预测比赛（包含可用的平局概率近似）。
 
         说明：
@@ -257,8 +257,10 @@ class EloRatingSystem:
         - 这会显著拉低平局预测、进而拖累比分/大小球推断。
         - 这里用“实力接近则更易平”的经验项，为 draw 分配合理质量，
           再把剩余概率按 Elo 强弱分配给主/客胜。
+        - home_advantage 显式传入时覆盖实例默认（中立场地传 0，消除场地无关的主队加分）。
         """
-        home_rating = self.get_rating(home_team) + self.home_advantage
+        ha = self.home_advantage if home_advantage is None else float(home_advantage)
+        home_rating = self.get_rating(home_team) + ha
         away_rating = self.get_rating(away_team)
 
         # Elo 强弱（胜负二元）基准概率
@@ -293,14 +295,16 @@ class GlickoRatingSystem(EloRatingSystem):
         self.rd_constant = rd_constant  # 评级偏差
         self.vol_constant = vol_constant  # 波动性
 
-    def predict_match(self, home_team: str, away_team: str) -> Dict[str, float]:
+    def predict_match(self, home_team: str, away_team: str, home_advantage: Optional[float] = None) -> Dict[str, float]:
         """预测比赛（真正使用 Glicko 的 RD 不确定性收缩）。
 
         与 Elo 的区别：Glicko 用 g(RD) 因子按评级偏差(RD)对实力差做收缩，
         RD 越大（样本越少/越不确定）预测越向 0.5 回归，从而与 Elo 输出真正区分，
         避免融合中 elo/glicko 双重计入同一信号。
+        home_advantage 显式传入时覆盖实例默认（中立场地传 0）。
         """
-        home_rating = self.get_rating(home_team) + self.home_advantage
+        ha = self.home_advantage if home_advantage is None else float(home_advantage)
+        home_rating = self.get_rating(home_team) + ha
         away_rating = self.get_rating(away_team)
 
         # Glicko g(RD) 收缩因子：q = ln(10)/400，RD 越大 g 越小、差距被压缩。
@@ -359,9 +363,14 @@ class LogisticRegressionModel:
         h2h_away_wins: int,
         h2h_draws: int,
         home_motivation: float,
-        away_motivation: float
+        away_motivation: float,
+        venue_neutral: bool = False
     ) -> Dict[str, float]:
-        """预测比赛结果"""
+        """预测比赛结果。
+
+        venue_neutral=True（中立场地）时不计入固定主场项 weights['home_advantage']，
+        消除场地无关的主队倾斜。
+        """
 
         # 计算特征
         strength_diff = (home_strength - away_strength) / 100
@@ -381,7 +390,7 @@ class LogisticRegressionModel:
         # 计算加权和
         home_score = (
             self.weights['strength_diff'] * strength_diff +
-            self.weights['home_advantage'] +
+            (0.0 if venue_neutral else self.weights['home_advantage']) +
             self.weights['form'] * form_diff +
             self.weights['injuries'] * injury_impact +
             self.weights['head_to_head'] * h2h_advantage +
@@ -515,13 +524,22 @@ class XGModel:
     def predict_from_xg(
         self,
         home_xg: float,
-        away_xg: float
+        away_xg: float,
+        venue_neutral: bool = False
     ) -> Dict[str, float]:
-        """基于xG预测"""
+        """基于xG预测。
+
+        venue_neutral=True（中立场地，如世界杯非东道主）时不施加主客场调整，
+        两侧用对称系数，避免在中立场制造场地无关的主队倾斜。
+        """
         poisson = PoissonModel()
 
-        home_lambda = home_xg * 1.1  # 主场调整
-        away_lambda = away_xg * 0.9
+        if venue_neutral:
+            home_lambda = home_xg
+            away_lambda = away_xg
+        else:
+            home_lambda = home_xg * 1.1  # 主场调整
+            away_lambda = away_xg * 0.9
 
         score_probs = poisson.predict_score_probability(home_lambda, away_lambda)
 
@@ -551,14 +569,30 @@ class BayesianModel:
         away_win: float,
         home_evidence_weight: float = 0.3,
         form_weight: float = 0.2,
-        injury_weight: float = 0.15
+        injury_weight: float = 0.15,
+        venue_neutral: bool = False
     ) -> Dict[str, float]:
-        """根据证据更新概率"""
+        """根据证据更新概率。
+
+        venue_neutral=True（中立场地）时把主/客胜先验与证据权对称化，
+        消除“主队先验偏高 + 主队证据权更大”带来的场地无关主队倾斜。
+        """
+
+        if venue_neutral:
+            sym_prior = (self.prior_home_win + self.prior_away_win) / 2.0
+            prior_home_win = sym_prior
+            prior_away_win = sym_prior
+            sym_weight = (home_evidence_weight + injury_weight) / 2.0
+            home_evidence_weight = sym_weight
+            injury_weight = sym_weight
+        else:
+            prior_home_win = self.prior_home_win
+            prior_away_win = self.prior_away_win
 
         # 简化的贝叶斯更新
-        posterior_home = self.prior_home_win * (1 + home_evidence_weight)
+        posterior_home = prior_home_win * (1 + home_evidence_weight)
         posterior_draw = self.prior_draw * (1 + form_weight)
-        posterior_away = self.prior_away_win * (1 + injury_weight)
+        posterior_away = prior_away_win * (1 + injury_weight)
 
         # 归一化
         total = posterior_home + posterior_draw + posterior_away
@@ -670,6 +704,12 @@ class MultiModelFusion:
             poisson.league_avg_goals = float(per_team_baseline)
             dc.league_avg_goals = float(per_team_baseline)
         ha = float(home_advantage) if (home_advantage is not None and home_advantage > 0) else 1.12
+        # 场地感知中立化：仅当显式传入的主场系数为中立（<=1.0，如世界杯非东道主）时，
+        # 把场地无关、硬编码偏主的子模型（elo/glicko/xg/lr/bayesian）中立化。
+        # 友谊赛(1.03)/世界杯东道主(1.08)/联赛(1.12) 均不触发，确保联赛与既有行为零回归。
+        venue_neutral = home_advantage is not None and float(home_advantage) <= 1.0 + 1e-9
+        # 中立场地下评级类模型不加主场分（Elo/Glicko 的 +100 是场地无关倾斜）
+        rating_home_adv = 0.0 if venue_neutral else None
         home_lambda, away_lambda = poisson.calculate_expected_goals(
             home_attack, home_defense, away_attack, away_defense,
             home_advantage=ha
@@ -689,14 +729,14 @@ class MultiModelFusion:
         elo = self.models['elo']
         elo.set_rating(home_team, float(home_hist.get('elo', strength_to_seed_rating(home_strength))))
         elo.set_rating(away_team, float(away_hist.get('elo', strength_to_seed_rating(away_strength))))
-        elo_result = elo.predict_match(home_team, away_team)
+        elo_result = elo.predict_match(home_team, away_team, home_advantage=rating_home_adv)
         all_predictions['elo'] = elo_result
 
         # 4. Glicko评级模型
         glicko = self.models['glicko']
         glicko.set_rating(home_team, float(home_hist.get('glicko', strength_to_seed_rating(home_strength))))
         glicko.set_rating(away_team, float(away_hist.get('glicko', strength_to_seed_rating(away_strength))))
-        glicko_result = glicko.predict_match(home_team, away_team)
+        glicko_result = glicko.predict_match(home_team, away_team, home_advantage=rating_home_adv)
         all_predictions['glicko'] = glicko_result
 
         # 5. 逻辑回归模型
@@ -706,7 +746,8 @@ class MultiModelFusion:
             home_form, away_form,
             home_injuries, away_injuries,
             h2h_home_wins, h2h_away_wins, h2h_draws,
-            home_motivation, away_motivation
+            home_motivation, away_motivation,
+            venue_neutral=venue_neutral
         )
         all_predictions['logistic_regression'] = lr_result
 
@@ -717,7 +758,7 @@ class MultiModelFusion:
 
         # 7. xG模型
         xg = self.models['xg']
-        xg_result = xg.predict_from_xg(home_xg, away_xg)
+        xg_result = xg.predict_from_xg(home_xg, away_xg, venue_neutral=venue_neutral)
         all_predictions['xg'] = xg_result
 
         # 8. 贝叶斯模型
@@ -725,7 +766,8 @@ class MultiModelFusion:
         bayesian_result = bayesian.update_with_evidence(
             home_strength / 100,
             1 - home_strength / 100 - away_strength / 100,
-            away_strength / 100
+            away_strength / 100,
+            venue_neutral=venue_neutral
         )
         all_predictions['bayesian'] = bayesian_result
 

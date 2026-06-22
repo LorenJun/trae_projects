@@ -202,6 +202,12 @@ def _score_summary(result: Dict[str, Any]) -> str:
 
 def _ou_summary(result: Dict[str, Any]) -> str:
     over_under = result.get("over_under") if isinstance(result.get("over_under"), dict) else {}
+    if over_under.get("ou_neutral") or over_under.get("stakes_neutral"):
+        line = over_under.get("line")
+        line_label = f"{float(line):g}" if isinstance(line, (int, float)) else "?"
+        tag = "不下注" if over_under.get("neutral_reason") == "ou_neutral_policy" else (
+            "动机扭曲" if over_under.get("stakes_neutral") else "证据不足")
+        return f"中性 {line_label} ({tag})"
     if over_under.get("available"):
         line = over_under.get("line")
         line_label = f"{float(line):g}" if isinstance(line, (int, float)) else "?"
@@ -257,10 +263,19 @@ def _ou_detail(result: Dict[str, Any]) -> Dict[str, Any]:
     over_under = result.get("over_under") if isinstance(result.get("over_under"), dict) else {}
     if not over_under.get("available"):
         return {"available": False, "direction": "缺失", "line": None, "confidence": 0.0}
+    if over_under.get("ou_neutral") or over_under.get("stakes_neutral"):
+        return {
+            "available": True,
+            "neutral": True,
+            "direction": "中性",
+            "line": over_under.get("line"),
+            "confidence": 0.0,
+        }
     over = float(over_under.get("over") or 0.0)
     under = float(over_under.get("under") or 0.0)
     return {
         "available": True,
+        "neutral": False,
         "direction": "大球" if over > under else "小球",
         "line": over_under.get("line"),
         "confidence": max(over, under),
