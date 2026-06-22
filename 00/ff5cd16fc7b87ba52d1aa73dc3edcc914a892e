@@ -1,0 +1,66 @@
+docs/architecture/europe_leagues_architecture.md
+  s_6a279d03782a67::t_7dec72029d54bd 283-292 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3932eafedfc6858f0f455f","tool_type":"agent","tool_id":"Edit","line_ranges":[{"Range":[283,292]}]}]}
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "00ff5cd16fc7b87ba52d1aa73dc3edcc914a892e",
+  "prompts": {},
+  "sessions": {
+    "s_6a279d03782a67": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a38f130fedfc6858f0f3d80",
+        "model": "openrouter-3o__dev"
+      },
+      "human_author": "bytedance <lijunlin.0721@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {
+    "docs/architecture/europe_leagues_architecture.md": [
+      {
+        "hash": "s_6a279d03782a67::t_7dec72029d54bd",
+        "line_ranges": [
+          {
+            "Range": [
+              283,
+              292
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3932eafedfc6858f0f455f",
+            "tool_type": "agent",
+            "tool_id": "Edit",
+            "line_ranges": [
+              {
+                "Range": [
+                  283,
+                  292
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "remote_transcripts": {
+    "s_6a279d03782a67": {
+      "tool": "trae",
+      "conversation_id": "6a38f130fedfc6858f0f3d80",
+      "session_id": "6a38f130fedfc6858f0f3d80",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_6a279d03782a67::t_7dec72029d54bd": {
+      "tool": "trae",
+      "conversation_id": "6a38f130fedfc6858f0f3d80",
+      "session_id": "6a38f130fedfc6858f0f3d80",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}
