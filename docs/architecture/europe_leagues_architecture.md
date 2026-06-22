@@ -280,6 +280,16 @@ flowchart TB
 - `storage/*` 偏向稳定读写 API
 - `runtime/*` 偏向运行时流程、增量同步和索引维护
 
+#### 3.4.1 中立场地建模与平局接近触发（世界杯非东道主，零联赛回归）
+
+世界杯合办赛事的非东道主对阵在中立场地进行，`resolve_home_advantage('world_cup', 非东道主)` 返回 `1.0`。在此基础上，模型层与决策层各加一道**仅在中立场地（`home_advantage<=1.0`）生效**的处理，联赛 1.12 / 友谊赛 1.03 / 东道主 1.08 均不触发：
+
+- **子模型场地中立化**（`ml_prediction_models.py` + `MultiModelFusion.predict` 透传）：消除 5 个场地无关、硬编码偏主的子模型偏置——Elo/Glicko 评级主场加分传 `0.0`、LR 不计 `home_advantage` 项、xG 不施加 ×1.1/×0.9、Bayesian 主客先验对称化。修正平局概率被系统性低估的问题。
+- **平局接近触发**（`domain/inference.py` 的 `_apply_draw_proximity_promotion`）：在最终 argmax 之后、置信度校准之前调用，与既有 `_apply_draw_confirmation_guard` 相互独立。当平局排第 2 且与最高差 `<= gap_threshold`（默认 0.05）、且市场欧赔隐含平局 `>= market_draw_floor`（默认 0.27）时，把平局提为 top-1（只改选边、不改概率），诊断写入 `realtime.context_applied.draw_proximity_promotion`。
+- **虚热诱下回撤参数化**（`apply_market_sentiment_adjustment`）：回撤强度抽出为可调实例属性 `sentiment_retreat_coef` / `sentiment_retreat_cap` / `sentiment_retreat_draw_share`，默认值与原硬编码一致（0.10 / 0.07 / 0.6），零回归，留作未来大样本再调。
+
+2022 世界杯 64 场样本外回测：1X2 命中 50.0%→53.1%，平局召回 6.7%→20.0%，无原本正确预测被改错。详见 `docs/CHANGELOG.md` 2026-06-22 条目。
+
 ### 3.5 RAG 记忆层
 
 RAG 已经是主链的正式组成部分，当前职责拆成三段：
