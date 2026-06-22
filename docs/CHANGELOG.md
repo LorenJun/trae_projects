@@ -2,7 +2,7 @@
 title: 仓库变更日志
 owner: trae_projects
 version: v1
-last_updated: 2026-06-18
+last_updated: 2026-06-22
 ---
 
 # CHANGELOG
@@ -16,7 +16,41 @@ last_updated: 2026-06-18
 
 ---
 
+## 2026-06-22
+
+### 0. 中立场地子模型场地中立化（世界杯非东道主，零联赛回归）
+
+世界杯合办赛事非东道主对阵在中立场地进行，`resolve_home_advantage('world_cup', 非东道主)` 返回 `1.0`。此前多个子模型仍硬编码主场偏置，系统性低估平局。新增**仅在中立场地（`home_advantage<=1.0`）生效**的子模型中立化（联赛 1.12 / 友谊赛 1.03 / 东道主 1.08 均不触发）：
+
+- `ml_prediction_models.py`：Elo/Glicko 评级 `predict_match` 新增 `home_advantage` 覆盖参数，中立场地传 `0.0` 取消主场评级加分；LR `predict` 中立场地不计 `home_advantage` 项；xG `predict_from_xg` 中立场地不施加 ×1.1/×0.9；Bayesian `update_with_evidence` 中立场地主客先验对称化。
+- `MultiModelFusion.predict` 派生 `venue_neutral = home_advantage is not None and float(home_advantage) <= 1.0 + 1e-9` 并透传到各子模型。
+
+### 1. 平局接近触发（`domain/inference.py` 的 `_apply_draw_proximity_promotion`）
+
+在最终 argmax 之后、置信度校准之前调用，与既有 `_apply_draw_confirmation_guard` 相互独立。当平局排第 2 且与最高差 `<= gap_threshold`（默认 0.05）、且市场欧赔隐含平局 `>= market_draw_floor`（默认 0.27）时，把平局提为 top-1（只改选边、不改概率），诊断写入 `realtime.context_applied.draw_proximity_promotion`。仅中立场地（`home_advantage<=1.0`）生效，否则早退 `venue_not_neutral`。
+
+### 2. 虚热诱下回撤力度参数化（`apply_market_sentiment_adjustment`）
+
+把虚热诱下回撤强度从硬编码抽成可调实例属性 `sentiment_retreat_coef` / `sentiment_retreat_cap` / `sentiment_retreat_draw_share`，默认值与原硬编码一致（0.10 / 0.07 / 0.6），零回归，留作未来大样本再调。回撤量 `take = min(cap, strength * coef)`，按 `draw_share` 比例分给平局、其余给冷门。
+
+> 方案 B 试验（调高回撤力度 coef0.25/cap0.16/ds0.75）：2026 已完赛 13 场命中率提升到 76.9%，但回归 2022 64 场样本净 -1（误改 2 个原本正确的主胜）。结论：**不采用 B2，保留默认零回归**，参数已留好待样本更大时再调。
+
+### 3. 回测验证与 2026 6-23 四场预测
+
+- 2022 世界杯 64 场样本外回测（`backtest_wc2022.py`，桩掉 review_learning/RAG、stakes 中性、`OKOOO_REFRESH_LIVE=0`/`ENABLE_TEAM_CONTEXT=0`/`persist=False`）：1X2 命中 50.0%→53.1%，平局召回 6.7%→20.0%，无原本正确预测被改错。
+- 2026 已完赛 13 场 A/B（ON/OFF/OLD）：三者持平 69.2%，平局接近触发未误触发（强弱分明的小组赛平局 gap 远超触发窗口，符合「不硬塞平局」设计）；比利时 0-0 经诊断为市场情绪确有捕获（strength 0.32 / 回撤 0.032），但 gap 0.058>0.05 且市场隐含平局 20%<27% 双重门槛挡住。
+- 用官方 CLI（`predict-match`，真实多公司盘口）重跑世界杯 6-23 四场预测并按 SoT 写回 `MEMORY.md` / RAG / `world_cup/teams_2026.md`：阿根廷vs奥地利（主胜 52.1%）、法国vs伊拉克（主胜 66.6%）、挪威vs塞内加尔（主胜 44.0%）、约旦vs阿尔及利亚（客胜 49.2%）。
+
+关联文件：
+- `europe_leagues/ml_prediction_models.py`、`europe_leagues/domain/inference.py`
+- `europe_leagues/backtest_wc2022.py`
+- `MEMORY.md`、`europe_leagues/world_cup/teams_2026.md`
+- `docs/architecture/europe_leagues_architecture.md` 3.4.1 节
+
+---
+
 ## 2026-06-18
+
 
 ### 0. 比分方向改由亚值让球口诀驱动 + OU 6 规则定大小球（`domain/score_projection.py`）
 
