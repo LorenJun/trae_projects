@@ -1055,7 +1055,12 @@ class PredictionPersistenceService:
         if ou_neutral:
             ou_line = over_under.get('line')
             line_label = f'{ou_line:g}' if isinstance(ou_line, (int, float)) else '?'
-            neutral_tag = '动机扭曲' if over_under.get('stakes_neutral') else '证据不足'
+            if over_under.get('stakes_neutral'):
+                neutral_tag = '动机扭曲'
+            elif str(over_under.get('neutral_reason') or '') == 'ou_neutral_policy':
+                neutral_tag = '不下注'
+            else:
+                neutral_tag = '证据不足'
             ou_summary = f'中性 {line_label} ({neutral_tag})'
         elif ou_available:
             over_prob = float(over_under.get('over') or 0.0)

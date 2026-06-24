@@ -86,6 +86,7 @@ python3 prediction_system.py save-result --match-id '<主队> vs <客队>' --hom
 ## 结果闭环后应看到什么
 
 - SoT-backed 比赛更新 `teams_2025-26.md` / `teams_2026.md`
+- 世界杯复盘时自动重算并写回 `teams_2026.md` 的「小组积分榜」章节（按已回填比分，胜3平1负0，积分→净胜球→进球数排序）
 - 非 SoT 比赛（`archive_only`）更新 `prediction_archive.json` 与 `.okooo-scraper/runtime/*.json`，不写 `MEMORY.md`
 - `prediction_archive.json` 实际赛果字段补齐
 - 准确率与 review-learning 相关输出刷新

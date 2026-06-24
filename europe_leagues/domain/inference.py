@@ -22,6 +22,13 @@ class InferencePipelineService:
     # 而模型相对盘口的偏移命中率仅 37%（负 alpha）——单边选边本质无 edge。
     # 故默认不再提交任何大小球方向，只保留盘口展示与诊断，不计入准确率。
     OU_ALWAYS_NEUTRAL = True
+    # λ 市场校准的网格 cost 由三项构成（拟合 1X2 的 cost_prob 权重恒为 1.0）：
+    #   cost_base 让 λ 不偏离队力基准、cost_total 让总进球贴近联赛/基准均值。
+    # LAMBDA_OU_ANCHOR_COST：联合拟合「大小球盘口线反解的市场总进球」的权重。
+    # 诊断显示纯拟合 1X2 会为均势高平局形态压低总进球（2022 世界杯 λ 总进球偏差 −0.075、
+    # 低估 30/64）。加入此锚定项让 λ 总量同时贴合市场对总进球的定价，缓解比分系统性偏小。
+    # 仅当大小球盘口可反解出 implied_total 时生效，不影响融合层 1X2（1X2 由独立 market_alpha 凸组合对齐）。
+    LAMBDA_OU_ANCHOR_COST = 0.10
 
     def __init__(
         self,
@@ -2603,6 +2610,7 @@ class InferencePipelineService:
         base_away_lambda: float,
         european_odds: Optional[Dict[str, Any]],
         asian_handicap: Optional[Dict[str, Any]] = None,
+        market_total_anchor: Optional[float] = None,
     ) -> Tuple[float, float, Dict[str, Any]]:
         diag: Dict[str, Any] = {'applied': False}
         if not isinstance(european_odds, dict):
@@ -2638,10 +2646,24 @@ class InferencePipelineService:
         dc = DixonColesModel(rho=resolve_rho(league_code))
         league_avg = float(self.league_config.get(league_code, {}).get('avg_goals') or 2.6)
         base_total = max(0.8, float(base_home_lambda) + float(base_away_lambda))
+        # 大小球盘口反解的市场总进球锚：仅在落入合理量级时启用，避免脏盘把 λ 拉飞。
+        anchor_total: Optional[float] = None
+        if market_total_anchor is not None:
+            try:
+                cand = float(market_total_anchor)
+                if 0.8 <= cand <= 6.0:
+                    anchor_total = cand
+            except (TypeError, ValueError):
+                anchor_total = None
         best = None
         best_cost = 1e9
         total_min = max(1.2, league_avg - 0.8)
         total_max = min(5.2, league_avg + 1.6)
+        # 锚定的市场总进球可能落在默认网格之外（如盘口 3.5 而联赛均值 2.6），
+        # 适度放宽上下界以容纳锚点，否则会被网格边界截断、锚定失效。
+        if anchor_total is not None:
+            total_min = min(total_min, max(0.8, anchor_total - 0.4))
+            total_max = max(total_max, min(6.0, anchor_total + 0.4))
         for total_tick in range(int(total_min * 20), int(total_max * 20) + 1):
             total_goals = total_tick / 20.0
             for share_tick in range(20, 81, 2):
@@ -2652,7 +2674,10 @@ class InferencePipelineService:
                 cost_prob = (probs['home_win'] - ph) ** 2 + (probs['draw'] - pd) ** 2 + (probs['away_win'] - pa) ** 2
                 cost_base = 0.08 * ((hl - base_home_lambda) ** 2 + (al - base_away_lambda) ** 2)
                 cost_total = 0.04 * ((total_goals - league_avg) ** 2 + (total_goals - base_total) ** 2)
-                cost = cost_prob + cost_base + cost_total
+                cost_anchor = 0.0
+                if anchor_total is not None:
+                    cost_anchor = self.LAMBDA_OU_ANCHOR_COST * (total_goals - anchor_total) ** 2
+                cost = cost_prob + cost_base + cost_total + cost_anchor
                 if cost < best_cost:
                     best_cost = cost
                     best = (hl, al, probs)
@@ -2675,6 +2700,7 @@ class InferencePipelineService:
             'cost': round(float(best_cost), 6),
             'odds_anomaly': anomaly_diag,
             'blend_weight': round(weight, 4),
+            'market_total_anchor': round(float(anchor_total), 4) if anchor_total is not None else None,
         }
         return float(hl), float(al), diag
 
@@ -3498,6 +3524,23 @@ class InferencePipelineService:
         realtime['context_applied']['home_advantage_factor'] = round(float(home_advantage), 4)
         home_lambda = base_home_lambda
         away_lambda = base_away_lambda
+        # 大小球盘口反解的市场总进球锚：用真实大小球终盘线 + 去水概率反推 implied_total，
+        # 传入 λ 校准联合拟合，让 λ 总量同时贴合 1X2 与市场对总进球的定价（治本：缓解为
+        # 拟合均势 1X2 而压低总进球）。仅在大小球盘口可用时生效，否则锚为 None（行为不变）。
+        market_total_anchor = None
+        try:
+            ou_signal = self.postprocess_service.extract_over_under_market_signal(current_odds)
+            if isinstance(ou_signal, dict) and ou_signal.get('available'):
+                final_prices = ou_signal.get('final_prices') if isinstance(ou_signal.get('final_prices'), dict) else {}
+                final_line = self._to_float(ou_signal.get('final_line'))
+                if final_line and final_prices.get('available'):
+                    market_total_anchor = self._implied_total_from_ou_line(
+                        final_line,
+                        self._to_float(final_prices.get('over_prob')) or 0.0,
+                        self._to_float(final_prices.get('under_prob')) or 0.0,
+                    )
+        except Exception:
+            market_total_anchor = None
         try:
             home_lambda, away_lambda, cal_diag = self.calibrate_lambdas_from_market(
                 league_code=league_code,
@@ -3505,6 +3548,7 @@ class InferencePipelineService:
                 base_away_lambda=base_away_lambda,
                 european_odds=european_odds,
                 asian_handicap=asian_handicap,
+                market_total_anchor=market_total_anchor,
             )
             realtime['context_applied']['lambda_calibration'] = cal_diag
         except Exception as exc:

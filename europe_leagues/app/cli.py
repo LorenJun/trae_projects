@@ -541,6 +541,13 @@ def run_openclaw_sync_pending_results_review(args):
             sample_limit=max(args.review_sample_limit, 12),
         )
 
+        from domain.world_cup_standings import update_world_cup_standings
+        from runtime.paths import get_default_paths
+
+        world_cup_standings = update_world_cup_standings(
+            get_default_paths(EUROPE_LEAGUES_ROOT).teams_file("world_cup")
+        )
+
         return {
             "pending_before_count": len(pending_before),
             "pending_after_count": len(pending_after),
@@ -558,6 +565,7 @@ def run_openclaw_sync_pending_results_review(args):
                 "ou_hits": review_summary.get("ou_hits", 0),
                 "ou_candidates": review_summary.get("ou_candidates", 0),
             },
+            "world_cup_standings": world_cup_standings,
             "upset_sync": upset_sync,
             "review_learning": {
                 "summary_path": str(review_learning_service.summary_path()),
@@ -581,6 +589,12 @@ def run_openclaw_sync_pending_results_review(args):
     print(f"待回填: {result['pending_before_count']} -> {result['pending_after_count']}")
     print(f"自动/统一处理后减少: {result['updated_count']} 场")
     print(f"复盘样本: {result['review']['sample_count']} 场")
+    standings = result.get("world_cup_standings") or {}
+    if standings.get("available"):
+        print(
+            f"世界杯小组积分: 已重算 {standings.get('completed_matches', 0)} 场"
+            f"（{'已更新' if standings.get('written') else '无变化'}）"
+        )
     overall = result.get("accuracy") or {}
     if overall:
         print(

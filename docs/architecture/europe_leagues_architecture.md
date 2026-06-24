@@ -1,8 +1,8 @@
 ---
 title: Europe Leagues 项目架构与模块划分
 owner: europe_leagues
-version: v2.6
-last_updated: 2026-06-18
+version: v2.7
+last_updated: 2026-06-23
 ---
 
 # Europe Leagues 项目架构与模块划分（技术分析）
@@ -289,6 +289,27 @@ flowchart TB
 - **虚热诱下回撤参数化**（`apply_market_sentiment_adjustment`）：回撤强度抽出为可调实例属性 `sentiment_retreat_coef` / `sentiment_retreat_cap` / `sentiment_retreat_draw_share`，默认值与原硬编码一致（0.10 / 0.07 / 0.6），零回归，留作未来大样本再调。
 
 2022 世界杯 64 场样本外回测：1X2 命中 50.0%→53.1%，平局召回 6.7%→20.0%，无原本正确预测被改错。详见 `docs/CHANGELOG.md` 2026-06-22 条目。
+
+#### 3.4.2 λ 校准联合拟合大小球盘口线（治本：缓解比分系统性偏小）
+
+比分误差归因诊断（`diag_score_attribution.py`）将「显示层 top3 命中」与「raw-λ 网格命中」分桶后证实：比分低估主因在 **λ 质量本身（H1，占 67%）**，而非代码侧的方向硬切或固定数值（H2 仅 4 场平局）。根因在 `calibrate_lambdas_from_market` 的网格搜索代价：
+
+```
+cost = cost_prob(权重 1.0) + cost_base(0.08) + cost_total(0.04)
+```
+
+`cost_prob`（拟合 1X2 欧赔）权重远高于 `cost_total`（贴近联赛/基准总进球），为拟合均势对阵的高平局形态会系统性压低 λ 总量（2022 64 场 λ 总进球偏差 −0.096、低估 30/64）。
+
+新增**大小球盘口锚定项**让 λ 总量同时贴合 1X2 与市场对总进球的定价：
+
+- 可调常量 `LAMBDA_OU_ANCHOR_COST = 0.10`，`cost` 加入 `cost_anchor = LAMBDA_OU_ANCHOR_COST * (total_goals - anchor_total) ** 2`。
+- `anchor_total`：从大小球终盘线 + 去水 over/under 概率反解的市场隐含总进球（`_implied_total_from_ou_line`），仅在 `0.8~6.0` 合理量级生效，网格上下界随锚点适度放宽避免被边界截断。
+- `run` 内从 `extract_over_under_market_signal` 取终盘线与概率算出锚点，经 `market_total_anchor` 入参传给校准；诊断写入 `realtime.context_applied.lambda_calibration.market_total_anchor`。
+- **结构上不影响融合层 1X2**：calibrated λ 只供「显示比分 + 大小球」链路，胜平负由独立 `market_alpha` 凸组合对齐。
+
+同轮模型审查修复两个失效子模型（`ml_prediction_models.py`）：**BayesianModel** 此前忽略证据输入、对任何对阵输出同一组常数，改为证据驱动的凸组合后验；**RandomForestModel** 此前返回离散硬编码概率桶、存在跳变，改为连续 sigmoid 映射。
+
+验证：2022 64 场样本外 A/B（`backtest_overall.py`）1X2 +1.5%、比分 top1 +1.5%、总进球偏差 −0.096→−0.05、均势场各 +11.1% 且 1X2 零回归；2026 世界杯 35 场同口径重放（`reanalyze_matches.py`）1X2 持平零回归、比分 top3 +2.86%、「1-0 顶 top1」3→1。详见 `docs/CHANGELOG.md` 2026-06-23 条目。
 
 ### 3.5 RAG 记忆层
 

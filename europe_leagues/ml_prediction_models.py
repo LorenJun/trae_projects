@@ -420,14 +420,12 @@ class LogisticRegressionModel:
 
 
 class RandomForestModel:
-    """随机森林模型（简化版）"""
+    """随机森林模型（简化版：连续决策桩）。
 
-    def __init__(self):
-        self.trees = []  # 简化的决策树
-
-    def add_tree(self, rules: List[Dict]):
-        """添加决策树"""
-        self.trees.append(rules)
+    早期实现返回固定概率桶（0.7/0.2/0.1 等），与实力/状态差无连续关系——
+    实力差 9 与 11 之间会概率跳变，且只看两维特征。改为对实力差与状态差做
+    连续打分，再用 sigmoid + 均势平局先验映射为概率，让输入真正驱动输出。
+    """
 
     def predict_single(
         self,
@@ -436,21 +434,10 @@ class RandomForestModel:
         home_form: int,
         away_form: int
     ) -> float:
-        """单个决策树预测"""
-        score = 0
-
-        # 简化规则
-        if home_strength > away_strength + 10:
-            score += 1
-        elif away_strength > home_strength + 10:
-            score -= 1
-
-        if home_form > away_form + 2:
-            score += 0.5
-        elif away_form > home_form + 2:
-            score -= 0.5
-
-        return score
+        """主队视角的连续净优势评分（>0 利主，<0 利客）。"""
+        strength_term = (home_strength - away_strength) / 20.0
+        form_term = (home_form - away_form) / 4.0
+        return strength_term + 0.5 * form_term
 
     def predict(
         self,
@@ -459,30 +446,14 @@ class RandomForestModel:
         home_form: int,
         away_form: int
     ) -> Dict[str, float]:
-        """随机森林预测"""
-        scores = [self.predict_single(home_strength, away_strength, home_form, away_form)]
+        """随机森林预测（连续概率，避免硬编码桶的跳变）。"""
+        score = self.predict_single(home_strength, away_strength, home_form, away_form)
 
-        # 计算平均分数
-        avg_score = sum(scores) / len(scores)
-
-        # 转换为概率
-        if avg_score > 0.5:
-            home_win_prob = 0.7
-            away_win_prob = 0.2
-            draw_prob = 0.1
-        elif avg_score < -0.5:
-            home_win_prob = 0.2
-            away_win_prob = 0.7
-            draw_prob = 0.1
-        else:
-            if abs(avg_score) < 0.2:
-                home_win_prob = 0.35
-                away_win_prob = 0.35
-                draw_prob = 0.3
-            else:
-                home_win_prob = 0.3
-                away_win_prob = 0.3
-                draw_prob = 0.4
+        spread = 1.0 / (1.0 + math.exp(-score))  # 0~1，0.5 为均势
+        draw_prob = max(0.16, min(0.34, 0.30 - 0.18 * abs(2 * spread - 1.0)))
+        remain = 1.0 - draw_prob
+        home_win_prob = remain * spread
+        away_win_prob = remain * (1.0 - spread)
 
         return {
             'home_win': home_win_prob,
@@ -572,8 +543,12 @@ class BayesianModel:
         injury_weight: float = 0.15,
         venue_neutral: bool = False
     ) -> Dict[str, float]:
-        """根据证据更新概率。
+        """根据证据更新概率：posterior = (1-conf)·prior + conf·evidence。
 
+        early 实现的后验只由固定先验×固定权重算出，完全忽略传入的
+        home_win/draw/away_win 证据，导致任何对阵都输出同一组常数。
+        这里把传入证据归一化为合法分布，再按证据置信度与先验做凸组合，
+        让队力等证据真正驱动输出。
         venue_neutral=True（中立场地）时把主/客胜先验与证据权对称化，
         消除“主队先验偏高 + 主队证据权更大”带来的场地无关主队倾斜。
         """
@@ -589,16 +564,26 @@ class BayesianModel:
             prior_home_win = self.prior_home_win
             prior_away_win = self.prior_away_win
 
-        # 简化的贝叶斯更新
-        posterior_home = prior_home_win * (1 + home_evidence_weight)
-        posterior_draw = self.prior_draw * (1 + form_weight)
-        posterior_away = prior_away_win * (1 + injury_weight)
+        prior = (prior_home_win, self.prior_draw, prior_away_win)
+        prior_total = sum(prior) or 1.0
+        prior = tuple(p / prior_total for p in prior)
 
-        # 归一化
-        total = posterior_home + posterior_draw + posterior_away
-        posterior_home /= total
-        posterior_draw /= total
-        posterior_away /= total
+        # 传入证据可能含负值（如 draw=1-h/100-a/100 在双方都强时为负），
+        # 下限保护后归一化为合法分布，避免无效似然破坏后验。
+        eps = 1e-6
+        evidence = (max(eps, float(home_win)), max(eps, float(draw)), max(eps, float(away_win)))
+        evidence_total = sum(evidence) or 1.0
+        evidence = tuple(e / evidence_total for e in evidence)
+
+        # 证据置信度：三个权重的均值，夹紧到 [0,1]，决定证据相对先验的拉动幅度。
+        confidence = max(0.0, min(1.0, (home_evidence_weight + form_weight + injury_weight) / 3.0))
+
+        posterior = tuple(
+            (1.0 - confidence) * pr + confidence * ev
+            for pr, ev in zip(prior, evidence)
+        )
+        total = sum(posterior) or 1.0
+        posterior_home, posterior_draw, posterior_away = (p / total for p in posterior)
 
         return {
             'home_win': posterior_home,
@@ -718,7 +703,6 @@ class MultiModelFusion:
         all_predictions['poisson'] = poisson_result
 
         # 2. Dixon-Coles模型
-        dc = self.models['dixon_coles']
         dc_result = dc.predict_with_dixon_coles(home_lambda, away_lambda)
         all_predictions['dixon_coles'] = dc_result
 

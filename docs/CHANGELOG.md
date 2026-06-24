@@ -2,7 +2,7 @@
 title: 仓库变更日志
 owner: trae_projects
 version: v1
-last_updated: 2026-06-22
+last_updated: 2026-06-23
 ---
 
 # CHANGELOG
@@ -13,6 +13,47 @@ last_updated: 2026-06-22
 - 代码：`/Users/bytedance/trae_projects/europe_leagues`
 - 技能：`/Users/bytedance/trae_projects/.trae/skills`
 - 文档：仓库根与 `europe_leagues/` 下相关 `md`
+
+---
+
+## 2026-06-23
+
+### 0. λ 校准联合拟合大小球盘口线（治本：缓解比分系统性偏小，`domain/inference.py`）
+
+归因诊断（`diag_score_attribution.py`）证实比分低估主因在 **λ 质量（H1，占 67%）**：`calibrate_lambdas_from_market` 的网格 `cost = cost_prob(权重1.0) + cost_base(0.08) + cost_total(0.04)`，`cost_prob` 远大于 `cost_total`，为拟合均势 1X2 的高平局形态会系统性压低总进球（2022 世界杯 λ 总进球偏差 −0.096、低估 30/64）。
+
+- 新增可调常量 `LAMBDA_OU_ANCHOR_COST = 0.10`，在 `cost` 中加入 `cost_anchor = LAMBDA_OU_ANCHOR_COST * (total_goals - anchor_total) ** 2`，其中 `anchor_total` 为**大小球盘口终盘线 + 去水概率反解的市场隐含总进球**（`_implied_total_from_ou_line`）。让 λ 总量同时贴合 1X2 与市场对总进球的定价。
+- `calibrate_lambdas_from_market` 新增 `market_total_anchor` 参数（仅在 0.8~6.0 合理量级生效），网格上下界随锢点适度放宽避免被边界截断；`run` 内从 `extract_over_under_market_signal` 取终盘线与 over/under 概率计算锢点后传入。
+- **不影响融合层 1X2**：calibrated λ 只走「显示比分 + 大小球」链路，1X2 由独立 `market_alpha` 凸组合对齐，结构上零回归。诊断写入 `realtime.context_applied.lambda_calibration.market_total_anchor`。
+
+> 权重选型：0.15 vs 0.10 在 2022 64 场对比中，0.10 用「少修复一点点低估」换回一场大小球与更小副作用，更均衡，故定为 **0.10**。
+
+### 1. 修复两个失效子模型（`ml_prediction_models.py`）
+
+模型审查发现两个「死模型」——名义参与融合但输出与输入无关：
+
+- **BayesianModel**：`update_with_evidence` 早期实现的后验只由固定先验×固定权重算出，**完全忽略传入的 home/away/draw 证据**，任何对阵都输出同一组常数。改为 `posterior = (1-conf)·prior + conf·evidence` 凸组合，证据归一化后真正驱动后验，证据置信度由三个权重均值夹紧到 `[0,1]`。
+- **RandomForestModel**：`self.trees` 从不参与预测，`predict` 只调一次单规则桩并返回**离散硬编码概率桶**（0.7/0.2/0.1 等），实力差 9 与 11 之间概率跳变。改为对实力差与状态差连续打分，经 sigmoid + 均势平局先验映射为连续概率。
+- 顺手删除 `MultiModelFusion.predict` 中 `dc = self.models['dixon_coles']` 的重复赋值。
+
+### 2. 回测验证（2022 样本外 + 2026 同口径重放）
+
+- **2022 世界杯 64 场样本外 A/B**（`backtest_overall.py`，HEAD 基线 vs 当前代码 via git stash）：1X2 命中 54.7%→56.2%（+1.5%），比分 top1 9.4%→10.9%（+1.5%），总进球偏差 −0.096→−0.05（低估缓解约 48%），均势场子集（9 场） 1X2 与比分 top1 各 +11.1%，1X2 零回归。
+- **2026 世界杯 35 场同口径重放**（`reanalyze_matches.py --league world_cup`，`persist=False`，44 场中 9 场缺历史快照跳过）：1X2 持平 57.14%（0 改善 0 回归），比分 top3 31.43%→34.29%（+2.86%），「1-0 顶 top1」从 3 次降到 1 次（比分偏小肉眼缓解）。
+
+### 3. 世界杯小组积分榜随复盘自动重算（`domain/world_cup_standings.py`）
+
+`teams_2026.md` 此前只有「小组信息」分组名单与赛程比分，没有积分榜。新增独立「小组积分榜」章节，并接入结果闭环让其随赛果自动刷新，不再手工维护：
+
+- 新增 `domain/world_cup_standings.py`：从 SoT 解析 12 组名单 + 已回填比分，按 FIFA 规则（胜 3 / 平 1 / 负 0）统计，排序按 积分 → 净胜球 → 进球数，幂等就地替换「小组积分榜」章节（首次无章节则插在「赛程信息」前）。
+- `app/cli.py` 的 `sync-pending-results-review` 在复盘总结后调用 `update_world_cup_standings`，回填后自动重算写回，并在 JSON/文本输出附 `world_cup_standings` 摘要。
+- 同步更新 `.trae/skills/sync-pending-results-review/SKILL.md`「结果闭环后应看到什么」。
+
+关联文件：
+- `europe_leagues/ml_prediction_models.py`、`europe_leagues/domain/inference.py`
+- `europe_leagues/domain/world_cup_standings.py`、`europe_leagues/app/cli.py`、`europe_leagues/world_cup/teams_2026.md`
+- `europe_leagues/backtest_overall.py`、`europe_leagues/backtest_score_ab.py`、`europe_leagues/diag_score_attribution.py`
+- `docs/architecture/europe_leagues_architecture.md` 3.4.2 节
 
 ---
 
