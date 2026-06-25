@@ -802,6 +802,7 @@ class EnhancedPredictor:
         historical_odds_reference = core["historical_odds_reference"]
         upset_potential = core["upset_potential"]
         top_scores = core["top_scores"]
+        score_probs = core.get("score_probs")
         total_goals = core["total_goals"]
         home_lambda = core["home_lambda"]
         away_lambda = core["away_lambda"]
@@ -884,6 +885,24 @@ class EnhancedPredictor:
         if lightweight_rag_decision:
             analysis_context['rag_lightweight_decision'] = lightweight_rag_decision
             realtime['context_applied']['rag_lightweight_decision'] = lightweight_rag_decision
+        # RAG 经验比分融合（先在世界杯灰度）：仅用相似度门控召回的同方向"总进球档/净胜球档"
+        # 经验分布乘性 tilt 泊松全网格，修正模型对进球量级的系统性低估，再重排 top-3。
+        # 注：曾尝试用「广义同方向已完赛池」作回退源，但 47 场完赛回测显示——按预测方向
+        # （线上唯一可得口径）聚合的池子是负增益（top-3 34%→21.3%），之前看到的 59.6% 增益
+        # 实为按真实赛果方向聚合的数据泄漏。故仅保留相似度召回，样本不足时安全降级、不 tilt。
+        if league_code == 'world_cup':
+            try:
+                fused_scores, rag_score_fusion_diag = self.postprocess_service.fuse_scores_with_rag_empirical(
+                    top_scores,
+                    score_probs,
+                    retrieved_memory,
+                    limit=3,
+                )
+                if rag_score_fusion_diag.get('applied'):
+                    top_scores = fused_scores
+                realtime['context_applied']['rag_score_fusion'] = rag_score_fusion_diag
+            except Exception as e:
+                realtime['context_applied']['rag_score_fusion'] = {'applied': False, 'error': str(e)}
         result = self.postprocess_service.build_prediction_result(
             match_id=match_id,
             home_team=home_team,

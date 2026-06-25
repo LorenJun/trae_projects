@@ -419,17 +419,49 @@ class HybridRAGService:
             )
         ]
         score_counter: Counter[str] = Counter()
+        # 仅用召回案例的“真实比分”构建经验分布（不掺预测比分），
+        # 供下游与泊松分布按自适应权重融合，修正泊松对低比分的系统性偏差。
+        # 回测表明：精确比分粒度太细、样本太稀（增益≈0），真正偏差在“进球量级”——
+        # 模型系统性低估总进球与净胜球。故同时聚合总进球档/净胜球档分布供下游 tilt。
+        actual_score_counter: Counter[str] = Counter()
+        total_goals_counter: Counter[int] = Counter()
+        margin_counter: Counter[int] = Counter()
         score_source = directional_ou_cases or direction_cases or ou_cases
         for item in score_source:
             actual_score = str(item.get("actual_score") or "").strip()
             if actual_score:
                 score_counter[actual_score] += 2
+                actual_score_counter[actual_score] += 1
+                parsed = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", actual_score)
+                if parsed:
+                    hg, ag = int(parsed.group(1)), int(parsed.group(2))
+                    total_goals_counter[hg + ag] += 1
+                    margin_counter[hg - ag] += 1
             for score in item.get("predicted_scores") or []:
                 text = str(score or "").strip()
                 if text:
                     score_counter[text] += 1
         preferred_scores = [score for score, _ in score_counter.most_common(3)]
         current_score_overlap = [score for score in preferred_scores if score in current_scores]
+        empirical_sample_count = int(sum(actual_score_counter.values()))
+        empirical_score_distribution = (
+            {
+                score: round(count / empirical_sample_count, 6)
+                for score, count in actual_score_counter.most_common()
+            }
+            if empirical_sample_count > 0
+            else {}
+        )
+        total_goals_distribution = (
+            {str(k): round(v / empirical_sample_count, 6) for k, v in total_goals_counter.items()}
+            if empirical_sample_count > 0
+            else {}
+        )
+        margin_distribution = (
+            {str(k): round(v / empirical_sample_count, 6) for k, v in margin_counter.items()}
+            if empirical_sample_count > 0
+            else {}
+        )
         return {
             **summary,
             "direction_priority": {
@@ -444,6 +476,10 @@ class HybridRAGService:
                 "matched_case_count": len(directional_ou_cases),
                 "preferred_scores": preferred_scores,
                 "current_score_overlap": current_score_overlap,
+                "empirical_score_distribution": empirical_score_distribution,
+                "empirical_sample_count": empirical_sample_count,
+                "total_goals_distribution": total_goals_distribution,
+                "margin_distribution": margin_distribution,
             },
         }
 

@@ -28,7 +28,29 @@ class InferencePipelineService:
     # 诊断显示纯拟合 1X2 会为均势高平局形态压低总进球（2022 世界杯 λ 总进球偏差 −0.075、
     # 低估 30/64）。加入此锚定项让 λ 总量同时贴合市场对总进球的定价，缓解比分系统性偏小。
     # 仅当大小球盘口可反解出 implied_total 时生效，不影响融合层 1X2（1X2 由独立 market_alpha 凸组合对齐）。
+    # 默认 0.10（与历史一致，SoT 联赛零回归）；world_cup 在 BY_LEAGUE 提到 0.30：
+    # 54 场世界杯已完赛回测显示，配合 cost_base/cost_total 削弱后，≥3 球场次校准 λ 被抬到 ≥2.5
+    # 的命中从 7/30 升到 20/30，且 1X2 拟合误差未恶化（0.0208→0.0135）。
+    # anchor 只竞争总进球量级维度、不动主客 share（由权重恒 1.0 的 cost_prob 主导），故 1X2 方向不受影响。
     LAMBDA_OU_ANCHOR_COST = 0.10
+    LAMBDA_OU_ANCHOR_COST_BY_LEAGUE: Dict[str, float] = {'world_cup': 0.30}
+    # cost_base 队力基准锚的权重：让校准后 λ 不过度偏离 attack×defense 派生的队力基准。
+    # 世界杯队力多为 FIFA 排名兜底（不可靠且系统性偏保守），过强的基准锚会把 λ 死死按在
+    # 偏低的起点上、抵消 OU 锚的上抬。故对 world_cup 调低此权重，让市场 OU 总进球更有话语权。
+    # 默认 0.08（与历史一致，SoT 联赛零回归）；仅 world_cup 走 LAMBDA_BASE_ANCHOR_COST_BY_LEAGUE。
+    LAMBDA_BASE_ANCHOR_COST = 0.08
+    LAMBDA_BASE_ANCHOR_COST_BY_LEAGUE: Dict[str, float] = {'world_cup': 0.03}
+    # cost_total 由两个独立的"总进球拉力"项构成（历史上合并为单个 0.04 权重）：
+    #   ① 往联赛均值 league_avg 拉：LAMBDA_TOTAL_AVG_COST（默认 0.04）。
+    #   ② 往队力基准总量 base_total 拉：LAMBDA_TOTAL_BASE_COST（默认 0.04）。
+    # 拆开是为了对 world_cup 单独削弱②——FIFA 兜底队力使 base_total 系统性偏低（1.9~2.05），
+    # 该项与 cost_base 冗余同向、把 λ 死死按在偏低起点上，抵消 OU 锚的上抬。
+    # 默认两项各 0.04，与历史 `0.04*((tg-avg)²+(tg-base)²)` 逐字节等价，SoT 联赛零回归。
+    # world_cup 把 base 项削到 0：FIFA 兜底队力 base_total 偏低且与 cost_base 冗余，去掉后
+    # 让 OU 锚主导总进球量级（仍保留 avg 项防止 λ 被脏盘拉飞）。
+    LAMBDA_TOTAL_AVG_COST = 0.04
+    LAMBDA_TOTAL_BASE_COST = 0.04
+    LAMBDA_TOTAL_BASE_COST_BY_LEAGUE: Dict[str, float] = {'world_cup': 0.0}
 
     def __init__(
         self,
@@ -2646,6 +2668,15 @@ class InferencePipelineService:
         dc = DixonColesModel(rho=resolve_rho(league_code))
         league_avg = float(self.league_config.get(league_code, {}).get('avg_goals') or 2.6)
         base_total = max(0.8, float(base_home_lambda) + float(base_away_lambda))
+        # 队力基准锚权重：默认 0.08，world_cup 等 FIFA 兜底联赛可在 BY_LEAGUE 调低，
+        # 让市场 OU 总进球锚更有话语权（不过度被偏低的兜底队力拽回）。
+        base_anchor_w = float(self.LAMBDA_BASE_ANCHOR_COST_BY_LEAGUE.get(league_code, self.LAMBDA_BASE_ANCHOR_COST))
+        # cost_total 的两项拉力权重：往联赛均值拉(avg) + 往队力基准总量拉(base)。
+        # world_cup 等兜底队力联赛可在 BY_LEAGUE 削弱 base 项，避免偏低 base_total 按住 λ。
+        total_avg_w = float(self.LAMBDA_TOTAL_AVG_COST)
+        total_base_w = float(self.LAMBDA_TOTAL_BASE_COST_BY_LEAGUE.get(league_code, self.LAMBDA_TOTAL_BASE_COST))
+        # OU 锚权重：默认 0.10，world_cup 在 BY_LEAGUE 提到 0.30（市场大小球是最可信的进球量级信号）。
+        anchor_w = float(self.LAMBDA_OU_ANCHOR_COST_BY_LEAGUE.get(league_code, self.LAMBDA_OU_ANCHOR_COST))
         # 大小球盘口反解的市场总进球锚：仅在落入合理量级时启用，避免脏盘把 λ 拉飞。
         anchor_total: Optional[float] = None
         if market_total_anchor is not None:
@@ -2672,11 +2703,11 @@ class InferencePipelineService:
                 al = max(0.15, total_goals * (1 - share))
                 probs = dc.predict_with_dixon_coles(hl, al)
                 cost_prob = (probs['home_win'] - ph) ** 2 + (probs['draw'] - pd) ** 2 + (probs['away_win'] - pa) ** 2
-                cost_base = 0.08 * ((hl - base_home_lambda) ** 2 + (al - base_away_lambda) ** 2)
-                cost_total = 0.04 * ((total_goals - league_avg) ** 2 + (total_goals - base_total) ** 2)
+                cost_base = base_anchor_w * ((hl - base_home_lambda) ** 2 + (al - base_away_lambda) ** 2)
+                cost_total = total_avg_w * (total_goals - league_avg) ** 2 + total_base_w * (total_goals - base_total) ** 2
                 cost_anchor = 0.0
                 if anchor_total is not None:
-                    cost_anchor = self.LAMBDA_OU_ANCHOR_COST * (total_goals - anchor_total) ** 2
+                    cost_anchor = anchor_w * (total_goals - anchor_total) ** 2
                 cost = cost_prob + cost_base + cost_total + cost_anchor
                 if cost < best_cost:
                     best_cost = cost
@@ -4115,6 +4146,7 @@ class InferencePipelineService:
             'historical_odds_reference': historical_odds_reference,
             'upset_potential': upset_potential,
             'top_scores': top_scores,
+            'score_probs': score_probs,
             'total_goals': total_goals,
             'home_lambda': home_lambda,
             'lightweight_rag_decision': lightweight_rag_decision,

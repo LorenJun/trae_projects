@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from domain.draw_risk import assess_draw_risk
 from domain.review_bias import ReviewBiasService
 from domain.review_learning import PredictionReviewLearningService
 
@@ -20,6 +21,7 @@ OUTCOME_LABELS = (
 class PredictionPostprocessService:
     def __init__(self, league_config: Dict[str, Dict[str, Any]], base_dir: Optional[str] = None):
         self.league_config = league_config
+        self.base_dir = base_dir
         self.review_bias = ReviewBiasService(league_config, base_dir)
 
     @staticmethod
@@ -76,6 +78,130 @@ class PredictionPostprocessService:
         if total <= 0:
             return [(score, float(prob or 0.0)) for score, prob in scores]
         return [(score, float(prob or 0.0) / total) for score, prob in scores]
+
+    @staticmethod
+    def fuse_scores_with_rag_empirical(
+        top_scores: Optional[List[Tuple[str, float]]],
+        score_probs: Optional[Dict[str, float]],
+        retrieved_memory: Optional[Dict[str, Any]],
+        *,
+        limit: int = 3,
+        beta_total_goals: float = 0.5,
+        beta_margin: float = 0.5,
+        min_sample: int = 5,
+    ) -> Tuple[List[Tuple[str, float]], Dict[str, Any]]:
+        """用 RAG 召回的"总进球档/净胜球档"经验分布 tilt 泊松全网格，修正"方向准但比分偏低"。
+
+        诊断：泊松/Dixon-Coles 系统性低估进球量级——模型 top-1 几乎全押总进球 1~2，
+        而实际近半场次 ≥3 球、主胜净胜球普遍 2~3。用"精确比分"经验分布融合无增益
+        （样本太稀、粒度太细），改用"总进球档 + 净胜球档"乘性 tilt。
+
+        样本来源仅限相似度门控的 RAG 召回（窄、贴脸、同方向）。曾尝试用"广义同方向已完赛池"
+        作回退源以提高触发率，但 47 场完赛回测显示：按预测方向（线上唯一可得口径）聚合的池子
+        是负增益（top-3 34%→21.3%），之前看到的 59.6% 增益实为按真实赛果方向聚合的数据泄漏。
+        故只用相似召回，样本不足（赛事早期常见）时直接安全降级、不 tilt。
+        """
+        diag: Dict[str, Any] = {
+            'applied': False,
+            'reason': 'not_triggered',
+            'sample_count': 0,
+            'sample_source': None,
+            'beta_total_goals': beta_total_goals,
+            'beta_margin': beta_margin,
+            'promoted_scores': [],
+        }
+        base = [
+            (str(score).strip(), float(prob or 0.0))
+            for score, prob in (top_scores or [])
+            if str(score).strip()
+        ]
+        target = max(1, int(limit or 3))
+        if not isinstance(score_probs, dict) or not score_probs:
+            diag['reason'] = 'missing_score_probs'
+            return base[:target], diag
+        summary = {}
+        if isinstance(retrieved_memory, dict):
+            summary = retrieved_memory.get('summary') if isinstance(retrieved_memory.get('summary'), dict) else {}
+        direction_ou = summary.get('direction_ou_priority') if isinstance(summary.get('direction_ou_priority'), dict) else {}
+        rag_sample_count = int(direction_ou.get('empirical_sample_count') or 0)
+        rag_tg = direction_ou.get('total_goals_distribution') if isinstance(direction_ou.get('total_goals_distribution'), dict) else {}
+        rag_mg = direction_ou.get('margin_distribution') if isinstance(direction_ou.get('margin_distribution'), dict) else {}
+
+        if rag_sample_count >= int(min_sample) and (rag_tg or rag_mg):
+            emp_tg, emp_mg, sample_count, source = rag_tg, rag_mg, rag_sample_count, 'rag_similar'
+        else:
+            diag['sample_count'] = rag_sample_count
+            diag['reason'] = 'insufficient_rag_samples'
+            return base[:target], diag
+        diag['sample_count'] = sample_count
+        diag['sample_source'] = source
+
+        def parse(score: str) -> Optional[Tuple[int, int]]:
+            try:
+                h, a = (int(x) for x in str(score).split('-'))
+                return h, a
+            except Exception:
+                return None
+
+        poisson_total = sum(max(0.0, float(p or 0.0)) for p in score_probs.values())
+        if poisson_total <= 0:
+            diag['reason'] = 'invalid_poisson_total'
+            return base[:target], diag
+        grid = {
+            str(score).strip(): max(0.0, float(prob or 0.0)) / poisson_total
+            for score, prob in score_probs.items()
+            if str(score).strip() and parse(score)
+        }
+        # 模型隐含的总进球档/净胜球档
+        base_tg: Dict[int, float] = {}
+        base_mg: Dict[int, float] = {}
+        for score, prob in grid.items():
+            hg, ag = parse(score)
+            base_tg[hg + ag] = base_tg.get(hg + ag, 0.0) + prob
+            base_mg[hg - ag] = base_mg.get(hg - ag, 0.0) + prob
+
+        def to_int_map(raw: Dict[str, Any]) -> Dict[int, float]:
+            out: Dict[int, float] = {}
+            for k, v in (raw or {}).items():
+                try:
+                    out[int(k)] = float(v or 0.0)
+                except Exception:
+                    continue
+            return out
+
+        emp_tg_i = to_int_map(emp_tg)
+        emp_mg_i = to_int_map(emp_mg)
+        # 平滑下限，避免某档经验为 0 时把整列乘没
+        n_cells = max(1, len(grid))
+        floor = 1.0 / (2.0 * n_cells)
+
+        tilted: Dict[str, float] = {}
+        for score, prob in grid.items():
+            hg, ag = parse(score)
+            tg, mg = hg + ag, hg - ag
+            et = emp_tg_i.get(tg, floor) or floor
+            bt = base_tg.get(tg, floor) or floor
+            em = emp_mg_i.get(mg, floor) or floor
+            bm = base_mg.get(mg, floor) or floor
+            factor = (et / bt) ** float(beta_total_goals) * (em / bm) ** float(beta_margin)
+            tilted[score] = prob * factor
+        tilted_total = sum(tilted.values())
+        if tilted_total <= 0:
+            diag['reason'] = 'empty_tilted'
+            return base[:target], diag
+        tilted = {score: prob / tilted_total for score, prob in tilted.items()}
+
+        ranked = sorted(tilted.items(), key=lambda item: item[1], reverse=True)[:target]
+        ranked = PredictionPostprocessService._rescale_score_list(ranked)
+        ranked = sorted(ranked, key=lambda item: item[1], reverse=True)
+
+        base_names = {score for score, _ in base[:target]}
+        diag['promoted_scores'] = [score for score, _ in ranked if score not in base_names]
+        diag['applied'] = True
+        diag['reason'] = 'rag_goal_band_tilt'
+        return ranked, diag
+
+
 
     @staticmethod
     def rescale_score_probs_to_outcome(
@@ -2699,6 +2825,11 @@ class PredictionPostprocessService:
             ),
             'live_betting_advice': live_betting_advice,
             'market_snapshot': self.build_market_snapshot(current_odds),
+            'draw_risk_assessment': assess_draw_risk(
+                current_odds=current_odds,
+                final_probabilities=final_probabilities,
+                base_dir=self.base_dir,
+            ),
             'runtime_profile': runtime_profile,
             'timestamp': datetime.now().isoformat(),
         }
