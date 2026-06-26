@@ -132,6 +132,152 @@ class InferencePipelineService:
     def _clamp_probability(value: float, lower: float = 0.0, upper: float = 0.99) -> float:
         return max(lower, min(upper, float(value)))
 
+    @staticmethod
+    def _normalize_prob_dict(probabilities: Dict[str, Any]) -> Dict[str, float]:
+        p_h = float(probabilities.get('home_win') or 0.0)
+        p_d = float(probabilities.get('draw') or 0.0)
+        p_a = float(probabilities.get('away_win') or 0.0)
+        total = p_h + p_d + p_a
+        if total <= 0:
+            return {'home_win': 0.0, 'draw': 0.0, 'away_win': 0.0}
+        return {'home_win': p_h / total, 'draw': p_d / total, 'away_win': p_a / total}
+
+    @classmethod
+    def _apply_near_tie_stage_cap(
+        cls,
+        *,
+        before_prob: Dict[str, Any],
+        after_prob: Dict[str, Any],
+        stage_name: str,
+        gap_threshold: float = 0.02,
+        keep_margin: float = 0.0008,
+    ) -> Tuple[Dict[str, float], Dict[str, Any]]:
+        diag: Dict[str, Any] = {'applied': False, 'stage': stage_name}
+        if not isinstance(before_prob, dict) or not isinstance(after_prob, dict):
+            diag['reason'] = 'invalid_inputs'
+            return after_prob, diag
+
+        before_norm = cls._normalize_prob_dict(before_prob)
+        after_norm = cls._normalize_prob_dict(after_prob)
+        before_ranked = sorted(before_norm.items(), key=lambda item: item[1], reverse=True)
+        after_ranked = sorted(after_norm.items(), key=lambda item: item[1], reverse=True)
+        if len(before_ranked) < 2 or len(after_ranked) < 2:
+            diag['reason'] = 'insufficient_mass'
+            return after_norm, diag
+
+        before_top, before_second = before_ranked[0], before_ranked[1]
+        after_top = after_ranked[0]
+        before_gap = float(before_top[1]) - float(before_second[1])
+        diag.update({
+            'before_top': before_top[0],
+            'after_top': after_top[0],
+            'before_gap': round(float(before_gap), 4),
+            'gap_threshold': gap_threshold,
+        })
+        if before_gap > gap_threshold + 1e-9:
+            diag['reason'] = 'pre_stage_gap_too_large'
+            return after_norm, diag
+        if before_top[0] == after_top[0]:
+            diag['reason'] = 'top_label_unchanged'
+            return after_norm, diag
+
+        donor_key = after_top[0]
+        anchor_key = before_top[0]
+        anchor_prob = float(after_norm.get(anchor_key) or 0.0)
+        donor_prob = float(after_norm.get(donor_key) or 0.0)
+        if donor_prob <= anchor_prob:
+            diag['reason'] = 'after_top_not_ahead'
+            return after_norm, diag
+        take = (donor_prob - anchor_prob + keep_margin) / 2.0
+        take = min(take, max(0.0, donor_prob - 0.02))
+        if take <= 0:
+            diag['reason'] = 'take_below_threshold'
+            return after_norm, diag
+        capped = dict(after_norm)
+        capped[donor_key] = max(0.0, donor_prob - take)
+        capped[anchor_key] = anchor_prob + take
+        capped = cls._normalize_prob_dict(capped)
+        diag.update({
+            'applied': True,
+            'reason': 'single_stage_flip_capped',
+            'anchor_top': anchor_key,
+            'attempted_top': donor_key,
+            'take': round(float(take), 6),
+            'capped_probabilities': {
+                'home_win': round(float(capped.get('home_win') or 0.0), 6),
+                'draw': round(float(capped.get('draw') or 0.0), 6),
+                'away_win': round(float(capped.get('away_win') or 0.0), 6),
+            },
+        })
+        return capped, diag
+
+    @classmethod
+    def _apply_cumulative_near_tie_cap(
+        cls,
+        *,
+        anchor_prob: Dict[str, Any],
+        current_prob: Dict[str, Any],
+        gap_threshold: float = 0.02,
+        keep_margin: float = 0.0012,
+    ) -> Tuple[Dict[str, float], Dict[str, Any]]:
+        diag: Dict[str, Any] = {'applied': False}
+        if not isinstance(anchor_prob, dict) or not isinstance(current_prob, dict):
+            diag['reason'] = 'invalid_inputs'
+            return current_prob, diag
+
+        anchor_norm = cls._normalize_prob_dict(anchor_prob)
+        current_norm = cls._normalize_prob_dict(current_prob)
+        anchor_ranked = sorted(anchor_norm.items(), key=lambda item: item[1], reverse=True)
+        current_ranked = sorted(current_norm.items(), key=lambda item: item[1], reverse=True)
+        if len(anchor_ranked) < 2 or len(current_ranked) < 2:
+            diag['reason'] = 'insufficient_mass'
+            return current_norm, diag
+
+        anchor_top, anchor_second = anchor_ranked[0], anchor_ranked[1]
+        current_top = current_ranked[0]
+        anchor_gap = float(anchor_top[1]) - float(anchor_second[1])
+        diag.update({
+            'anchor_top': anchor_top[0],
+            'current_top': current_top[0],
+            'anchor_gap': round(float(anchor_gap), 4),
+            'gap_threshold': gap_threshold,
+        })
+        if anchor_gap > gap_threshold + 1e-9:
+            diag['reason'] = 'anchor_gap_too_large'
+            return current_norm, diag
+        if anchor_top[0] == current_top[0]:
+            diag['reason'] = 'top_label_unchanged'
+            return current_norm, diag
+
+        donor_key = current_top[0]
+        anchor_key = anchor_top[0]
+        anchor_current = float(current_norm.get(anchor_key) or 0.0)
+        donor_current = float(current_norm.get(donor_key) or 0.0)
+        if donor_current <= anchor_current:
+            diag['reason'] = 'current_top_not_ahead'
+            return current_norm, diag
+        take = (donor_current - anchor_current + keep_margin) / 2.0
+        take = min(take, max(0.0, donor_current - 0.02))
+        if take <= 0:
+            diag['reason'] = 'take_below_threshold'
+            return current_norm, diag
+        capped = dict(current_norm)
+        capped[donor_key] = max(0.0, donor_current - take)
+        capped[anchor_key] = anchor_current + take
+        capped = cls._normalize_prob_dict(capped)
+        diag.update({
+            'applied': True,
+            'reason': 'cumulative_flip_capped',
+            'attempted_top': donor_key,
+            'take': round(float(take), 6),
+            'capped_probabilities': {
+                'home_win': round(float(capped.get('home_win') or 0.0), 6),
+                'draw': round(float(capped.get('draw') or 0.0), 6),
+                'away_win': round(float(capped.get('away_win') or 0.0), 6),
+            },
+        })
+        return capped, diag
+
     @classmethod
     def _calibrate_confidence_with_league_learning(
         cls,
@@ -1295,6 +1441,111 @@ class InferencePipelineService:
         ph, pd, pa = 1.0 / oh, 1.0 / od, 1.0 / oa
         total = ph + pd + pa
         return {'home_win': ph / total, 'draw': pd / total, 'away_win': pa / total}
+
+    @staticmethod
+    def _favor_label_from_side(side: Optional[str]) -> str:
+        if str(side or '').strip() == 'home':
+            return '主胜'
+        if str(side or '').strip() == 'away':
+            return '客胜'
+        return ''
+
+    def _apply_outcome_stability_guard(
+        self,
+        *,
+        ranked_probabilities: List[Tuple[str, float]],
+        anchor_ranked_probabilities: Optional[List[Tuple[str, float]]],
+        draw_guard_diag: Optional[Dict[str, Any]] = None,
+        operation_adj_diag: Optional[Dict[str, Any]] = None,
+        review_outcome_diag: Optional[Dict[str, Any]] = None,
+        sentiment_adj_diag: Optional[Dict[str, Any]] = None,
+        gap_threshold: float = 0.012,
+    ) -> Tuple[List[Tuple[str, float]], Dict[str, Any]]:
+        diag: Dict[str, Any] = {'applied': False, 'eligible': False}
+        if not ranked_probabilities or len(ranked_probabilities) < 2:
+            diag['reason'] = 'insufficient_ranking'
+            return ranked_probabilities, diag
+        if not anchor_ranked_probabilities or len(anchor_ranked_probabilities) < 1:
+            diag['reason'] = 'missing_anchor_ranking'
+            return ranked_probabilities, diag
+
+        anchor_top = str(anchor_ranked_probabilities[0][0] or '').strip()
+        top_label, top_prob = ranked_probabilities[0]
+        second_label, second_prob = ranked_probabilities[1]
+        top_label = str(top_label or '').strip()
+        second_label = str(second_label or '').strip()
+        gap = float(top_prob or 0.0) - float(second_prob or 0.0)
+        diag.update({
+            'anchor_top': anchor_top,
+            'current_top': top_label,
+            'runner_up': second_label,
+            'gap': round(float(gap), 4),
+            'gap_threshold': gap_threshold,
+        })
+        if not anchor_top:
+            diag['reason'] = 'empty_anchor_label'
+            return ranked_probabilities, diag
+        if gap > gap_threshold + 1e-9:
+            diag['reason'] = 'gap_too_large'
+            return ranked_probabilities, diag
+        if top_label == anchor_top:
+            diag['reason'] = 'top_label_unchanged'
+            return ranked_probabilities, diag
+        if second_label != anchor_top:
+            diag['reason'] = 'anchor_not_runner_up'
+            return ranked_probabilities, diag
+
+        draw_guard_diag = draw_guard_diag if isinstance(draw_guard_diag, dict) else {}
+        operation_adj_diag = operation_adj_diag if isinstance(operation_adj_diag, dict) else {}
+        review_outcome_diag = review_outcome_diag if isinstance(review_outcome_diag, dict) else {}
+        sentiment_adj_diag = sentiment_adj_diag if isinstance(sentiment_adj_diag, dict) else {}
+        favored_label = self._favor_label_from_side(operation_adj_diag.get('favored_side'))
+        draw_guard_applied = bool(draw_guard_diag.get('applied'))
+        draw_guard_qualified = bool(draw_guard_diag.get('qualified'))
+        operation_applied = bool(operation_adj_diag.get('applied'))
+        operation_direction = str(operation_adj_diag.get('direction') or '').strip()
+        sentiment_applied = bool(sentiment_adj_diag.get('applied'))
+        review_applied = bool(review_outcome_diag.get('applied'))
+        current_supported = bool(
+            (top_label == '平局' and draw_guard_applied)
+            or (operation_applied and operation_direction == 'endorse' and favored_label == top_label)
+        )
+        anchor_supported = bool(
+            (anchor_top == '平局' and draw_guard_qualified and not draw_guard_applied)
+            or (operation_applied and favored_label == anchor_top and operation_direction in {'endorse', 'deceptive'})
+        )
+        diag.update({
+            'draw_guard_applied': draw_guard_applied,
+            'draw_guard_qualified': draw_guard_qualified,
+            'operation_applied': operation_applied,
+            'operation_direction': operation_direction,
+            'favored_label': favored_label,
+            'review_applied': review_applied,
+            'sentiment_applied': sentiment_applied,
+            'current_supported': current_supported,
+            'anchor_supported': anchor_supported,
+        })
+        diag['eligible'] = True
+        if current_supported and not anchor_supported:
+            diag['reason'] = 'current_top_has_confirming_signal'
+            return ranked_probabilities, diag
+        if not (anchor_supported or draw_guard_qualified or sentiment_applied or review_applied or operation_applied):
+            diag['reason'] = 'no_instability_evidence'
+            return ranked_probabilities, diag
+
+        promoted = [item for item in ranked_probabilities if str(item[0] or '').strip() == anchor_top]
+        remainder = [item for item in ranked_probabilities if str(item[0] or '').strip() != anchor_top]
+        if not promoted:
+            diag['reason'] = 'anchor_label_missing_from_current_ranking'
+            return ranked_probabilities, diag
+        reordered = promoted + remainder
+        diag.update({
+            'applied': True,
+            'reason': 'anchor_top_reinstated_for_near_tie',
+            'preferred_direction': anchor_top,
+            'preferred_outcomes': [anchor_top, top_label],
+        })
+        return reordered, diag
 
     def _apply_draw_proximity_promotion(
         self,
@@ -3657,7 +3908,15 @@ class InferencePipelineService:
                 gap_ratio = (target_total_lambda - total_lambda_pre) / target_total_lambda
                 close_rate = 0.42 if strength_quality != 'real' else 0.22
                 scale = 1.0 + gap_ratio * close_rate
-                scale = min(scale, 1.12)
+                score_ceiling_boost = bool(
+                    total_lambda_pre >= 2.85
+                    and total_lambda_pre <= 3.35
+                    and home_lambda >= 1.7
+                    and (home_lambda - away_lambda) >= 0.45
+                )
+                if score_ceiling_boost:
+                    scale += 0.03
+                scale = min(scale, 1.16 if score_ceiling_boost else 1.12)
                 home_lambda *= scale
                 away_lambda *= scale
                 realtime['context_applied']['world_cup_tail_uplift'] = {
@@ -3666,6 +3925,7 @@ class InferencePipelineService:
                     'total_lambda_before': round(total_lambda_pre, 4),
                     'total_lambda_after': round(home_lambda + away_lambda, 4),
                     'scale': round(scale, 4),
+                    'score_ceiling_boost': score_ceiling_boost,
                 }
             else:
                 realtime['context_applied']['world_cup_tail_uplift'] = {
@@ -3763,6 +4023,7 @@ class InferencePipelineService:
             final_prob = adjusted_prob
             ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
         realtime['context_applied']['live_outcome_adjustment'] = live_adj_diag
+        anchor_ranked_probabilities = list(ranked_probabilities)
         preliminary_upset_potential = self._build_preliminary_upset_potential(
             home_team=home_team,
             away_team=away_team,
@@ -3778,6 +4039,7 @@ class InferencePipelineService:
             'motivation_risk': preliminary_upset_potential.get('motivation_risk') or {},
             'handicap_strength_mismatch': preliminary_upset_potential.get('handicap_strength_mismatch') or {},
         }
+        review_stage_input = dict(final_prob)
         final_prob, review_outcome_diag = self.postprocess_service.apply_review_outcome_adjustment(
             final_probabilities=final_prob,
             league_code=league_code,
@@ -3788,12 +4050,28 @@ class InferencePipelineService:
             match_intelligence=match_intelligence,
             upset_potential=preliminary_upset_potential,
         )
-        realtime['context_applied']['review_outcome_adjustment'] = review_outcome_diag
+        review_stage_cap_diag: Dict[str, Any] = {'applied': False, 'stage': 'review_outcome_adjustment'}
         if isinstance(review_outcome_diag, dict) and review_outcome_diag.get('applied'):
+            final_prob, review_stage_cap_diag = self._apply_near_tie_stage_cap(
+                before_prob=review_stage_input,
+                after_prob=final_prob,
+                stage_name='review_outcome_adjustment',
+            )
             ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
+        realtime['context_applied']['review_outcome_adjustment'] = review_outcome_diag
+        realtime['context_applied']['review_outcome_stage_cap'] = review_stage_cap_diag
+        match_intel_stage_input = dict(final_prob)
         final_prob, match_intel_diag = self.match_intelligence_engine._apply_match_intelligence_adjustment(final_prob=final_prob, match_intelligence=match_intelligence)
+        match_intel_stage_cap_diag: Dict[str, Any] = {'applied': False, 'stage': 'match_intelligence_adjustment'}
         if isinstance(match_intel_diag, dict):
+            if match_intel_diag.get('applied'):
+                final_prob, match_intel_stage_cap_diag = self._apply_near_tie_stage_cap(
+                    before_prob=match_intel_stage_input,
+                    after_prob=final_prob,
+                    stage_name='match_intelligence_adjustment',
+                )
             realtime['context_applied']['match_intelligence_adjustment'] = match_intel_diag
+            realtime['context_applied']['match_intelligence_stage_cap'] = match_intel_stage_cap_diag
             retry_motivation = preliminary_upset_potential.get('motivation_risk') if isinstance(preliminary_upset_potential, dict) and isinstance(preliminary_upset_potential.get('motivation_risk'), dict) else {}
             retry_ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
             retry_top_label = retry_ranked_probabilities[0][0] if retry_ranked_probabilities else ''
@@ -3888,12 +4166,22 @@ class InferencePipelineService:
             suppress_over_shift=suppress_review_over_push,
         )
         realtime['context_applied']['review_over_under_adjustment'] = review_ou_diag
+        real_ou_stage_input = dict(final_prob)
         final_prob, real_ou_outcome_diag = self.apply_real_totals_outcome_adjustment(
             final_prob=final_prob,
             current_odds=current_odds,
             over_under=over_under,
         )
+        real_ou_stage_cap_diag: Dict[str, Any] = {'applied': False, 'stage': 'real_market_over_under_outcome_adjustment'}
+        if isinstance(real_ou_outcome_diag, dict) and real_ou_outcome_diag.get('applied'):
+            final_prob, real_ou_stage_cap_diag = self._apply_near_tie_stage_cap(
+                before_prob=real_ou_stage_input,
+                after_prob=final_prob,
+                stage_name='real_market_over_under_outcome_adjustment',
+            )
         realtime['context_applied']['real_market_over_under_outcome_adjustment'] = real_ou_outcome_diag
+        realtime['context_applied']['real_market_over_under_stage_cap'] = real_ou_stage_cap_diag
+        draw_guard_stage_input = dict(final_prob)
         final_prob, draw_guard_diag = self._apply_draw_confirmation_guard(
             final_prob=final_prob,
             current_odds=current_odds,
@@ -3901,7 +4189,15 @@ class InferencePipelineService:
             match_intelligence=match_intelligence,
             review_outcome_diag=review_outcome_diag,
         )
+        draw_guard_stage_cap_diag: Dict[str, Any] = {'applied': False, 'stage': 'draw_confirmation_guard'}
+        if isinstance(draw_guard_diag, dict) and draw_guard_diag.get('applied'):
+            final_prob, draw_guard_stage_cap_diag = self._apply_near_tie_stage_cap(
+                before_prob=draw_guard_stage_input,
+                after_prob=final_prob,
+                stage_name='draw_confirmation_guard',
+            )
         realtime['context_applied']['draw_confirmation_guard'] = draw_guard_diag
+        realtime['context_applied']['draw_confirmation_stage_cap'] = draw_guard_stage_cap_diag
         sentiment_adj_diag: Dict[str, Any] = {'applied': False}
         try:
             market_sentiment = self.detect_market_movement_sentiment(
@@ -3909,13 +4205,23 @@ class InferencePipelineService:
                 asian_handicap=asian_handicap,
             )
             realtime['context_applied']['market_movement_sentiment'] = market_sentiment
+            sentiment_stage_input = dict(final_prob)
             final_prob, sentiment_adj_diag = self.apply_market_sentiment_adjustment(
                 final_prob=final_prob,
                 sentiment=market_sentiment,
             )
+            sentiment_stage_cap_diag: Dict[str, Any] = {'applied': False, 'stage': 'market_sentiment_adjustment'}
+            if isinstance(sentiment_adj_diag, dict) and sentiment_adj_diag.get('applied'):
+                final_prob, sentiment_stage_cap_diag = self._apply_near_tie_stage_cap(
+                    before_prob=sentiment_stage_input,
+                    after_prob=final_prob,
+                    stage_name='market_sentiment_adjustment',
+                )
             realtime['context_applied']['market_sentiment_adjustment'] = sentiment_adj_diag
+            realtime['context_applied']['market_sentiment_stage_cap'] = sentiment_stage_cap_diag
         except Exception as exc:
             realtime['context_applied']['market_sentiment_adjustment'] = {'applied': False, 'error': str(exc)}
+        operation_adj_diag: Dict[str, Any] = {'applied': False}
         try:
             ou_market_signal = self.postprocess_service.extract_over_under_market_signal(current_odds)
             operation_pattern = self.classify_market_operation_pattern(
@@ -3934,15 +4240,26 @@ class InferencePipelineService:
                 self._parse_handicap_value,
             )
             realtime['context_applied']['market_operation_delta_vector'] = operation_delta_vector
+            operation_stage_input = dict(final_prob)
             final_prob, operation_adj_diag = self.apply_market_operation_adjustment(
                 final_prob=final_prob,
                 pattern_diag=operation_pattern,
                 delta_vector=operation_delta_vector,
             )
+            operation_stage_cap_diag: Dict[str, Any] = {'applied': False, 'stage': 'market_operation_adjustment'}
+            if isinstance(operation_adj_diag, dict) and operation_adj_diag.get('applied'):
+                final_prob, operation_stage_cap_diag = self._apply_near_tie_stage_cap(
+                    before_prob=operation_stage_input,
+                    after_prob=final_prob,
+                    stage_name='market_operation_adjustment',
+                )
             realtime['context_applied']['market_operation_adjustment'] = operation_adj_diag
+            realtime['context_applied']['market_operation_stage_cap'] = operation_stage_cap_diag
         except Exception as exc:
             realtime['context_applied']['market_operation_adjustment'] = {'applied': False, 'error': str(exc)}
-        ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
+        operation_adj_diag = realtime['context_applied'].get('market_operation_adjustment') if isinstance(realtime['context_applied'].get('market_operation_adjustment'), dict) else operation_adj_diag
+        anchor_ranked_probabilities = self.postprocess_service.rank_outcomes(final_prob)
+        ranked_probabilities = list(anchor_ranked_probabilities)
         main_prediction = ranked_probabilities[0][0]
         confidence = ranked_probabilities[0][1]
 
@@ -4047,7 +4364,36 @@ class InferencePipelineService:
             home_advantage=home_advantage,
         )
         realtime['context_applied']['draw_proximity_promotion'] = draw_proximity_diag
-        if draw_proximity_diag.get('applied'):
+        cumulative_stage_cap_diag: Dict[str, Any] = {'applied': False}
+        current_prob_map = {
+            'home_win': next((float(prob) for label, prob in ranked_probabilities if label == '主胜'), 0.0),
+            'draw': next((float(prob) for label, prob in ranked_probabilities if label == '平局'), 0.0),
+            'away_win': next((float(prob) for label, prob in ranked_probabilities if label == '客胜'), 0.0),
+        }
+        current_prob_map = self._normalize_prob_dict(current_prob_map)
+        current_before_cumulative = dict(current_prob_map)
+        current_prob_map, cumulative_stage_cap_diag = self._apply_cumulative_near_tie_cap(
+            anchor_prob={
+                'home_win': next((float(prob) for label, prob in anchor_ranked_probabilities if label == '主胜'), 0.0),
+                'draw': next((float(prob) for label, prob in anchor_ranked_probabilities if label == '平局'), 0.0),
+                'away_win': next((float(prob) for label, prob in anchor_ranked_probabilities if label == '客胜'), 0.0),
+            },
+            current_prob=current_prob_map,
+        )
+        if cumulative_stage_cap_diag.get('applied'):
+            ranked_probabilities = self.postprocess_service.rank_outcomes(current_prob_map)
+            final_prob = dict(current_prob_map)
+        realtime['context_applied']['cumulative_outcome_stage_cap'] = cumulative_stage_cap_diag
+        ranked_probabilities, outcome_stability_diag = self._apply_outcome_stability_guard(
+            ranked_probabilities=ranked_probabilities,
+            anchor_ranked_probabilities=anchor_ranked_probabilities,
+            draw_guard_diag=draw_guard_diag,
+            operation_adj_diag=operation_adj_diag,
+            review_outcome_diag=review_outcome_diag,
+            sentiment_adj_diag=sentiment_adj_diag,
+        )
+        realtime['context_applied']['outcome_stability_guard'] = outcome_stability_diag
+        if draw_proximity_diag.get('applied') or cumulative_stage_cap_diag.get('applied') or outcome_stability_diag.get('applied'):
             main_prediction = ranked_probabilities[0][0]
             confidence = ranked_probabilities[0][1]
         confidence, confidence_diag = self._calibrate_confidence_with_league_learning(

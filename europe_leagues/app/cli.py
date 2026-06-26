@@ -122,6 +122,76 @@ def is_reference_only_league_request(league_code: Optional[str]) -> bool:
     return bool(normalize_reference_only_league_code(text))
 
 
+def _prepare_predict_match_runtime(
+    requested_league: Optional[str],
+    analysis_context: Optional[dict],
+    *,
+    no_write: bool = False,
+) -> dict:
+    ctx = analysis_context if isinstance(analysis_context, dict) else {}
+    requested = str(requested_league or "").strip()
+    reference_only = is_reference_only_league_request(requested)
+    resolved_league = normalize_formal_league_code(requested)
+    reference_only_code = normalize_reference_only_league_code(requested)
+    reference_only_name = reference_only_league_display_name(requested)
+    if reference_only:
+        ctx.setdefault("competition_type", "friendly")
+        ctx.setdefault("okooo_league_name_override", reference_only_name)
+        runtime_league_code = reference_only_code
+    else:
+        runtime_league_code = resolved_league
+    write_enabled = not bool(no_write)
+    persist = write_enabled
+    archive_only = write_enabled and not is_sot_backed_league(runtime_league_code)
+    return {
+        "analysis_context": ctx,
+        "requested_league": requested,
+        "reference_only": reference_only,
+        "reference_only_code": reference_only_code,
+        "reference_only_name": reference_only_name,
+        "runtime_league_code": runtime_league_code,
+        "write_enabled": write_enabled,
+        "persist": persist,
+        "archive_only": archive_only,
+    }
+
+
+def _finalize_predict_match_result(
+    result: dict,
+    prepared: dict,
+    *,
+    runtime_profile_command: Optional[str] = None,
+) -> dict:
+    if not isinstance(result, dict):
+        return result
+    persist = bool(prepared.get("persist"))
+    archive_only = bool(prepared.get("archive_only"))
+    reference_only = bool(prepared.get("reference_only"))
+    runtime_league_code = str(prepared.get("runtime_league_code") or "").strip()
+    requested_league = str(prepared.get("requested_league") or "").strip()
+    if not persist:
+        result["persisted"] = {"enabled": False, "archived": False, "memory_updated": False}
+    else:
+        result.setdefault("persisted", {"enabled": True, "archived": False, "memory_updated": False})
+        if archive_only:
+            result["persisted"].setdefault("archive_only", True)
+    if reference_only:
+        result["reference_only"] = True
+        result["league_code"] = prepared.get("reference_only_code") or runtime_league_code
+        result["league_name"] = prepared.get("reference_only_name") or result.get("league_name")
+        result["league_request"] = requested_league
+        result["runtime_league_code"] = runtime_league_code
+        okooo_state = result.get("realtime", {}).get("okooo") if isinstance(result.get("realtime"), dict) else {}
+        if not str(result.get("match_id") or okooo_state.get("match_id") or "").strip():
+            result["reference_only_live_market_notice"] = {
+                "reason": "friendly_match_requires_explicit_match_id_for_live_market",
+                "message": "当前友谊赛缺少稳定的自动 match_id 来源；如需实时盘口，请显式提供 match_id。",
+            }
+    if runtime_profile_command:
+        result.setdefault("runtime_profile", get_command_runtime_profile(runtime_profile_command))
+    return result
+
+
 FORMAL_COMMANDS = (
     "list-leagues",
     "predict-match",
@@ -850,30 +920,15 @@ def run_openclaw_predict_match(args):
 
         predictor = DomainPredictor()
         ctx = load_analysis_context_file(getattr(args, "context_file", ""))
-        if not isinstance(ctx, dict):
-            ctx = {}
-        requested_league = str(getattr(args, "league", "") or "").strip()
-        reference_only = is_reference_only_league_request(requested_league)
-        resolved_league = normalize_formal_league_code(requested_league)
-        reference_only_code = normalize_reference_only_league_code(requested_league)
-        reference_only_name = reference_only_league_display_name(requested_league)
-        if reference_only:
-            ctx.setdefault("competition_type", "friendly")
-            ctx.setdefault("okooo_league_name_override", reference_only_name)
-            runtime_league_code = reference_only_code
-        else:
-            runtime_league_code = resolved_league
-        # 只有 SoT 正式联赛（五大联赛 + 世界杯）才写回 teams md / MEMORY / RAG；
-        # 其余赛事（杯赛、欧战、友谊赛等）一律只输出预测。
-        sot_backed = is_sot_backed_league(runtime_league_code)
-        write_enabled = not bool(getattr(args, "no_write", False))
-        # SoT 联赛走完整写回；非 SoT 联赛仅归档同步网页，不写 MEMORY/RAG/teams md。
-        persist = write_enabled
-        archive_only = write_enabled and not sot_backed
+        prepared = _prepare_predict_match_runtime(
+            getattr(args, "league", ""),
+            ctx,
+            no_write=bool(getattr(args, "no_write", False)),
+        )
         result = predictor.predict_match(
             home_team=args.home_team,
             away_team=args.away_team,
-            league_code=runtime_league_code,
+            league_code=prepared["runtime_league_code"],
             match_date=args.date,
             match_id=getattr(args, "match_id", "") or "",
             force_refresh_odds=True,
@@ -881,30 +936,11 @@ def run_openclaw_predict_match(args):
             okooo_headed=bool(getattr(args, "okooo_headed", False)),
             match_time=getattr(args, "match_time", "") or "",
             league_hint=getattr(args, "league_hint", None),
-            analysis_context=ctx,
-            persist=persist,
-            archive_only=archive_only,
+            analysis_context=prepared["analysis_context"],
+            persist=prepared["persist"],
+            archive_only=prepared["archive_only"],
         )
-        if not persist:
-            result["persisted"] = {"enabled": False, "archived": False, "memory_updated": False}
-        else:
-            result.setdefault("persisted", {"enabled": True, "archived": False, "memory_updated": False})
-            if archive_only:
-                result["persisted"].setdefault("archive_only", True)
-        if reference_only:
-            result["reference_only"] = True
-            result["league_code"] = reference_only_code
-            result["league_name"] = reference_only_name
-            result["league_request"] = requested_league
-            result["runtime_league_code"] = runtime_league_code
-            okooo_state = result.get("realtime", {}).get("okooo") if isinstance(result.get("realtime"), dict) else {}
-            if not str(result.get("match_id") or okooo_state.get("match_id") or "").strip():
-                result["reference_only_live_market_notice"] = {
-                    "reason": "friendly_match_requires_explicit_match_id_for_live_market",
-                    "message": "当前友谊赛缺少稳定的自动 match_id 来源；如需实时盘口，请显式提供 match_id。",
-                }
-        result.setdefault("runtime_profile", get_command_runtime_profile("predict-match"))
-        return result
+        return _finalize_predict_match_result(result, prepared, runtime_profile_command="predict-match")
 
     if args.json:
         result, captured_stdout, captured_stderr = run_quietly(_execute)
@@ -1757,9 +1793,11 @@ def run_harness_pipeline(args):
         "okooo_headed": bool(getattr(args, "okooo_headed", False)),
         "no_refresh_odds": bool(getattr(args, "no_refresh_odds", False)),
         "no_cache": bool(getattr(args, "no_cache", False)),
+        "no_write": bool(getattr(args, "no_write", False)),
         "analysis_context": analysis_context,
         "home_score": getattr(args, "home_score", None),
         "away_score": getattr(args, "away_score", None),
+        "force": bool(getattr(args, "force", False)),
         "refresh": bool(getattr(args, "refresh", False)),
     }
     pipeline = build_pipeline(args.pipeline)
@@ -1770,6 +1808,7 @@ def run_harness_pipeline(args):
             build_json_result(
                 "harness-run",
                 result,
+                success=bool(result.get("success", False)),
                 runtime_profile=result.get("runtime_profile") or get_command_runtime_profile("harness-run"),
             ),
             as_json=True,
@@ -2024,9 +2063,11 @@ def build_parser():
     parser_harness_run.add_argument("--okooo-headed", action="store_true", help="是否有头运行（仅 browser-use 生效）")
     parser_harness_run.add_argument("--no-refresh-odds", action="store_true", help="不刷新赔率")
     parser_harness_run.add_argument("--no-cache", action="store_true", help="跳过采集缓存")
+    parser_harness_run.add_argument("--no-write", action="store_true", help="不写入持久化结果")
     parser_harness_run.add_argument("--context-file", default="", help="补充信息 JSON 文件")
     parser_harness_run.add_argument("--home-score", type=int, help="主队进球")
     parser_harness_run.add_argument("--away-score", type=int, help="客队进球")
+    parser_harness_run.add_argument("--force", action="store_true", help="result_recording 时覆盖已存在比分")
     parser_harness_run.add_argument("--refresh", action="store_true", help="result_recording 后刷新准确率")
     add_json_flag(parser_harness_run)
 

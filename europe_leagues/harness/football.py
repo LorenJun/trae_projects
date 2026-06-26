@@ -37,12 +37,28 @@ def _pick_selected_match(context: HarnessContext) -> Dict[str, Any]:
 
 
 def _stage_collect_data(context: HarnessContext) -> Dict[str, Any]:
+    from app.cli import (
+        is_reference_only_league_request,
+        normalize_formal_league_code,
+        normalize_reference_only_league_code,
+    )
     from collectors.sporttery import DataCollector
 
-    collector = DataCollector()
-    league = context.get("league")
+    requested_league = context.get("league")
     date = context.get("date")
     no_cache = bool(context.get("no_cache", False))
+    if is_reference_only_league_request(requested_league):
+        reference_code = normalize_reference_only_league_code(requested_league)
+        return {
+            "league": reference_code,
+            "date": date,
+            "count": 0,
+            "matches": [],
+            "reference_only": True,
+        }
+
+    league = normalize_formal_league_code(requested_league)
+    collector = DataCollector()
     matches = asyncio.run(collector.collect_league_data(league, date, use_cache=not no_cache))
     payload = {
         "league": league,
@@ -64,14 +80,20 @@ def _stage_collect_data(context: HarnessContext) -> Dict[str, Any]:
 
 
 def _stage_predict_match(context: HarnessContext) -> Dict[str, Any]:
+    from app.cli import _prepare_predict_match_runtime, _finalize_predict_match_result
     from domain.predictor import DomainPredictor
 
     predictor = DomainPredictor()
     selected_match = _pick_selected_match(context)
-    return predictor.predict_match(
+    prepared = _prepare_predict_match_runtime(
+        context.get("league"),
+        ensure_analysis_context(context.get("analysis_context", None)),
+        no_write=bool(context.get("no_write", False)),
+    )
+    result = predictor.predict_match(
         home_team=context.get("home_team"),
         away_team=context.get("away_team"),
-        league_code=context.get("league"),
+        league_code=prepared["runtime_league_code"],
         match_date=context.get("date"),
         match_id=context.get("match_id", "") or selected_match.get("match_id", ""),
         force_refresh_odds=not bool(context.get("no_refresh_odds", False)),
@@ -79,8 +101,11 @@ def _stage_predict_match(context: HarnessContext) -> Dict[str, Any]:
         okooo_headed=bool(context.get("okooo_headed", False)),
         match_time=context.get("match_time", "") or selected_match.get("match_time", ""),
         league_hint=context.get("league_hint", None),
-        analysis_context=ensure_analysis_context(context.get("analysis_context", None)),
+        analysis_context=prepared["analysis_context"],
+        persist=prepared["persist"],
+        archive_only=prepared["archive_only"],
     )
+    return _finalize_predict_match_result(result, prepared, runtime_profile_command="harness-run")
 
 
 def _stage_save_result(context: HarnessContext) -> Dict[str, Any]:
@@ -91,6 +116,7 @@ def _stage_save_result(context: HarnessContext) -> Dict[str, Any]:
         context.get("match_id"),
         int(context.get("home_score")),
         int(context.get("away_score")),
+        force=bool(context.get("force", False)),
     )
 
 

@@ -595,6 +595,387 @@ class CliPersistenceTest(unittest.TestCase):
         self.assertTrue(captured["payload"]["data"]["persisted"]["archived"])
         self.assertNotIn("skipped_reason", captured["payload"]["data"]["persisted"])
 
+    def test_harness_run_json_success_tracks_pipeline_failure(self):
+        captured = {}
+
+        class DummyPipeline:
+            def execute(self, inputs):
+                return {
+                    "success": False,
+                    "status": "failed",
+                    "pipeline": "match_prediction",
+                    "runtime_profile": {},
+                    "stages": [{"stage": "predict_match", "status": "failed"}],
+                    "error": "boom",
+                    "inputs": inputs,
+                    "artifacts": {},
+                }
+
+        args = Namespace(
+            pipeline="match_prediction",
+            league="premier_league",
+            date="2026-04-28",
+            home_team="曼联",
+            away_team="布伦特福德",
+            match_id="",
+            match_time="",
+            league_hint="",
+            okooo_driver="local-chrome",
+            okooo_headed=False,
+            no_refresh_odds=False,
+            no_cache=False,
+            no_write=False,
+            context_file="",
+            home_score=None,
+            away_score=None,
+            refresh=False,
+            json=True,
+        )
+
+        with patch("harness.build_pipeline", return_value=DummyPipeline()), patch(
+            "app.cli.load_analysis_context_file", return_value={}
+        ), patch("app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)):
+            cli.run_harness_pipeline(args)
+
+        self.assertFalse(captured["payload"]["success"])
+        self.assertFalse(captured["payload"]["data"]["success"])
+        self.assertEqual(captured["payload"]["data"]["status"], "failed")
+
+    def test_harness_match_prediction_non_sot_league_uses_archive_only(self):
+        captured = {}
+        predictor_calls = []
+
+        class DummyPredictor:
+            def predict_match(self, **kwargs):
+                predictor_calls.append(kwargs)
+                return {
+                    "home_team": kwargs["home_team"],
+                    "away_team": kwargs["away_team"],
+                    "league_name": "英冠",
+                    "match_date": kwargs["match_date"],
+                    "prediction": "主胜",
+                    "confidence": 0.55,
+                    "final_probabilities": {"home_win": 0.55, "draw": 0.25, "away_win": 0.20},
+                    "over_under": {"available": False, "reason": "missing_real_market_line"},
+                }
+
+        class DummyCollector:
+            async def collect_league_data(self, league, date, use_cache=True):
+                return [
+                    MatchData(
+                        home_team="米尔沃尔",
+                        away_team="赫尔城",
+                        league=league,
+                        match_date=date,
+                        match_time="03:00",
+                        status="待进行",
+                        match_id="1309999",
+                        sources=["mock"],
+                    )
+                ]
+
+        args = Namespace(
+            pipeline="match_prediction",
+            league="championship",
+            date="2026-05-12",
+            home_team="米尔沃尔",
+            away_team="赫尔城",
+            match_id="",
+            match_time="03:00",
+            league_hint="",
+            okooo_driver="local-chrome",
+            okooo_headed=False,
+            no_refresh_odds=False,
+            no_cache=False,
+            no_write=False,
+            context_file="",
+            home_score=None,
+            away_score=None,
+            refresh=False,
+            json=True,
+        )
+
+        with patch("collectors.sporttery.DataCollector", return_value=DummyCollector()), patch(
+            "domain.predictor.DomainPredictor", return_value=DummyPredictor()
+        ), patch("app.cli.load_analysis_context_file", return_value={}), patch(
+            "app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)
+        ):
+            cli.run_harness_pipeline(args)
+
+        self.assertTrue(predictor_calls[0]["persist"])
+        self.assertTrue(predictor_calls[0]["archive_only"])
+        predict_artifact = captured["payload"]["data"]["artifacts"]["predict_match"]
+        self.assertTrue(predict_artifact["persisted"]["archive_only"])
+
+    def test_harness_match_prediction_friendly_request_uses_reference_only_runtime(self):
+        captured = {}
+        predictor_calls = []
+
+        class DummyPredictor:
+            def predict_match(self, **kwargs):
+                predictor_calls.append(kwargs)
+                return {
+                    "home_team": kwargs["home_team"],
+                    "away_team": kwargs["away_team"],
+                    "league_name": "世界杯",
+                    "match_date": kwargs["match_date"],
+                    "prediction": "主胜",
+                    "confidence": 0.57,
+                    "final_probabilities": {"home_win": 0.48, "draw": 0.30, "away_win": 0.22},
+                    "over_under": {"available": False, "reason": "missing_real_market_line"},
+                }
+
+        class DummyCollector:
+            async def collect_league_data(self, league, date, use_cache=True):
+                return [
+                    MatchData(
+                        home_team="比利时",
+                        away_team="突尼斯",
+                        league=league,
+                        match_date=date,
+                        match_time="21:00",
+                        status="待进行",
+                        match_id="friendly-1",
+                        sources=["mock"],
+                    )
+                ]
+
+        args = Namespace(
+            pipeline="match_prediction",
+            league="友谊赛",
+            date="2026-06-06",
+            home_team="比利时",
+            away_team="突尼斯",
+            match_id="",
+            match_time="21:00",
+            league_hint="",
+            okooo_driver="local-chrome",
+            okooo_headed=False,
+            no_refresh_odds=False,
+            no_cache=False,
+            no_write=False,
+            context_file="",
+            home_score=None,
+            away_score=None,
+            force=False,
+            refresh=False,
+            json=True,
+        )
+
+        with patch("collectors.sporttery.DataCollector", return_value=DummyCollector()), patch(
+            "domain.predictor.DomainPredictor", return_value=DummyPredictor()
+        ), patch("app.cli.load_analysis_context_file", return_value={}), patch(
+            "app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)
+        ):
+            cli.run_harness_pipeline(args)
+
+        self.assertEqual(predictor_calls[0]["league_code"], "friendly")
+        self.assertTrue(predictor_calls[0]["archive_only"])
+        self.assertEqual(predictor_calls[0]["analysis_context"]["competition_type"], "friendly")
+        predict_artifact = captured["payload"]["data"]["artifacts"]["predict_match"]
+        self.assertTrue(predict_artifact["reference_only"])
+        self.assertEqual(predict_artifact["runtime_league_code"], "friendly")
+
+    def test_harness_result_recording_passes_force_flag(self):
+        captured = {}
+        calls = []
+
+        class DummyPipeline:
+            def execute(self, inputs):
+                calls.append(inputs)
+                return {
+                    "success": True,
+                    "status": "success",
+                    "pipeline": "result_recording",
+                    "runtime_profile": {},
+                    "stages": [{"stage": "save_result", "status": "success"}],
+                    "error": "",
+                    "inputs": inputs,
+                    "artifacts": {"save_result": {"actual_score": "2-1"}},
+                }
+
+        args = Namespace(
+            pipeline="result_recording",
+            league="",
+            date="",
+            home_team="",
+            away_team="",
+            match_id="la_liga_20260511_巴塞罗那_皇家马德里",
+            match_time="",
+            league_hint="",
+            okooo_driver="local-chrome",
+            okooo_headed=False,
+            no_refresh_odds=False,
+            no_cache=False,
+            no_write=False,
+            context_file="",
+            home_score=2,
+            away_score=1,
+            force=True,
+            refresh=True,
+            json=True,
+        )
+
+        with patch("harness.build_pipeline", return_value=DummyPipeline()), patch(
+            "app.cli.load_analysis_context_file", return_value={}
+        ), patch("app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)):
+            cli.run_harness_pipeline(args)
+
+        self.assertTrue(calls[0]["force"])
+        self.assertTrue(calls[0]["refresh"])
+        self.assertTrue(captured["payload"]["success"])
+
+    def test_harness_result_recording_failed_pipeline_sets_outer_failure(self):
+        captured = {}
+
+        class DummyPipeline:
+            def execute(self, inputs):
+                return {
+                    "success": False,
+                    "status": "failed",
+                    "pipeline": "result_recording",
+                    "runtime_profile": {},
+                    "stages": [{"stage": "save_result", "status": "failed"}],
+                    "error": "save failed",
+                    "inputs": inputs,
+                    "artifacts": {},
+                }
+
+        args = Namespace(
+            pipeline="result_recording",
+            league="",
+            date="",
+            home_team="",
+            away_team="",
+            match_id="la_liga_20260511_巴塞罗那_皇家马德里",
+            match_time="",
+            league_hint="",
+            okooo_driver="local-chrome",
+            okooo_headed=False,
+            no_refresh_odds=False,
+            no_cache=False,
+            no_write=False,
+            context_file="",
+            home_score=2,
+            away_score=1,
+            force=False,
+            refresh=False,
+            json=True,
+        )
+
+        with patch("harness.build_pipeline", return_value=DummyPipeline()), patch(
+            "app.cli.load_analysis_context_file", return_value={}
+        ), patch("app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)):
+            cli.run_harness_pipeline(args)
+
+        self.assertFalse(captured["payload"]["success"])
+        self.assertFalse(captured["payload"]["data"]["success"])
+        self.assertEqual(captured["payload"]["data"]["status"], "failed")
+
+    def test_harness_result_recording_refresh_flag_reaches_pipeline(self):
+        captured = {}
+        calls = []
+
+        class DummyPipeline:
+            def execute(self, inputs):
+                calls.append(inputs)
+                return {
+                    "success": True,
+                    "status": "success",
+                    "pipeline": "result_recording",
+                    "runtime_profile": {},
+                    "stages": [{"stage": "refresh_accuracy", "status": "success"}],
+                    "error": "",
+                    "inputs": inputs,
+                    "artifacts": {"accuracy": {"overall": {}}},
+                }
+
+        args = Namespace(
+            pipeline="result_recording",
+            league="",
+            date="",
+            home_team="",
+            away_team="",
+            match_id="la_liga_20260511_巴塞罗那_皇家马德里",
+            match_time="",
+            league_hint="",
+            okooo_driver="local-chrome",
+            okooo_headed=False,
+            no_refresh_odds=False,
+            no_cache=False,
+            no_write=False,
+            context_file="",
+            home_score=2,
+            away_score=1,
+            force=False,
+            refresh=True,
+            json=True,
+        )
+
+        with patch("harness.build_pipeline", return_value=DummyPipeline()), patch(
+            "app.cli.load_analysis_context_file", return_value={}
+        ), patch("app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)):
+            cli.run_harness_pipeline(args)
+
+        self.assertTrue(calls[0]["refresh"])
+        self.assertTrue(captured["payload"]["success"])
+        self.assertEqual(captured["payload"]["data"]["pipeline"], "result_recording")
+
+    def test_harness_match_prediction_friendly_skips_collect_stage_network_path(self):
+        captured = {}
+        predictor_calls = []
+
+        class DummyPredictor:
+            def predict_match(self, **kwargs):
+                predictor_calls.append(kwargs)
+                return {
+                    "home_team": kwargs["home_team"],
+                    "away_team": kwargs["away_team"],
+                    "league_name": "世界杯",
+                    "match_date": kwargs["match_date"],
+                    "prediction": "主胜",
+                    "confidence": 0.57,
+                    "final_probabilities": {"home_win": 0.48, "draw": 0.30, "away_win": 0.22},
+                    "over_under": {"available": False, "reason": "missing_real_market_line"},
+                }
+
+        class DummyCollector:
+            async def collect_league_data(self, league, date, use_cache=True):
+                raise AssertionError("friendly harness collect stage should not hit collect_league_data")
+
+        args = Namespace(
+            pipeline="match_prediction",
+            league="友谊赛",
+            date="2026-06-06",
+            home_team="比利时",
+            away_team="突尼斯",
+            match_id="",
+            match_time="21:00",
+            league_hint="",
+            okooo_driver="local-chrome",
+            okooo_headed=False,
+            no_refresh_odds=False,
+            no_cache=False,
+            no_write=False,
+            context_file="",
+            home_score=None,
+            away_score=None,
+            force=False,
+            refresh=False,
+            json=True,
+        )
+
+        with patch("collectors.sporttery.DataCollector", return_value=DummyCollector()), patch(
+            "domain.predictor.DomainPredictor", return_value=DummyPredictor()
+        ), patch("app.cli.load_analysis_context_file", return_value={}), patch(
+            "app.cli.emit_response", side_effect=lambda payload, as_json: captured.setdefault("payload", payload)
+        ):
+            cli.run_harness_pipeline(args)
+
+        self.assertEqual(predictor_calls[0]["league_code"], "friendly")
+        self.assertEqual(captured["payload"]["data"]["artifacts"]["collect_data"]["count"], 0)
+        self.assertTrue(captured["payload"]["data"]["artifacts"]["collect_data"]["reference_only"])
+
 
 if __name__ == "__main__":
     unittest.main()

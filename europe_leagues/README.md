@@ -189,6 +189,8 @@ python3 prediction_system.py predict-fourteen-issue --issue 26082 --json
 python3 prediction_system.py harness-run --pipeline match_prediction --league premier_league --home-team 曼联 --away-team 切尔西 --date 2026-05-11 --json
 ```
 
+> 说明：`predict-match` 仍是默认正式单场预测入口；`harness-run --pipeline match_prediction` 现在已对齐正式 `predict-match` 的 SoT / `archive_only` / friendly(reference-only) / `--no-write` 语义，但更适合在你需要查看阶段 artifacts 与 stage 审计记录时使用。
+
 ### 结果同步与复盘
 
 ```bash

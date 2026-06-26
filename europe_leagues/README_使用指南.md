@@ -107,10 +107,18 @@ python3 prediction_system.py predict-fourteen-issue --issue 26082 --json
 
 ### 5. Harness 审计链路
 
+`harness-run` 现在和正式 `predict-match` / `save-result` 共享同一套关键语义：
+- `match_prediction` 会复用正式单场预测的 league 规范化、SoT/`archive_only` 写回边界、friendlies/reference-only 处理；
+- `result_recording` 会复用正式 `save-result` 的核心写回能力，支持 `--force` 与可选 `--refresh`；
+- `--json` 下外层 `success` 会正确反映 pipeline 成败。
+
+因此，**默认正式入口仍是 `predict-match` / `save-result`**；`harness-run` 更适合在你需要阶段化审计、查看 stage artifacts、排查哪一阶段失败时使用。
+
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py harness-list --json
 python3 prediction_system.py harness-run --pipeline match_prediction --league premier_league --home-team 伯恩利 --away-team 狼队 --date 2026-05-24 --time 23:00 --json
+python3 prediction_system.py harness-run --pipeline result_recording --match-id premier_league_20260511_曼联_切尔西 --home-score 2 --away-score 1 --force --refresh --json
 ```
 
 ### 6. 结果同步

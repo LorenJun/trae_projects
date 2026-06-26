@@ -3403,6 +3403,56 @@ class InferenceConfidenceCalibrationTest(unittest.TestCase):
 
 
 class InferencePipelineReviewRetryTest(unittest.TestCase):
+    def test_outcome_stability_guard_reinstates_anchor_top_in_near_tie(self):
+        inference = object.__new__(InferencePipelineService)
+        adjusted, diag = inference._apply_outcome_stability_guard(
+            ranked_probabilities=[("客胜", 0.3673), ("主胜", 0.3625), ("平局", 0.2702)],
+            anchor_ranked_probabilities=[("主胜", 0.39), ("平局", 0.33), ("客胜", 0.28)],
+            draw_guard_diag={"applied": False, "qualified": False},
+            operation_adj_diag={"applied": True, "favored_side": "home", "direction": "deceptive"},
+            review_outcome_diag={"applied": True},
+            sentiment_adj_diag={"applied": True},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertEqual(adjusted[0][0], "主胜")
+        self.assertEqual(diag["preferred_direction"], "主胜")
+        self.assertEqual(diag["preferred_outcomes"], ["主胜", "客胜"])
+
+    def test_outcome_stability_guard_keeps_current_top_when_draw_is_confirmed(self):
+        inference = object.__new__(InferencePipelineService)
+        adjusted, diag = inference._apply_outcome_stability_guard(
+            ranked_probabilities=[("平局", 0.3514), ("客胜", 0.3436), ("主胜", 0.3050)],
+            anchor_ranked_probabilities=[("客胜", 0.36), ("平局", 0.34), ("主胜", 0.30)],
+            draw_guard_diag={"applied": True, "qualified": True},
+            operation_adj_diag={"applied": False},
+            review_outcome_diag={"applied": True},
+            sentiment_adj_diag={"applied": False},
+        )
+        self.assertFalse(diag["applied"])
+        self.assertEqual(diag["reason"], "current_top_has_confirming_signal")
+        self.assertEqual(adjusted[0][0], "平局")
+
+    def test_apply_near_tie_stage_cap_prevents_single_stage_flip(self):
+        capped, diag = InferencePipelineService._apply_near_tie_stage_cap(
+            before_prob={"home_win": 0.371, "draw": 0.364, "away_win": 0.265},
+            after_prob={"home_win": 0.3625, "draw": 0.2704, "away_win": 0.3671},
+            stage_name="market_operation_adjustment",
+        )
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["anchor_top"], "home_win")
+        self.assertEqual(diag["attempted_top"], "away_win")
+        self.assertGreater(capped["home_win"], capped["away_win"])
+
+    def test_apply_cumulative_near_tie_cap_restores_anchor_top(self):
+        capped, diag = InferencePipelineService._apply_cumulative_near_tie_cap(
+            anchor_prob={"home_win": 0.371, "draw": 0.364, "away_win": 0.265},
+            current_prob={"home_win": 0.334, "draw": 0.321, "away_win": 0.345},
+        )
+        self.assertTrue(diag["applied"])
+        self.assertEqual(diag["anchor_top"], "home_win")
+        self.assertEqual(diag["attempted_top"], "away_win")
+        self.assertGreater(capped["home_win"], capped["away_win"])
+
     def test_run_applies_league_confidence_adjustment_to_final_confidence(self):
         postprocess = PredictionPostprocessService({"premier_league": {"avg_goals": 2.7}})
         inference = InferencePipelineService(
@@ -3464,6 +3514,66 @@ class InferencePipelineReviewRetryTest(unittest.TestCase):
         self.assertAlmostEqual(result["confidence"], 0.452, places=6)
         self.assertEqual(realtime["context_applied"]["league_confidence_adjustment"]["base_confidence"], 0.44)
         self.assertEqual(realtime["context_applied"]["league_confidence_adjustment"]["adjusted_confidence"], 0.452)
+
+    def test_world_cup_tail_uplift_applies_score_ceiling_boost_for_strong_home_case(self):
+        postprocess = PredictionPostprocessService({"world_cup": {"avg_goals": 2.7}})
+        inference = InferencePipelineService(
+            league_config={"world_cup": {"name": "世界杯", "avg_goals": 3.2}},
+            team_manager=type("TM", (), {
+                "analyze_team_strength": staticmethod(lambda league_code, team: {"strength": 1.0, "attack": 1.0, "defense": 1.0, "injured_count": 0, "strength_source": "real"})
+            })(),
+            match_intelligence_engine=type("MI", (), {
+                "_build_match_intelligence": staticmethod(lambda **kwargs: {"available": True, "signals": [], "market": {"signals": []}}),
+                "_apply_match_intelligence_adjustment": staticmethod(lambda final_prob, match_intelligence: (final_prob, {"applied": False, "signals": []})),
+                "_finalize_match_intelligence": staticmethod(lambda **kwargs: kwargs.get("match_intelligence") or {}),
+            })(),
+            odds_reference=type("OR", (), {
+                "find_similar_matches": staticmethod(lambda **kwargs: {"available": False, "similar_matches": [], "summary": {}}),
+                "get_league_record_count": staticmethod(lambda league_code: 0),
+            })(),
+            upset_analyzer=type("UA", (), {
+                "assess_upset_potential": staticmethod(lambda **kwargs: {"level": "低", "similar_cases_count": 0, "risk_score_detail": {}, "case_knowledge": {}})
+            })(),
+            model_fusion=type("MF", (), {
+                "predict": staticmethod(lambda **kwargs: {"final": {"home_win": 0.54, "draw": 0.26, "away_win": 0.20}, "all_models": {}})
+            })(),
+            poisson_model=_DummyPoissonModel(),
+            weight_adjuster=type("WA", (), {"adjust_weights": staticmethod(lambda *args, **kwargs: {})})(),
+            league_ou_learning=type("LOU", (), {})(),
+            postprocess_service=postprocess,
+        )
+        inference.apply_dynamic_weights = lambda league_code: {}
+        inference.apply_live_outcome_adjustment = lambda **kwargs: (kwargs["final_prob"], {"applied": False})
+        inference._build_preliminary_upset_potential = lambda **kwargs: {
+            "available": False,
+            "motivation_risk": {"available": False, "supports_upset": False, "pressure_side": "away", "favored_side": "home", "score": 0.0},
+            "handicap_strength_mismatch": {"mismatch_detected": False},
+        }
+        inference.build_real_market_over_under = lambda **kwargs: ({"available": True, "line": 2.75, "over": 0.56, "under": 0.44}, {"available": True})
+        inference.apply_real_totals_outcome_adjustment = lambda **kwargs: (kwargs["final_prob"], {"applied": False})
+        inference._apply_draw_confirmation_guard = lambda **kwargs: (kwargs["final_prob"], {"applied": False, "qualified": False, "reason": "not_draw_top1", "signals": [], "evidence": []})
+        inference.apply_market_ou_calibration = lambda **kwargs: (1.82, 1.03, {"applied": True, "market_signal": {}})
+        inference.apply_league_ou_learning = lambda **kwargs: (kwargs["home_lambda"], kwargs["away_lambda"], {"applied": False})
+
+        realtime = {"context_applied": {}}
+        result = inference.run(
+            home_team="法国",
+            away_team="伊拉克",
+            league_code="world_cup",
+            match_date="2026-06-24",
+            current_odds={
+                "欧赔": {"final": {"home": 1.62, "draw": 4.2, "away": 5.8}},
+                "亚值": {"final": {"handicap_value": -0.75}},
+                "大小球": {"final": {"line": 2.75, "over": 1.9, "under": 1.9}},
+            },
+            analysis_context={"home_form": 3, "away_form": 3, "home_motivation": 80.0, "away_motivation": 75.0},
+            realtime=realtime,
+            review_learning={},
+        )
+        uplift = realtime["context_applied"]["world_cup_tail_uplift"]
+        self.assertTrue(uplift["applied"])
+        self.assertTrue(uplift["score_ceiling_boost"])
+        self.assertGreater(result["home_lambda"] + result["away_lambda"], 2.95)
 
     def test_retry_review_outcome_adjustment_after_match_intelligence(self):
         postprocess = PredictionPostprocessService({"premier_league": {"avg_goals": 2.7}})

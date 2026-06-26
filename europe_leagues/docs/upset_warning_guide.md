@@ -43,6 +43,10 @@ python3 prediction_system.py predict-match \
 
 ### 3. 需要阶段化审计时使用 Harness
 
+`harness-run` 适合你要检查 collect / predict / save-result 每一阶段的输入、artifact 与失败点时使用。当前它已经对齐正式主链的关键语义：
+- `match_prediction` 共享 `predict-match` 的 SoT / `archive_only` / friendly(reference-only) / `--no-write` 行为；
+- `result_recording` 共享 `save-result` 的核心写回能力，并支持 `--force` 与 `--refresh`。
+
 ```bash
 cd /Users/bytedance/trae_projects/europe_leagues
 python3 prediction_system.py harness-run \

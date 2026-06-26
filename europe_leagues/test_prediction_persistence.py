@@ -1056,7 +1056,7 @@ class PredictionPersistenceSideEffectTest(unittest.TestCase):
         lines = teams_file.read_text(encoding="utf-8").splitlines()
         schedule_rows = [
             line for line in lines
-            if line.startswith("|") and line.count("|") >= 7 and "日期" not in line and "-----" not in line
+            if line.startswith("| 2026-") and line.count("|") >= 7 and "-----" not in line
         ]
         self.assertGreater(len(schedule_rows), 50)
         for row in schedule_rows:

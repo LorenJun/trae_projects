@@ -133,6 +133,88 @@ class DirectionFromAsianHandicapTest(unittest.TestCase):
             h, a = map(int, sc.split("-"))
             self.assertGreater(h + a, 2.25, f"{sc} 强信号判大球应 > 2.25")
 
+    def test_draw_heavy_home_keeps_draw_hedge_in_top3(self):
+        d = _base(
+            all_probabilities={"主胜": 0.42, "平局": 0.32, "客胜": 0.26},
+            expected_goals={"home": 1.82, "away": 1.02},
+            over_under={"over": 0.58, "under": 0.42, "line": 2.25},
+            prediction="主胜",
+        )
+        scores = project_scores_for_side(d)
+        names = [score for score, _ in scores]
+        self.assertTrue(any(score in {"1-1", "0-0"} for score in names), names)
+        self.assertNotEqual(names[0], "1-1")
+
+    def test_open_home_high_total_keeps_ceiling_score_in_top3(self):
+        d = _base(
+            all_probabilities={"主胜": 0.48, "平局": 0.27, "客胜": 0.25},
+            expected_goals={"home": 1.95, "away": 1.13},
+            over_under={"over": 0.56, "under": 0.44, "line": 2.75},
+            prediction="主胜",
+        )
+        scores = project_scores_for_side(d)
+        names = [score for score, _ in scores]
+        self.assertTrue(any(score in {"3-1", "3-0", "4-1", "4-0"} for score in names), names)
+
+    def test_review_draw_heavy_home_corridor_allows_draw_without_flipping_top1(self):
+        d = _base(
+            all_probabilities={"主胜": 0.44, "平局": 0.31, "客胜": 0.25},
+            expected_goals={"home": 1.72, "away": 0.98},
+            over_under={"over": 0.52, "under": 0.48, "line": 2.25},
+            prediction="主胜",
+        )
+        d["realtime"] = {
+            "context_applied": {
+                "review_outcome_adjustment": {
+                    "applied": True,
+                    "applied_shift": {"draw_shift": 0.024},
+                    "stratified_review": {
+                        "matched": {"draw_miss_rate": 0.5556}
+                    },
+                }
+            }
+        }
+        self.assertEqual(direction_of(d), "主胜")
+        self.assertIn("平局", allowed_outcomes(d))
+        scores = project_scores_for_side(d)
+        self.assertTrue(any(score in {"1-1", "0-0"} for score, _ in scores), scores)
+
+    def test_strict_home_verdict_can_still_admit_draw_under_strong_review_signal(self):
+        d = _base(
+            all_probabilities={"主胜": 0.41, "平局": 0.31, "客胜": 0.28},
+            expected_goals={"home": 1.68, "away": 1.02},
+            over_under={"over": 0.5, "under": 0.5, "line": 2.25},
+            prediction="主胜",
+        )
+        d["tri_axis_consistency"] = {
+            "direction_handicap": {"verdict_dir": "block_up_home_genuine", "fav_side": "home"}
+        }
+        d["realtime"] = {
+            "context_applied": {
+                "review_outcome_adjustment": {
+                    "applied": True,
+                    "applied_shift": {"draw_shift": 0.024},
+                    "stratified_review": {
+                        "matched": {"draw_miss_rate": 0.5556}
+                    },
+                }
+            }
+        }
+        self.assertIn("平局", allowed_outcomes(d))
+        scores = project_scores_for_side(d)
+        self.assertTrue(any(score in {"1-1", "0-0"} for score, _ in scores), scores)
+
+    def test_strong_home_btts_blowout_keeps_four_one_in_top3(self):
+        d = _base(
+            all_probabilities={"主胜": 0.47, "平局": 0.28, "客胜": 0.25},
+            expected_goals={"home": 1.9, "away": 1.12},
+            over_under={"over": 0.55, "under": 0.45, "line": 2.75},
+            prediction="主胜",
+        )
+        scores = project_scores_for_side(d)
+        names = [score for score, _ in scores]
+        self.assertTrue(any(score in {"3-1", "4-1"} for score in names), names)
+
     def test_realtime_matrix_fallback_path(self):
         # 口诀来源回退：tri_axis 缺失时从 realtime.context_applied 取
         d = _base(prediction="平局")

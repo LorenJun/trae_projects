@@ -61,12 +61,29 @@ def _model_direction(d: Dict[str, Any]) -> str:
     return ""
 
 
+def _outcome_stability_guard(d: Dict[str, Any]) -> Dict[str, Any]:
+    realtime = d.get('realtime')
+    if not isinstance(realtime, dict):
+        return {}
+    context_applied = realtime.get('context_applied')
+    if not isinstance(context_applied, dict):
+        return {}
+    guard = context_applied.get('outcome_stability_guard')
+    if isinstance(guard, dict) and guard.get('applied'):
+        return guard
+    return {}
+
+
 def direction_of(d: Dict[str, Any]) -> str:
     """比分方向：优先用亚值让球口诀(verdict_dir)判定，未触发时回退模型 1X2。
 
     - 印证类口诀(强侧真赢) → 让球方(fav_side)获胜方向；
     - 诱导类口诀(强侧不赢) → 取 平局 / 弱侧 中模型概率更高者为主方向（弱侧集合见 allowed_outcomes）。
     """
+    guard = _outcome_stability_guard(d)
+    preferred_direction = str(guard.get('preferred_direction') or '').strip()
+    if preferred_direction in ('主胜', '平局', '客胜'):
+        return preferred_direction
     dh = _direction_handicap(d)
     verdict_dir = dh.get("verdict_dir")
     intent = _VERDICT_DIR_INTENT.get(verdict_dir)
@@ -81,6 +98,50 @@ def direction_of(d: Dict[str, Any]) -> str:
     return _model_direction(d)
 
 
+def _review_draw_heavy_home_corridor(d: Dict[str, Any], *, direction: str) -> bool:
+    if direction != "主胜":
+        return False
+    probs = d.get("all_probabilities") or {}
+    draw_prob = float(probs.get("平局") or 0.0)
+    top_prob = float(probs.get("主胜") or 0.0)
+    away_prob = float(probs.get("客胜") or 0.0)
+    expected_goals = d.get("expected_goals") if isinstance(d.get("expected_goals"), dict) else {}
+    total_lambda = float(expected_goals.get("home") or 0.0) + float(expected_goals.get("away") or 0.0)
+    dh = _direction_handicap(d)
+    strict_home_verdict = bool(
+        _VERDICT_DIR_INTENT.get(dh.get("verdict_dir")) == "fav"
+        and dh.get("fav_side") == "home"
+    )
+    realtime = d.get("realtime") if isinstance(d.get("realtime"), dict) else {}
+    context_applied = realtime.get("context_applied") if isinstance(realtime.get("context_applied"), dict) else {}
+    review_diag = context_applied.get("review_outcome_adjustment") if isinstance(context_applied.get("review_outcome_adjustment"), dict) else {}
+    stratified = review_diag.get("stratified_review") if isinstance(review_diag.get("stratified_review"), dict) else {}
+    matched = stratified.get("matched") if isinstance(stratified.get("matched"), dict) else {}
+    draw_miss_rate = float(matched.get("draw_miss_rate") or 0.0)
+    applied_shift = review_diag.get("applied_shift") if isinstance(review_diag.get("applied_shift"), dict) else {}
+    draw_shift = float(applied_shift.get("draw_shift") or 0.0)
+
+    relaxed_home_draw = bool(
+        not strict_home_verdict
+        and draw_prob >= 0.27
+        and top_prob <= 0.50
+        and away_prob <= 0.28
+        and total_lambda <= 2.9
+        and draw_miss_rate >= 0.5
+        and draw_shift >= 0.018
+    )
+    strict_home_draw_override = bool(
+        strict_home_verdict
+        and draw_prob >= 0.30
+        and top_prob <= 0.43
+        and away_prob <= draw_prob + 0.01
+        and total_lambda <= 2.8
+        and draw_miss_rate >= 0.5
+        and draw_shift >= 0.02
+    )
+    return relaxed_home_draw or strict_home_draw_override
+
+
 def allowed_outcomes(d: Dict[str, Any]) -> set[str]:
     """允许展示的胜负结果集合。
 
@@ -89,6 +150,14 @@ def allowed_outcomes(d: Dict[str, Any]) -> set[str]:
     - 诱导类 → 平局 + 弱侧获胜两侧均放行。
     无口诀时回退模型 1X2 方向，并保留原有「平局概率达标并入平局 / 平局方向并入第二高方向 / 爆冷放行反向」逻辑。
     """
+    guard = _outcome_stability_guard(d)
+    preferred_outcomes = [
+        str(item).strip()
+        for item in (guard.get('preferred_outcomes') or [])
+        if str(item).strip() in {'主胜', '平局', '客胜'}
+    ]
+    if preferred_outcomes:
+        return set(preferred_outcomes)
     probs = d.get("all_probabilities") or {}
     dh = _direction_handicap(d)
     intent = _VERDICT_DIR_INTENT.get(dh.get("verdict_dir"))
@@ -98,6 +167,8 @@ def allowed_outcomes(d: Dict[str, Any]) -> set[str]:
         dog_outcome = "客胜" if fav_side == "home" else "主胜"
         if intent == "fav":
             allowed = {fav_outcome}
+            if _review_draw_heavy_home_corridor(d, direction=fav_outcome):
+                allowed.add("平局")
         else:  # fade：平局 + 弱侧都放行
             allowed = {"平局", dog_outcome}
         level = (d.get("upset_potential") or {}).get("level")
@@ -109,6 +180,8 @@ def allowed_outcomes(d: Dict[str, Any]) -> set[str]:
     if direction not in ("主胜", "客胜", "平局"):
         return {"主胜", "平局", "客胜"}
     allowed = {direction}
+    if _review_draw_heavy_home_corridor(d, direction=direction):
+        allowed.add("平局")
     if (probs.get("平局") or 0.0) >= DRAW_HINT_THRESHOLD:
         allowed.add("平局")
     # 方向为平局时，平局比分（对角线）与大球同侧约束易冲突、塌缩到 2-2/3-3 等大比分；
@@ -251,4 +324,115 @@ def project_scores_for_side(d: Dict[str, Any]) -> List[Tuple[str, float]]:
                     break
             if len(primary) >= 3:
                 break
+
+    probs = d.get("all_probabilities") or {}
+    direction = direction_of(d)
+    draw_prob = float(probs.get("平局") or 0.0)
+    top_prob = float(probs.get(direction) or 0.0)
+    dh = _direction_handicap(d)
+    strict_home_verdict = bool(
+        _VERDICT_DIR_INTENT.get(dh.get("verdict_dir")) == "fav"
+        and dh.get("fav_side") == "home"
+    )
+    draw_heavy_home = bool(
+        direction == "主胜"
+        and not strict_home_verdict
+        and draw_prob >= 0.26
+        and top_prob <= 0.46
+        and float(probs.get("客胜") or 0.0) <= 0.28
+        and (float(lam_h or 0.0) + float(lam_a or 0.0)) <= 2.9
+    )
+    if draw_heavy_home and not any(sc in {"1-1", "0-0"} for sc, _ in primary):
+        draw_candidates = _scores_of_outcome("平局")
+        preferred_draw_order = ["1-1", "0-0", "2-2"] if (ou_neutral or side == "小") else ["1-1", "0-0", "2-2"]
+        draw_candidate = next(
+            ((sc, p) for wanted in preferred_draw_order for sc, p in draw_candidates if sc == wanted),
+            None,
+        )
+        if draw_candidate and primary:
+            weakest_prob = min(float(prob or 0.0) for _score, prob in primary)
+            hedge_prob = min(float(draw_candidate[1] or 0.0), weakest_prob * 0.98 if weakest_prob > 0 else float(draw_candidate[1] or 0.0))
+            primary = primary[: max(0, len(primary) - 1)] + [(draw_candidate[0], hedge_prob)]
+            mass = sum(max(0.0, prob) for _score, prob in primary) or 1.0
+            primary = sorted(
+                ((sc, max(0.0, prob) / mass) for sc, prob in primary),
+                key=lambda item: item[1],
+                reverse=True,
+            )
+
+    open_high_ceiling_home = bool(
+        direction == "主胜"
+        and not draw_heavy_home
+        and (
+            (not ou_neutral and side == "大" and float(over_p or 0.0) >= 0.54)
+            or (ou_neutral and float(lam_h or 0.0) + float(lam_a or 0.0) >= 2.95)
+        )
+        and (float(lam_h or 0.0) + float(lam_a or 0.0)) >= 2.95
+        and float(lam_h or 0.0) >= 1.65
+    )
+    if open_high_ceiling_home and not any(sc in {"3-0", "3-1", "4-0", "4-1"} for sc, _ in primary):
+        home_ceiling_order = ["3-1", "3-0", "4-1", "4-0"]
+        home_ceiling = next(
+            ((sc, p) for wanted in home_ceiling_order for sc, p in _scores_of_outcome("主胜") if sc == wanted),
+            None,
+        )
+        if home_ceiling and primary:
+            weakest_prob = min(float(prob or 0.0) for _score, prob in primary)
+            ceiling_prob = min(float(home_ceiling[1] or 0.0), weakest_prob * 0.96 if weakest_prob > 0 else float(home_ceiling[1] or 0.0))
+            primary = primary[: max(0, len(primary) - 1)] + [(home_ceiling[0], ceiling_prob)]
+            mass = sum(max(0.0, prob) for _score, prob in primary) or 1.0
+            primary = sorted(
+                ((sc, max(0.0, prob) / mass) for sc, prob in primary),
+                key=lambda item: item[1],
+                reverse=True,
+            )
+
+    strong_home_btts_blowout = bool(
+        open_high_ceiling_home
+        and float(lam_a or 0.0) >= 1.0
+        and float(lam_h or 0.0) >= 1.75
+        and (float(lam_h or 0.0) + float(lam_a or 0.0)) >= 3.0
+    )
+    if strong_home_btts_blowout and any(sc == "3-1" for sc, _ in primary) and not any(sc == "4-1" for sc, _ in primary):
+        home_btts_ceiling = next(
+            ((sc, p) for sc, p in _scores_of_outcome("主胜") if sc == "4-1"),
+            None,
+        )
+        if home_btts_ceiling and primary:
+            replace_index = next((idx for idx, (sc, _prob) in enumerate(primary) if sc in {"1-0", "2-0"}), len(primary) - 1)
+            weakest_prob = min(float(prob or 0.0) for _score, prob in primary)
+            ceiling_prob = min(float(home_btts_ceiling[1] or 0.0), weakest_prob * 0.94 if weakest_prob > 0 else float(home_btts_ceiling[1] or 0.0))
+            primary = list(primary)
+            primary[replace_index] = (home_btts_ceiling[0], ceiling_prob)
+            mass = sum(max(0.0, prob) for _score, prob in primary) or 1.0
+            primary = sorted(
+                ((sc, max(0.0, prob) / mass) for sc, prob in primary),
+                key=lambda item: item[1],
+                reverse=True,
+            )
+
+    open_high_ceiling_away = bool(
+        direction == "客胜"
+        and not ou_neutral
+        and side == "大"
+        and float(over_p or 0.0) >= 0.54
+        and (float(lam_h or 0.0) + float(lam_a or 0.0)) >= 3.0
+        and float(lam_a or 0.0) >= 1.7
+    )
+    if open_high_ceiling_away and not any(sc in {"0-3", "1-3", "0-4", "1-4"} for sc, _ in primary):
+        away_ceiling_order = ["1-3", "0-3", "1-4", "0-4"]
+        away_ceiling = next(
+            ((sc, p) for wanted in away_ceiling_order for sc, p in _scores_of_outcome("客胜") if sc == wanted),
+            None,
+        )
+        if away_ceiling and primary:
+            weakest_prob = min(float(prob or 0.0) for _score, prob in primary)
+            ceiling_prob = min(float(away_ceiling[1] or 0.0), weakest_prob * 0.96 if weakest_prob > 0 else float(away_ceiling[1] or 0.0))
+            primary = primary[: max(0, len(primary) - 1)] + [(away_ceiling[0], ceiling_prob)]
+            mass = sum(max(0.0, prob) for _score, prob in primary) or 1.0
+            primary = sorted(
+                ((sc, max(0.0, prob) / mass) for sc, prob in primary),
+                key=lambda item: item[1],
+                reverse=True,
+            )
     return primary[:3]
