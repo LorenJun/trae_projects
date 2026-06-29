@@ -1876,10 +1876,9 @@ def _click_visible_text(bu: BrowserUse, labels: list[str], settle_seconds: float
 
 
 def _parse_europe_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
-    js = r"""
-(() => {
+    js = "(() => {\n" + _DEOBFUSCATE_HELPER_JS + r"""
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
-  const bodyText = norm(document.body?.innerText || '');
+  const bodyText = norm(visibleInnerText(document.body));
   const html = String(document.documentElement?.outerHTML || '');
   const title = String(document.title || '');
   const hasVerifyIframe = Array.from(document.querySelectorAll('iframe')).some((el) => {
@@ -1913,7 +1912,7 @@ def _parse_europe_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
   // AND the page lacks a meaningful amount of odds data.
   const oddsHits = (bodyText.match(/\d{1,2}\.\d{2}/g) || []).length;
   if (blocked && oddsHits < 6) return JSON.stringify({blocked:true});
-  const body = document.body?.innerText || '';
+  const body = visibleInnerText(document.body);
   const lines = body.split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
   const compact = body.replace(/\s+/g, ' ').trim();
   const compactOddsRe = /\d{1,2}\.\d{2}/g;
@@ -2032,7 +2031,7 @@ def _parse_europe_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
     if (!dedup.has(key)) dedup.set(key, item);
   };
 
-  const tableRows = [...document.querySelectorAll('tr')].map(tr => (tr.innerText || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const tableRows = [...document.querySelectorAll('tr')].map(tr => visibleInnerText(tr).replace(/\s+/g, ' ').trim()).filter(Boolean);
   for (const company of companyAliases) {
     for (const line of tableRows) pushCandidate(parseLine(line, company, 'table_row'));
   }
@@ -2132,12 +2131,188 @@ def _parse_europe_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
     return bu.eval_json(js)
 
 
-def _parse_asian_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
+# m.okooo obfuscates Chinese company names by inserting zero-font-size <span>
+# nodes carrying junk glyphs (e.g. 澳<span style="font-size:0">!</span>门彩票,
+# b<span style="font-size:0">!</span>et365). Stripping those nodes before
+# sampling innerText restores the canonical company names so alias matching
+# can see Bet365/皇冠/澳门彩票 instead of bogus b!et365/澳!门#彩!票.
+# Confirmed on handicap.php (亚盘); pre-emptively wired into 欧赔/大小球/凯利
+# parsers so a future obfuscation rollout on those pages doesn't silently
+# collapse multi_company_consensus back to single_company.
+_DEOBFUSCATE_HELPER_JS = r"""
+const visibleInnerText = (el) => {
+  if (!el) return '';
+  const clone = el.cloneNode(true);
+  const all = clone.querySelectorAll ? clone.querySelectorAll('*') : [];
+  for (const node of all) {
+    const style = (node.getAttribute && node.getAttribute('style')) || '';
+    if (/font-size\s*:\s*0(?:px|pt|em|%)?/i.test(style) || /display\s*:\s*none/i.test(style) || /visibility\s*:\s*hidden/i.test(style)) {
+      node.parentNode && node.parentNode.removeChild(node);
+    }
+  }
+  return (clone.innerText || clone.textContent || '');
+};
+"""
+
+
+ASIAN_EXPAND_LABEL_GROUPS: list[list[str]] = [
+    ["全部公司", "全部博彩公司", "所有公司", "更多公司", "更多博彩公司", "查看更多公司", "查看全部公司"],
+    ["机构指数", "公司指数", "公司列表", "更多机构", "全部机构"],
+    ["切换公司", "切换机构", "展开", "查看更多"],
+]
+
+
+def _asian_page_signal(bu: BrowserUse) -> Dict[str, Any]:
+    """Probe handicap.php for how many companies the page is currently exposing.
+
+    Returns ``{tr_count, company_hit_count, aliases}`` so the caller can tell
+    whether an expansion click actually unfolded more company rows."""
     js = r"""
 (() => {
+  const aliases = ['Bet365','bet365','皇冠','Pinnacle','澳门彩票','澳门','易胜博',
+    '威廉希尔','威廉.希尔','立博','Bwin','Interwetten','12BET','SBOBET','SBO',
+    '伟德','韦德','香港马会','明陞','利记','平博'];
+  const body = (document.body?.innerText || '').replace(/\s+/g,' ').trim();
+  const trCount = document.querySelectorAll('tr').length;
+  const seen = new Set();
+  for (const a of aliases) { if (body.includes(a)) seen.add(a.toLowerCase()); }
+  return JSON.stringify({
+    tr_count: trCount,
+    company_hit_count: seen.size,
+    aliases: [...seen],
+  });
+})()
+"""
+    try:
+        return bu.eval_json(js)
+    except Exception:
+        return {}
+
+
+def _expand_asian_company_view(bu: BrowserUse, dwell: float = 2.0) -> Dict[str, Any]:
+    """Best-effort: click any "全部公司 / 更多公司 / 机构指数" control on m.okooo
+    handicap.php so the table renders more than the default single company row.
+
+    Strategy:
+    - Snapshot current `(tr_count, company_hit_count)` as the baseline.
+    - For each label group, try `_click_visible_text` with exact-match labels.
+      After each successful click, settle and re-probe; accept the click if the
+      signal strictly improved.
+    - Also try a click against any anchor/button whose textContent matches the
+      Chinese label loosely (substring), since some pages wrap the trigger in
+      `<a><span>` or `<button>` tags whose innerText has surrounding glyphs.
+    - Always returns a diagnostics dict; never raises.
+    """
+    before = _asian_page_signal(bu)
+    attempts: list[Dict[str, Any]] = []
+    best_signal = before
+
+    def _record(label: str, click_result: Dict[str, Any], after: Dict[str, Any]) -> None:
+        attempts.append({
+            "label": label,
+            "click": click_result,
+            "after_tr": after.get("tr_count"),
+            "after_companies": after.get("company_hit_count"),
+            "after_aliases": after.get("aliases"),
+        })
+
+    def _signal_improved(prev: Dict[str, Any], curr: Dict[str, Any]) -> bool:
+        prev_hits = int(prev.get("company_hit_count") or 0)
+        curr_hits = int(curr.get("company_hit_count") or 0)
+        if curr_hits > prev_hits:
+            return True
+        prev_rows = int(prev.get("tr_count") or 0)
+        curr_rows = int(curr.get("tr_count") or 0)
+        return curr_rows >= prev_rows + 5 and curr_hits >= prev_hits
+
+    for group in ASIAN_EXPAND_LABEL_GROUPS:
+        # The existing _click_visible_text matches exact text (after whitespace
+        # collapse); good enough for explicit buttons.
+        click_result = _click_visible_text(bu, group, settle_seconds=dwell)
+        if not click_result.get("clicked"):
+            continue
+        time.sleep(_jittered(dwell))
+        after = _asian_page_signal(bu)
+        _record(click_result.get("label") or "", click_result, after)
+        if _signal_improved(best_signal, after):
+            best_signal = after
+            # One successful expansion usually reveals every company; no need
+            # to keep poking and risk collapsing the panel.
+            break
+
+    # If nothing exact-matched, try a loose-substring sweep over inline controls.
+    if int(best_signal.get("company_hit_count") or 0) <= 1:
+        loose_js = r"""
+(() => {
+  const want = %s;
+  const flat = want.flat();
+  const els = [...document.querySelectorAll('a,button,div,span,li,td,th')];
+  const fired = [];
+  for (const el of els) {
+    const t = ((el.innerText || el.textContent || '').replace(/\s+/g,'').trim());
+    if (!t) continue;
+    if (flat.some(w => t.includes(w))) {
+      try { el.click(); fired.push({text: t.slice(0,40), tag: el.tagName}); } catch (e) {}
+      if (fired.length >= 4) break;
+    }
+  }
+  return JSON.stringify({fired});
+})()
+""" % json.dumps(ASIAN_EXPAND_LABEL_GROUPS, ensure_ascii=False)
+        try:
+            loose_result = bu.eval_json(loose_js)
+        except Exception:
+            loose_result = {}
+        if isinstance(loose_result, dict) and loose_result.get("fired"):
+            time.sleep(_jittered(dwell))
+            after = _asian_page_signal(bu)
+            _record("__loose_sweep__", loose_result, after)
+            if _signal_improved(best_signal, after):
+                best_signal = after
+
+    # Collect what *looks* like an expansion trigger on the page so we can iterate
+    # on the label list next round. This is cheap (<1ms) and capped.
+    candidates_js = r"""
+(() => {
+  const pats = /(公司|机构|更多|全部|展开|切换)/;
+  const out = [];
+  const els = [...document.querySelectorAll('a,button,div,span,li,td,th')];
+  for (const el of els) {
+    const t = ((el.innerText || el.textContent || '').replace(/\s+/g,' ').trim());
+    if (!t || t.length > 30) continue;
+    if (!pats.test(t)) continue;
+    out.push({
+      tag: el.tagName,
+      text: t,
+      cls: (el.className || '').toString().slice(0, 120),
+      id: (el.id || '').toString().slice(0, 60),
+    });
+    if (out.length >= 30) break;
+  }
+  return JSON.stringify({candidates: out});
+})()
+"""
+    try:
+        cand = bu.eval_json(candidates_js)
+    except Exception:
+        cand = {}
+    candidates = cand.get("candidates") if isinstance(cand, dict) else []
+
+    return {
+        "before": before,
+        "after": best_signal,
+        "expanded": bool(int(best_signal.get("company_hit_count") or 0) > int(before.get("company_hit_count") or 0)),
+        "attempts": attempts,
+        "candidates": candidates,
+    }
+
+
+def _parse_asian_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
+    js = "(() => {\n" + _DEOBFUSCATE_HELPER_JS + r"""
   const blocked = (document.body?.innerText||'').includes('访问被阻断') || (document.title||'').includes('405');
   if (blocked) return JSON.stringify({blocked:true});
-  const body = document.body?.innerText || '';
+  // Build the deobfuscated views once: body / lines / compact / table rows.
+  const body = visibleInnerText(document.body);
   const lines = body.split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
   const compact = body.replace(/\s+/g, ' ').trim();
 
@@ -2230,35 +2405,34 @@ def _parse_asian_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
     return null;
   };
 
-  const parseLine = (line, companyAlias, sourceTag) => {
-    const idx = line.indexOf(companyAlias);
-    if (idx < 0) return null;
-    const company = normalizeCompany(companyAlias);
-    const tail = line.slice(idx + companyAlias.length).trim();
-    const m = tail.match(/(\d+\.\d+)\s*([\u4e00-\u9fff\/半球两一平受让]+)\s*(\d+\.\d+)\s*(\d+\.\d+)\s*([\u4e00-\u9fff\/半球两一平受让]+)\s*(\d+\.\d+)/);
-    if (!m) return null;
-    const initialText = m[2].trim();
-    const finalText = m[5].trim();
+  const normalizeText = (raw) => String(raw || '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[／\uFF0F]/g, '/')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const sortedHandicapTokens = Object.keys(handicapMap).sort((a, b) => b.length - a.length);
+
+  const buildFromSixSegments = (homeInitWater, initialText, awayInitWater, homeFinalWater, finalText, awayFinalWater) => {
     const initialValue = parseHandicap(initialText);
     const finalValue = parseHandicap(finalText);
+    if (initialValue == null || finalValue == null) return null;
     const initial = {
-      home_water: parseFloat(m[1]),
+      home_water: homeInitWater,
       handicap_text: initialText,
       handicap_value: initialValue,
       handicap: initialValue,
-      away_water: parseFloat(m[3]),
+      away_water: awayInitWater,
     };
     const final = {
-      home_water: parseFloat(m[4]),
+      home_water: homeFinalWater,
       handicap_text: finalText,
       handicap_value: finalValue,
       handicap: finalValue,
-      away_water: parseFloat(m[6]),
+      away_water: awayFinalWater,
     };
     if (![initial.home_water, initial.away_water, final.home_water, final.away_water].every(v => Number.isFinite(v))) return null;
-    if (initialValue == null || finalValue == null) return null;
     return {
-      company,
       initial,
       final,
       delta: {
@@ -2266,9 +2440,98 @@ def _parse_asian_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
         handicap_value: round4(final.handicap_value - initial.handicap_value),
         away_water: round4(final.away_water - initial.away_water),
       },
+    };
+  };
+
+  const tokenizeAsian = (tail) => {
+    const tokens = [];
+    let cursor = 0;
+    while (cursor < tail.length) {
+      const slice = tail.slice(cursor);
+      const numMatch = slice.match(/^\s*(\d+(?:\.\d+)?)/);
+      if (numMatch) {
+        tokens.push({ type: 'num', val: parseFloat(numMatch[1]), raw: numMatch[1] });
+        cursor += numMatch[0].length;
+        continue;
+      }
+      let matched = false;
+      for (const token of sortedHandicapTokens) {
+        if (slice.startsWith(token)) {
+          tokens.push({ type: 'hcap', val: token });
+          cursor += token.length;
+          matched = true;
+          break;
+        }
+      }
+      if (matched) continue;
+      cursor += 1;
+    }
+    return tokens;
+  };
+
+  const findSegmentByTokens = (tail) => {
+    const tokens = tokenizeAsian(tail);
+    for (let i = 0; i + 5 < tokens.length; i += 1) {
+      const window = tokens.slice(i, i + 6);
+      if (window[0].type === 'num' && window[1].type === 'hcap'
+        && window[2].type === 'num' && window[3].type === 'num'
+        && window[4].type === 'hcap' && window[5].type === 'num') {
+        return buildFromSixSegments(
+          window[0].val,
+          window[1].val,
+          window[2].val,
+          window[3].val,
+          window[4].val,
+          window[5].val,
+        );
+      }
+    }
+    return null;
+  };
+
+  const parseLine = (line, companyAlias, sourceTag) => {
+    const normalized = normalizeText(line);
+    const idx = normalized.indexOf(companyAlias);
+    if (idx < 0) return null;
+    const company = normalizeCompany(companyAlias);
+    const tail = normalized.slice(idx + companyAlias.length).trim();
+    const strictRe = /(\d+(?:\.\d+)?)\s*([\u4e00-\u9fff\/半球两一平受让]+)\s*(\d+(?:\.\d+)?)\s*(\d+(?:\.\d+)?)\s*([\u4e00-\u9fff\/半球两一平受让]+)\s*(\d+(?:\.\d+)?)/;
+    const m = tail.match(strictRe);
+    let segment = null;
+    if (m) {
+      segment = buildFromSixSegments(
+        parseFloat(m[1]), m[2].trim(), parseFloat(m[3]),
+        parseFloat(m[4]), m[5].trim(), parseFloat(m[6]),
+      );
+    }
+    if (!segment) segment = findSegmentByTokens(tail);
+    if (!segment) return null;
+    return {
+      company,
+      initial: segment.initial,
+      final: segment.final,
+      delta: segment.delta,
       _source: sourceTag,
-      _matched_line: line,
+      _matched_line: normalized,
       _priority: priority[company] || 1,
+    };
+  };
+
+  const parseRowCells = (tr, companyAlias) => {
+    const cellTexts = [...tr.querySelectorAll('td,th')].map(td => normalizeText(visibleInnerText(td)));
+    if (!cellTexts.length) return null;
+    const joinedText = cellTexts.join(' ');
+    if (joinedText.indexOf(companyAlias) < 0) return null;
+    const segment = findSegmentByTokens(joinedText.slice(joinedText.indexOf(companyAlias) + companyAlias.length));
+    if (!segment) return null;
+    return {
+      company: normalizeCompany(companyAlias),
+      initial: segment.initial,
+      final: segment.final,
+      delta: segment.delta,
+      _source: 'table_cells',
+      _matched_line: joinedText,
+      _priority: priority[normalizeCompany(companyAlias)] || 1,
     };
   };
 
@@ -2287,9 +2550,14 @@ def _parse_asian_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
     if (!dedup.has(key)) dedup.set(key, item);
   };
 
-  const tableRows = [...document.querySelectorAll('tr')].map(tr => (tr.innerText || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const tableRows = [...document.querySelectorAll('tr')].map(tr => visibleInnerText(tr).replace(/\s+/g, ' ').trim()).filter(Boolean);
   for (const company of companyAliases) {
     for (const line of tableRows) pushCandidate(parseLine(line, company, 'table_row'));
+  }
+  for (const tr of document.querySelectorAll('tr')) {
+    for (const company of companyAliases) {
+      pushCandidate(parseRowCells(tr, company));
+    }
   }
   for (const company of companyAliases) {
     for (const line of lines) pushCandidate(parseLine(line, company, 'body_text_line'));
@@ -2434,12 +2702,11 @@ def _parse_totals_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
     - Build a market consensus line from the most common final line.
     - Keep the company-level details for traceability.
     """
-    js = r"""
-(() => {
+    js = "(() => {\n" + _DEOBFUSCATE_HELPER_JS + r"""
   const blocked = (document.body?.innerText||'').includes('访问被阻断') || (document.title||'').includes('405');
   if (blocked) return JSON.stringify({blocked:true});
 
-  const body = document.body?.innerText || '';
+  const body = visibleInnerText(document.body);
   const lines = body.split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
   const compact = body.replace(/\s+/g, ' ').trim();
 
@@ -2533,7 +2800,7 @@ def _parse_totals_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
     if (!dedup.has(key)) dedup.set(key, item);
   };
 
-  const tableRows = [...document.querySelectorAll('tr')].map(tr => (tr.innerText || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const tableRows = [...document.querySelectorAll('tr')].map(tr => visibleInnerText(tr).replace(/\s+/g, ' ').trim()).filter(Boolean);
   for (const company of companyAliases) {
     for (const line of tableRows) {
       pushCandidate(parseLine(line, company, 'table_row'));
@@ -2690,8 +2957,7 @@ def _parse_kelly_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
     # multi-company consensus, mirroring _parse_europe_on_current_page, instead of
     # reading a single 99家平均 aggregate cell (which only exposes the payout rate
     # and collapsed all three outcomes onto the same number).
-    js = r"""
-(() => {
+    js = "(() => {\n" + _DEOBFUSCATE_HELPER_JS + r"""
   const blocked = (document.body?.innerText||'').includes('访问被阻断') || (document.title||'').includes('405');
   if (blocked) return JSON.stringify({blocked:true});
 
@@ -2763,9 +3029,9 @@ def _parse_kelly_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
   };
 
   const aliases = aliasPairs.map(x => x[0]);
-  const tableRows = [...document.querySelectorAll('tr')].map(tr => (tr.innerText || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const tableRows = [...document.querySelectorAll('tr')].map(tr => visibleInnerText(tr).replace(/\s+/g, ' ').trim()).filter(Boolean);
   for (const a of aliases) for (const line of tableRows) push(parseLine(line, a));
-  const bodyLines = (document.body?.innerText || '').split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const bodyLines = visibleInnerText(document.body).split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
   for (const a of aliases) for (const line of bodyLines) push(parseLine(line, a));
 
   const companies = [...dedup.values()];
@@ -3327,10 +3593,16 @@ def _extract_all_markets_from_hub(bu: BrowserUse, history_url: str, market_dwell
     if _page_blocked_now(bu):
         return {"blocked": True, "url": asian_url or history_url, "_blocked_at": "hub_nav_yazhi"}
     time.sleep(dwell)
+    # m.okooo handicap.php defaults to a single-company table (Pinnacle only) on
+    # most match pages; this best-effort expander tries to surface the full
+    # multi-company list before parsing. Diagnostics are kept so we can iterate
+    # on label coverage when a page exposes a different trigger.
+    asian_expand = _expand_asian_company_view(bu, dwell=dwell)
     asian = _parse_asian_on_current_page(bu)
     asian["url"] = asian_url or history_url
     asian["_flow"] = "hub_nav_yazhi"
     asian["_click"] = asian_click
+    asian["_expand"] = asian_expand
 
     time.sleep(ASIAN_TO_TOTALS_DWELL_SECONDS)
     totals_click = _click_visible_text(bu, ["大小球", "大/小", "总进球"], settle_seconds=CLICK_SETTLE_SECONDS)
