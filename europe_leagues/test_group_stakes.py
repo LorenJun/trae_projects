@@ -108,6 +108,27 @@ class QualificationTest(unittest.TestCase):
         status = compute_qualification(groups)
         self.assertEqual(status["墨西哥"], "已出线")
         self.assertEqual(status["韩国"], "已出线")
+        # 2026 赛制：12 个小组前二 + 8 个最佳第三名晋级。两连败但末轮赢球仍可争第三，
+        # 在全局第三名排序未尘埃落定前不能提前判定出局。
+        self.assertEqual(status["捷克"], "争夺中")
+        self.assertEqual(status["南非"], "争夺中")
+
+    def test_final_round_third_place_still_alive_for_best_third(self):
+        md = _group_info({"I": ["法国", "挪威", "塞内加尔", "伊拉克"]}) + "\n" + _schedule([
+            ("法国", "3-1", "塞内加尔"),
+            ("伊拉克", "1-4", "挪威"),
+            ("法国", "3-0", "伊拉克"),
+            ("挪威", "3-2", "塞内加尔"),
+        ])
+        groups = compute_group_standings(md, exclude_pair=("塞内加尔", "伊拉克"))
+        status = compute_qualification(groups)
+        self.assertEqual(status["法国"], "已出线")
+        self.assertEqual(status["挪威"], "已出线")
+        self.assertEqual(status["塞内加尔"], "争夺中")
+        self.assertEqual(status["伊拉克"], "争夺中")
+        sc = classify_stakes_scenario("塞内加尔", "伊拉克", groups, status)
+        self.assertFalse(sc.distortion)
+        self.assertEqual(sc.type, "normal")
 
 
 def _mk_group(letter, specs):

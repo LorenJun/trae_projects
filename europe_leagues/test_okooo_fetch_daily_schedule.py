@@ -16,6 +16,12 @@ class OkoooFetchDailyScheduleTest(unittest.TestCase):
         self.assertEqual(parsed["away_team"], "狼队")
         self.assertEqual(parsed["kickoff_time"], "23:00")
 
+    def test_parse_row_text_handles_world_cup_knockout_stage_marker(self):
+        parsed = _parse_row_text("2026-06-30 1/16决赛 德国 04:30 巴拉圭")
+        self.assertEqual(parsed["home_team"], "德国")
+        self.assertEqual(parsed["away_team"], "巴拉圭")
+        self.assertEqual(parsed["kickoff_time"], "04:30")
+
     def test_league_code_supports_non_major_leagues(self):
         self.assertEqual(_league_code("瑞超"), "allsvenskan")
         self.assertEqual(_league_code("瑞典超"), "allsvenskan")

@@ -111,6 +111,8 @@ The main runtime path is:
 
 `EnhancedPredictor` is still the main orchestration hub. It wires together the domain services and owns the end-to-end prediction workflow.
 
+World Cup knockout matches add one more pre-inference context step inside `EnhancedPredictor`: `_inject_world_cup_reference_context` builds `analysis_context.world_cup_reference` before `InferencePipelineService.run(...)`. It injects 90-minute / extra-time / penalty route rules, group-stage form, lineup/reference-XI data, `home_form` / `away_form`, `home_motivation` / `away_motivation=90`, and `single_elimination=True`. Treat these fields as part of the formal prediction input, not just HTML presentation.
+
 ### 3. `PredictionPersistenceService` owns prediction side effects
 
 If a change affects what happens after a prediction is produced, start in `europe_leagues/domain/persistence.py`.

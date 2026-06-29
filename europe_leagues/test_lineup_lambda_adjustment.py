@@ -8,6 +8,7 @@ import unittest
 
 from okooo_live_snapshot import extract_current_odds
 from domain.intelligence import MatchIntelligenceEngine as E
+from scripts.build_world_cup_daily_html import _validated_lineup
 
 
 def _lineup(hv, av, hin=0, ain=0, hiv=0, aiv=0, found=True):
@@ -43,6 +44,43 @@ class LineupTransmitTest(unittest.TestCase):
     def test_extract_current_odds_missing_lineup_is_empty(self):
         out = extract_current_odds({"match_id": "1"})
         self.assertEqual(out.get("阵容"), {})
+
+    def test_world_cup_lineup_completes_partial_starting_xi_to_eleven(self):
+        partial_home = [
+            {"number": 1, "name": "诺伊尔", "position": "门将", "value_wan": 400},
+            {"number": 2, "name": "吕迪格", "position": "后卫", "value_wan": 900},
+            {"number": 6, "name": "基米希", "position": "后卫", "value_wan": 4000},
+            {"number": 7, "name": "格纳布里", "position": "前锋", "value_wan": 2000},
+        ]
+        partial_away = [
+            {"number": 2, "name": "Gustavo Velásquez", "position": "后卫", "value_wan": 40},
+            {"number": 3, "name": "奥马尔·阿尔德雷特", "position": "后卫", "value_wan": 1500},
+            {"number": 4, "name": "Juan Cáceres", "position": "后卫", "value_wan": 500},
+            {"number": 7, "name": "米格爾·艾馬朗", "position": "中场", "value_wan": 800},
+        ]
+        d = {
+            "home_team": "德国",
+            "away_team": "巴拉圭",
+            "market_snapshot": {
+                "阵容": {
+                    "available": True,
+                    "home_starting_xi": partial_home,
+                    "away_starting_xi": partial_away,
+                }
+            },
+        }
+        lineup, meta = _validated_lineup(d)
+        self.assertEqual(len(lineup.get("home_starting_xi") or []), 11)
+        self.assertEqual(len(lineup.get("away_starting_xi") or []), 11)
+        self.assertTrue(meta.get("home_completed"))
+        self.assertTrue(meta.get("away_completed"))
+
+    def test_world_cup_lineup_does_not_fake_missing_lineup_page(self):
+        d = {"home_team": "德国", "away_team": "巴拉圭", "market_snapshot": {"阵容": {}}}
+        lineup, meta = _validated_lineup(d)
+        self.assertEqual(lineup, {})
+        self.assertFalse(meta.get("home_fallback"))
+        self.assertFalse(meta.get("away_fallback"))
 
 
 class LineupEdgeTest(unittest.TestCase):

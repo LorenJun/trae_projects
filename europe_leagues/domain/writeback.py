@@ -71,6 +71,33 @@ def _filter_score_candidates(raw_scores: Any, prediction_text: str, limit: int |
     return score_parts
 
 
+def _align_score_candidates_to_prediction(score_parts: List[str], prediction_text: str, limit: int = 3) -> List[str]:
+    """最终写回兜底：保证预测方向与比分候选口径一致。
+
+    复盘发现低置信/盘口口诀修正后可能出现「预测:平局，但比分仍全是单边胜」的历史残留，
+    这里在写回层做最后一道防线：平局方向必须以平局比分开头。
+    """
+    cleaned = [str(score).strip() for score in (score_parts or []) if str(score).strip()]
+    if prediction_text == '平局':
+        draw_scores = [score for score in cleaned if re.match(r'^(\d+)-(\d+)$', score) and score.split('-')[0] == score.split('-')[1]]
+        preferred = next((score for score in ['1-1', '0-0', '2-2', '3-3'] if score in draw_scores), None)
+        if preferred is None:
+            preferred = '1-1'
+        rest = [score for score in cleaned if score != preferred]
+        cleaned = [preferred] + rest
+    elif prediction_text == '主胜':
+        cleaned = [score for score in cleaned if re.match(r'^(\d+)-(\d+)$', score) and int(score.split('-')[0]) > int(score.split('-')[1])]
+    elif prediction_text == '客胜':
+        cleaned = [score for score in cleaned if re.match(r'^(\d+)-(\d+)$', score) and int(score.split('-')[0]) < int(score.split('-')[1])]
+    out: List[str] = []
+    for score in cleaned:
+        if score not in out:
+            out.append(score)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def normalize_existing_prediction_note(note: str) -> str:
     text = str(note or '').strip()
     if not text or '预测:' not in text:
@@ -149,6 +176,7 @@ def format_score_ou_note(prediction: Dict[str, Any]) -> str:
             prediction_text,
             limit=3,
         )
+        score_parts = _align_score_candidates_to_prediction(score_parts, prediction_text, limit=3)
     if not score_parts:
         top_scores = prediction.get('top_scores') or []
         if isinstance(top_scores, list):
@@ -157,6 +185,7 @@ def format_score_ou_note(prediction: Dict[str, Any]) -> str:
                 prediction_text,
                 limit=3,
             )
+            score_parts = _align_score_candidates_to_prediction(score_parts, prediction_text, limit=3)
     score_note = f"比分:{'/'.join(score_parts)}" if score_parts else ''
 
     over_under = prediction.get('over_under') or {}

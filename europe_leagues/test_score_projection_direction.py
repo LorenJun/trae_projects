@@ -215,6 +215,57 @@ class DirectionFromAsianHandicapTest(unittest.TestCase):
         names = [score for score, _ in scores]
         self.assertTrue(any(score in {"3-1", "4-1"} for score in names), names)
 
+    def test_low_confidence_away_pick_is_downgraded_to_draw_hedge(self):
+        # 低置信客胜 + 平局只小幅落后：比分层应转为防平口径，避免弱客胜单边输出。
+        d = _base(
+            all_probabilities={"主胜": 0.303, "平局": 0.324, "客胜": 0.373},
+            expected_goals={"home": 1.15, "away": 1.25},
+            over_under={"over": 0.51, "under": 0.49, "line": 2.25, "ou_neutral": True},
+            prediction="客胜",
+        )
+        self.assertEqual(direction_of(d), "平局")
+        self.assertEqual(allowed_outcomes(d), {"平局", "客胜"})
+        names = [score for score, _ in project_scores_for_side(d)]
+        self.assertIn(names[0], {"0-0", "1-1"}, names)
+
+    def test_draw_direction_forces_draw_score_consistency(self):
+        # 最终方向为平局时，top_scores 不能继续全是主胜/客胜比分。
+        d = _base(
+            all_probabilities={"主胜": 0.336, "平局": 0.358, "客胜": 0.306},
+            expected_goals={"home": 1.55, "away": 1.05},
+            over_under={"over": 0.50, "under": 0.50, "line": 1.75, "ou_neutral": True},
+            prediction="平局",
+        )
+        scores = project_scores_for_side(d)
+        self.assertTrue(scores)
+        h, a = map(int, scores[0][0].split("-"))
+        self.assertEqual(h, a, scores)
+
+    def test_final_draw_direction_overrides_strict_home_handicap_for_scores(self):
+        # 严格主队盘口口诀可能仍认为主真赢，但最终 1X2 若已改为平局，比分候选必须以平局开头。
+        d = _with_verdict(
+            "block_up_home_genuine", "home",
+            all_probabilities={"主胜": 0.375, "平局": 0.376, "客胜": 0.249},
+            expected_goals={"home": 1.94, "away": 0.93},
+            over_under={"over": 0.62, "under": 0.38, "line": 2.25, "ou_neutral": True},
+            prediction="平局",
+        )
+        scores = project_scores_for_side(d)
+        self.assertTrue(scores)
+        h, a = map(int, scores[0][0].split("-"))
+        self.assertEqual(h, a, scores)
+
+    def test_strong_away_favorite_neutral_ou_keeps_blowout_tail(self):
+        # 强客 + 大盘/高λ，即便大小球被转中性，也要把 0-3/0-4/1-4 这类穿透比分放入候选。
+        d = _base(
+            all_probabilities={"主胜": 0.10, "平局": 0.22, "客胜": 0.68},
+            expected_goals={"home": 0.72, "away": 3.05},
+            over_under={"over": 0.50, "under": 0.50, "line": 4.0, "ou_neutral": True},
+            prediction="客胜",
+        )
+        names = [score for score, _ in project_scores_for_side(d)]
+        self.assertTrue(any(score in {"0-3", "0-4", "1-4", "0-5"} for score in names), names)
+
     def test_realtime_matrix_fallback_path(self):
         # 口诀来源回退：tri_axis 缺失时从 realtime.context_applied 取
         d = _base(prediction="平局")

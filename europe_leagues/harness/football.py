@@ -121,15 +121,9 @@ def _stage_save_result(context: HarnessContext) -> Dict[str, Any]:
 
 
 def _stage_accuracy(context: HarnessContext) -> Dict[str, Any]:
-    from result_manager import ResultManager
+    from app.cli import _load_or_refresh_accuracy_stats
 
-    manager = ResultManager()
-    if bool(context.get("refresh", False)):
-        return manager.update_accuracy_stats()
-    stats = manager.accuracy_store.load()
-    if stats:
-        return stats
-    return manager.update_accuracy_stats()
+    return _load_or_refresh_accuracy_stats(refresh=bool(context.get("refresh", False)))
 
 
 def list_pipelines() -> List[Dict[str, Any]]:

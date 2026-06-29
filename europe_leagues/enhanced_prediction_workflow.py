@@ -9,7 +9,7 @@ import re
 import sys
 import json
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import logging
 
 from collectors.odds_snapshots import OddsSnapshotRepository
@@ -713,6 +713,308 @@ class EnhancedPredictor:
     def _to_float(value: Any) -> Optional[float]:
         return LiveRefreshService.to_float(value)
 
+    @staticmethod
+    def _world_cup_form_score(points: int, matches: int) -> int:
+        m = max(1, int(matches or 0))
+        ppg = float(points or 0) / m
+        if ppg >= 2.2:
+            return 5
+        if ppg >= 1.6:
+            return 4
+        if ppg >= 1.0:
+            return 3
+        if ppg >= 0.5:
+            return 2
+        return 1
+
+    @staticmethod
+    def _norm_world_cup_player_name(name: Any) -> str:
+        return re.sub(r'[\s·•・.．,，-]+', '', str(name or '').lower())
+
+    def _world_cup_roster(self, team: str) -> List[Dict[str, Any]]:
+        team = str(team or '').strip()
+        if not team:
+            return []
+        path = self.paths.base_dir / 'world_cup' / 'players' / f'{team}.json'
+        try:
+            payload = json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            return []
+        players = payload.get('players') if isinstance(payload, dict) else []
+        return players if isinstance(players, list) else []
+
+    def _world_cup_roster_name_keys(self, team: str) -> set:
+        keys = set()
+        for p in self._world_cup_roster(team):
+            if not isinstance(p, dict):
+                continue
+            for field in ('name_cn', 'name', 'short_name', 'known_as'):
+                key = self._norm_world_cup_player_name(p.get(field) or '')
+                if key:
+                    keys.add(key)
+        return keys
+
+    def _world_cup_lineup_matches_roster(self, items: Any, team: str) -> bool:
+        names = [
+            self._norm_world_cup_player_name(p.get('name') or '')
+            for p in (items or [])
+            if isinstance(p, dict)
+        ]
+        names = [n for n in names if n]
+        if len(names) < 4:
+            return True
+        roster_keys = self._world_cup_roster_name_keys(team)
+        if not roster_keys:
+            return True
+        hits = sum(1 for n in names if n in roster_keys or any(n and (n in r or r in n) for r in roster_keys))
+        return hits >= max(2, int(len(names) * 0.35))
+
+    def _world_cup_regular_xi_fallback(self, team: str) -> List[Dict[str, Any]]:
+        roster = [p for p in self._world_cup_roster(team) if isinstance(p, dict)]
+        if not roster:
+            return []
+        picked: List[Dict[str, Any]] = []
+        seen = set()
+        for pos, limit in (('门将', 1), ('后卫', 4), ('中场', 3), ('前锋', 3)):
+            for idx, p in enumerate(roster):
+                if idx in seen or pos not in str(p.get('position') or ''):
+                    continue
+                picked.append({
+                    'number': p.get('number') or p.get('shirt_number'),
+                    'name': p.get('name_cn') or p.get('name') or '',
+                    'position': p.get('position') or '',
+                    '_source': 'local_world_cup_roster_fallback',
+                })
+                seen.add(idx)
+                if sum(1 for x in picked if pos in str(x.get('position') or '')) >= limit:
+                    break
+        if len(picked) < 11:
+            for idx, p in enumerate(roster):
+                if idx in seen:
+                    continue
+                picked.append({
+                    'number': p.get('number') or p.get('shirt_number'),
+                    'name': p.get('name_cn') or p.get('name') or '',
+                    'position': p.get('position') or '',
+                    '_source': 'local_world_cup_roster_fallback',
+                })
+                if len(picked) >= 11:
+                    break
+        return picked[:11]
+
+    def _world_cup_player_identity_key(self, player: Dict[str, Any]) -> str:
+        name = self._norm_world_cup_player_name((player or {}).get('name') or '')
+        if name:
+            return name
+        number = str((player or {}).get('number') or (player or {}).get('shirt_number') or '').strip()
+        return f'#{number}' if number else ''
+
+    def _complete_world_cup_regular_xi(self, team: str, items: Any) -> Tuple[List[Dict[str, Any]], bool]:
+        """保留阵容 tab 已解析首发，再补齐部分缺口；完全缺失时不冒充首发。"""
+        existing = [
+            dict(p)
+            for p in (items or [])
+            if isinstance(p, dict) and (p.get('name') or p.get('number'))
+        ]
+        if len(existing) >= 11:
+            return existing[:11], False
+        if not existing:
+            return [], False
+
+        fallback = self._world_cup_regular_xi_fallback(team)
+        if not fallback:
+            return existing[:11], False
+
+        seen = {self._world_cup_player_identity_key(p) for p in existing if self._world_cup_player_identity_key(p)}
+        completed = list(existing)
+        for p in fallback:
+            key = self._world_cup_player_identity_key(p)
+            if key and key in seen:
+                continue
+            completed.append(dict(p))
+            if key:
+                seen.add(key)
+            if len(completed) >= 11:
+                break
+        return completed[:11], len(completed) >= 11 and len(existing) < 11
+
+    @staticmethod
+    def _extract_world_cup_group_form(md_text: str, team: str) -> Dict[str, Any]:
+        """从 teams_2026.md 小组赛段提取球队世界杯近期状态，供预测前置特征使用。"""
+        stat: Dict[str, Any] = {
+            'available': False,
+            'played': 0,
+            'wins': 0,
+            'draws': 0,
+            'losses': 0,
+            'gf': 0,
+            'ga': 0,
+            'points': 0,
+            'form_score': 3,
+            'results': [],
+        }
+        if not team or not md_text:
+            return stat
+        in_group_stage = False
+        score_re = re.compile(r'^(\d+)\s*-\s*(\d+)$')
+        for line in md_text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith('### '):
+                in_group_stage = stripped.startswith('### 小组赛')
+                continue
+            if not in_group_stage or not stripped.startswith('|'):
+                continue
+            cols = [c.strip() for c in stripped.strip('|').split('|')]
+            if len(cols) < 6:
+                continue
+            date, _time, home, score, away, _note = cols[:6]
+            m = score_re.match(score or '')
+            if not m or team not in {home, away}:
+                continue
+            hs, as_ = int(m.group(1)), int(m.group(2))
+            is_home = team == home
+            gf, ga = (hs, as_) if is_home else (as_, hs)
+            stat['available'] = True
+            stat['played'] += 1
+            stat['gf'] += gf
+            stat['ga'] += ga
+            opp = away if is_home else home
+            if gf > ga:
+                stat['wins'] += 1
+                stat['points'] += 3
+                outcome = '胜'
+            elif gf < ga:
+                stat['losses'] += 1
+                outcome = '负'
+            else:
+                stat['draws'] += 1
+                stat['points'] += 1
+                outcome = '平'
+            stat['results'].append({'date': date, 'opponent': opp, 'score_for': gf, 'score_against': ga, 'outcome': outcome})
+        stat['gd'] = int(stat['gf']) - int(stat['ga'])
+        stat['form_score'] = EnhancedPredictor._world_cup_form_score(int(stat['points']), int(stat['played']))
+        return stat
+
+    def _summarize_lineup_reference(self, current_odds: Optional[Dict[str, Any]], home_team: str = '', away_team: str = '') -> Dict[str, Any]:
+        lineup = current_odds.get('阵容') if isinstance(current_odds, dict) and isinstance(current_odds.get('阵容'), dict) else {}
+        if not lineup or not (lineup.get('available') or lineup.get('found')):
+            return {'available': False}
+        lineup = dict(lineup)
+        warnings = []
+
+        for side, team in (('home', home_team), ('away', away_team)):
+            key = f'{side}_starting_xi'
+            if not self._world_cup_lineup_matches_roster(lineup.get(key), team):
+                fallback = self._world_cup_regular_xi_fallback(team)
+                if fallback:
+                    lineup[key] = fallback
+                    lineup[f'{side}_starting_value_wan'] = None
+                    lineage = f'{side}_lineup_identity_mismatch_roster_fallback'
+                    lineup[f'{side}_lineup_warning'] = lineage
+                    warnings.append(lineage)
+            else:
+                completed, did_complete = self._complete_world_cup_regular_xi(team, lineup.get(key))
+                if completed:
+                    lineup[key] = completed
+                    if did_complete:
+                        lineage = f'{side}_lineup_partial_roster_completed'
+                        lineup[f'{side}_lineup_warning'] = lineage
+                        warnings.append(lineage)
+
+        def _count_positions(items: Any) -> Dict[str, int]:
+            counts = {'门将': 0, '后卫': 0, '中场': 0, '前锋': 0}
+            if not isinstance(items, list):
+                return counts
+            for p in items[:11]:
+                if not isinstance(p, dict):
+                    continue
+                pos = str(p.get('position') or '')
+                for key in counts:
+                    if key in pos:
+                        counts[key] += 1
+                        break
+            return counts
+
+        return {
+            'available': True,
+            'source': 'okooo_lineup_or_group_regular_xi',
+            'home_starting_value_wan': lineup.get('home_starting_value_wan'),
+            'away_starting_value_wan': lineup.get('away_starting_value_wan'),
+            'home_injury_count': lineup.get('home_injury_count'),
+            'away_injury_count': lineup.get('away_injury_count'),
+            'home_shape_counts': _count_positions(lineup.get('home_starting_xi')),
+            'away_shape_counts': _count_positions(lineup.get('away_starting_xi')),
+            'home_starting_xi': lineup.get('home_starting_xi') or [],
+            'away_starting_xi': lineup.get('away_starting_xi') or [],
+            'identity_warnings': warnings,
+        }
+
+    def _inject_world_cup_reference_context(
+        self,
+        *,
+        home_team: str,
+        away_team: str,
+        match_date: str,
+        current_odds: Optional[Dict[str, Any]],
+        analysis_context: Dict[str, Any],
+        realtime: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """把淘汰赛规则、首发/常规阵容、小组赛状态送入正式预测 analysis_context。
+
+        这些字段会在 `InferencePipelineService.run` 之前注入，因此 home_form / away_form / motivation
+        会参与模型推理；完整诊断保存在 analysis_context 与 realtime.context_applied 中，供 RAG、写回和网页复用。
+        """
+        if not isinstance(analysis_context, dict):
+            analysis_context = {}
+        try:
+            teams_path = self.paths.teams_file('world_cup')
+            md_text = teams_path.read_text(encoding='utf-8') if os.path.exists(teams_path) else ''
+        except Exception:
+            md_text = ''
+        home_form_ctx = self._extract_world_cup_group_form(md_text, home_team)
+        away_form_ctx = self._extract_world_cup_group_form(md_text, away_team)
+        lineup_ref = self._summarize_lineup_reference(current_odds, home_team, away_team)
+        is_knockout = bool(match_date and str(match_date) >= '2026-06-29')
+        knockout_route = {
+            'enabled': is_knockout,
+            'regular_time_rule': '90分钟常规时间分出胜负，胜者晋级下一轮。',
+            'extra_time_rule': '90分钟打平后进入30分钟加时赛（上下半场各15分钟）。',
+            'penalty_rule': '加时仍平局则点球大战决胜。',
+            'away_goals_rule': '无客场进球规则，单场定生死，输球直接出局。',
+            'prediction_scope': '胜平负与比分预测均为90分钟常规时间口径；平局代表更高概率进入加时/点球窗口。',
+        }
+
+        reference = {
+            'available': True,
+            'source': 'world_cup_knockout_route_group_stage_form_lineup_reference',
+            'knockout_route': knockout_route,
+            'home_group_stage_form': home_form_ctx,
+            'away_group_stage_form': away_form_ctx,
+            'lineup_reference': lineup_ref,
+            'tactical_note': '结合小组赛常规阵容、首发身价/伤停、近期小组赛攻防表现、盘口临场变化与淘汰赛战意进行预测。',
+        }
+        analysis_context['world_cup_reference'] = reference
+        # 将小组赛状态真正送入模型输入，而不仅用于展示；若外部 context 已显式给定则不覆盖。
+        if home_form_ctx.get('available') and 'home_form' not in analysis_context:
+            analysis_context['home_form'] = int(home_form_ctx.get('form_score') or 3)
+        if away_form_ctx.get('available') and 'away_form' not in analysis_context:
+            analysis_context['away_form'] = int(away_form_ctx.get('form_score') or 3)
+        if is_knockout:
+            analysis_context.setdefault('home_motivation', 90.0)
+            analysis_context.setdefault('away_motivation', 90.0)
+            analysis_context['single_elimination'] = True
+            analysis_context['draw_after_90_goes_extra_time'] = True
+        realtime.setdefault('context_applied', {})['world_cup_reference'] = {
+            'available': True,
+            'home_form': analysis_context.get('home_form'),
+            'away_form': analysis_context.get('away_form'),
+            'home_motivation': analysis_context.get('home_motivation'),
+            'away_motivation': analysis_context.get('away_motivation'),
+            'knockout': is_knockout,
+            'lineup_available': bool(lineup_ref.get('available')),
+        }
+        return reference
+
     def _extract_current_odds_from_csv_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
         return self.snapshot_repository.extract_current_odds_from_csv_row(row)
 
@@ -757,6 +1059,28 @@ class EnhancedPredictor:
         current_odds = prep["current_odds"]
         realtime = prep["realtime"]
         cache_params = prep["cache_params"]
+        world_cup_reference = {}
+        if league_code == 'world_cup':
+            try:
+                world_cup_reference = self._inject_world_cup_reference_context(
+                    home_team=home_team,
+                    away_team=away_team,
+                    match_date=match_date,
+                    current_odds=current_odds,
+                    analysis_context=analysis_context,
+                    realtime=realtime,
+                )
+                if isinstance(cache_params, dict):
+                    cache_params['world_cup_reference_context'] = {
+                        'home_form': analysis_context.get('home_form'),
+                        'away_form': analysis_context.get('away_form'),
+                        'home_motivation': analysis_context.get('home_motivation'),
+                        'away_motivation': analysis_context.get('away_motivation'),
+                        'single_elimination': analysis_context.get('single_elimination'),
+                        'lineup_available': bool((world_cup_reference.get('lineup_reference') or {}).get('available')) if isinstance(world_cup_reference, dict) else False,
+                    }
+            except Exception as e:
+                realtime.setdefault('context_applied', {})['world_cup_reference'] = {'available': False, 'error': str(e)}
         cached = self.cache.get('predict_match', cache_params)
         if cached:
             logger.info(f"使用缓存预测: {home_team} vs {away_team}")
@@ -835,6 +1159,23 @@ class EnhancedPredictor:
                     over_under = dict(over_under)
                     over_under['stakes_neutral'] = True
             realtime["context_applied"]["stakes_scenario"] = stakes_scenario
+
+        knockout_route = {}
+        if league_code == 'world_cup':
+            try:
+                is_knockout = bool(match_date and str(match_date) >= '2026-06-29')
+            except Exception:
+                is_knockout = False
+            if is_knockout:
+                knockout_route = {
+                    'stage': '淘汰赛',
+                    'regular_time_rule': '90分钟常规时间分出胜负，胜者晋级下一轮。',
+                    'extra_time_rule': '90分钟打平后进入30分钟加时赛（上下半场各15分钟）。',
+                    'penalty_rule': '加时仍平局则点球大战决胜。',
+                    'away_goals_rule': '无客场进球规则，单场定生死，输球直接出局。',
+                    'lineup_reference': '首发/预计首发参考两队小组赛常规阵容与赛前阵容页。',
+                }
+                realtime['context_applied']['knockout_route'] = knockout_route
 
         # 5.5 凯利仓位建议（基于模型概率 + 欧赔/竞彩赔率；输出半凯利封顶5% + 1/4凯利封顶3%）
         staking = {}
@@ -936,6 +1277,11 @@ class EnhancedPredictor:
         result['tri_axis_consistency'] = core.get('tri_axis_consistency')
         if stakes_scenario:
             result['stakes_scenario'] = stakes_scenario
+        if knockout_route:
+            result['knockout_route'] = knockout_route
+        wc_ref = analysis_context.get('world_cup_reference') if isinstance(analysis_context, dict) else None
+        if isinstance(wc_ref, dict) and wc_ref:
+            result['world_cup_reference_context'] = wc_ref
 
         # 硬性闸门：必须拿到真实盘口数据（澳客实时快照）才允许预测。
         # over_under.available 仅在通过真实盘口校验（line_source ∈ snapshot_final/initial）后才置 True，

@@ -78,8 +78,11 @@ def _parse_row_text(text: str) -> Dict[str, Any]:
         result["kickoff_time"] = kickoff_match.group(1)
         s_clean = re.sub(r"\b\d{1,2}:\d{2}\b", "", s_clean)
     
-    # Remove round marker, 完/进行中 markers, extra spaces, date tokens
+    # Remove round/stage marker, 完/进行中 markers, extra spaces, date tokens.
+    # 澳客淘汰赛行形如："2026-06-30 1/16决赛 德国 04:30 巴拉圭"；
+    # 若不剥离 "1/16决赛"，会被误识别为主队，导致后续 MatchID/盘口串场。
     s_clean = re.sub(r"\b\d{4}-\d{1,2}-\d{1,2}\b", "", s_clean)
+    s_clean = re.sub(r"(?:1/16决赛|1/8决赛|1/4决赛|半决赛|决赛|季军赛)", "", s_clean)
     s_clean = re.sub(r"^第\d+轮", "", s_clean)
     s_clean = re.sub(r"\b第\d+轮\b", "", s_clean)
     s_clean = re.sub(r"\b(?:完|进行中|未开始)\b", "", s_clean, flags=re.IGNORECASE)

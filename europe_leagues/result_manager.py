@@ -785,6 +785,9 @@ class ResultManager:
         return 'unknown' if saw_unknown else ''
 
     def _merge_accuracy_sample(self, sample: Dict[str, Any], incoming: Dict[str, Any]) -> None:
+        incoming_sources = set(incoming.get('source_presence') or [])
+        incoming_is_sot = 'teams_sot' in incoming_sources
+        current_is_sot = 'teams_sot' in set(sample.get('source_presence') or [])
         for key in (
             'match_id',
             'league',
@@ -793,24 +796,35 @@ class ResultManager:
             'match_time',
             'home_team',
             'away_team',
-            'actual_score',
-            'actual_winner',
-            'predicted_winner',
             'storage_mode',
         ):
             if incoming.get(key) and not sample.get(key):
                 sample[key] = incoming[key]
 
+        # SoT-backed 赛事的 teams_*.md 是用户看到的正式预测/赛果口径。
+        # archive 可能保留更早版本或 replay 过程中的预测，统一准确率与仪表盘应优先采用 SoT 行备注，
+        # 仅当 SoT 备注缺预测时才由 _restore_prediction_note_from_archive 回填 archive 内容。
+        for key in ('actual_score', 'actual_winner', 'predicted_winner'):
+            if incoming.get(key) and (incoming_is_sot or not sample.get(key)):
+                sample[key] = incoming[key]
+
         if incoming.get('predicted_scores'):
-            existing_scores = list(sample.get('predicted_scores') or [])
-            for score in incoming.get('predicted_scores') or []:
-                if score and score not in existing_scores:
-                    existing_scores.append(score)
-            sample['predicted_scores'] = existing_scores
+            if incoming_is_sot:
+                sample['predicted_scores'] = [
+                    score for score in (incoming.get('predicted_scores') or []) if score
+                ]
+            elif current_is_sot and sample.get('predicted_scores'):
+                pass
+            else:
+                existing_scores = list(sample.get('predicted_scores') or [])
+                for score in incoming.get('predicted_scores') or []:
+                    if score and score not in existing_scores:
+                        existing_scores.append(score)
+                sample['predicted_scores'] = existing_scores
 
         incoming_ou = self._normalize_predicted_ou_value(incoming.get('predicted_ou'))
         current_ou = self._normalize_predicted_ou_value(sample.get('predicted_ou'))
-        if incoming_ou and (not current_ou or str(sample.get('line_source') or 'unknown') == 'unknown'):
+        if incoming_ou and (incoming_is_sot or (not current_is_sot and (not current_ou or str(sample.get('line_source') or 'unknown') == 'unknown'))):
             sample['predicted_ou'] = incoming_ou
 
         incoming_line_source = self._normalize_accuracy_line_source(incoming.get('line_source'))

@@ -278,6 +278,38 @@ class ResultManagerTest(unittest.TestCase):
         self.assertEqual(stats["win_scope"], "unified_prediction_sources")
         self.assertEqual(stats["score_scope"], "unified_prediction_sources")
 
+    def test_calculate_accuracy_prefers_sot_note_over_stale_archive_prediction(self):
+        archive = self.manager.prediction_archive_store.load()
+        archived = archive["la_liga_20260511_巴塞罗那_皇家马德里"]
+        archived["prediction"] = "平局"
+        archived["predicted_winner"] = "draw"
+        archived["predicted_scores"] = ["1-1", "0-0"]
+        archived["predicted_ou"] = {"side": "大", "line": 2.5}
+        self.manager.prediction_archive_store.save(archive)
+        (self.base_dir / "la_liga" / "teams_2025-26.md").write_text(
+            "\n".join(
+                [
+                    "# 测试联赛",
+                    "",
+                    "| 日期 | 时间 | 主队 | 比分 | 客队 | 备注 |",
+                    "|-----|------|-----|------|-----|------|",
+                    "| 2026-05-11 | 03:00 | 巴塞罗那 | 2-1 | 皇家马德里 | 预测:主胜 信心:0.61 比分:2-1/1-0 大小:小2.5 爆冷:低 ✅ |",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        samples = self.manager._build_unified_prediction_samples(days=30)
+        sample = samples["la_liga_20260511_巴塞罗那_皇家马德里"]
+        stats = self.manager.calculate_accuracy(league="la_liga", days=30)
+
+        self.assertEqual(sample["predicted_winner"], "home")
+        self.assertEqual(sample["predicted_scores"], ["2-1", "1-0"])
+        self.assertEqual(sample["predicted_ou"], {"side": "小", "line": 2.5})
+        self.assertEqual(stats["correct_predictions"], 1)
+        self.assertEqual(stats["correct_score_predictions"], 1)
+
     def test_update_accuracy_stats_outputs_league_weight_profile(self):
         stats = self.manager.update_accuracy_stats()
         overall = stats["overall"]

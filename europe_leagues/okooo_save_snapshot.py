@@ -3141,19 +3141,22 @@ def _parse_lineup_on_current_page(bu: BrowserUse) -> Dict[str, Any]:
   const homePlayers = [];
   const awayPlayers = [];
   let pm;
-  const homeRe = /(\d{1,2})\s+([\u4e00-\u9fff·]{2,})\s+(门将|后卫|中场|前锋)\s+€\s*([\d.]+\s*万)/g;
+  const nameChars = '[\\u4e00-\\u9fffA-Za-zÀ-ÖØ-öø-ÿ·•・.．’\'-]{2,}';
+  const homeRe = new RegExp('(\\d{1,2})\\s+(' + nameChars + ')\\s+(门将|后卫|中场|前锋)\\s+€\\s*([\\d.]+\\s*[亿万])', 'g');
   while ((pm = homeRe.exec(seg)) && homePlayers.length < 14) {
     homePlayers.push({number: parseInt(pm[1],10), name: pm[2], position: pm[3], value_wan: toWan(pm[4])});
   }
-  const awayRe = /(\d{1,2})\s+(门将|后卫|中场|前锋)\s+([\u4e00-\u9fff·]{2,})\s+€\s*([\d.]+\s*万)/g;
+  const awayRe = new RegExp('(\\d{1,2})\\s+(门将|后卫|中场|前锋)\\s+(' + nameChars + ')\\s+€\\s*([\\d.]+\\s*[亿万])', 'g');
   while ((pm = awayRe.exec(seg)) && awayPlayers.length < 14) {
     awayPlayers.push({number: parseInt(pm[1],10), position: pm[2], name: pm[3], value_wan: toWan(pm[4])});
   }
   if (homePlayers.length) result.home_starting_xi = homePlayers;
   if (awayPlayers.length) result.away_starting_xi = awayPlayers;
 
-  // success requires the core λ signal: both sides' starting-XI value
-  result.found = (result.home_starting_value_wan != null && result.away_starting_value_wan != null);
+  // success: prefer core λ value signal, but do not discard a fully parsed lineup tab
+  // when the aggregate value row is absent/lazy. 阵容 tab 本身应给出 11 人名单。
+  result.found = (result.home_starting_value_wan != null && result.away_starting_value_wan != null)
+    || (homePlayers.length >= 11 && awayPlayers.length >= 11);
   return JSON.stringify(result);
 })()
 """

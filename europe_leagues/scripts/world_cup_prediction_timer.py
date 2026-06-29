@@ -5,9 +5,10 @@
 监控「下一场未开赛/进行中的真实球队比赛」，当该场比分从 `-` 变成真实比分
 （赛果回填）后，自动切换到下一场继续监控，依次类推到赛事结束。
 
-定时触发口径（仍保留）：
-  1) 每天 21:00 触发一次：刷新「当天这批」即将开赛的比赛所在日期的网页。
-  2) 每场比赛开赛前 1 小时自动触发一次：刷新该场所在日期的网页。
+定时触发口径：
+  1) 每天 21:00 触发一次：预测「隔天」全部世界杯比赛，重生成整页 HTML 并推送截图。
+  2) 每场比赛开赛前 1 小时自动触发一次：捞最新盘口数据、重跑预测，重生成整页 HTML 并推送截图。
+  3) 赛后自动回填只更新赛果/网页，不推送飞书截图；其他时间点不推送。
 
 抓盘口 / 预测 / 落库 / 渲染网页全部复用
 `scripts/build_world_cup_daily_html.py`（逐场调用 `predict-match`，
@@ -30,6 +31,10 @@ predict-match 默认 OKOOO_REFRESH_LIVE=1 会抓澳客最新盘口并落库）�
   install-launchd  注册 macOS 开机自启（LaunchAgent）
   uninstall-launchd 注销开机自启
 
+飞书图片推送说明：webhook 图片消息只能发送 image_key；脚本会先把截图上传到
+飞书开放平台换取 image_key，再调用 webhook。请在运行环境中设置
+LARK_TENANT_ACCESS_TOKEN，或设置 LARK_APP_ID/LARK_APP_SECRET 让脚本自动换 token。
+
 用法示例：
   # 其他 agent 调用：刷新阿根廷这场的最新数据 + 网页
   python3 scripts/world_cup_prediction_timer.py refresh \
@@ -46,6 +51,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -63,12 +69,21 @@ GENERATOR = PROJECT_ROOT / "scripts" / "build_world_cup_daily_html.py"
 
 EVENING_HOUR = 21          # 每天晚间触发（时）
 EVENING_MINUTE = 0         # 每天晚间触发（分）=> 21:00
-EVENING_WINDOW_HOURS = 18  # 晚间触发只刷「当天这批」：未来 N 小时内开赛的比赛
 PRE_MATCH_MINUTES = 60     # 赛前 1 小时触发
 STALE_AFTER_HOURS = 3      # 开赛 N 小时后仍无赛果 => 监控疑似卡住
 MAX_FAILS = 3              # 刷新连续失败次数阈值 => 提示重启
 ALERT_COOLDOWN_MINUTES = 30  # 同类告警最短间隔，避免刷屏
 SYNC_LIMIT = 10            # 每轮自动回填赛果的最大尝试场数
+SCREENSHOT_WIDTH = 1100    # 预测页截图宽度，和网页 max-width 保持匹配
+SCREENSHOT_HEIGHT = 900
+PUSH_DEDUPE_MINUTES = 20   # 同一日期短时间重复刷新时，只推送一次截图
+
+DEFAULT_LARK_WEBHOOK_URL = (
+    "https://open.larkoffice.com/open-apis/bot/v2/hook/"
+    "225e2409-8f3b-42b2-83c8-b3ea20ac3077"
+)
+LARK_TENANT_TOKEN_URL = "https://open.larkoffice.com/open-apis/auth/v3/tenant_access_token/internal"
+LARK_IMAGE_UPLOAD_URL = "https://open.larkoffice.com/open-apis/im/v1/images"
 
 LAUNCHD_LABEL = "com.europeleagues.worldcuptimer"
 SCORE_RE = re.compile(r"^\d+-\d+$")
@@ -106,6 +121,62 @@ def notify(title: str, message: str) -> None:
         pass
 
 
+def _json_http_post(url: str, payload: dict, *, headers: dict | None = None, timeout: int = 30) -> tuple[int, str]:
+    """stdlib 版 JSON POST，避免给守护进程额外引入 requests 运行时依赖。"""
+    from urllib import error, request
+
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json", **(headers or {})},
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=timeout) as resp:
+            return int(resp.status), resp.read().decode("utf-8", errors="replace")
+    except error.HTTPError as exc:
+        return int(exc.code), exc.read().decode("utf-8", errors="replace")
+
+
+def _multipart_http_post(url: str, fields: dict[str, str], files: dict[str, Path], *, headers: dict | None = None, timeout: int = 60) -> tuple[int, str]:
+    """stdlib 版 multipart/form-data POST，用于飞书图片上传。"""
+    from urllib import error, request
+    import mimetypes
+    import uuid
+
+    boundary = f"----wc-timer-{uuid.uuid4().hex}"
+    chunks: list[bytes] = []
+    for name, value in fields.items():
+        chunks.extend([
+            f"--{boundary}\r\n".encode(),
+            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
+            str(value).encode("utf-8"),
+            b"\r\n",
+        ])
+    for name, path in files.items():
+        ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        chunks.extend([
+            f"--{boundary}\r\n".encode(),
+            f'Content-Disposition: form-data; name="{name}"; filename="{path.name}"\r\n'.encode(),
+            f"Content-Type: {ctype}\r\n\r\n".encode(),
+            path.read_bytes(),
+            b"\r\n",
+        ])
+    chunks.append(f"--{boundary}--\r\n".encode())
+    req = request.Request(
+        url,
+        data=b"".join(chunks),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}", **(headers or {})},
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=timeout) as resp:
+            return int(resp.status), resp.read().decode("utf-8", errors="replace")
+    except error.HTTPError as exc:
+        return int(exc.code), exc.read().decode("utf-8", errors="replace")
+
+
 def alert(state: dict, kind: str, title: str, message: str) -> None:
     """记录日志 + 弹通知，带去重冷却。"""
     now = datetime.now()
@@ -128,6 +199,7 @@ def _default_state() -> dict:
     return {
         "last_evening_refresh": "",
         "pre_match_done": [],
+        "pre_match_done_schema": 2,
         "monitor": {"current": None, "since": ""},
         "fail_count": 0,
         "alert_cooldown": {},
@@ -143,6 +215,10 @@ def load_state() -> dict:
         return _default_state()
     base = _default_state()
     base.update(data)
+    if int(data.get("pre_match_done_schema") or 0) < 2:
+        # 旧版曾可能把未来比赛过早写入 pre_match_done。升级后清空，按新逻辑重新布防。
+        base["pre_match_done"] = []
+        base["pre_match_done_schema"] = 2
     base.setdefault("monitor", {"current": None, "since": ""})
     base.setdefault("alert_cooldown", {})
     return base
@@ -270,8 +346,160 @@ def _run_generator(date: str, matches: list[dict]) -> None:
         raise RuntimeError(f"网页生成器失败（{date}）returncode={proc.returncode}")
 
 
-def refresh_date_from_schedule(date: str, schedule: list[dict] | None = None) -> int:
-    """刷新某日期全部真实球队比赛并重生成网页。返回刷新场数。"""
+def _html_path(date: str) -> Path:
+    return PRED_DIR / f"{date}_predictions.html"
+
+
+def _screenshot_path(date: str) -> Path:
+    return PRED_DIR / f"{date}_predictions.png"
+
+
+def _push_lock_path(date: str) -> Path:
+    return PRED_DIR / f".{date}.push.lock"
+
+
+def _push_marker_path(date: str) -> Path:
+    return PRED_DIR / f".{date}.last_push.json"
+
+
+def _recently_pushed(date: str, now: datetime) -> bool:
+    """判断同一日期是否刚刚推送过，避免手工补跑与 daemon 同时触发导致重复飞书图片。"""
+    marker = _push_marker_path(date)
+    if not marker.exists():
+        return False
+    try:
+        data = json.loads(marker.read_text(encoding="utf-8"))
+        last = datetime.fromisoformat(str(data.get("pushed_at") or ""))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    return now - last < timedelta(minutes=PUSH_DEDUPE_MINUTES)
+
+
+def _mark_pushed(date: str, now: datetime) -> None:
+    marker = _push_marker_path(date)
+    marker.write_text(
+        json.dumps({"date": date, "pushed_at": now.isoformat()}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def capture_html_screenshot(date: str) -> Path:
+    """把每日预测 HTML 截成整页 PNG。"""
+    html_path = _html_path(date)
+    if not html_path.exists():
+        raise FileNotFoundError(f"预测 HTML 不存在：{html_path}")
+    screenshot_path = _screenshot_path(date)
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise RuntimeError(
+            "缺少 playwright，无法截图；请先执行 `pip install -r requirements.txt` "
+            "和 `python3 -m playwright install chromium`。"
+        ) from exc
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page(viewport={"width": SCREENSHOT_WIDTH, "height": SCREENSHOT_HEIGHT}, device_scale_factor=2)
+            page.goto(html_path.resolve().as_uri(), wait_until="networkidle")
+            page.screenshot(path=str(screenshot_path), full_page=True)
+        finally:
+            browser.close()
+    log(f"✓ 已生成整页截图：{screenshot_path}")
+    return screenshot_path
+
+
+def _get_lark_tenant_access_token() -> str | None:
+    """读取或用 app_id/app_secret 换取 tenant_access_token，用于上传图片取得 image_key。"""
+    token = os.environ.get("LARK_TENANT_ACCESS_TOKEN") or os.environ.get("FEISHU_TENANT_ACCESS_TOKEN")
+    if token:
+        return token
+    app_id = os.environ.get("LARK_APP_ID") or os.environ.get("FEISHU_APP_ID")
+    app_secret = os.environ.get("LARK_APP_SECRET") or os.environ.get("FEISHU_APP_SECRET")
+    if not app_id or not app_secret:
+        return None
+    status, text = _json_http_post(
+        LARK_TENANT_TOKEN_URL,
+        {"app_id": app_id, "app_secret": app_secret},
+        timeout=30,
+    )
+    if status >= 300:
+        raise RuntimeError(f"飞书 tenant_access_token 获取失败 HTTP {status}: {text[:500]}")
+    data = json.loads(text or "{}")
+    if data.get("code") != 0 or not data.get("tenant_access_token"):
+        raise RuntimeError(f"飞书 tenant_access_token 获取失败：{text[:500]}")
+    return str(data["tenant_access_token"])
+
+
+def _upload_lark_image(image_path: Path) -> str:
+    """上传截图到飞书开放平台，返回 webhook 图片消息需要的 image_key。"""
+    token = _get_lark_tenant_access_token()
+    if not token:
+        raise RuntimeError(
+            "飞书 webhook 发送图片需要 image_key；请设置 LARK_TENANT_ACCESS_TOKEN，"
+            "或设置 LARK_APP_ID/LARK_APP_SECRET 供脚本自动上传图片换取 image_key。"
+        )
+    status, text = _multipart_http_post(
+        LARK_IMAGE_UPLOAD_URL,
+        {"image_type": "message"},
+        {"image": image_path},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=60,
+    )
+    if status >= 300:
+        raise RuntimeError(f"飞书图片上传失败 HTTP {status}: {text[:500]}")
+    data = json.loads(text or "{}")
+    image_key = ((data.get("data") or {}).get("image_key")) if isinstance(data, dict) else None
+    if data.get("code") != 0 or not image_key:
+        raise RuntimeError(f"飞书图片上传失败：{text[:500]}")
+    return str(image_key)
+
+
+def send_lark_screenshot(date: str, screenshot_path: Path, *, webhook_url: str | None = None) -> bool:
+    """通过飞书 / Lark webhook 推送整页 HTML 截图。"""
+    webhook = webhook_url or os.environ.get("WORLD_CUP_LARK_WEBHOOK_URL") or os.environ.get("LARK_WEBHOOK_URL") or DEFAULT_LARK_WEBHOOK_URL
+    image_key = _upload_lark_image(screenshot_path)
+    payload = {"msg_type": "image", "content": {"image_key": image_key}}
+    status, text = _json_http_post(webhook, payload, timeout=30)
+    if status >= 300:
+        raise RuntimeError(f"飞书 webhook 推送失败 HTTP {status}: {text[:500]}")
+    try:
+        data = json.loads(text or "{}")
+    except json.JSONDecodeError:
+        data = {}
+    if data and data.get("code") not in (0, None):
+        raise RuntimeError(f"飞书 webhook 推送失败：{text[:500]}")
+    log(f"✓ 已通过飞书 webhook 推送 {date} 整页截图")
+    return True
+
+
+def push_prediction_page(date: str) -> None:
+    """刷新后统一执行：HTML -> 整页截图 -> webhook 推送。"""
+    PRED_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = _push_lock_path(date)
+    with lock_path.open("w", encoding="utf-8") as lock_fh:
+        try:
+            import fcntl
+
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            # macOS 正常有 fcntl；若在其他平台不可用，仍继续执行，至少保留时间去重。
+            pass
+        now = datetime.now()
+        if _recently_pushed(date, now):
+            log(f"跳过 {date} 飞书截图推送：{PUSH_DEDUPE_MINUTES} 分钟内已推送过")
+            return
+        screenshot = capture_html_screenshot(date)
+        send_lark_screenshot(date, screenshot)
+        _mark_pushed(date, now)
+
+
+def refresh_date_from_schedule(date: str, schedule: list[dict] | None = None, *, push: bool = True) -> int:
+    """刷新某日期全部真实球队比赛并重生成网页。返回刷新场数。
+
+    push=True 仅用于 21:00 隔天预测、赛前 1 小时临场刷新、以及人工 refresh/refresh-date。
+    daemon 里的赛后自动回填刷新必须传 push=False，避免比赛结束后仍向飞书发截图。
+    """
     schedule = schedule if schedule is not None else parse_schedule()
     todays = _matches_on_date(schedule, date)
     if not todays:
@@ -279,6 +507,10 @@ def refresh_date_from_schedule(date: str, schedule: list[dict] | None = None) ->
         return 0
     todays.sort(key=lambda m: (m.get("time") or ""))
     _run_generator(date, todays)
+    if push:
+        push_prediction_page(date)
+    else:
+        log(f"✓ {date} 已刷新网页；本次为赛后自动回填，不推送飞书截图")
     return len(todays)
 
 
@@ -326,17 +558,13 @@ def evaluate_triggers(schedule: list[dict], state: dict, now: datetime) -> list[
     due: set[str] = set()
 
     today = now.strftime("%Y-%m-%d")
+    tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
     evening_at = now.replace(hour=EVENING_HOUR, minute=EVENING_MINUTE,
                              second=0, microsecond=0)
     if now >= evening_at and state.get("last_evening_refresh") != today:
-        window_end = now + timedelta(hours=EVENING_WINDOW_HOURS)
-        for m in schedule:
-            if m["finished"]:
-                continue
-            ko = _kickoff_dt(m)
-            # 只验证「当天这批」：未来窗口内即将开赛的比赛
-            if ko is not None and now <= ko <= window_end:
-                due.add(m["date"])
+        # 用户口径：每天晚上 21:00 预测「隔天」的世界杯比赛。
+        if any((not m["finished"]) and m["date"] == tomorrow for m in schedule):
+            due.add(tomorrow)
         state["last_evening_refresh"] = today
 
     done = set(state.get("pre_match_done", []))
@@ -392,6 +620,33 @@ def check_health(schedule: list[dict], state: dict, now: datetime, cur: dict | N
         )
 
 
+def sanitize_pre_match_done(schedule: list[dict], state: dict, now: datetime) -> None:
+    """清理历史状态中被过早写入的赛前刷新标记。
+
+    只保留：
+    - 未完赛且已进入「赛前 1 小时」窗口/已开赛的比赛；
+    - 这样既避免重复推送，也能把历史误写入的未来比赛重新布防。
+    """
+    by_key = {_match_key(m): m for m in schedule}
+    prev = list(state.get("pre_match_done", []))
+    kept: list[str] = []
+    removed = 0
+    for key in prev:
+        m = by_key.get(key)
+        if not m or m.get("finished"):
+            removed += 1
+            continue
+        ko = _kickoff_dt(m)
+        if ko is not None and now < ko - timedelta(minutes=PRE_MATCH_MINUTES):
+            # 历史状态里过早写入的未来比赛，删除后让它到点重新触发。
+            removed += 1
+            continue
+        kept.append(key)
+    if removed:
+        log(f"✓ 清理 pre_match_done 过期/过早标记 {removed} 条")
+    state["pre_match_done"] = sorted(set(kept))
+
+
 def run_cycle(now: datetime, *, do_refresh: bool = True) -> tuple[list[str], dict | None]:
     """跑一轮：解析赛程 -> 触发 -> 监控切换 -> 刷新 -> 健康检查。"""
     state = load_state()
@@ -409,8 +664,8 @@ def run_cycle(now: datetime, *, do_refresh: bool = True) -> tuple[list[str], dic
         save_state(state)
         return [], None
 
-    # 已开赛但未回填的比赛 => 自动尝试回填赛果，回填成功后把对应日期并入刷新集合，
-    # 使「赛果 + 终场比分 + 最新大小球/欧赔/亚盘水位」自动刷上网页。
+    # 已开赛但未回填的比赛 => 自动尝试回填赛果，回填成功后只把对应日期并入刷新集合，
+    # 使「赛果 + 终场比分」刷上网页；这类赛后刷新不进入 push_due，不推送飞书截图。
     newly_finished_dates: set[str] = set()
     if do_refresh:
         kicked_unfinished = [
@@ -428,31 +683,25 @@ def run_cycle(now: datetime, *, do_refresh: bool = True) -> tuple[list[str], dic
             except (OSError, subprocess.SubprocessError) as exc:
                 log(f"自动回填赛果异常：{exc}")
 
-    # 自动剔除：pre_match_done 中已完赛的比赛键移除，保持其仅含「未完赛」的赛前去重项。
-    finished_keys = {_match_key(m) for m in schedule if m["finished"]}
-    prev_done = state.get("pre_match_done", [])
-    pruned = [k for k in prev_done if k not in finished_keys]
-    if len(pruned) != len(prev_done):
-        log(f"✓ 从 pre_match_done 自动剔除 {len(prev_done) - len(pruned)} 场已完赛比赛")
-        state["pre_match_done"] = sorted(pruned)
+    sanitize_pre_match_done(schedule, state, now)
 
     cur = update_monitor(schedule, state, now)
-    due = set(evaluate_triggers(schedule, state, now))
-    due |= newly_finished_dates
-    due = sorted(due)
+    push_due = set(evaluate_triggers(schedule, state, now))
+    refresh_due = sorted(push_due | newly_finished_dates)
 
     if do_refresh:
-        for date in due:
+        for date in refresh_due:
             try:
-                refresh_date_from_schedule(date, schedule)
+                refresh_date_from_schedule(date, schedule, push=date in push_due)
                 state["fail_count"] = 0
             except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
                 state["fail_count"] = state.get("fail_count", 0) + 1
                 log(f"错误：{date} 刷新失败（连续 {state['fail_count']} 次）：{exc}")
 
-    check_health(schedule, state, now, cur)
-    save_state(state)
-    return due, cur
+    if do_refresh:
+        check_health(schedule, state, now, cur)
+        save_state(state)
+    return refresh_due, cur
 
 
 # ----------------------------- 子命令 -----------------------------
@@ -506,6 +755,7 @@ def cmd_refresh(args) -> None:
         return
     matches.sort(key=lambda m: (m.get("time") or ""))
     _run_generator(args.date, matches)
+    push_prediction_page(args.date)
 
 
 def cmd_refresh_date(args) -> None:
@@ -526,7 +776,7 @@ def cmd_run_once(args) -> None:
 def cmd_daemon(args) -> None:
     interval = max(1, int(args.interval_minutes))
     cycles = 0
-    log(f"守护启动：每 {interval} 分钟轮询；赛程驱动监控 + 21:00 / 赛前1小时刷新")
+    log(f"守护启动：每 {interval} 分钟轮询；赛程驱动监控 + 21:00预测隔天 / 赛前1小时刷新 + 截图推送")
     while True:
         try:
             run_cycle(datetime.now(), do_refresh=True)
@@ -543,7 +793,26 @@ def cmd_daemon(args) -> None:
         if args.max_cycles and cycles >= args.max_cycles:
             log(f"守护达到 max_cycles={args.max_cycles}，退出")
             break
-        time.sleep(interval * 60)
+        sleep_seconds = _seconds_until_next_aligned_tick(datetime.now(), interval)
+        log(f"下次轮询将在 {sleep_seconds // 60}分{sleep_seconds % 60}秒后触发（对齐整点/{interval}分钟边界）")
+        time.sleep(sleep_seconds)
+
+
+def _seconds_until_next_aligned_tick(now: datetime, interval_minutes: int) -> int:
+    """返回距离下一个对齐轮询点的秒数。
+
+    例如 interval=30 时，轮询点固定为 xx:00 / xx:30，而不是按守护进程启动时间滚动。
+    这样每天 21:00 能准点检查，不会因为 17:15 启动而变成 21:15 才触发。
+    """
+    interval_minutes = max(1, min(60, int(interval_minutes)))
+    base = now.replace(second=0, microsecond=0)
+    minute = base.minute
+    next_minute = ((minute // interval_minutes) + 1) * interval_minutes
+    if next_minute >= 60:
+        target = (base.replace(minute=0) + timedelta(hours=1))
+    else:
+        target = base.replace(minute=next_minute)
+    return max(1, int((target - now).total_seconds()))
 
 
 # ----------------------------- launchd 开机自启 -----------------------------
@@ -552,9 +821,41 @@ def _launchd_plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
 
 
+def _xml_escape(value: str) -> str:
+    return (value.replace("&", "&amp;")
+                 .replace("<", "&lt;")
+                 .replace(">", "&gt;")
+                 .replace('"', "&quot;")
+                 .replace("'", "&apos;"))
+
+
+def _launchd_environment_xml() -> str:
+    """把当前 shell 中与飞书推送相关的环境变量写入 launchd，避免开机自启后丢失凭据。"""
+    keys = [
+        "WORLD_CUP_LARK_WEBHOOK_URL",
+        "LARK_WEBHOOK_URL",
+        "LARK_TENANT_ACCESS_TOKEN",
+        "FEISHU_TENANT_ACCESS_TOKEN",
+        "LARK_APP_ID",
+        "FEISHU_APP_ID",
+        "LARK_APP_SECRET",
+        "FEISHU_APP_SECRET",
+    ]
+    pairs = [(k, os.environ.get(k, "")) for k in keys if os.environ.get(k)]
+    if not pairs:
+        return ""
+    lines = ["    <key>EnvironmentVariables</key>", "    <dict>"]
+    for key, value in pairs:
+        lines.append(f"        <key>{_xml_escape(key)}</key>")
+        lines.append(f"        <string>{_xml_escape(value)}</string>")
+    lines.append("    </dict>")
+    return "\n".join(lines) + "\n"
+
+
 def _build_plist(interval_minutes: int) -> str:
     out_log = PRED_DIR / "launchd.out.log"
     err_log = PRED_DIR / "launchd.err.log"
+    env_xml = _launchd_environment_xml()
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -575,7 +876,7 @@ def _build_plist(interval_minutes: int) -> str:
     <true/>
     <key>KeepAlive</key>
     <true/>
-    <key>StandardOutPath</key>
+{env_xml}    <key>StandardOutPath</key>
     <string>{out_log}</string>
     <key>StandardErrorPath</key>
     <string>{err_log}</string>

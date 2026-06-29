@@ -263,7 +263,7 @@ class PredictionPostprocessService:
         if not isinstance(current_odds, dict):
             return {}
         snapshot: Dict[str, Any] = {}
-        for key in ('欧赔', '亚值', '大小球', '凯利'):
+        for key in ('欧赔', '亚值', '大小球', '凯利', '阵容'):
             value = current_odds.get(key)
             if isinstance(value, dict):
                 snapshot[key] = value

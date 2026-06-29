@@ -56,6 +56,9 @@ def _model_direction(d: Dict[str, Any]) -> str:
     if pred in ("主胜", "客胜", "平局"):
         return pred
     probs = d.get("all_probabilities") or {}
+    if not probs and isinstance(d.get("final_probabilities"), dict):
+        final = d.get("final_probabilities") or {}
+        probs = {"主胜": final.get("home_win"), "平局": final.get("draw"), "客胜": final.get("away_win")}
     if probs:
         return max(("主胜", "平局", "客胜"), key=lambda k: probs.get(k) or 0.0)
     return ""
@@ -95,7 +98,16 @@ def direction_of(d: Dict[str, Any]) -> str:
         dog = "客胜" if fav_side == "home" else "主胜"
         probs = d.get("all_probabilities") or {}
         return "平局" if (probs.get("平局") or 0.0) >= (probs.get(dog) or 0.0) else dog
-    return _model_direction(d)
+    model_direction = _model_direction(d)
+    # 低置信防平：首选胜负低于 40%，且平局只落后 6 个百分点内时，
+    # 比分投影口径降级为平局优先，避免弱主/弱客方向输出仍给单边胜比分。
+    probs = d.get("all_probabilities") or {}
+    if model_direction in ("主胜", "客胜"):
+        top_prob = float(probs.get(model_direction) or 0.0)
+        draw_prob = float(probs.get("平局") or 0.0)
+        if top_prob < 0.40 and draw_prob >= 0.27 and (top_prob - draw_prob) <= 0.06:
+            return "平局"
+    return model_direction
 
 
 def _review_draw_heavy_home_corridor(d: Dict[str, Any], *, direction: str) -> bool:
@@ -179,6 +191,11 @@ def allowed_outcomes(d: Dict[str, Any]) -> set[str]:
     direction = _model_direction(d)
     if direction not in ("主胜", "客胜", "平局"):
         return {"主胜", "平局", "客胜"}
+    if direction in ("主胜", "客胜"):
+        top_prob = float(probs.get(direction) or 0.0)
+        draw_prob = float(probs.get("平局") or 0.0)
+        if top_prob < 0.40 and draw_prob >= 0.27 and (top_prob - draw_prob) <= 0.06:
+            return {"平局", direction}
     allowed = {direction}
     if _review_draw_heavy_home_corridor(d, direction=direction):
         allowed.add("平局")
@@ -211,6 +228,8 @@ def project_scores_for_side(d: Dict[str, Any]) -> List[Tuple[str, float]]:
     对应的平局 / 爆冷比分。无 λ 或无盘口线时回退到原始 top_scores（仍按允许集过滤）。
     """
     eg = d.get("expected_goals") or {}
+    if not eg and (d.get("home_lambda") is not None or d.get("away_lambda") is not None):
+        eg = {"home": d.get("home_lambda"), "away": d.get("away_lambda")}
     lam_h, lam_a = eg.get("home"), eg.get("away")
     ou = d.get("over_under") or {}
     line = ou.get("line")
@@ -282,6 +301,32 @@ def project_scores_for_side(d: Dict[str, Any]) -> List[Tuple[str, float]]:
         grid.sort(key=lambda x: x[1], reverse=True)
         return grid
 
+    def _renormalized(scores: List[Tuple[str, float]]) -> List[Tuple[str, float]]:
+        mass = sum(max(0.0, float(prob or 0.0)) for _score, prob in scores) or 1.0
+        return [(sc, max(0.0, float(prob or 0.0)) / mass) for sc, prob in scores]
+
+    def _force_score_candidate(
+        scores: List[Tuple[str, float]],
+        candidate: Tuple[str, float] | None,
+        *,
+        prefer_top: bool = False,
+        signal: float = 0.96,
+    ) -> List[Tuple[str, float]]:
+        """把关键比分挤入 top3，用于复盘规则修正；不改变方向允许集。"""
+        if not candidate:
+            return scores
+        sc, prob = candidate
+        current = [(s, p) for s, p in scores if s != sc]
+        if prefer_top:
+            top_prob = max((float(p or 0.0) for _s, p in current), default=0.0)
+            insert_prob = max(float(prob or 0.0), top_prob * 1.01 if top_prob > 0 else float(prob or 0.0))
+            merged = [(sc, insert_prob)] + current
+            return sorted(_renormalized(merged), key=lambda item: (item[0] != sc, -item[1]))[:3]
+        weakest_prob = min((float(p or 0.0) for _s, p in current), default=float(prob or 0.0))
+        insert_prob = min(float(prob or 0.0), weakest_prob * signal if weakest_prob > 0 else float(prob or 0.0))
+        merged = current[:2] + [(sc, insert_prob)]
+        return sorted(_renormalized(merged), key=lambda item: item[1], reverse=True)[:3]
+
     def _fallback_top_outcome() -> List[Tuple[str, float]]:
         probs = d.get("all_probabilities") or {}
         top = max(("主胜", "平局", "客胜"), key=lambda k: probs.get(k) or 0.0) if probs else "主胜"
@@ -327,6 +372,7 @@ def project_scores_for_side(d: Dict[str, Any]) -> List[Tuple[str, float]]:
 
     probs = d.get("all_probabilities") or {}
     direction = direction_of(d)
+    final_prediction_direction = _model_direction(d)
     draw_prob = float(probs.get("平局") or 0.0)
     top_prob = float(probs.get(direction) or 0.0)
     dh = _direction_handicap(d)
@@ -334,6 +380,23 @@ def project_scores_for_side(d: Dict[str, Any]) -> List[Tuple[str, float]]:
         _VERDICT_DIR_INTENT.get(dh.get("verdict_dir")) == "fav"
         and dh.get("fav_side") == "home"
     )
+
+    if direction == "平局":
+        draw_candidates = _scores_of_outcome("平局")
+        total_lambda = float(lam_h or 0.0) + float(lam_a or 0.0)
+        if total_lambda <= 2.05 or (not ou_neutral and side == "小" and lf <= 2.0):
+            preferred_draw_order = ["0-0", "1-1", "2-2"]
+        elif total_lambda >= 3.25 or (not ou_neutral and side == "大" and lf >= 3.0):
+            preferred_draw_order = ["2-2", "1-1", "3-3", "0-0"]
+        else:
+            preferred_draw_order = ["1-1", "0-0", "2-2", "3-3"]
+        draw_candidate = next(
+            ((sc, p) for wanted in preferred_draw_order for sc, p in draw_candidates if sc == wanted),
+            draw_candidates[0] if draw_candidates else None,
+        )
+        if draw_candidate:
+            primary = _force_score_candidate(primary, draw_candidate, prefer_top=True)
+
     draw_heavy_home = bool(
         direction == "主胜"
         and not strict_home_verdict
@@ -411,12 +474,35 @@ def project_scores_for_side(d: Dict[str, Any]) -> List[Tuple[str, float]]:
                 reverse=True,
             )
 
+    strong_favorite_blowout = bool(
+        direction in {"主胜", "客胜"}
+        and top_prob >= 0.54
+        and (
+            (direction == "主胜" and float(lam_h or 0.0) >= 2.05 and float(lam_h or 0.0) - float(lam_a or 0.0) >= 0.75)
+            or (direction == "客胜" and float(lam_a or 0.0) >= 2.05 and float(lam_a or 0.0) - float(lam_h or 0.0) >= 0.75)
+        )
+        and (
+            float(lam_h or 0.0) + float(lam_a or 0.0) >= 3.15
+            or (line is not None and lf >= 3.0)
+            or (not ou_neutral and side == "大" and float(over_p or 0.0) >= 0.54)
+        )
+    )
+    if strong_favorite_blowout:
+        blowout_order = ["3-0", "4-0", "4-1", "5-0", "3-1"] if direction == "主胜" else ["0-3", "0-4", "1-4", "0-5", "1-3"]
+        if not any(sc in set(blowout_order[:4]) for sc, _ in primary):
+            blowout_candidate = next(
+                ((sc, p) for wanted in blowout_order for sc, p in _scores_of_outcome(direction) if sc == wanted),
+                None,
+            )
+            primary = _force_score_candidate(primary, blowout_candidate, signal=0.98)
+
     open_high_ceiling_away = bool(
         direction == "客胜"
-        and not ou_neutral
-        and side == "大"
-        and float(over_p or 0.0) >= 0.54
-        and (float(lam_h or 0.0) + float(lam_a or 0.0)) >= 3.0
+        and (
+            (not ou_neutral and side == "大" and float(over_p or 0.0) >= 0.54)
+            or (ou_neutral and float(lam_h or 0.0) + float(lam_a or 0.0) >= 2.95)
+        )
+        and (float(lam_h or 0.0) + float(lam_a or 0.0)) >= 2.95
         and float(lam_a or 0.0) >= 1.7
     )
     if open_high_ceiling_away and not any(sc in {"0-3", "1-3", "0-4", "1-4"} for sc, _ in primary):
@@ -435,4 +521,24 @@ def project_scores_for_side(d: Dict[str, Any]) -> List[Tuple[str, float]]:
                 key=lambda item: item[1],
                 reverse=True,
             )
+
+    # 最终方向一致性兜底：盘口口诀可能把比分投影方向强制到让球方，
+    # 但最终 1X2 结论若已被低置信防平/后处理改为「平局」，展示层必须以平局比分开头。
+    # 这一步放在尾部，确保强队穿透等尾部修正规则不会再次覆盖平局方向口径。
+    if final_prediction_direction == "平局" and not any(
+        (sc.split("-")[0] == sc.split("-")[1]) for sc, _ in primary if re.match(r"^\d+-\d+$", sc)
+    ):
+        draw_candidates = _scores_of_outcome("平局")
+        total_lambda = float(lam_h or 0.0) + float(lam_a or 0.0)
+        if total_lambda <= 2.05 or (not ou_neutral and side == "小" and lf <= 2.0):
+            preferred_draw_order = ["0-0", "1-1", "2-2"]
+        elif total_lambda >= 3.25 or (not ou_neutral and side == "大" and lf >= 3.0):
+            preferred_draw_order = ["2-2", "1-1", "3-3", "0-0"]
+        else:
+            preferred_draw_order = ["1-1", "0-0", "2-2", "3-3"]
+        draw_candidate = next(
+            ((sc, p) for wanted in preferred_draw_order for sc, p in draw_candidates if sc == wanted),
+            draw_candidates[0] if draw_candidates else None,
+        )
+        primary = _force_score_candidate(primary, draw_candidate, prefer_top=True)
     return primary[:3]

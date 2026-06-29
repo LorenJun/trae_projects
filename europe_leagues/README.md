@@ -11,6 +11,7 @@
 > - **盘口四盘**：欧赔 / 凯利 / 亚盘 / 大小球，走单会话 hub 真实导航一次拿回；解析规则与排障见 [`ODDS_FETCH_GUIDE.md`](ODDS_FETCH_GUIDE.md)。
 > - **固定 IP 抗封（单机无代理，默认全开）**：三道防线 = 进程级全局频控闸（`_global_pace_gate`，默认 2.5s，可调 `--min-request-interval`）+ 节奏随机抖动（`_jittered` ±35%）+ stealth 指纹屏蔽（`_install_stealth_script` 抹掉 `navigator.webdriver` 等自动化特征）。无代理时把请求节奏放慢拉抖是降低撞验证墙的根因手段，换模型/换 UA 不是。
 > - **持久化边界（已收敛为二元）**：只有 SoT-backed 正式联赛（五大联赛 + 世界杯）走完整写回（teams md / `MEMORY.md` 滚动记忆 / RAG / 归档 / 赛果同步）；其余一切赛事（杯赛、欧战、友谊赛等）走 `archive_only`——**仅归档预测 + 登记赛果同步 + 刷新准确率，不写 MEMORY/RAG/teams md**（`persisted.archive_only=True`、`memory_updated=False`）。详见 [`docs/PRD_足球预测系统_2026.md`](docs/PRD_足球预测系统_2026.md) 第 5 节。
+> - **世界杯淘汰赛上下文**：`world_cup` 预测会在核心推理前自动注入 `analysis_context.world_cup_reference`（90 分钟/加时/点球规则、小组赛状态、首发/常规阵容、战术节奏与单场淘汰战意），并写入 `realtime.context_applied.world_cup_reference` 供审计。
 > - **找文档**：先看导航路由页 [`docs/INDEX.md`](docs/INDEX.md)，按场景跳转。
 > - **凯利解析关键不变量**：主/平/客三路应彼此不同；若三路坍缩成同一个返还率即为解析 bug。
 >
@@ -53,6 +54,8 @@
 > **三轴影子诊断层**：`domain/inference.py` 在主预测之外产出 `tri_axis_consistency`（方向轴/大小球轴/操盘轴 + 临场资金轴）。操盘轴含「让球方向手法矩阵」（亚盘升降盘 × 水位档位 × 欧赔方向 → 阻上/诱上/防客/诱客/阻下，以「让球口诀」并入研判文本）。临场资金轴 = 封盘热门赔率漂移，带置信度质检层（欧赔走冷用亚值/凯利同向共振印证，`drift_confidence` high/low/n/a，过滤单家抓取噪声）。三轴层本身**纯标记、不改概率**，随归档持久化供回测。技术口径见 [`docs/architecture/europe_leagues_architecture.md`](../docs/architecture/europe_leagues_architecture.md) 第 3.7 节。
 >
 > **2026-06-18 起让球 6 口诀已进入打分链路**（不再只是标签）：① 经 `apply_market_operation_adjustment` 的常开矩阵偏置驱动**胜平负概率**（世界杯样本不足、历史学习权重失效时仍生效）；② 经 `domain/score_projection.py` 驱动**比分方向**（印证类→强侧获胜、诱导类→平局+弱侧），大小球侧由 OU 操盘 6 规则决定，详见架构文档第 3.8 节。比分（`top_scores`）已统一由 `score_projection` 单一数据源产出，网页 / `MEMORY.md` / `teams_2026.md` 三处一致。
+>
+> **2026-06-29 起世界杯淘汰赛参考信息进入正式预测链**：`EnhancedPredictor._inject_world_cup_reference_context` 会在 `InferencePipelineService.run(...)` 前读取 `world_cup/teams_2026.md` 小组赛表现与实时快照 `阵容` 块，生成 `analysis_context['world_cup_reference']`，并把 `home_form` / `away_form`、淘汰赛 `home_motivation=90` / `away_motivation=90`、`single_elimination=True` 送入模型。网页「参考预测分析」只消费正式结果，不再作为独立展示层口径。
 
 ### 共享基础模块（单一事实源 / 无状态工具）
 
@@ -72,6 +75,7 @@
 4. `domain/live.py` 与 `domain/odds.py` 会在预测前注入快照，必要时补抓真实盘口线
 5. 预测输出中的 `over_under.line_source=snapshot_final` 代表真实盘口已成功接入正式链
 6. `predict-match` 的文本输出在「主胜/平局/客胜」之后会罗列 `比分参考 (Top N)`（带各比分置信度，数据来自结果里的 `top_scores`）
+7. 世界杯淘汰赛会额外检查 `world_cup_reference_context` / `analysis_context.world_cup_reference`：小组赛状态、阵容身价/伤停、常规阵容、90 分钟/加时/点球规则必须先注入预测，再用于网页参考分析
 
 当前身份字段约定也已收敛：
 
@@ -135,6 +139,17 @@
 - 直接跑 `okooo_save_snapshot.py` 快照脚本本就不写 `MEMORY.md`
 
 > 注意：**世界杯属于 SoT-backed 正式联赛**，`predict-match` 会写回 [`world_cup/teams_2026.md`](world_cup/teams_2026.md) + 滚动记忆 + 赛果同步登记。
+
+### 1.1 世界杯淘汰赛预测上下文
+
+世界杯 `world_cup` 在淘汰赛阶段采用 90 分钟常规时间预测口径：常规时间胜者晋级；常规时间打平进入 30 分钟加时；加时仍平进入点球；无客场进球规则。正式预测链会把该规则与两队小组赛常规阵容/首发大名单、小组赛近期表现、阵容实力差距、伤停、战术节奏和赛事战意一起注入 `analysis_context['world_cup_reference']`，并同步暴露到 `result['world_cup_reference_context']`。
+
+该信息会影响：
+
+- `home_form` / `away_form`：由小组赛积分与表现派生，进入模型输入；
+- `home_motivation` / `away_motivation`：淘汰赛默认提升到 `90.0`，反映单场出局压力；
+- `single_elimination` / `draw_after_90_goes_extra_time`：供推理、RAG 和网页审计识别 90 分钟平局进入加时/点球窗口；
+- 网页 `参考预测分析`：展示人员配置、小组赛状态、战术倾向、常规时间比分预测、爆冷/对冲比分及理由。
 
 ## 预测与结果闭环
 

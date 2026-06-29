@@ -29,6 +29,7 @@ last_updated_date: "2026-05-19"
 - 赛果同步、结果闭环与准确率统计
 - RAG 记忆、样本索引与赛后复盘
 - Harness 阶段化编排与审计输出
+- 世界杯淘汰赛参考预测上下文：`predict-match` 会在核心推理前自动注入 `world_cup_reference`，包含 90 分钟常规时间/加时/点球晋级规则、小组赛近期状态、首发/预计首发/常规阵容、阵容身价与伤停、单场淘汰战意；这些字段不仅用于网页展示，也会进入 `analysis_context` 参与正式预测
 
 ## 当前正式命令面（europe_leagues）
 
@@ -46,6 +47,7 @@ last_updated_date: "2026-05-19"
 - `apply-reanalysis`
 - `rag-replay-eval`
 - `sync-pending-results-review`
+- `world-cup-daily-predictions-page` / `world-cup-prediction-timer`：世界杯每日网页与定时刷新技能，复用正式 `predict-match` 链路并展示参考预测分析
 - `build-season-master-review`
 - `refresh-repo-docs`
 - `purge-nonreal-data`
@@ -107,6 +109,8 @@ last_updated_date: "2026-05-19"
 与 `europe_leagues/` 直接相关的高价值 skills 包括：
 
 - `football-match-analysis`
+- `world-cup-daily-predictions-page`
+- `world-cup-prediction-timer`
 - `okooo-match-finder`
 - `sync-pending-results-review`
 - `update-five-leagues-schedules`

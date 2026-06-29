@@ -1291,17 +1291,21 @@ def run_openclaw_result_sync_daemon(args):
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
+def _load_or_refresh_accuracy_stats(*, refresh: bool = False):
+    from result_manager import ResultManager
+
+    manager = ResultManager()
+    if refresh:
+        return manager.update_accuracy_stats()
+    result = manager.accuracy_store.load()
+    if not result:
+        result = manager.update_accuracy_stats()
+    return result
+
+
 def run_openclaw_accuracy(args):
     def _execute():
-        from result_manager import ResultManager
-
-        manager = ResultManager()
-        if args.refresh:
-            result = manager.update_accuracy_stats()
-        else:
-            result = manager.accuracy_store.load()
-            if not result:
-                result = manager.update_accuracy_stats()
+        result = _load_or_refresh_accuracy_stats(refresh=bool(args.refresh))
         if isinstance(result, dict):
             result.setdefault("runtime_profile", get_command_runtime_profile("accuracy"))
         return result

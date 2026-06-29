@@ -2,7 +2,7 @@
 title: 仓库变更日志
 owner: trae_projects
 version: v1
-last_updated: 2026-06-23
+last_updated: 2026-06-29
 ---
 
 # CHANGELOG
@@ -13,6 +13,35 @@ last_updated: 2026-06-23
 - 代码：`/Users/bytedance/trae_projects/europe_leagues`
 - 技能：`/Users/bytedance/trae_projects/.trae/skills`
 - 文档：仓库根与 `europe_leagues/` 下相关 `md`
+
+---
+
+## 2026-06-29
+
+### 0. 世界杯淘汰赛参考上下文进入正式预测链（`enhanced_prediction_workflow.py`）
+
+按淘汰赛口径补齐世界杯预测主链：预测仍只针对 **90 分钟常规时间**；常规时间胜者晋级，90 分钟打平进入 30 分钟加时（上下半场各 15 分钟），加时仍平进入点球大战；无客场进球规则，单场定生死。该信息不再只用于网页展示，而是在 `InferencePipelineService.run(...)` 之前写入 `analysis_context`。
+
+- 新增 `world_cup_reference` 上下文块：包含淘汰赛晋级路线、90 分钟平局进入加时/点球窗口、小组赛常规阵容/首发参考、阵容身价/位置结构/伤停、小组赛近期表现、战术节奏与单场淘汰战意。
+- 小组赛表现量化为正式输入：从 `world_cup/teams_2026.md` 解析小组赛战绩并生成 `home_form` / `away_form`；淘汰赛自动设置 `home_motivation=90.0`、`away_motivation=90.0`、`single_elimination=True`、`draw_after_90_goes_extra_time=True`。
+- 预测结果暴露审计字段：`world_cup_reference_context`、`analysis_context.world_cup_reference`、`realtime.context_applied.world_cup_reference`，供 RAG、写回、定时器和网页复用。
+
+### 1. 世界杯每日预测网页新增参考预测分析（`scripts/build_world_cup_daily_html.py`）
+
+- 日期进入淘汰赛阶段后页面标题与顶部横幅自动切换为「世界杯淘汰赛」口径，并提示 90 分钟/加时/点球规则。
+- 每场卡片新增「参考预测分析」模块，固定展示：人员配置、小组赛状态、战术倾向、常规时间比分预测、爆冷/对冲比分及理由。
+- 该模块消费正式 `predict-match` 输出与已注入上下文，不再允许脱离正式主链手写展示层结论。
+
+### 2. 文档与数据口径同步
+
+- `AGENT.md` / `agent.md` / `README.md` / `CLAUDE.md` / `MEMORY.md` / `europe_leagues/README.md` / `europe_leagues/docs/PRD_足球预测系统_2026.md` / `europe_leagues/docs/INDEX.md` 同步补充 `world_cup_reference` 正式流程说明。
+- `world_cup/teams_2026.md` 在赛事说明中补齐淘汰赛晋级路线与正式预测上下文口径。
+
+关联文件：
+- `europe_leagues/enhanced_prediction_workflow.py`、`europe_leagues/domain/postprocess.py`
+- `europe_leagues/scripts/build_world_cup_daily_html.py`、`europe_leagues/scripts/world_cup_prediction_timer.py`
+- `europe_leagues/world_cup/teams_2026.md`
+- `AGENT.md`、`agent.md`、`README.md`、`CLAUDE.md`、`MEMORY.md`、`europe_leagues/README.md`
 
 ---
 

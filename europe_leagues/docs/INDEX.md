@@ -13,6 +13,7 @@
 | 了解系统总览 / 入口 / 架构边界 | [`../README.md`](../README.md) | 顶部「速读摘要」+「入口与权威链」 |
 | 学怎么跑命令 / 日常工作流 | [`../README_使用指南.md`](../README_使用指南.md) | 「默认工作流」 |
 | 理解产品边界 / SoT 治理语义 | [`PRD_足球预测系统_2026.md`](./PRD_足球预测系统_2026.md) | 顶部「速读摘要」+ 第 2、5 节 |
+| 理解世界杯淘汰赛预测口径 / 参考上下文如何进入模型 | [`PRD_足球预测系统_2026.md`](./PRD_足球预测系统_2026.md) | 顶部「速读摘要」+ 第 4.4、6.1 节 |
 | 抓澳客盘口 / 欧赔凯利解析 / 排障 | [`../ODDS_FETCH_GUIDE.md`](../ODDS_FETCH_GUIDE.md) | 「盘口抓取链路」「解析规则」 |
 | 抓盘口反复撞验证墙 / 固定 IP 单机抗封 | [`../ODDS_FETCH_GUIDE.md`](../ODDS_FETCH_GUIDE.md) | 「固定 IP 单机抗封三道防线」 |
 | 本机 odds.php 被拦截排障 | [`../../debug-local-odds-access.md`](../../debug-local-odds-access.md) | 全文 |
@@ -58,6 +59,8 @@
 仓库根 skills：[`/Users/bytedance/trae_projects/.trae/skills/`](/Users/bytedance/trae_projects/.trae/skills/)
 
 与本项目高相关：`football-match-analysis` · `okooo-match-finder` · `sync-pending-results-review` · `update-five-leagues-schedules` · `update-five-leagues-players`
+
+世界杯高相关：`world-cup-daily-predictions-page` · `world-cup-prediction-timer`（均复用正式 `predict-match`，淘汰赛参考分析需来自 `world_cup_reference` 上下文）
 
 ---
 

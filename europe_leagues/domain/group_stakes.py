@@ -240,18 +240,32 @@ def compute_qualification(groups: Dict[str, List[TeamStat]]) -> Dict[str, str]:
 
 
 def _provisional_status(team: TeamStat, group_rows: List[TeamStat]) -> str:
-    """小组未完赛时的保守出线判定（只标数学锁定的，否则争夺中）。"""
+    """小组未完赛时的保守出线判定（只标数学锁定的，否则争夺中）。
+
+    2026 世界杯是 12 个小组前二 + 8 个成绩最好的第三名晋级 32 强。
+    因此在全部小组第三名排序尚未尘埃落定前，不能因为某队已经无缘小组前二，
+    就把它标成「已出局」；只要它仍可能拿到组内第三，就仍保留「争夺中」。
+    """
     others = [s for s in group_rows if s.team != team.team]
+
+    # 本组已踢完但其他组未完赛：前二已锁定出线，第四已确定出局，第三仍需等待
+    # 12 个小组第三名横向比较，不能提前判死。
+    if team.played >= 3:
+        if team.rank <= 2:
+            return '已出线'
+        if team.rank >= 4:
+            return '已出局'
+        return '争夺中'
 
     # 保证前二：组内至多 1 队的"理论最高分"能超过本队当前分。
     can_surpass = sum(1 for o in others if o.max_possible_pts > team.pts)
     if can_surpass <= 1:
         return '已出线'
 
-    # 保守出局：本队理论最高分仍低于组内已有 ≥3 队的当前分（铁定进不了前二），
-    # 且理论最高分 <= 3（基本无缘最佳第三名）。
+    # 保守出局：本队理论最高分仍低于组内已有 3 队的当前分，连组内第三都拿不到。
+    # 若只是无缘前二但仍可拿第三，按 2026 赛制仍有争夺最佳第三名的机会，不能标出局。
     ahead_fixed = sum(1 for o in others if o.pts > team.max_possible_pts)
-    if ahead_fixed >= 2 and team.max_possible_pts <= 3:
+    if ahead_fixed >= 3:
         return '已出局'
 
     return '争夺中'

@@ -35,10 +35,165 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from domain.score_projection import project_scores_for_side
+
 PRED_DIR = PROJECT_ROOT / "world_cup" / "analysis" / "predictions"
 TEAMS_MD = PROJECT_ROOT / "world_cup" / "teams_2026.md"
+PLAYERS_DIR = PROJECT_ROOT / "world_cup" / "players"
 
 WEEKDAY_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+
+_ROSTER_CACHE: dict[str, list[dict]] = {}
+
+
+def _norm_player_name(name: str) -> str:
+    return re.sub(r"[\s·•・.．,，-]+", "", str(name or "").lower())
+
+
+def _team_roster(team: str) -> list[dict]:
+    team = str(team or "").strip()
+    if not team:
+        return []
+    if team in _ROSTER_CACHE:
+        return _ROSTER_CACHE[team]
+    path = PLAYERS_DIR / f"{team}.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        _ROSTER_CACHE[team] = []
+        return []
+    players = payload.get("players") if isinstance(payload, dict) else []
+    roster = players if isinstance(players, list) else []
+    _ROSTER_CACHE[team] = roster
+    return roster
+
+
+def _roster_name_keys(team: str) -> set[str]:
+    keys: set[str] = set()
+    for p in _team_roster(team):
+        if not isinstance(p, dict):
+            continue
+        for field in ("name_cn", "name", "short_name", "known_as"):
+            key = _norm_player_name(p.get(field) or "")
+            if key:
+                keys.add(key)
+    return keys
+
+
+def _lineup_matches_roster(items: list, team: str) -> bool:
+    """澳客阵容页偶发串场；低命中率时不使用该侧阵容。"""
+    names = [_norm_player_name((p or {}).get("name") or "") for p in (items or []) if isinstance(p, dict)]
+    names = [n for n in names if n]
+    if len(names) < 4:
+        return True
+    roster_keys = _roster_name_keys(team)
+    if not roster_keys:
+        return True
+    hits = sum(1 for n in names if n in roster_keys or any(n and (n in r or r in n) for r in roster_keys))
+    return hits >= max(2, int(len(names) * 0.35))
+
+
+def _fallback_regular_xi(team: str) -> list[dict]:
+    """用本地世界杯大名单兜底生成常规阵容骨架，避免串用其他国家球员。"""
+    roster = [p for p in _team_roster(team) if isinstance(p, dict)]
+    if not roster:
+        return []
+    plan = [("门将", 1), ("后卫", 4), ("中场", 3), ("前锋", 3)]
+    picked: list[dict] = []
+    seen: set[int] = set()
+    for pos, limit in plan:
+        for idx, p in enumerate(roster):
+            if idx in seen or pos not in str(p.get("position") or ""):
+                continue
+            picked.append({
+                "number": p.get("number") or p.get("shirt_number"),
+                "name": p.get("name_cn") or p.get("name") or "",
+                "position": p.get("position") or "",
+                "_source": "local_world_cup_roster_fallback",
+            })
+            seen.add(idx)
+            if sum(1 for x in picked if pos in str(x.get("position") or "")) >= limit:
+                break
+    if len(picked) < 11:
+        for idx, p in enumerate(roster):
+            if idx in seen:
+                continue
+            picked.append({
+                "number": p.get("number") or p.get("shirt_number"),
+                "name": p.get("name_cn") or p.get("name") or "",
+                "position": p.get("position") or "",
+                "_source": "local_world_cup_roster_fallback",
+            })
+            if len(picked) >= 11:
+                break
+    return picked[:11]
+
+
+def _player_identity_key(p: dict) -> str:
+    name = _norm_player_name((p or {}).get("name") or "")
+    number = str((p or {}).get("number") or (p or {}).get("shirt_number") or "").strip()
+    if name:
+        return name
+    return f"#{number}" if number else ""
+
+
+def _complete_regular_xi(team: str, items: list | None) -> tuple[list[dict], bool]:
+    """把澳客只渲染出 6~10 人的首发名单补齐到 11 人。
+
+    澳客阵容 tab 本身应提供 11 人；这里仅处理「已从 tab 解析出部分球员」的兼容补齐，
+    不在阵容页完全缺失/某侧 0 人时用本地大名单冒充首发。
+    """
+    existing = [dict(p) for p in (items or []) if isinstance(p, dict) and ((p.get("name") or p.get("number")))]
+    if len(existing) >= 11:
+        return existing[:11], False
+    if not existing:
+        return [], False
+
+    fallback = _fallback_regular_xi(team)
+    if not fallback:
+        return existing[:11], False
+
+    seen = {_player_identity_key(p) for p in existing if _player_identity_key(p)}
+    completed = list(existing)
+    for p in fallback:
+        key = _player_identity_key(p)
+        if key and key in seen:
+            continue
+        completed.append(dict(p))
+        if key:
+            seen.add(key)
+        if len(completed) >= 11:
+            break
+    return completed[:11], len(completed) >= 11 and len(existing) < 11
+
+
+def _validated_lineup(d: dict) -> tuple[dict, dict]:
+    ms = d.get("market_snapshot") or {}
+    src = ms.get("阵容") or {}
+    home = d.get("home_team") or ""
+    away = d.get("away_team") or ""
+    if not isinstance(src, dict) or not (src.get("available") or src.get("found")):
+        return {}, {"home_fallback": False, "away_fallback": False, "home_completed": False, "away_completed": False}
+    lineup = dict(src)
+    meta = {"home_fallback": False, "away_fallback": False, "home_completed": False, "away_completed": False}
+    for side, team in (("home", home), ("away", away)):
+        key = f"{side}_starting_xi"
+        items = lineup.get(key) or []
+        if not _lineup_matches_roster(items, team):
+            fallback = _fallback_regular_xi(team)
+            lineup[key] = fallback
+            lineup[f"{side}_starting_value_wan"] = None
+            lineup[f"{side}_injury_count"] = None
+            lineup[f"{side}_lineup_warning"] = "okooo_lineup_identity_mismatch_roster_fallback"
+            meta[f"{side}_fallback"] = bool(fallback)
+        else:
+            completed, did_complete = _complete_regular_xi(team, items)
+            if completed:
+                lineup[key] = completed
+                if did_complete:
+                    lineup[f"{side}_lineup_warning"] = "okooo_lineup_partial_roster_completed"
+                    meta[f"{side}_completed"] = True
+    return lineup, meta
 
 
 def load_actual_results(date: str) -> dict:
@@ -279,6 +434,260 @@ def _institution_lean(d: dict) -> str:
     )
 
 
+def _lineup_block(d: dict) -> str:
+    """淘汰赛阵容信息：优先展示澳客阵容页首发/预计首发，缺失时安全降级。"""
+    lineup, meta = _validated_lineup(d)
+    if not lineup:
+        return ""
+
+    def _team_list(items: list) -> str:
+        rows = []
+        for p in (items or [])[:11]:
+            if not isinstance(p, dict):
+                continue
+            number = p.get("number")
+            name = str(p.get("name") or "").strip()
+            pos = str(p.get("position") or "").strip()
+            if not name:
+                continue
+            shirt = f"{int(number)}号 " if isinstance(number, (int, float)) else (f"{html.escape(str(number))}号 " if number else "")
+            pos_txt = f"<em>{html.escape(pos)}</em>" if pos else ""
+            rows.append(f"<span>{shirt}{html.escape(name)}{pos_txt}</span>")
+        return "".join(rows)
+
+    home_xi = _team_list(lineup.get("home_starting_xi") or [])
+    away_xi = _team_list(lineup.get("away_starting_xi") or [])
+    if not home_xi and not away_xi:
+        return ""
+
+    home = html.escape(d.get("home_team") or "主队")
+    away = html.escape(d.get("away_team") or "客队")
+
+    def _value(v) -> str:
+        try:
+            return f"{float(v):.0f}万"
+        except (TypeError, ValueError):
+            return "—"
+
+    hv = _value(lineup.get("home_starting_value_wan"))
+    av = _value(lineup.get("away_starting_value_wan"))
+    hi = "—" if lineup.get("home_injury_count") is None else int(lineup.get("home_injury_count") or 0)
+    ai = "—" if lineup.get("away_injury_count") is None else int(lineup.get("away_injury_count") or 0)
+    source_notes = []
+    if meta.get("home_fallback") or meta.get("away_fallback"):
+        source_notes.append("本地大名单兜底已替换串场阵容")
+    if meta.get("home_completed") or meta.get("away_completed"):
+        source_notes.append("不足11人已按本地世界杯大名单补齐")
+    source_note = f"；{'；'.join(source_notes)}" if source_notes else ""
+    return (
+        '<div class="lineup-box">\n'
+        '        <div class="lineup-title">📋 首发大名单 <span>· 参考小组赛常规阵容/赛前阵容页</span></div>\n'
+        f'        <div class="lineup-meta">首发身价：{home} {hv} / {away} {av}；伤停计数：{home} {hi} / {away} {ai}{source_note}</div>\n'
+        '        <div class="lineup-cols">\n'
+        f'          <div><b style="color:var(--home)">{home}</b>{home_xi or "<span>暂无</span>"}</div>\n'
+        f'          <div><b style="color:var(--away)">{away}</b>{away_xi or "<span>暂无</span>"}</div>\n'
+        '        </div>\n'
+        '      </div>'
+    )
+
+
+def _group_stage_form(team: str) -> dict:
+    """从 teams_2026.md 小组赛赛程提取球队近期世界杯表现。"""
+    stat = {"played": 0, "win": 0, "draw": 0, "loss": 0, "gf": 0, "ga": 0, "results": []}
+    if not TEAMS_MD.exists():
+        return stat
+    in_group_stage = False
+    score_re = re.compile(r"^(\d+)-(\d+)$")
+    for line in TEAMS_MD.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("### "):
+            in_group_stage = stripped.startswith("### 小组赛")
+            continue
+        if not in_group_stage or not stripped.startswith("|"):
+            continue
+        cols = [c.strip() for c in stripped.strip("|").split("|")]
+        if len(cols) < 6:
+            continue
+        date, _time, home, score, away, _note = cols[:6]
+        m = score_re.match(score)
+        if not m or team not in {home, away}:
+            continue
+        hs, as_ = int(m.group(1)), int(m.group(2))
+        is_home = team == home
+        gf, ga = (hs, as_) if is_home else (as_, hs)
+        stat["played"] += 1
+        stat["gf"] += gf
+        stat["ga"] += ga
+        if gf > ga:
+            stat["win"] += 1
+            tag = "胜"
+        elif gf < ga:
+            stat["loss"] += 1
+            tag = "负"
+        else:
+            stat["draw"] += 1
+            tag = "平"
+        opp = away if is_home else home
+        stat["results"].append(f"{date[5:]} {tag}{opp}{gf}-{ga}")
+    return stat
+
+
+def _form_text(team: str) -> str:
+    st = _group_stage_form(team)
+    if not st.get("played"):
+        return f"{team}小组赛样本缺失"
+    recent = "、".join(st.get("results")[-3:])
+    return (
+        f"{team}小组赛{st['win']}胜{st['draw']}平{st['loss']}负，"
+        f"进{st['gf']}失{st['ga']}；{recent}"
+    )
+
+
+def _lineup_summary(d: dict) -> str:
+    home = d.get("home_team") or "主队"
+    away = d.get("away_team") or "客队"
+    lineup, meta = _validated_lineup(d)
+    if not lineup:
+        return "阵容页暂未形成有效首发样本，人员配置按小组赛常规阵容与盘口强弱兜底。"
+
+    def _safe_float(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    hv = _safe_float(lineup.get("home_starting_value_wan"))
+    av = _safe_float(lineup.get("away_starting_value_wan"))
+    hxi = lineup.get("home_starting_xi") or []
+    axi = lineup.get("away_starting_xi") or []
+
+    def _counts(items):
+        out = {"门将": 0, "后卫": 0, "中场": 0, "前锋": 0}
+        names = []
+        for p in items[:11]:
+            if not isinstance(p, dict):
+                continue
+            pos = str(p.get("position") or "")
+            for key in out:
+                if key in pos:
+                    out[key] += 1
+                    break
+            if p.get("name"):
+                names.append(str(p.get("name")))
+        return out, names
+
+    hc, hn = _counts(hxi)
+    ac, an = _counts(axi)
+    if hv and av:
+        ratio = max(hv, av) / max(1.0, min(hv, av))
+        stronger = home if hv >= av else away
+        gap = "实力差距明显" if ratio >= 2.0 else ("实力略占优" if ratio >= 1.25 else "实力接近")
+        value_txt = f"首发身价{home}{hv:.0f}万 vs {away}{av:.0f}万，{stronger}{gap}。"
+    else:
+        value_txt = "首发身价样本不足，实力差距更多依赖赔率与小组赛表现校准。"
+    if meta.get("home_fallback") or meta.get("away_fallback"):
+        value_txt += " 阵容页存在球队身份串场，已改用本地世界杯大名单常规骨架兜底。"
+    home_shape = f"{home}配置约{hc['后卫']}后卫/{hc['中场']}中场/{hc['前锋']}前锋"
+    away_shape = f"{away}配置约{ac['后卫']}后卫/{ac['中场']}中场/{ac['前锋']}前锋"
+    key_players = []
+    if hn:
+        key_players.append(f"{home}常规骨架：{'、'.join(hn[:4])}")
+    if an:
+        key_players.append(f"{away}常规骨架：{'、'.join(an[:4])}")
+    return value_txt + f" {home_shape}，{away_shape}。" + (" " + "；".join(key_players) if key_players else "")
+
+
+def _style_summary(d: dict) -> str:
+    ou = d.get("over_under") or {}
+    eg = d.get("expected_goals") or {}
+    total_xg = eg.get("total")
+    line = ou.get("line")
+    try:
+        total_f = float(total_xg)
+    except (TypeError, ValueError):
+        total_f = None
+    tempo = "节奏偏谨慎、先防守再寻找转换" if (total_f is not None and total_f <= 2.35) else "节奏具备拉开空间和对攻可能"
+    if ou.get("ou_neutral") or ou.get("stakes_neutral"):
+        ou_txt = f"大小球@{_fmt_line(line)}为中性，不强行下注，说明节奏分歧仍在。"
+    else:
+        side = "大球" if (ou.get("over") or 0.0) >= (ou.get("under") or 0.0) else "小球"
+        ou_txt = f"大小球模型偏{side}@{_fmt_line(line)}。"
+    return f"战术节奏判断：{tempo}；{ou_txt}"
+
+
+def _score_pick_text(d: dict) -> str:
+    scores = _model_scores(d)
+    if not scores:
+        return "比分候选不足，倾向以胜平负方向为主。"
+    main_score, main_prob = scores[0]
+    pred = _prediction_label(d) or d.get("prediction") or "方向未定"
+    probs = d.get("all_probabilities") or {}
+    prob_txt = ", ".join(f"{k}{_fmt_pct(probs.get(k) or 0.0)}" for k in ["主胜", "平局", "客胜"] if k in probs)
+    eg = d.get("expected_goals") or {}
+    xg_txt = ""
+    if eg:
+        xg_txt = f"；预期进球{_fmt_num(eg.get('home'))}-{_fmt_num(eg.get('away'))}"
+    return f"常规时间主推比分：{main_score}（方向：{pred}，条件概率{_fmt_pct(main_prob)}；{prob_txt}{xg_txt}）。"
+
+
+def _upset_score_text(d: dict) -> str:
+    pred = _prediction_label(d)
+    probs = d.get("all_probabilities") or {}
+    ranked = sorted([(k, float(probs.get(k) or 0.0)) for k in ("主胜", "平局", "客胜")], key=lambda x: x[1], reverse=True)
+    runner = next((x for x in ranked if x[0] != pred), ("平局", 0.0))
+    runner_label, runner_prob = runner
+    if pred == "主胜":
+        upset_score = "1-1" if runner_label == "平局" else "0-1"
+    elif pred == "客胜":
+        upset_score = "1-1" if runner_label == "平局" else "1-0"
+    else:
+        upset_score = "1-0" if runner_label == "主胜" else "0-1"
+    up = d.get("upset_potential") or {}
+    lvl = up.get("level") or "低"
+    factors = [str(x) for x in (up.get("factors") or [])[:2] if str(x).strip()]
+    tri = d.get("tri_axis_consistency") or {}
+    drift = ((tri.get("market_drift") or {}).get("drift"))
+    if drift is not None:
+        try:
+            if float(drift) > 0.05:
+                factors.append("热门封盘走冷，需防守平/冷门脚本")
+            elif float(drift) < -0.05:
+                factors.append("热门封盘走热，防范低赔方向过热")
+        except (TypeError, ValueError):
+            pass
+    reason = "；".join(factors) or f"第二方向{runner_label}仍有{_fmt_pct(runner_prob)}，淘汰赛单场制容错低。"
+    return f"爆冷/对冲比分：{upset_score}（爆冷等级{lvl}；理由：{reason}）。"
+
+
+def _reference_prediction_block(d: dict) -> str:
+    """后续世界杯赛程统一展示：阵容点评 + 状态战术 + 主推比分 + 爆冷比分。"""
+    home = html.escape(d.get("home_team") or "主队")
+    away = html.escape(d.get("away_team") or "客队")
+    lineup = html.escape(_lineup_summary(d))
+    form = html.escape(_form_text(d.get("home_team") or "") + "；" + _form_text(d.get("away_team") or ""))
+    style = html.escape(_style_summary(d))
+    main_pick = html.escape(_score_pick_text(d))
+    upset_pick = html.escape(_upset_score_text(d))
+    stakes = d.get("stakes_scenario") or {}
+    route = d.get("knockout_route") or {}
+    pressure = ""
+    if isinstance(stakes, dict) and stakes.get("distortion") and stakes.get("summary"):
+        pressure = f"出线/战意：{html.escape(str(stakes.get('summary')))}。"
+    elif route:
+        pressure = "出线/战意：淘汰赛单场定生死，常规时间若打平仍有加时与点球，强队也会更重视风险控制。"
+    return (
+        '<div class="ref-box">\n'
+        '        <div class="ref-title">🧭 参考预测分析 <span>· 阵容/状态/战术/战意综合</span></div>\n'
+        f'        <div class="ref-line"><b>人员配置</b>：{lineup}</div>\n'
+        f'        <div class="ref-line"><b>小组赛状态</b>：{form}</div>\n'
+        f'        <div class="ref-line"><b>战术倾向</b>：{style}{pressure}</div>\n'
+        f'        <div class="ref-line"><b>比分预测</b>：{main_pick}</div>\n'
+        f'        <div class="ref-line"><b>爆冷比分</b>：{upset_pick}</div>\n'
+        f'        <div class="ref-foot">{home} vs {away} 的结论以90分钟常规时间口径为准；若预测平局，代表更高概率进入加时/点球决胜窗口。</div>\n'
+        '      </div>'
+    )
+
+
 def _ou_row(d: dict) -> str:
     ou = d.get("over_under") or {}
     over = ou.get("over") or 0.0
@@ -368,8 +777,8 @@ def _total_goals_row(d: dict) -> str:
     return f'<div class="total-row">最可能总进球：{body}</div>'
 
 
-def _model_scores(d: dict) -> list[tuple[str, float]]:
-    """直接取模型预测的原始比分 top_scores，网页不再做任何方向/大小球处理。"""
+def _raw_model_scores(d: dict) -> list[tuple[str, float]]:
+    """读取模型原始 top_scores，作为投影失败时的降级兜底。"""
     out: list[tuple[str, float]] = []
     for item in (d.get("top_scores") or [])[:3]:
         if isinstance(item, (list, tuple)) and len(item) >= 2:
@@ -381,6 +790,71 @@ def _model_scores(d: dict) -> list[tuple[str, float]]:
         if sc:
             out.append((sc, p))
     return out
+
+
+def _score_outcome(score: str) -> str | None:
+    m = re.match(r"^(\d+)-(\d+)$", str(score or "").strip())
+    if not m:
+        return None
+    home, away = int(m.group(1)), int(m.group(2))
+    if home > away:
+        return "主胜"
+    if home < away:
+        return "客胜"
+    return "平局"
+
+
+def _prediction_label(d: dict) -> str:
+    pred = str(d.get("prediction") or "").strip()
+    if pred in {"主胜", "平局", "客胜"}:
+        return pred
+    probs = d.get("all_probabilities") or {}
+    if probs:
+        return max(("主胜", "平局", "客胜"), key=lambda k: probs.get(k) or 0.0)
+    return ""
+
+
+def _align_scores_to_prediction(d: dict, scores: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """网页最终兜底：比分候选必须与卡片展示的最终预测方向一致。"""
+    prediction = _prediction_label(d)
+    cleaned: list[tuple[str, float]] = []
+    seen: set[str] = set()
+    for sc, p in scores:
+        sc = str(sc).strip()
+        if not sc or sc in seen or not re.match(r"^\d+-\d+$", sc):
+            continue
+        seen.add(sc)
+        cleaned.append((sc, float(p or 0.0)))
+
+    if prediction == "平局":
+        candidates = cleaned + [item for item in _raw_model_scores(d) if item[0] not in seen]
+        preferred = next(
+            (
+                (sc, p)
+                for wanted in ["1-1", "0-0", "2-2", "3-3"]
+                for sc, p in candidates
+                if sc == wanted and _score_outcome(sc) == "平局"
+            ),
+            None,
+        )
+        if preferred is None:
+            draw_candidate = next(((sc, p) for sc, p in candidates if _score_outcome(sc) == "平局"), None)
+            preferred = draw_candidate or ("1-1", max((p for _sc, p in cleaned), default=0.0))
+        rest = [(sc, p) for sc, p in cleaned if sc != preferred[0]]
+        cleaned = [preferred] + rest
+    elif prediction in {"主胜", "客胜"}:
+        cleaned = [(sc, p) for sc, p in cleaned if _score_outcome(sc) == prediction]
+
+    return cleaned[:3]
+
+
+def _model_scores(d: dict) -> list[tuple[str, float]]:
+    """使用与 MEMORY/teams 滚动记忆一致的比分投影，避免网页比分与记忆不一致。"""
+    try:
+        projected = [(str(sc), float(p or 0.0)) for sc, p in project_scores_for_side(d)[:3] if sc]
+    except Exception:
+        projected = []
+    return _align_scores_to_prediction(d, projected or _raw_model_scores(d))
 
 
 def _scores_row(d: dict) -> str:
@@ -586,6 +1060,10 @@ def render_card(d: dict, time: str | None, actual_score: str | None = None) -> s
     lean = _institution_lean(d)
     if lean:
         parts.append(f"      {lean}")
+    lineup = _lineup_block(d)
+    if lineup:
+        parts.append(f"      {lineup}")
+    parts.append(f"      {_reference_prediction_block(d)}")
     stakes = _stakes_block(d)
     if stakes:
         parts.append(f"      {stakes}")
@@ -603,6 +1081,18 @@ def render_html(date: str, cards: list[str]) -> str:
     today = datetime.now().strftime("%Y-%m-%d")
     n = len(cards)
     cards_html = "\n\n".join(cards)
+    is_knockout = date >= "2026-06-29"
+    title_stage = "淘汰赛" if is_knockout else "小组赛"
+    knockout_banner = ""
+    if is_knockout:
+        knockout_banner = """
+  <div class="legend-banner knockout-banner">
+    <b>世界杯淘汰赛晋级规则</b>：90 分钟常规时间分出胜负，胜者晋级 16 强；
+    90 分钟打平 → 30 分钟加时（上下半场各 15 分钟）；加时仍平局 → 点球大战决胜；
+    <span style="color:var(--away)">无客场进球规则</span>，单场定生死，输球直接出局。
+    <br><b>阵容参考</b>：首发大名单优先取澳客赛前阵容页；未公布正式首发时，按两队小组赛常规阵容/预计首发口径展示。
+  </div>
+"""
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -617,12 +1107,13 @@ def render_html(date: str, cards: list[str]) -> str:
     --bar-text: #0A0E1A; --shadow: rgba(0,0,0,0.45);
   }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  html {{ background: #0A0E1A; min-height: 100%; }}
   body {{
     background:
       radial-gradient(1200px 600px at 15% -10%, rgba(110,139,255,0.14) 0%, transparent 55%),
       radial-gradient(1000px 500px at 100% 0%, rgba(232,200,135,0.10) 0%, transparent 50%),
       linear-gradient(170deg, #090C16 0%, #0D1222 45%, #0A0F1C 100%);
-    background-attachment: fixed; color: var(--text);
+    background-color: #0A0E1A; color: var(--text);
     font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     padding: 36px 16px; line-height: 1.5; -webkit-font-smoothing: antialiased;
   }}
@@ -701,7 +1192,7 @@ def render_html(date: str, cards: list[str]) -> str:
   .odds-line .v {{ color: var(--text); text-align: right; flex: 1; font-variant-numeric: tabular-nums; }}
   .odds-line .v b {{ color: var(--title); }}
   .odds-line .v em {{ font-style: normal; color: var(--muted); }}
-  .inst-box {{
+  .inst-box, .lineup-box, .ref-box {{
     background: linear-gradient(135deg, rgba(232,200,135,0.10) 0%, rgba(110,139,255,0.07) 100%);
     border: 1px solid rgba(232,200,135,0.22); border-radius: 12px;
     padding: 11px 14px; margin-bottom: 12px; font-size: 11.5px;
@@ -713,6 +1204,19 @@ def render_html(date: str, cards: list[str]) -> str:
   .inst-line .inst-v {{ color: var(--text); flex: 1; line-height: 1.5; }}
   .inst-ok {{ color: var(--home); font-weight: 700; margin-left: 4px; }}
   .inst-diff {{ color: var(--away); font-weight: 700; margin-left: 4px; }}
+  .lineup-title {{ font-size: 11px; color: var(--title); font-weight: 700; margin-bottom: 7px; letter-spacing: .3px; }}
+  .lineup-title span {{ color: var(--muted); font-weight: 400; }}
+  .lineup-meta {{ color: var(--muted); margin-bottom: 8px; line-height: 1.5; }}
+  .lineup-cols {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }}
+  .lineup-cols b {{ display: block; margin-bottom: 5px; }}
+  .lineup-cols span {{ display: block; color: var(--text); line-height: 1.55; }}
+  .lineup-cols em {{ color: var(--muted); font-style: normal; margin-left: 4px; }}
+  .ref-box {{ background: linear-gradient(135deg, rgba(110,139,255,0.10) 0%, rgba(28,35,56,0.34) 100%); }}
+  .ref-title {{ font-size: 11px; color: var(--title); font-weight: 700; margin-bottom: 7px; letter-spacing: .3px; }}
+  .ref-title span {{ color: var(--muted); font-weight: 400; }}
+  .ref-line {{ color: var(--text); line-height: 1.55; padding: 3px 0; }}
+  .ref-line b {{ color: var(--title); }}
+  .ref-foot {{ margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.45; }}
   .tri-verdict {{
     font-size: 12px; color: var(--text); line-height: 1.55;
     border-radius: 12px; padding: 10px 12px; margin: 6px 0 2px;
@@ -734,13 +1238,15 @@ def render_html(date: str, cards: list[str]) -> str:
 </head>
 <body>
   <header>
-    <h1>世界杯小组赛 · 预测比分</h1>
+    <h1>世界杯{title_stage} · 预测比分</h1>
     <div class="sub">{date}（{weekday}）· 共 {n} 场 · 数据源：澳客实时盘口 + DomainPredictor 正式预测链</div>
   </header>
   <p class="meta-note">
     比分为模型最可能比分（Dixon-Coles），胜平负为综合概率。本场次队力多走 FIFA 排名兜底（fallback），
     结论以市场盘口与模型综合为准，仅供研究参考、非投注建议。
   </p>
+
+{knockout_banner}
 
   <div class="legend-banner">
     <b>三轴综合研判说明</b>：把「方向支持率 + 大小球支持率 + 庄家操盘手法」三轴融合为一句研判，<b>仅诊断、不修改预测方向</b>。

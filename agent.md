@@ -12,12 +12,12 @@ last_updated_date: "2026-05-15"
 > 当前正式流程  
 > 1. `prediction_system.py` 是发现入口，真实命令实现位于 `europe_leagues/app/cli.py`  
 > 2. `prediction_system.py collect-data` 或赛程抓取定位 `match_id`  
-> 3. `prediction_system.py predict-match` 执行增强预测（足彩 14 场用 `predict-fourteen-issue`）  
+> 3. `prediction_system.py predict-match` 执行增强预测（足彩 14 场用 `predict-fourteen-issue`）。世界杯淘汰赛会在 `InferencePipelineService.run` 前自动注入 `world_cup_reference`（90 分钟/加时/点球晋级规则、小组赛状态、首发/常规阵容、单场淘汰战意）  
 > 4. 只有 SoT 联赛（五大联赛 + 世界杯）才走完整写回 `europe_leagues/<league>/teams_*.md` + `MEMORY.md` + RAG + 归档；其余一切赛事（欧战/杯赛/友谊赛等）走 `archive_only`——仅归档 + 赛果同步 + 准确率，不写 MEMORY/RAG/teams md  
 > 5. 赛后优先用 `prediction_system.py save-result`、`auto-sync-results`、`result-sync-daemon` 或 `sync-pending-results-review` 回填  
 > 6. 结果闭环会统一刷新 accuracy / MEMORY / RAG / review-learning；`prediction_system.py accuracy --refresh --json` 仍可作为显式重建入口  
 > 可审计编排入口：`prediction_system.py harness-run --pipeline ... --json`  
-> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`
+> 关键检查项：`over_under.line`、`line_source`、`over_under.market.final`、`analysis_context.world_cup_reference`、`realtime.context_applied.world_cup_reference`
 
 ## 项目概述
 
@@ -30,6 +30,7 @@ last_updated_date: "2026-05-15"
 - 从 `亚值` 页面内 `大小球` tab 抓取真实盘口线与水位
 - 可选：SofaScore 近况增强（阵型/控球/上一场首发/球员评分趋势）注入 `analysis_context['team_context']`
 - 多模型融合、Dixon-Coles、动态调权、临场修正
+- 世界杯淘汰赛参考上下文：自动把 90 分钟常规时间胜负、加时/点球、无客场进球规则、小组赛状态、首发/预计首发/常规阵容、阵容身价与伤停、战术节奏和战意压力送入 `analysis_context`，再进入正式预测推理
 - EWMA 近况自动回填、缺失大小球自动补抓
 - 预测结果写回 `teams_2025-26.md`
 - 赛果回填与准确率统计（胜负 / 比分 / 大小球）
@@ -87,6 +88,7 @@ trae_projects/
 - `prediction_system.py` 仅作为兼容入口，实际命令实现已迁移到 `app/cli.py`
 - `DomainPredictor` 是接口层与预测核心之间的稳定外壳
 - `EnhancedPredictor` 仍保留主流程编排职责，但大部分子能力已拆到 `domain/`、`collectors/`、`storage/`、`runtime/`
+- 世界杯 `predict-match` 在核心推理前会由 `EnhancedPredictor._inject_world_cup_reference_context` 生成 `analysis_context['world_cup_reference']`，并把 `home_form`/`away_form`、淘汰赛 `home_motivation`/`away_motivation=90`、`single_elimination=True` 注入模型输入；输出同步暴露 `world_cup_reference_context` 供网页、RAG 与审计复用
 - `agents/*.md` 与 `agent_runtime_registry.py` 共同决定运行时输出中的 `runtime_profile`
 
 ## 事实写回与归档边界

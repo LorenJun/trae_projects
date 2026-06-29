@@ -1577,12 +1577,36 @@ class InferencePipelineService:
             return ranked_probabilities, diag
         gap = float(top_prob) - float(second_prob)
         diag['model_gap'] = round(gap, 4)
-        if gap > gap_threshold + 1e-9:
-            diag['reason'] = 'gap_too_large'
-            return ranked_probabilities, diag
         market_probs = self._market_implied_1x2(european_odds)
         market_draw = float(market_probs.get('draw')) if isinstance(market_probs, dict) else None
         diag['market_draw'] = round(market_draw, 4) if market_draw is not None else None
+
+        # 低置信防平：世界杯/中立赛程里，首选胜负低于 40% 且平局只落后 6 个百分点内，
+        # 本质是三分布均衡盘。若市场隐含平局不低（>=27%），把「防平」提升为主口径，
+        # 避免 37%-32% 这类弱客胜/弱主胜被写成单选方向。
+        low_conf_draw_guard = bool(
+            float(top_prob or 0.0) < 0.40
+            and gap <= 0.06 + 1e-9
+            and market_draw is not None
+            and market_draw >= market_draw_floor
+        )
+        if low_conf_draw_guard:
+            promoted = [ranked_probabilities[1], ranked_probabilities[0]] + list(ranked_probabilities[2:])
+            diag.update({
+                'applied': True,
+                'reason': 'low_confidence_draw_guard',
+                'gap_threshold': 0.06,
+                'market_draw_floor': market_draw_floor,
+                'from_label': top_label,
+                'to_label': '平局',
+                'top_prob': round(float(top_prob), 4),
+                'draw_prob': round(float(second_prob), 4),
+            })
+            return promoted, diag
+
+        if gap > gap_threshold + 1e-9:
+            diag['reason'] = 'gap_too_large'
+            return ranked_probabilities, diag
         if market_draw is None or market_draw < market_draw_floor:
             diag['reason'] = 'market_draw_not_elevated'
             return ranked_probabilities, diag
