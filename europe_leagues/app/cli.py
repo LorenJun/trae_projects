@@ -614,9 +614,8 @@ def run_openclaw_sync_pending_results_review(args):
         from domain.world_cup_standings import update_world_cup_standings
         from runtime.paths import get_default_paths
 
-        world_cup_standings = update_world_cup_standings(
-            get_default_paths(EUROPE_LEAGUES_ROOT).teams_file("world_cup")
-        )
+        world_cup_teams_file = get_default_paths(EUROPE_LEAGUES_ROOT).teams_file("world_cup")
+        world_cup_standings = update_world_cup_standings(world_cup_teams_file)
 
         return {
             "pending_before_count": len(pending_before),

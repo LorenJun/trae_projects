@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>世界杯 2026-07-07 预测</title>
+<style>
+  :root {
+    --bg: #0A0E1A; --card: rgba(22,28,44,0.72); --card-strong: rgba(36,44,68,0.85); --line: rgba(120,140,190,0.16);
+    --text: #D9DEEC; --muted: #8089A3; --title: #E8C887; --accent: #6E8BFF;
+    --home: #4FD1B5; --draw: #E0B45C; --away: #F08CA8;
+    --bar-text: #0A0E1A; --shadow: rgba(0,0,0,0.45);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { background: #0A0E1A; min-height: 100%; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(110,139,255,0.14) 0%, transparent 55%),
+      radial-gradient(1000px 500px at 100% 0%, rgba(232,200,135,0.10) 0%, transparent 50%),
+      linear-gradient(170deg, #090C16 0%, #0D1222 45%, #0A0F1C 100%);
+    background-color: #0A0E1A; color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    padding: 36px 16px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+  }
+  header { text-align: center; margin-bottom: 28px; }
+  header h1 {
+    font-size: 26px; font-weight: 800; letter-spacing: .5px;
+    background: linear-gradient(92deg, #F4DBA0 0%, #E8C887 35%, #C9A24F 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  header .sub { color: var(--muted); font-size: 13px; margin-top: 8px; letter-spacing: .2px; }
+  .meta-note { max-width: 880px; margin: 0 auto 24px; color: var(--muted); font-size: 12px; text-align: center; line-height: 1.7; }
+  .legend-banner {
+    max-width: 880px; margin: 0 auto 28px; padding: 16px 20px;
+    background: linear-gradient(160deg, rgba(28,35,56,0.72) 0%, rgba(18,23,38,0.72) 100%);
+    border: 1px solid var(--line); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-radius: 18px; font-size: 12.5px; color: var(--text); line-height: 1.75;
+    box-shadow: 0 10px 34px var(--shadow);
+  }
+  .legend-banner b { color: var(--title); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 24px; max-width: 880px; margin: 0 auto; }
+  .card {
+    position: relative; background: var(--card); border: 1px solid var(--line);
+    border-radius: 18px; padding: 22px 20px 18px;
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 14px 40px var(--shadow), inset 0 1px 0 rgba(255,255,255,0.05);
+    transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+  }
+  .card::before {
+    content: ""; position: absolute; inset: 0; border-radius: 18px; padding: 1px;
+    background: linear-gradient(140deg, rgba(232,200,135,0.4), rgba(110,139,255,0.12) 40%, transparent 70%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; opacity: .5;
+  }
+  .card:hover { transform: translateY(-4px); border-color: rgba(232,200,135,0.35); box-shadow: 0 20px 52px rgba(0,0,0,0.55); }
+  .matchup { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .matchup .team { font-size: 17px; font-weight: 700; color: var(--text); }
+  .matchup .vs { color: var(--muted); font-size: 12px; }
+  .time { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .result-banner {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    background: linear-gradient(135deg, rgba(232,200,135,0.16) 0%, rgba(110,139,255,0.10) 100%);
+    border: 1px solid rgba(232,200,135,0.26); border-radius: 12px;
+    padding: 9px 12px; margin-bottom: 12px;
+  }
+  .result-banner .r-score { font-size: 15px; font-weight: 800; color: var(--title); }
+  .result-banner .r-total { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+  .r-tag { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 10px; }
+  .r-hit { background: rgba(79,209,181,.18); color: var(--home); }
+  .r-miss { background: rgba(240,140,168,.20); color: var(--away); }
+  .r-push { background: rgba(128,137,163,.18); color: var(--muted); }
+  .verdict { display: inline-block; font-size: 13px; font-weight: 700; padding: 4px 14px; border-radius: 16px; margin-bottom: 12px; }
+  .v-home { background: rgba(79,209,181,.16); color: var(--home); }
+  .v-draw { background: rgba(224,180,92,.18); color: var(--draw); }
+  .v-away { background: rgba(240,140,168,.16); color: var(--away); }
+  .bar { display: flex; height: 26px; border-radius: 10px; overflow: hidden; font-size: 11px; font-weight: 700; color: var(--bar-text); margin-bottom: 4px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04); }
+  .b-home { background: linear-gradient(180deg, #5FE0C4 0%, #3FB89E 100%); display: flex; align-items: center; justify-content: center; color: #07271F; }
+  .b-draw { background: linear-gradient(180deg, #ECC66E 0%, #C99B45 100%); display: flex; align-items: center; justify-content: center; color: #2A1E04; }
+  .b-away { background: linear-gradient(180deg, #F49BB4 0%, #D96E8E 100%); display: flex; align-items: center; justify-content: center; color: #2E0C18; }
+  .prob-legend { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 14px; }
+  .total-row { font-size: 12.5px; color: var(--text); margin-bottom: 10px; }
+  .total-row b { color: var(--title); }
+  .scores-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .chip { flex: 1; text-align: center; background: rgba(110,139,255,0.07); border: 1px solid var(--line); border-radius: 12px; padding: 8px 4px; }
+  .chip b { display: block; font-size: 15px; color: var(--title); }
+  .chip i { font-style: normal; color: var(--muted); font-size: 11px; }
+  .ou-row { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+  .ou-row b { color: var(--text); }
+  .odds-box {
+    background: rgba(12,16,28,0.5); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; font-size: 11.5px;
+  }
+  .odds-box .obx-title { font-size: 11px; color: var(--title); font-weight: 700; margin-bottom: 7px; letter-spacing: .3px; }
+  .odds-box .obx-title span { color: var(--muted); font-weight: 400; }
+  .odds-line { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; color: var(--muted); }
+  .odds-line .k { color: var(--muted); flex: 0 0 38px; }
+  .odds-line .v { color: var(--text); text-align: right; flex: 1; font-variant-numeric: tabular-nums; }
+  .odds-line .v b { color: var(--title); }
+  .odds-line .v em { font-style: normal; color: var(--muted); }
+  .inst-box, .lineup-box, .ref-box {
+    background: linear-gradient(135deg, rgba(232,200,135,0.10) 0%, rgba(110,139,255,0.07) 100%);
+    border: 1px solid rgba(232,200,135,0.22); border-radius: 12px;
+    padding: 11px 14px; margin-bottom: 12px; font-size: 11.5px;
+  }
+  .inst-title { font-size: 11px; color: var(--title); font-weight: 700; margin-bottom: 7px; letter-spacing: .3px; }
+  .inst-title span { color: var(--muted); font-weight: 400; }
+  .inst-line { display: flex; gap: 8px; padding: 3px 0; align-items: baseline; }
+  .inst-line .inst-k { color: var(--muted); flex: 0 0 42px; }
+  .inst-line .inst-v { color: var(--text); flex: 1; line-height: 1.5; }
+  .inst-ok { color: var(--home); font-weight: 700; margin-left: 4px; }
+  .inst-diff { color: var(--away); font-weight: 700; margin-left: 4px; }
+  .lineup-title { font-size: 11px; color: var(--title); font-weight: 700; margin-bottom: 7px; letter-spacing: .3px; }
+  .lineup-title span { color: var(--muted); font-weight: 400; }
+  .lineup-meta { color: var(--muted); margin-bottom: 8px; line-height: 1.5; }
+  .lineup-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .lineup-cols b { display: block; margin-bottom: 5px; }
+  .lineup-cols span { display: block; color: var(--text); line-height: 1.55; }
+  .lineup-cols em { color: var(--muted); font-style: normal; margin-left: 4px; }
+  .ref-box { background: linear-gradient(135deg, rgba(110,139,255,0.10) 0%, rgba(28,35,56,0.34) 100%); }
+  .ref-title { font-size: 11px; color: var(--title); font-weight: 700; margin-bottom: 7px; letter-spacing: .3px; }
+  .ref-title span { color: var(--muted); font-weight: 400; }
+  .ref-line { color: var(--text); line-height: 1.55; padding: 3px 0; }
+  .ref-line b { color: var(--title); }
+  .ref-foot { margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+  .tri-verdict {
+    font-size: 12px; color: var(--text); line-height: 1.55;
+    border-radius: 12px; padding: 10px 12px; margin: 6px 0 2px;
+  }
+  .tri-diverge { background: rgba(240,140,168,.12); border-left: 3px solid var(--away); }
+  .tri-aligned { background: rgba(79,209,181,.12); border-left: 3px solid var(--home); }
+  .tri-mixed { background: rgba(128,137,163,.12); border-left: 3px solid var(--muted); }
+  .tri-verdict .tag { font-weight: 700; }
+  .tri-diverge .tag { color: var(--away); }
+  .tri-aligned .tag { color: var(--home); }
+  .tri-mixed .tag { color: var(--muted); }
+  .upset-row { font-size: 12px; margin: 8px 0 2px; padding: 9px 12px; border-radius: 12px; }
+  .upset-high { background: rgba(240,140,168,.16); border-left: 3px solid var(--away); color: var(--text); }
+  .upset-high b { color: var(--away); }
+  .upset-mid { background: rgba(224,180,92,.16); border-left: 3px solid var(--draw); color: var(--text); }
+  .upset-mid b { color: var(--draw); }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 36px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>世界杯淘汰赛 · 预测比分</h1>
+    <div class="sub">2026-07-07（周二）· 共 2 场 · 数据源：澳客实时盘口 + DomainPredictor 正式预测链</div>
+  </header>
+  <p class="meta-note">
+    比分为模型最可能比分（Dixon-Coles），胜平负为综合概率。本场次队力多走 FIFA 排名兜底（fallback），
+    结论以市场盘口与模型综合为准，仅供研究参考、非投注建议。
+  </p>
+
+
+  <div class="legend-banner knockout-banner">
+    <b>世界杯淘汰赛晋级规则</b>：90 分钟常规时间分出胜负，胜者晋级 16 强；
+    90 分钟打平 → 30 分钟加时（上下半场各 15 分钟）；加时仍平局 → 点球大战决胜；
+    <span style="color:var(--away)">无客场进球规则</span>，单场定生死，输球直接出局。
+    <br><b>阵容参考</b>：首发大名单优先取澳客赛前阵容页；未公布正式首发时，按两队小组赛常规阵容/预计首发口径展示。
+  </div>
+
+
+  <div class="legend-banner">
+    <b>三轴综合研判说明</b>：把「方向支持率 + 大小球支持率 + 庄家操盘手法」三轴融合为一句研判，<b>仅诊断、不修改预测方向</b>。
+    <span style="color:var(--away)">背离</span>＝方向与进球/操盘自相矛盾（如强主胜却判小球，需警惕）；
+    <span style="color:var(--home)">共振</span>＝三轴一致看好同一方；
+    <span style="color:var(--muted)">部分一致</span>＝无明显矛盾、信号偏弱。
+    <br><b>临场资金质检层</b>：封盘热门赔率漂移用亚值/凯利同向印证——<span style="color:var(--home)">共振</span>＝真实资金流，<span style="color:var(--muted)">孤证</span>＝单家欧赔疑似噪声、已降级不触发背离。
+  </div>
+
+  <div class="grid">
+
+    <!-- 葡萄牙 vs 西班牙 -->
+    <div class="card">
+      <div class="matchup"><span class="team" style="color:var(--home)">葡萄牙</span><span class="vs">VS</span><span class="team" style="color:var(--away)">西班牙</span></div>
+      <div class="time">07-07 03:00</div>
+      <div style="text-align:center;"><span class="verdict v-away">客胜 · 44.3%</span></div>
+      <div class="bar">
+        <span class="b-home" style="width:28.5%">28%</span>
+        <span class="b-draw" style="width:27.2%">27%</span>
+        <span class="b-away" style="width:44.3%">44%</span>
+      </div>
+      <div class="prob-legend"><span>主胜</span><span>平局</span><span>客胜</span></div>
+      <div class="total-row">最可能总进球：<b>2 球</b>(22.9%) / 3球(22.3%) / 4球(16.7%)</div>
+      <div class="scores-row">
+        <span class="chip"><b>1-2</b><i>23.1%</i></span>
+        <span class="chip"><b>0-1</b><i>20.6%</i></span>
+        <span class="chip"><b>0-2</b><i>14.6%</i></span>
+      </div>
+      <div class="ou-row">大小球：<b style="color:var(--draw)">中性·不建议</b> @ 2.5 <span style="color:var(--muted)">（无统计优势）</span></div>
+      <div class="odds-box">
+        <div class="obx-title">真实盘口原始数据 <span>· 澳客实时采集</span></div>
+        <div class="odds-line"><span class="k">欧赔</span><span class="v">开 3.90 / 3.52 / 1.91 → 终 <b>3.96 / 3.52 / 1.90</b> <em>（13家共识）</em></span></div>
+        <div class="odds-line"><span class="k">亚盘</span><span class="v">半球(-0.50)未动 水位 1.96/1.89 <em>（10家共识）</em></span></div>
+        <div class="odds-line"><span class="k">凯利</span><span class="v">主 0.93 / 平 0.93 / 客 0.95</span></div>
+        <div class="odds-line"><span class="k">大小</span><span class="v">大 1.78 / 小 1.99 @ 2.5</span></div>
+      </div>
+      <div class="inst-box">
+        <div class="inst-title">🏦 机构看好走向 <span>· 盘口隐含、非模型</span></div>
+        <div class="inst-line"><span class="inst-k">方向</span><span class="inst-v"><b style="color:var(--away)">客胜</b>（隐含 49.4%），亚盘下盘(客)低水 1.89 受注 <span class="inst-ok">与模型一致</span></span></div>
+        <div class="inst-line"><span class="inst-k">大小球</span><span class="inst-v"><b>大球</b>（大 1.78 / 小 1.99 @ 2.5） <span class="inst-diff">模型中性·不下注</span></span></div>
+      </div>
+      <div class="lineup-box">
+        <div class="lineup-title">📋 首发大名单 <span>· 参考小组赛常规阵容/赛前阵容页</span></div>
+        <div class="lineup-meta">首发身价：葡萄牙 65600万 / 西班牙 74900万；伤停计数：葡萄牙 0 / 西班牙 1</div>
+        <div class="lineup-cols">
+          <div><b style="color:var(--home)">葡萄牙</b><span>1号 科斯塔<em>门将</em></span><span>3号 迪亚斯<em>后卫</em></span><span>13号 韦加<em>后卫</em></span><span>20号 坎塞洛<em>后卫</em></span><span>25号 门德斯<em>后卫</em></span><span>8号 B费<em>中场</em></span><span>15号 J内维斯<em>中场</em></span><span>23号 维蒂尼亚<em>中场</em></span><span>7号 C罗<em>前锋</em></span><span>17号 莱奥<em>前锋</em></span><span>18号 内托<em>前锋</em></span></div>
+          <div><b style="color:var(--away)">西班牙</b><span>23号 西蒙<em>门将</em></span><span>12号 波罗<em>后卫</em></span><span>14号 拉波尔特<em>后卫</em></span><span>22号 库巴西<em>后卫</em></span><span>24号 库库雷利亚<em>后卫</em></span><span>15号 巴埃纳<em>中场</em></span><span>16号 罗德里<em>中场</em></span><span>20号 佩德里<em>中场</em></span><span>10号 奥尔莫<em>前锋</em></span><span>19号 亚马尔<em>前锋</em></span><span>21号 奥亚萨瓦尔<em>前锋</em></span></div>
+        </div>
+      </div>
+      <div class="ref-box">
+        <div class="ref-title">🧭 参考预测分析 <span>· 阵容/状态/战术/战意综合</span></div>
+        <div class="ref-line"><b>人员配置</b>：首发身价葡萄牙65600万 vs 西班牙74900万，西班牙实力接近。 葡萄牙配置约4后卫/3中场/3前锋，西班牙配置约4后卫/3中场/3前锋。 葡萄牙常规骨架：科斯塔、迪亚斯、韦加、坎塞洛；西班牙常规骨架：西蒙、波罗、拉波尔特、库巴西</div>
+        <div class="ref-line"><b>小组赛状态</b>：葡萄牙小组赛1胜2平0负，进6失1；06-18 平刚果民主共和国1-1、06-24 胜乌兹别克斯坦5-0、06-28 平哥伦比亚0-0；西班牙小组赛2胜1平0负，进5失0；06-16 平佛得角0-0、06-22 胜沙特4-0、06-27 胜乌拉圭1-0</div>
+        <div class="ref-line"><b>战术倾向</b>：战术节奏判断：节奏具备拉开空间和对攻可能；大小球@2.5为中性，不强行下注，说明节奏分歧仍在。出线/战意：淘汰赛单场定生死，常规时间若打平仍有加时与点球，强队也会更重视风险控制。</div>
+        <div class="ref-line"><b>比分预测</b>：常规时间主推比分：1-2（方向：客胜，条件概率23.1%；主胜28.5%, 平局27.2%, 客胜44.3%；预期进球1.58-1.42）。</div>
+        <div class="ref-line"><b>爆冷比分</b>：爆冷/对冲比分：1-0（爆冷等级低；理由：历史同向反打(10次)；相似赔率反向结果偏多(60%)）。</div>
+        <div class="ref-foot">葡萄牙 vs 西班牙 的结论以90分钟常规时间口径为准；若预测平局，代表更高概率进入加时/点球决胜窗口。</div>
+      </div>
+      <div class="tri-verdict tri-mixed">
+        <span class="tag">部分一致</span>：方向强（客胜 44%）；大小球中性（不下注）；操盘中性盘 ⇒ <b>三轴无明显矛盾，可按模型方向参考</b><br>
+        <span style="color:var(--muted)">临场资金：封盘热门（西班牙）赔率走低 −0.009（n/a）；总进球盘未漂移；爆冷低(26)。</span>
+      </div>
+    </div>
+
+    <!-- 美国 vs 比利时 -->
+    <div class="card">
+      <div class="matchup"><span class="team" style="color:var(--home)">美国</span><span class="vs">VS</span><span class="team" style="color:var(--away)">比利时</span></div>
+      <div class="time">07-07 08:00</div>
+      <div style="text-align:center;"><span class="verdict v-home">主胜 · 38.7%</span></div>
+      <div class="bar">
+        <span class="b-home" style="width:38.7%">39%</span>
+        <span class="b-draw" style="width:26.8%">27%</span>
+        <span class="b-away" style="width:34.5%">34%</span>
+      </div>
+      <div class="prob-legend"><span>主胜</span><span>平局</span><span>客胜</span></div>
+      <div class="total-row">最可能总进球：<b>2 球</b>(23.7%) / 3球(22.2%) / 4球(16.1%)</div>
+      <div class="scores-row">
+        <span class="chip"><b>2-1</b><i>21.4%</i></span>
+        <span class="chip"><b>1-0</b><i>20.6%</i></span>
+        <span class="chip"><b>2-0</b><i>15.7%</i></span>
+      </div>
+      <div class="ou-row">大小球：<b style="color:var(--draw)">中性·不建议</b> @ 2.75 <span style="color:var(--muted)">（无统计优势）</span></div>
+      <div class="odds-box">
+        <div class="obx-title">真实盘口原始数据 <span>· 澳客实时采集</span></div>
+        <div class="odds-line"><span class="k">欧赔</span><span class="v">开 2.60 / 3.41 / 2.56 → 终 <b>2.46 / 3.33 / 2.77</b> <em>（13家共识）</em></span></div>
+        <div class="odds-line"><span class="k">亚盘</span><span class="v">平手(0.00)未动 水位 1.78/2.04 <em>（10家共识）</em></span></div>
+        <div class="odds-line"><span class="k">凯利</span><span class="v">主 0.93 / 平 0.93 / 客 0.94</span></div>
+        <div class="odds-line"><span class="k">大小</span><span class="v">大 1.81 / 小 2.01 @ 2.75</span></div>
+      </div>
+      <div class="inst-box">
+        <div class="inst-title">🏦 机构看好走向 <span>· 盘口隐含、非模型</span></div>
+        <div class="inst-line"><span class="inst-k">方向</span><span class="inst-v"><b style="color:var(--home)">主胜</b>（隐含 38.1%），亚盘上盘(主)低水 1.78 受注 <span class="inst-ok">与模型一致</span></span></div>
+        <div class="inst-line"><span class="inst-k">大小球</span><span class="inst-v"><b>大球</b>（大 1.81 / 小 2.01 @ 2.75） <span class="inst-diff">模型中性·不下注</span></span></div>
+      </div>
+      <div class="lineup-box">
+        <div class="lineup-title">📋 首发大名单 <span>· 参考小组赛常规阵容/赛前阵容页</span></div>
+        <div class="lineup-meta">首发身价：美国 23800万 / 比利时 24400万；伤停计数：美国 2 / 比利时 1</div>
+        <div class="lineup-cols">
+          <div><b style="color:var(--home)">美国</b><span>24号 弗里斯<em>门将</em></span><span>2号 塞尔吉诺<em>后卫</em></span><span>3号 理查兹<em>后卫</em></span><span>5号 罗宾逊<em>后卫</em></span><span>13号 里姆<em>后卫</em></span><span>16号 弗里曼<em>后卫</em></span><span>4号 亚当斯<em>中场</em></span><span>8号 麦肯尼<em>中场</em></span><span>17号 蒂尔曼<em>中场</em></span><span>10号 普利希奇<em>前锋</em></span><span>20号 巴洛贡<em>前锋</em></span></div>
+          <div><b style="color:var(--away)">比利时</b><span>1号 库尔图瓦<em>门将</em></span><span>3号 泰特<em>后卫</em></span><span>4号 梅切勒<em>后卫</em></span><span>5号 德库耶佩<em>后卫</em></span><span>21号 卡斯塔涅<em>后卫</em></span><span>7号 德布劳内<em>中场</em></span><span>8号 蒂勒芒斯<em>中场</em></span><span>20号 瓦纳肯<em>中场</em></span><span>10号 特罗萨德<em>前锋</em></span><span>11号 多库<em>前锋</em></span><span>17号 德凯特拉雷<em>前锋</em></span></div>
+        </div>
+      </div>
+      <div class="ref-box">
+        <div class="ref-title">🧭 参考预测分析 <span>· 阵容/状态/战术/战意综合</span></div>
+        <div class="ref-line"><b>人员配置</b>：首发身价美国23800万 vs 比利时24400万，比利时实力接近。 美国配置约5后卫/3中场/2前锋，比利时配置约4后卫/3中场/3前锋。 美国常规骨架：弗里斯、塞尔吉诺、理查兹、罗宾逊；比利时常规骨架：库尔图瓦、泰特、梅切勒、德库耶佩</div>
+        <div class="ref-line"><b>小组赛状态</b>：美国小组赛2胜0平1负，进8失4；06-13 胜巴拉圭4-1、06-20 胜澳大利亚2-0、06-26 负土耳其2-3；比利时小组赛1胜2平0负，进6失2；06-16 平埃及1-1、06-22 平伊朗0-0、06-27 胜新西兰5-1</div>
+        <div class="ref-line"><b>战术倾向</b>：战术节奏判断：节奏具备拉开空间和对攻可能；大小球@2.75为中性，不强行下注，说明节奏分歧仍在。出线/战意：淘汰赛单场定生死，常规时间若打平仍有加时与点球，强队也会更重视风险控制。</div>
+        <div class="ref-line"><b>比分预测</b>：常规时间主推比分：2-1（方向：主胜，条件概率21.4%；主胜38.7%, 平局26.8%, 客胜34.5%；预期进球1.52-1.37）。</div>
+        <div class="ref-line"><b>爆冷比分</b>：爆冷/对冲比分：0-1（爆冷等级低；理由：历史同向反打(15次)；热门封盘走热，防范低赔方向过热）。</div>
+        <div class="ref-foot">美国 vs 比利时 的结论以90分钟常规时间口径为准；若预测平局，代表更高概率进入加时/点球决胜窗口。</div>
+      </div>
+      <div class="tri-verdict tri-mixed">
+        <span class="tag">部分一致</span>：方向弱（主胜 39%）；大小球中性（不下注）；操盘中性盘 ⇒ <b>三轴无明显矛盾，可按模型方向参考</b><br>
+        <span style="color:var(--muted)">临场资金：封盘热门（美国）赔率走低 −0.134（共振（high））；总进球盘有漂移；爆冷低(20)。</span>
+      </div>
+    </div>
+
+  </div>
+
+  <footer>
+    更新时间 2026-07-06（已按最新临场盘口刷新）· europe_leagues 正式预测链 · 三轴综合研判 + 临场资金质检层（仅诊断、不改方向）· 仅供研究参考，非投注建议
+  </footer>
+</body>
+</html>

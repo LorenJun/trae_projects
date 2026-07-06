@@ -60,6 +60,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 WORLD_CUP_DIR = PROJECT_ROOT / "world_cup"
 TEAMS_MD = WORLD_CUP_DIR / "teams_2026.md"
 PRED_DIR = WORLD_CUP_DIR / "analysis" / "predictions"
@@ -69,6 +71,8 @@ GENERATOR = PROJECT_ROOT / "scripts" / "build_world_cup_daily_html.py"
 
 EVENING_HOUR = 21          # 每天晚间触发（时）
 EVENING_MINUTE = 0         # 每天晚间触发（分）=> 21:00
+NOON_HOUR = 12             # 每天中午自动重拉澳客世界杯赛程（时）
+NOON_MINUTE = 0            # 每天中午自动重拉澳客世界杯赛程（分）=> 12:00
 PRE_MATCH_MINUTES = 60     # 赛前 1 小时触发
 STALE_AFTER_HOURS = 3      # 开赛 N 小时后仍无赛果 => 监控疑似卡住
 MAX_FAILS = 3              # 刷新连续失败次数阈值 => 提示重启
@@ -198,6 +202,7 @@ def alert(state: dict, kind: str, title: str, message: str) -> None:
 def _default_state() -> dict:
     return {
         "last_evening_refresh": "",
+        "last_noon_schedule_pull": "",
         "pre_match_done": [],
         "pre_match_done_schema": 2,
         "monitor": {"current": None, "since": ""},
@@ -221,6 +226,7 @@ def load_state() -> dict:
         base["pre_match_done_schema"] = 2
     base.setdefault("monitor", {"current": None, "since": ""})
     base.setdefault("alert_cooldown", {})
+    base.setdefault("last_noon_schedule_pull", "")
     return base
 
 
@@ -647,9 +653,84 @@ def sanitize_pre_match_done(schedule: list[dict], state: dict, now: datetime) ->
     state["pre_match_done"] = sorted(set(kept))
 
 
+def _months_for_schedule_pull(now: datetime) -> list[str]:
+    """本月 + 下月。世界杯 SoT 覆盖 2026-06/2026-07，跨月自动拉两月避免漏边界场次。"""
+    this_month = now.strftime("%Y-%m")
+    next_first = (now.replace(day=1) + timedelta(days=32)).replace(day=1)
+    next_month = next_first.strftime("%Y-%m")
+    return [this_month, next_month]
+
+
+def _do_refresh_schedule_from_okooo(state: dict, now: datetime) -> bool:
+    """从澳客 m 站拉当月+下月赛程，覆盖式写回 teams_2026.md。返回是否成功。"""
+    try:
+        from domain.world_cup_schedule_fetch import (
+            ScheduleFetchBlocked,
+            fetch_world_cup_schedule,
+        )
+        from domain.world_cup_schedule_writeback import apply_schedule_updates
+    except ImportError as exc:
+        alert(state, "schedule_pull_import", "赛程拉取模块加载失败",
+              f"import 失败：{exc}。请检查 europe_leagues 依赖。")
+        return False
+
+    months = _months_for_schedule_pull(now)
+    try:
+        records = fetch_world_cup_schedule(months)
+    except ScheduleFetchBlocked as exc:
+        alert(state, "schedule_pull_fail", "澳客月份页抓取失败",
+              f"月份 {months} 拉取失败：{exc}。SoT 保持原样，等待下次自动重试。")
+        return False
+    except Exception as exc:  # 兜底：未预期异常也要走 alert，不影响后续流程
+        alert(state, "schedule_pull_fail", "澳客赛程抓取异常",
+              f"月份 {months} 异常：{exc}。SoT 保持原样。")
+        return False
+
+    if not records:
+        alert(state, "schedule_pull_empty", "澳客赛程返回为空",
+              f"月份 {months} 抓到 0 条比赛，可能被风控降级。SoT 保持原样。")
+        return False
+
+    try:
+        summary = apply_schedule_updates(TEAMS_MD, records)
+    except (OSError, ValueError) as exc:
+        alert(state, "schedule_pull_writeback", "赛程写回失败",
+              f"apply_schedule_updates 失败：{exc}")
+        return False
+
+    updated = int(summary.get("updated_lines") or 0)
+    warnings = summary.get("warnings") or []
+    log(f"12:00 赛程自愈：拉取 {len(records)} 场，更新 {updated} 行；warnings={len(warnings)}")
+    for w in warnings[:5]:
+        log(f"  warn: {w}")
+    return True
+
+
+def _maybe_refresh_schedule_from_okooo(state: dict, now: datetime) -> bool:
+    """每天 12:00 之后触发一次澳客赛程重拉；已跑过的当日不再重复。"""
+    today = now.strftime("%Y-%m-%d")
+    noon_at = now.replace(hour=NOON_HOUR, minute=NOON_MINUTE, second=0, microsecond=0)
+    if now < noon_at:
+        return False
+    if state.get("last_noon_schedule_pull") == today:
+        return False
+    try:
+        ok = _do_refresh_schedule_from_okooo(state, now)
+        if ok:
+            state["last_noon_schedule_pull"] = today
+        return ok
+    finally:
+        try:
+            save_state(state)
+        except OSError as exc:
+            log(f"保存 timer_state.json 失败：{exc}")
+
+
 def run_cycle(now: datetime, *, do_refresh: bool = True) -> tuple[list[str], dict | None]:
     """跑一轮：解析赛程 -> 触发 -> 监控切换 -> 刷新 -> 健康检查。"""
     state = load_state()
+    if do_refresh:
+        _maybe_refresh_schedule_from_okooo(state, now)
     try:
         schedule = parse_schedule()
     except (OSError, ValueError) as exc:
@@ -760,6 +841,21 @@ def cmd_refresh(args) -> None:
 
 def cmd_refresh_date(args) -> None:
     refresh_date_from_schedule(args.date)
+
+
+def cmd_refresh_schedule(args) -> None:
+    """一次性从澳客 m 站重拉赛程覆盖 teams_2026.md（不受 12:00 冷却限制）。"""
+    now = datetime.strptime(args.now, "%Y-%m-%d %H:%M") if args.now else datetime.now()
+    state = load_state()
+    ok = _do_refresh_schedule_from_okooo(state, now)
+    if ok:
+        state["last_noon_schedule_pull"] = now.strftime("%Y-%m-%d")
+    try:
+        save_state(state)
+    except OSError as exc:
+        log(f"保存 timer_state.json 失败：{exc}")
+    if not ok:
+        sys.exit(1)
 
 
 def cmd_run_once(args) -> None:
@@ -939,6 +1035,11 @@ def main() -> None:
     p_refd = sub.add_parser("refresh-date", help="刷新某日期全部真实球队比赛")
     p_refd.add_argument("--date", required=True, help="比赛日期 YYYY-MM-DD")
     p_refd.set_defaults(func=cmd_refresh_date)
+
+    p_refs = sub.add_parser("refresh-schedule",
+                            help="一次性从澳客 m 站重拉赛程并覆盖 teams_2026.md")
+    p_refs.add_argument("--now", help="模拟当前时间 'YYYY-MM-DD HH:MM'（测试用）")
+    p_refs.set_defaults(func=cmd_refresh_schedule)
 
     p_run = sub.add_parser("run-once", help="按赛程检查一次触发/监控/健康")
     p_run.add_argument("--now", help="模拟当前时间 'YYYY-MM-DD HH:MM'（测试用）")

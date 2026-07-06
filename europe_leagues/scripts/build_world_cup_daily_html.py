@@ -247,7 +247,7 @@ def _company_mode_label(mode: str, consensus: dict | None) -> str:
     return mode or "—"
 
 
-def run_prediction(home: str, away: str, date: str, time: str | None) -> dict:
+def run_prediction(home: str, away: str, date: str, time: str | None, match_id: str | None = None) -> dict:
     """调用正式 predict-match 取单场完整 JSON。"""
     cmd = [
         sys.executable,
@@ -265,6 +265,8 @@ def run_prediction(home: str, away: str, date: str, time: str | None) -> dict:
     ]
     if time:
         cmd += ["--time", time]
+    if match_id:
+        cmd += ["--match-id", str(match_id)]
     proc = subprocess.run(
         cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True
     )
@@ -690,6 +692,13 @@ def _reference_prediction_block(d: dict) -> str:
 
 def _ou_row(d: dict) -> str:
     ou = d.get("over_under") or {}
+    if not ou.get("available"):
+        reason = str(ou.get("reason") or "missing_real_market_line").strip()
+        reason_label = "缺少真实盘口线" if reason == "missing_real_market_line" else html.escape(reason)
+        return (
+            f'<div class="ou-row">大小球：<b style="color:var(--draw)">待补真实盘口</b> '
+            f'<span style="color:var(--muted)">（{reason_label}）</span></div>'
+        )
     over = ou.get("over") or 0.0
     under = ou.get("under") or 0.0
     line = ou.get("line")
@@ -843,7 +852,37 @@ def _align_scores_to_prediction(d: dict, scores: list[tuple[str, float]]) -> lis
         rest = [(sc, p) for sc, p in cleaned if sc != preferred[0]]
         cleaned = [preferred] + rest
     elif prediction in {"主胜", "客胜"}:
-        cleaned = [(sc, p) for sc, p in cleaned if _score_outcome(sc) == prediction]
+        primary = [(sc, p) for sc, p in cleaned if _score_outcome(sc) == prediction]
+        if len(primary) < 3:
+            probs = d.get("all_probabilities") or {}
+            ordered = sorted(
+                ("主胜", "平局", "客胜"),
+                key=lambda k: float(probs.get(k) or 0.0),
+                reverse=True,
+            )
+            fallback_dirs = [k for k in ordered if k != prediction]
+            pool: list[tuple[str, float]] = list(cleaned)
+            for sc, p in _raw_model_scores(d):
+                if sc not in {s for s, _ in pool}:
+                    pool.append((sc, p))
+            picked_scores = {sc for sc, _ in primary}
+            for direction in fallback_dirs:
+                if len(primary) >= 3:
+                    break
+                extras = sorted(
+                    (
+                        (sc, p) for sc, p in pool
+                        if _score_outcome(sc) == direction and sc not in picked_scores
+                    ),
+                    key=lambda x: x[1],
+                    reverse=True,
+                )
+                for sc, p in extras:
+                    if len(primary) >= 3:
+                        break
+                    primary.append((sc, p))
+                    picked_scores.add(sc)
+        cleaned = primary
 
     return cleaned[:3]
 
@@ -1276,14 +1315,24 @@ def parse_matches(args) -> list[dict]:
         data = json.loads(Path(args.matches_file).read_text(encoding="utf-8"))
         for item in data:
             matches.append(
-                {"home": item["home"], "away": item["away"], "time": item.get("time")}
+                {
+                    "home": item["home"],
+                    "away": item["away"],
+                    "time": item.get("time"),
+                    "match_id": item.get("match_id") or item.get("MatchID") or "",
+                }
             )
     for spec in args.match or []:
         parts = [p.strip() for p in spec.split(",")]
         if len(parts) < 2:
-            raise SystemExit(f"--match 格式应为 主队,客队[,时间]，收到：{spec}")
+            raise SystemExit(f"--match 格式应为 主队,客队[,时间[,MatchID]]，收到：{spec}")
         matches.append(
-            {"home": parts[0], "away": parts[1], "time": parts[2] if len(parts) > 2 else None}
+            {
+                "home": parts[0],
+                "away": parts[1],
+                "time": parts[2] if len(parts) > 2 else None,
+                "match_id": parts[3] if len(parts) > 3 else "",
+            }
         )
     if not matches:
         raise SystemExit("未提供比赛清单：请用 --match 或 --matches-file")
@@ -1310,7 +1359,7 @@ def main() -> int:
     cards = []
     for m in matches:
         print(f"[预测] {m['home']} vs {m['away']} ...", file=sys.stderr)
-        d = run_prediction(m["home"], m["away"], args.date, m.get("time"))
+        d = run_prediction(m["home"], m["away"], args.date, m.get("time"), m.get("match_id"))
         actual = actual_results.get((m["home"], m["away"]))
         cards.append(render_card(d, m.get("time"), actual))
 

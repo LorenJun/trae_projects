@@ -87,6 +87,7 @@ python3 prediction_system.py save-result --match-id '<主队> vs <客队>' --hom
 
 - SoT-backed 比赛更新 `teams_2025-26.md` / `teams_2026.md`
 - 世界杯复盘时自动重算并写回 `teams_2026.md` 的「小组积分榜」章节（按已回填比分，胜3平1负0，积分→净胜球→进球数排序）
+- 世界杯淘汰赛回填后，必须按 `teams_2026.md` 末尾「淘汰赛晋级映射（复盘自动推进 SoT）」章节，把胜者 `W##` / 败者 `L##` 替换到下一轮赛程行的主队 / 客队字段；占位仍为 `W##` / `L##` 的下一轮场次禁止生成正式预测或每日预测网页
 - 非 SoT 比赛（`archive_only`）更新 `prediction_archive.json` 与 `.okooo-scraper/runtime/*.json`，不写 `MEMORY.md`
 - `prediction_archive.json` 实际赛果字段补齐
 - 准确率与 review-learning 相关输出刷新

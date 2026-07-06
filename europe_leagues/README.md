@@ -151,6 +151,17 @@
 - `single_elimination` / `draw_after_90_goes_extra_time`：供推理、RAG 和网页审计识别 90 分钟平局进入加时/点球窗口；
 - 网页 `参考预测分析`：展示人员配置、小组赛状态、战术倾向、常规时间比分预测、爆冷/对冲比分及理由。
 
+### 1.2 世界杯赛程按日自愈（2026-07-06 起）
+
+淘汰赛 `W## / L##` 占位符级联映射已废弃。真实主客队来源改为**澳客网按日抓取**，由 `scripts/world_cup_prediction_timer.py` daemon 每天 12:00 自愈：
+
+- **主链路**：`_maybe_refresh_schedule_from_okooo` → `domain.world_cup_schedule_fetch.fetch_world_cup_schedule`（`_default_date_window()` = `[today, today+1, today+2]`，逐日 subprocess 跑 `okooo_fetch_daily_schedule.py --league 世界杯 --date {YYYY-MM-DD} --driver local-chrome`）→ `domain.world_cup_schedule_writeback.apply_schedule_updates`（MatchID 优先匹配，比分保护，只覆盖 `date/time/home/away/MatchID`，预测尾段 `预测:/信心:/比分:/大小:/爆冷:/解读:/复盘:` 原样保留）。
+- **单日 flag**：`timer_state.json.last_noon_schedule_pull == today` 时同日不再重复触发；失败走 `alert(state, kind, ...)` 30 分钟冷却。
+- **手工兜底**：`python3 scripts/world_cup_prediction_timer.py refresh-schedule` 立刻重跑（不受单日 flag 限制），失败非 0 退出。
+- **开机自启**：`~/Library/LaunchAgents/com.europeleagues.worldcuptimer.plist`（`RunAtLoad=true` + `KeepAlive=true`，30 分钟对齐轮询），子进程 Python 由 `.venv/bin/python3` 显式指定；`_fetch_one_date` 用 `sys.executable` 而不是裸 `python3`，避免 launchd 环境解析到系统 Python。
+- **SoT 变化**：`world_cup/teams_2026.md` 淘汰赛未开赛行的主客队字段先写占位 `-`，末尾新增「淘汰赛赛程自愈说明」章节；旧「淘汰赛晋级映射（复盘自动推进 SoT）」章节已整段删除。
+- **相关删除**：`domain/world_cup_bracket.py`、`collectors/okooo_match_result.py`、`test_world_cup_bracket_draw.py`；`app/cli.py sync-pending-results-review` 不再调 `advance_world_cup_bracket`。
+
 ## 预测与结果闭环
 
 预测 side effects 由 `domain/persistence.py` 统一编排，通常会联动：
