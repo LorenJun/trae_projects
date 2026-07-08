@@ -153,7 +153,7 @@
 
 ### 1.2 世界杯赛程按日自愈（2026-07-06 起）
 
-淘汰赛 `W## / L##` 占位符级联映射已废弃。真实主客队来源改为**澳客网按日抓取**，由 `scripts/world_cup_prediction_timer.py` daemon 每天 12:00 自愈：
+淘汰赛 `W## / L##` 占位符级联映射已废弃。真实主客队来源改为**澳客网按日抓取**，由 `scripts/world_cup_prediction_timer.py` daemon 每天 15:00 自愈：
 
 - **主链路**：`_maybe_refresh_schedule_from_okooo` → `domain.world_cup_schedule_fetch.fetch_world_cup_schedule`（`_default_date_window()` = `[today, today+1, today+2]`，逐日 subprocess 跑 `okooo_fetch_daily_schedule.py --league 世界杯 --date {YYYY-MM-DD} --driver local-chrome`）→ `domain.world_cup_schedule_writeback.apply_schedule_updates`（MatchID 优先匹配，比分保护，只覆盖 `date/time/home/away/MatchID`，预测尾段 `预测:/信心:/比分:/大小:/爆冷:/解读:/复盘:` 原样保留）。
 - **单日 flag**：`timer_state.json.last_noon_schedule_pull == today` 时同日不再重复触发；失败走 `alert(state, kind, ...)` 30 分钟冷却。

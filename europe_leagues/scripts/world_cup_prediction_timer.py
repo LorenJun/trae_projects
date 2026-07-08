@@ -6,9 +6,10 @@
 （赛果回填）后，自动切换到下一场继续监控，依次类推到赛事结束。
 
 定时触发口径：
-  1) 每天 21:00 触发一次：预测「隔天」全部世界杯比赛，重生成整页 HTML 并推送截图。
-  2) 每场比赛开赛前 1 小时自动触发一次：捞最新盘口数据、重跑预测，重生成整页 HTML 并推送截图。
-  3) 赛后自动回填只更新赛果/网页，不推送飞书截图；其他时间点不推送。
+  1) 每天 15:00 触发一次：从澳客重拉世界杯赛程覆盖 teams_2026.md（SoT 自愈）。
+  2) 每天 21:00 触发一次：预测「隔天」全部世界杯比赛，重生成整页 HTML 并推送截图。
+  3) 每场比赛开赛前 1 小时自动触发一次：捞最新盘口数据、重跑预测，重生成整页 HTML 并推送截图。
+  4) 赛后自动回填只更新赛果/网页，不推送飞书截图；其他时间点不推送。
 
 抓盘口 / 预测 / 落库 / 渲染网页全部复用
 `scripts/build_world_cup_daily_html.py`（逐场调用 `predict-match`，
@@ -71,9 +72,10 @@ GENERATOR = PROJECT_ROOT / "scripts" / "build_world_cup_daily_html.py"
 
 EVENING_HOUR = 21          # 每天晚间触发（时）
 EVENING_MINUTE = 0         # 每天晚间触发（分）=> 21:00
-NOON_HOUR = 12             # 每天中午自动重拉澳客世界杯赛程（时）
-NOON_MINUTE = 0            # 每天中午自动重拉澳客世界杯赛程（分）=> 12:00
-PRE_MATCH_MINUTES = 60     # 赛前 1 小时触发
+NOON_HOUR = 15             # 每天下午自动重拉澳客世界杯赛程（时）
+NOON_MINUTE = 0            # 每天下午自动重拉澳客世界杯赛程（分）=> 15:00
+PRE_MATCH_MINUTES = 60     # 赛前 1 小时触发（近场刷新）
+PRE_MATCH_STAGES_MINUTES = (360, 180, 60)  # 赛前 6h/3h/1h 三档时序抓取（大小球盘口变化识别）
 STALE_AFTER_HOURS = 3      # 开赛 N 小时后仍无赛果 => 监控疑似卡住
 MAX_FAILS = 3              # 刷新连续失败次数阈值 => 提示重启
 ALERT_COOLDOWN_MINUTES = 30  # 同类告警最短间隔，避免刷屏
@@ -205,6 +207,7 @@ def _default_state() -> dict:
         "last_noon_schedule_pull": "",
         "pre_match_done": [],
         "pre_match_done_schema": 2,
+        "pre_match_stage_done": [],
         "monitor": {"current": None, "since": ""},
         "fail_count": 0,
         "alert_cooldown": {},
@@ -227,6 +230,7 @@ def load_state() -> dict:
     base.setdefault("monitor", {"current": None, "since": ""})
     base.setdefault("alert_cooldown", {})
     base.setdefault("last_noon_schedule_pull", "")
+    base.setdefault("pre_match_stage_done", [])
     return base
 
 
@@ -574,19 +578,37 @@ def evaluate_triggers(schedule: list[dict], state: dict, now: datetime) -> list[
         state["last_evening_refresh"] = today
 
     done = set(state.get("pre_match_done", []))
+    # 三档时序触发状态：每档独立集合，key = f"{match_key}|{stage_minutes}"，
+    # 避免同场同一档重复抓取，同时保证 6h/3h/1h 三个时间点都能各触发一次。
+    stage_done = set(state.get("pre_match_stage_done", []))
     for m in schedule:
         if m["finished"]:
             continue
         key = _match_key(m)
-        if key in done:
-            continue
         ko = _kickoff_dt(m)
         if ko is None:
+            continue
+        # 三档时序抓取：每档独立触发，用途是给大小球盘口累积时序点（snapshots[]），
+        # 供后续「盘口 3h/1h 变化幅度」识别使用。
+        for stage in PRE_MATCH_STAGES_MINUTES:
+            stage_key = f"{key}|{stage}"
+            if stage_key in stage_done:
+                continue
+            trigger_at = ko - timedelta(minutes=stage)
+            # 时窗容忍度：+/- 半个轮询间隔，避免 daemon 稍微延迟就错过触发点。
+            window_start = trigger_at - timedelta(minutes=5)
+            window_end = trigger_at + timedelta(minutes=15)
+            if window_start <= now < window_end and now < ko:
+                due.add(m["date"])
+                stage_done.add(stage_key)
+        # 兼容：老版 pre_match_done 逻辑保留（只在 1h 档记录），供健康监控使用。
+        if key in done:
             continue
         if ko - timedelta(minutes=PRE_MATCH_MINUTES) <= now < ko:
             due.add(m["date"])
             done.add(key)
     state["pre_match_done"] = sorted(done)
+    state["pre_match_stage_done"] = sorted(stage_done)
     return sorted(due)
 
 
@@ -700,14 +722,14 @@ def _do_refresh_schedule_from_okooo(state: dict, now: datetime) -> bool:
 
     updated = int(summary.get("updated_lines") or 0)
     warnings = summary.get("warnings") or []
-    log(f"12:00 赛程自愈：拉取 {len(records)} 场，更新 {updated} 行；warnings={len(warnings)}")
+    log(f"15:00 赛程自愈：拉取 {len(records)} 场，更新 {updated} 行；warnings={len(warnings)}")
     for w in warnings[:5]:
         log(f"  warn: {w}")
     return True
 
 
 def _maybe_refresh_schedule_from_okooo(state: dict, now: datetime) -> bool:
-    """每天 12:00 之后触发一次澳客赛程重拉；已跑过的当日不再重复。"""
+    """每天 15:00 之后触发一次澳客赛程重拉；已跑过的当日不再重复。"""
     today = now.strftime("%Y-%m-%d")
     noon_at = now.replace(hour=NOON_HOUR, minute=NOON_MINUTE, second=0, microsecond=0)
     if now < noon_at:
@@ -844,7 +866,7 @@ def cmd_refresh_date(args) -> None:
 
 
 def cmd_refresh_schedule(args) -> None:
-    """一次性从澳客 m 站重拉赛程覆盖 teams_2026.md（不受 12:00 冷却限制）。"""
+    """一次性从澳客 m 站重拉赛程覆盖 teams_2026.md（不受 15:00 冷却限制）。"""
     now = datetime.strptime(args.now, "%Y-%m-%d %H:%M") if args.now else datetime.now()
     state = load_state()
     ok = _do_refresh_schedule_from_okooo(state, now)

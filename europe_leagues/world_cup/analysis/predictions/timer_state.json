@@ -1,15 +1,22 @@
 {
-  "last_evening_refresh": "2026-07-05",
-  "last_noon_schedule_pull": "2026-07-06",
+  "last_evening_refresh": "2026-07-07",
+  "last_noon_schedule_pull": "2026-07-07",
   "pre_match_done": [],
   "pre_match_done_schema": 2,
+  "pre_match_stage_done": [
+    "2026-07-08|瑞士|哥伦比亚|180",
+    "2026-07-08|瑞士|哥伦比亚|360",
+    "2026-07-08|瑞士|哥伦比亚|60",
+    "2026-07-08|阿根廷|埃及|180",
+    "2026-07-08|阿根廷|埃及|60"
+  ],
   "monitor": {
     "current": "2026-07-05|巴拉圭|挪威",
     "since": "2026-07-06T10:59:59.394698"
   },
   "fail_count": 0,
   "alert_cooldown": {
-    "stale_result": "2026-07-06T19:00:20.711653",
+    "stale_result": "2026-07-08T11:02:14.982502",
     "schedule_pull_import": "2026-07-06T14:41:13.631190",
     "schedule_pull_fail": "2026-07-06T14:41:52.396490"
   }

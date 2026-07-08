@@ -1673,6 +1673,72 @@ def _snapshot_has_usable_odds(payload: Dict[str, Any]) -> bool:
     return any(_market_is_usable(payload.get(k)) for k in ("欧赔", "亚值", "大小球"))
 
 
+def _extract_totals_time_point(totals: Any, captured_at: str) -> Optional[Dict[str, Any]]:
+    """从大小球市场块抽出可用的 line/over/under 时序点（用 final 值代表当次抓取时刻的即时盘口）。"""
+    if not isinstance(totals, dict):
+        return None
+    final = totals.get("final") if isinstance(totals.get("final"), dict) else None
+    if not final:
+        return None
+    line = final.get("line")
+    over = final.get("over")
+    under = final.get("under")
+    if line is None or over is None or under is None:
+        return None
+    return {
+        "captured_at": captured_at,
+        "line": line,
+        "over": over,
+        "under": under,
+    }
+
+
+def _merge_totals_snapshots(prior_payload: Optional[Dict[str, Any]], new_payload: Dict[str, Any]) -> None:
+    """把旧快照的大小球时间点追加到新快照的 snapshots 数组。
+
+    设计要点：
+    - snapshots 只落盘 `大小球` 一项（识别精细化优先聚焦 OU）；后续需要时再扩到亚值/欧赔。
+    - initial 恒定为「首次抓取时的 initial」，用来做「vs 开盘」对比。
+    - final 恒定为「当次抓取的 final」（即最新可用盘口）。
+    - snapshots[] 是「历次抓取的即时点序列」，按 captured_at 升序，同 line+over+under 去重。
+    - 若本次抓取盘口不可用（blocked/empty），保留旧 snapshots 不追加空点。
+    """
+    totals_new = new_payload.get("大小球") if isinstance(new_payload.get("大小球"), dict) else None
+    if not totals_new:
+        return
+    captured_at = str(new_payload.get("captured_at") or "").strip()
+    prior_snapshots: List[Dict[str, Any]] = []
+    prior_totals = None
+    if isinstance(prior_payload, dict):
+        prior_totals = prior_payload.get("大小球") if isinstance(prior_payload.get("大小球"), dict) else None
+    if isinstance(prior_totals, dict):
+        raw = prior_totals.get("snapshots")
+        if isinstance(raw, list):
+            for pt in raw:
+                if isinstance(pt, dict) and pt.get("captured_at"):
+                    prior_snapshots.append(pt)
+        # 首次开启时序功能时，把旧的 final 也塞入 snapshots 尾部（作为「上一次抓取时刻」的时序点）。
+        if not prior_snapshots:
+            prior_captured = str(prior_payload.get("captured_at") or "").strip() if isinstance(prior_payload, dict) else ""
+            prior_point = _extract_totals_time_point(prior_totals, prior_captured)
+            if prior_point:
+                prior_snapshots.append(prior_point)
+    current_point = _extract_totals_time_point(totals_new, captured_at)
+    if current_point:
+        prior_snapshots.append(current_point)
+    # 去重（相同 line+over+under 且 captured_at 相同视为同点）+ 排序
+    seen = set()
+    deduped: List[Dict[str, Any]] = []
+    for pt in sorted(prior_snapshots, key=lambda x: str(x.get("captured_at") or "")):
+        key = (str(pt.get("captured_at")), pt.get("line"), pt.get("over"), pt.get("under"))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(pt)
+    if deduped:
+        totals_new["snapshots"] = deduped
+
+
 def _classify_retry_error_message(msg: str) -> str:
     """Classify retry errors so we can fail fast on clearly non-recoverable cases."""
     s = (msg or "").lower()
@@ -4134,14 +4200,21 @@ def main() -> None:
 
         # 熔断/空盘口保护：本次抓取若三大盘口全部 blocked/空（如 ttl_circuit_open 风控熔断），
         # 不要用这份废快照覆盖已有的好快照，避免污染下游 predict 写回。
+        prior_payload_for_merge: Optional[Dict[str, Any]] = None
+        if existing and existing.exists():
+            try:
+                prior_payload_for_merge = json.loads(existing.read_text(encoding="utf-8"))
+            except Exception:
+                prior_payload_for_merge = None
+        # 大小球时序追加：把旧 snapshot 的时序点合并到本次 payload（识别精细化的数据基础）。
+        try:
+            _merge_totals_snapshots(prior_payload_for_merge, payload)
+        except Exception as merge_exc:
+            print(f"[warn] 大小球时序追加失败: {merge_exc}", file=sys.stderr)
         if not _snapshot_has_usable_odds(payload):
             prior_ok = False
-            if existing and existing.exists():
-                try:
-                    prior = json.loads(existing.read_text(encoding="utf-8"))
-                    prior_ok = _snapshot_has_usable_odds(prior)
-                except Exception:
-                    prior_ok = False
+            if isinstance(prior_payload_for_merge, dict):
+                prior_ok = _snapshot_has_usable_odds(prior_payload_for_merge)
             if prior_ok:
                 print(
                     f"[skip] 本次抓取盘口为空/被熔断，保留已有有效快照不覆盖: {existing}",

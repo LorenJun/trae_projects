@@ -710,7 +710,31 @@ def _ou_row(d: dict) -> str:
         )
     if ou.get("ou_neutral"):
         # 大小球转中性：方案 A 恒定中性(无 edge) 或证据不足，均展示为中性/不建议。
-        tag = "无统计优势" if ou.get("neutral_reason") == "ou_neutral_policy" else "盘口信号不足"
+        reason_code = ou.get("neutral_reason") or ""
+        conv = ou.get("conviction") or {}
+        # 升盘反打大球预警优先级最高（91 场样本大球率 64.3%），覆盖底层"无统计优势"文案。
+        if conv.get("line_up_over_reversal"):
+            init_line = conv.get("initial_line")
+            delta = conv.get("line_delta")
+            delta_txt = f"+{delta:g}" if isinstance(delta, (int, float)) else ""
+            trail = (
+                f'<div class="ou-row" style="color:var(--warn,#f5a623);font-weight:600;">'
+                f'⚠️ 升盘反打大球预警：盘口从 {_fmt_line(init_line)} 升至 {_fmt_line(line)}({delta_txt})，'
+                f'模型预小仅 35.7% 命中，历史大球率 64.3%（14 场样本）</div>'
+            )
+            return (
+                f'<div class="ou-row">大小球：<b style="color:var(--draw)">中性·不建议</b> '
+                f'@ {_fmt_line(line)} <span style="color:#f5a623;font-weight:700;">'
+                f'（⚠️ 升盘反打大球）</span></div>' + trail
+            )
+        if reason_code == "high_line_under_guard":
+            tag = "⚠️ 高盘预小需谨慎"
+        elif reason_code == "ou_neutral_policy":
+            tag = "无统计优势"
+        elif reason_code == "neutral_line_low_margin":
+            tag = "中性盘边际不足"
+        else:
+            tag = "盘口信号不足"
         return (
             f'<div class="ou-row">大小球：<b style="color:var(--draw)">中性·不建议</b> '
             f'@ {_fmt_line(line)} <span style="color:var(--muted)">（{tag}）</span></div>'

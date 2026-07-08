@@ -3573,6 +3573,8 @@ class InferencePipelineService:
             over_under['ou_neutral'] = True
             over_under['neutral_reason'] = conviction_diag.get('reason') or 'low_ou_conviction'
         over_under['conviction'] = conviction_diag
+        if conviction_diag.get('line_up_over_reversal'):
+            over_under['line_up_over_reversal'] = True
         diag['conviction'] = conviction_diag
         diag.update(
             {
@@ -3594,6 +3596,21 @@ class InferencePipelineService:
         因此默认不提交方向（转中性），仅当「模型边际足够」且「市场资金真实同向」时才落方向。
         关键：反向资金诱导（暗钱背离 ou_line_water_divergence）不计入同向证据，
         即便它把 over/under 推到某一侧，也不允许据此提交方向——只保留为展示标签。
+
+        2026-07-07 世界杯 90 场复盘增强：**中性盘退让阈值**。盘口线在 2.25/2.5/2.75
+        这一"进球均值附近的等价档"上，样本命中率仅 40%~65%，远低于极端档（≥3.5 或 ≤2.0）。
+        对中性盘施加更高的 margin 门槛（0.15），把"预大边际 0.05"这种噪声一律转 push。
+
+        2026-07-07 世界杯 90 场复盘增强：**高盘反打爆冷预警**。当盘口线 ≥ 3.25 且模型
+        反打小球（`model_side='under'`），实测命中率仅 20%（5 场里错 4 场），
+        属于「机构做高盘诱下」的经典陷阱。此时强制转 push，并在 reason 中标注
+        `high_line_under_guard` 供网页渲染 ⚠️「高盘预小需谨慎」爆冷提示。
+
+        2026-07-07 世界杯 91 场复盘增强：**升盘反打大球预警**。当盘口线上升 ≥ 0.25
+        且模型预 under，实测 14 场里大球出现 9 场（64.3%），模型 under 命中率仅 35.7%。
+        属于「机构升盘明面示强大球、暗面吸小球诱导」的经典诱盘手法。此时不改模型
+        方向（仍走 always_neutral / high_line_under_guard 通道），仅在 conviction 中
+        暴露 `line_up_over_reversal=True` 供网页渲染 ⚠️「升盘反打大球」爆冷提示。
         """
         over = self._to_float(over_under.get('over'))
         under = self._to_float(over_under.get('under'))
@@ -3609,17 +3626,45 @@ class InferencePipelineService:
         reverse_money = bool(market_signal.get('ou_line_water_divergence'))
         market_agrees = (market_side == model_side)
         genuine_agree = market_agrees and not reverse_money
+        # 中性盘退让：line ∈ {2.25, 2.5, 2.75} 需要更高的模型边际才能提交方向。
+        line_val = self._to_float(over_under.get('line'))
+        neutral_line = line_val is not None and abs(line_val - 2.5) <= 0.25
+        effective_min_margin = (
+            max(self.ou_min_conviction_margin, 0.15)
+            if neutral_line
+            else self.ou_min_conviction_margin
+        )
+        # 高盘反打爆冷闸门：line ≥ 3.25 且模型预小，视为机构做高盘诱下陷阱。
+        high_line_under_guard = bool(
+            line_val is not None and line_val >= 3.25 and model_side == 'under'
+        )
+        # 升盘反打大球预警：盘口线上升 ≥ 0.25 且模型预 under → 91 场样本实际大球率 64.3%。
+        # 此处仅识别不改方向（可能已被 always_neutral / high_line_under_guard 提前 push），
+        # 但在网页渲染醒目预警 tag。
+        initial_line = None
+        market_block = over_under.get('market') if isinstance(over_under.get('market'), dict) else {}
+        initial_block = market_block.get('initial') if isinstance(market_block.get('initial'), dict) else {}
+        initial_line = self._to_float(initial_block.get('line'))
+        line_delta = None
+        if line_val is not None and initial_line is not None:
+            line_delta = round(float(line_val) - float(initial_line), 3)
+        line_up_over_reversal = bool(
+            line_delta is not None and line_delta >= 0.25 and model_side == 'under'
+        )
         if self.ou_always_neutral:
             commit = False
             reason = 'ou_neutral_policy'
+        elif high_line_under_guard:
+            commit = False
+            reason = 'high_line_under_guard'
         else:
-            commit = bool(margin >= self.ou_min_conviction_margin and genuine_agree)
+            commit = bool(margin >= effective_min_margin and genuine_agree)
             if commit:
                 reason = 'committed'
             elif reverse_money and market_agrees:
                 reason = 'reverse_money_only'
-            elif margin < self.ou_min_conviction_margin:
-                reason = 'low_margin'
+            elif margin < effective_min_margin:
+                reason = 'neutral_line_low_margin' if neutral_line else 'low_margin'
             else:
                 reason = 'no_market_corroboration'
         return {
@@ -3629,7 +3674,12 @@ class InferencePipelineService:
             'model_side': model_side,
             'market_side': market_side,
             'reverse_money': reverse_money,
-            'min_margin': self.ou_min_conviction_margin,
+            'min_margin': effective_min_margin,
+            'neutral_line': neutral_line,
+            'high_line_under_guard': high_line_under_guard,
+            'line_up_over_reversal': line_up_over_reversal,
+            'line_delta': line_delta,
+            'initial_line': initial_line,
         }
 
     def apply_real_totals_outcome_adjustment(

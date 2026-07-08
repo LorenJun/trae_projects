@@ -206,14 +206,18 @@ def fetch_world_cup_schedule_for_dates(
 
 
 def _default_date_window(reference: Optional[datetime] = None) -> List[str]:
-    """默认抓 [today, today+1, today+2]。北京时间下 today 由 daemon 侧传入。"""
+    """默认抓 [today .. today+13]（14 天）。北京时间下 today 由 daemon 侧传入。
+
+    覆盖范围要够到淘汰赛全轮：1/8→1/4→半决→季军→决赛间隔最长约 13 天，
+    只抓 3 天窗口会漏掉 1/4 决赛及之后新亮出的对阵（澳客定档后 SoT 永远补不上）。
+    """
     ref = reference or datetime.now()
     base: date = ref.date()
-    return [(base + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
+    return [(base + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(14)]
 
 
 def fetch_world_cup_schedule(months: Iterable[Any] | None = None) -> List[MatchRecord]:
-    """向后兼容旧 daemon 签名：忽略 months，抓 [today, today+1, today+2]。"""
+    """向后兼容旧 daemon 签名：忽略 months，抓 [today .. today+13]（14 天）。"""
     _ = months  # 保留位置参数，实际使用日期窗口
     report = fetch_world_cup_schedule_for_dates(_default_date_window())
     return report.records

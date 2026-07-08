@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from domain.draw_risk import assess_draw_risk
@@ -496,6 +496,93 @@ class PredictionPostprocessService:
         return result
 
     @staticmethod
+    def _parse_snapshot_ts(raw: Any) -> Optional[datetime]:
+        if raw is None:
+            return None
+        s = str(raw).strip()
+        if not s:
+            return None
+        try:
+            return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _snapshot_window_delta(
+        parsed: List[Tuple[datetime, Dict[str, Any]]],
+        window_hours: float,
+    ) -> Optional[Dict[str, Any]]:
+        """在 parsed（升序）中取「最新点」与「不晚于 ref-window」的最近旧点做差值。
+
+        若窗口外无点则回退最早点；仍无有效基线返回 None。
+        """
+        if len(parsed) < 2:
+            return None
+        ref_t, ref_pt = parsed[-1]
+        cutoff = ref_t - timedelta(hours=window_hours)
+        baseline: Optional[Tuple[datetime, Dict[str, Any]]] = None
+        for entry in parsed[:-1]:
+            if entry[0] <= cutoff:
+                baseline = entry
+        if baseline is None:
+            baseline = parsed[0]
+            if baseline[0] >= ref_t:
+                return None
+        base_t, base_pt = baseline
+
+        def _f(v: Any) -> Optional[float]:
+            try:
+                return float(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        rl, bl = _f(ref_pt.get("line")), _f(base_pt.get("line"))
+        ro, bo = _f(ref_pt.get("over")), _f(base_pt.get("over"))
+        ru, bu = _f(ref_pt.get("under")), _f(base_pt.get("under"))
+        return {
+            "window_hours": window_hours,
+            "elapsed_hours": round((ref_t - base_t).total_seconds() / 3600.0, 3),
+            "line_delta": round(rl - bl, 3) if (rl is not None and bl is not None) else None,
+            "over_water_delta": round(ro - bo, 3) if (ro is not None and bo is not None) else None,
+            "under_water_delta": round(ru - bu, 3) if (ru is not None and bu is not None) else None,
+            "baseline_captured_at": base_pt.get("captured_at"),
+            "ref_captured_at": ref_pt.get("captured_at"),
+        }
+
+    @staticmethod
+    def _derive_live_series(snapshots: Any) -> Optional[Dict[str, Any]]:
+        """从 `大小球.snapshots[]` 时序点派生 1h/3h/6h 窗口的 line/水位变化。
+
+        - 仅做诊断字段输出（不改任何概率）。
+        - 上游 `okooo_save_snapshot._merge_totals_snapshots` 累积存储时序。
+        - 派生窗口便于下游 archive 复盘「暗钱临场变化 vs 结果」的相关性。
+        """
+        if not isinstance(snapshots, list) or len(snapshots) < 2:
+            return None
+        parsed: List[Tuple[datetime, Dict[str, Any]]] = []
+        for pt in snapshots:
+            if not isinstance(pt, dict):
+                continue
+            t = PredictionPostprocessService._parse_snapshot_ts(pt.get("captured_at"))
+            if t is None:
+                continue
+            parsed.append((t, pt))
+        if len(parsed) < 2:
+            return None
+        parsed.sort(key=lambda x: x[0])
+        first_t, _ = parsed[0]
+        last_t, _ = parsed[-1]
+        return {
+            "snapshots_count": len(parsed),
+            "span_hours": round((last_t - first_t).total_seconds() / 3600.0, 3),
+            "first_captured_at": parsed[0][1].get("captured_at"),
+            "last_captured_at": parsed[-1][1].get("captured_at"),
+            "last_1h": PredictionPostprocessService._snapshot_window_delta(parsed, 1.0),
+            "last_3h": PredictionPostprocessService._snapshot_window_delta(parsed, 3.0),
+            "last_6h": PredictionPostprocessService._snapshot_window_delta(parsed, 6.0),
+        }
+
+    @staticmethod
     def attach_over_under_context(
         over_under: Dict[str, Any],
         current_odds: Optional[Dict[str, Any]],
@@ -530,10 +617,19 @@ class PredictionPostprocessService:
                         market_ou['companies'] = block.get('companies') or []
                     if block.get('company_mode'):
                         market_ou['company_mode'] = block.get('company_mode')
+                    if isinstance(block.get('snapshots'), list):
+                        market_ou['snapshots'] = block.get('snapshots') or []
             if market_ou:
                 over_under['market'] = market_ou
+                live_series = PredictionPostprocessService._derive_live_series(
+                    market_ou.get('snapshots')
+                )
+                if live_series:
+                    over_under['live_series'] = live_series
                 if isinstance(realtime_context_applied, dict):
                     realtime_context_applied['ou_market'] = market_ou
+                    if live_series:
+                        realtime_context_applied['ou_live_series'] = live_series
         except Exception:
             pass
         return over_under
